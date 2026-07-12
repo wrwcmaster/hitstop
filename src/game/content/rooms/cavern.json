@@ -77,6 +77,16 @@
    "type": "slime",
    "x": 700,
    "y": 220
+  },
+  {
+   "type": "merchant",
+   "x": 176,
+   "y": 208
+  },
+  {
+   "type": "devourer",
+   "x": 470,
+   "y": 214
   }
  ],
  "triggers": [

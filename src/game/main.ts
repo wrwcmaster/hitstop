@@ -1,11 +1,16 @@
 import { Game, validateRoom } from '@engine/index';
 import { KEYMAP, VIEW_W, VIEW_H, type Action, type GameEvents } from './defs';
 import { registerSounds } from './content/sfx';
+import { registerSongs } from './content/music';
 import { registerEnemies } from './actors/enemies';
 import { registerBosses } from './actors/boss';
+import { registerNpcs } from './actors/npc';
 import { registerItems } from './content/items';
 import { registerSkills } from './content/skills';
+import { registerStatuses } from './content/statuses';
 import { registerConversations } from './content/conversations';
+import { registerShops } from './content/shops';
+import { loadSettings } from './settings';
 import './content/tiles';
 import { PlayScene } from './scenes/play';
 
@@ -24,11 +29,16 @@ const game = new Game<Action, GameEvents>({
 });
 
 registerSounds(game.sfx);
+registerSongs();
 registerEnemies();
 registerBosses();
+registerNpcs();
 registerItems();
 registerSkills();
+registerStatuses();
 registerConversations();
+registerShops();
+loadSettings(game);
 
 // Touch controls (hidden by CSS on pointer:fine devices). Buttons carry
 // menu actions too, so touch players can drive dialogue and menus.

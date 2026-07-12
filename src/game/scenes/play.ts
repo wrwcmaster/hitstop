@@ -6,6 +6,7 @@ import {
   Tilemap,
   tiles,
   drawText,
+  textWidth,
   DebugOverlay,
   Triggers,
   DialogueScene,
@@ -19,6 +20,7 @@ import {
 import type { ActionGame, Action } from '../defs';
 import { Player } from '../actors/player';
 import { Monster, monsters } from '../actors/monster';
+import { Npc, npcs } from '../actors/npc';
 import { Pickup } from '../actors/pickup';
 import { PauseScene } from './pause';
 import { Background } from './background';
@@ -30,8 +32,16 @@ import {
   HEART_EMPTY,
   MANA_PIP,
   MANA_PIP_EMPTY,
+  ICON_COIN,
   KNIGHT_IDLE_SPRITE,
 } from '../content/sprites';
+
+/** Fallback music per room (rooms can override via props.music). */
+const ROOM_MUSIC: Record<string, string> = {
+  arena: 'overworld',
+  cavern: 'depths',
+  throne: 'depths',
+};
 
 /** A monster queued to spawn, currently telegraphing. */
 interface PendingSpawn {
@@ -134,6 +144,12 @@ export class PlayScene implements Scene {
       this.score += pts;
       game.feel.text(info.target.cx, info.target.y - 8, pts, COLORS.gold);
       this.rollDrops(info.target);
+      // A Devourer that swallowed the weapon coughs it back up.
+      const stolen = info.target.state.stolenItem;
+      if (typeof stolen === 'string') {
+        game.world.spawn(new Pickup(stolen, game, this.tilemap, info.target.cx, info.target.y));
+        game.feel.text(info.target.cx, info.target.y - 16, 'WEAPON FREED!', COLORS.gold);
+      }
       if (info.target.def.boss) this.onBossDefeated();
     });
     game.events.on('score', ({ points, x, y }) => {
@@ -233,12 +249,18 @@ export class PlayScene implements Scene {
       g.camera.y = 0;
     }
 
-    // Pre-placed monsters; a defeated boss stays defeated.
+    // Pre-placed monsters and NPCs; a defeated boss stays defeated.
     for (const e of this.room.entities) {
+      if (npcs.has(e.type)) {
+        this.game.world.spawn(new Npc(e.type, this.game, this.tilemap, e.x, e.y));
+        continue;
+      }
       if (!monsters.has(e.type)) continue;
       if (monsters.get(e.type).boss && this.flags.has('bossDefeated')) continue;
       this.game.world.spawn(new Monster(e.type, this.game, this.tilemap, e.x, e.y));
     }
+
+    this.updateMusic();
 
     if (this.phase === 'play') {
       if (this.roomWantsWaves()) this.nextWave();
@@ -248,6 +270,23 @@ export class PlayScene implements Scene {
         this.bannerT = 1.2;
       }
     }
+  }
+
+  /** Boss rooms play the boss theme while the boss lives; otherwise the room's track. */
+  private updateMusic(): void {
+    // Just-spawned entities are still in the world's spawn queue, so also
+    // consult the room def when deciding if a boss is (about to be) alive.
+    const bossAlive =
+      this.currentBoss() !== null ||
+      this.room.entities.some(
+        (e) => monsters.has(e.type) && monsters.get(e.type).boss && !this.flags.has('bossDefeated'),
+      );
+    if (bossAlive && this.phase === 'play') {
+      this.game.music.play('boss');
+      return;
+    }
+    const song = (this.room.props?.music as string) ?? ROOM_MUSIC[this.roomId] ?? 'overworld';
+    this.game.music.play(song);
   }
 
   private roomWantsWaves(): boolean {
@@ -297,6 +336,7 @@ export class PlayScene implements Scene {
     this.bannerT = 2;
     this.victoryT = 1.6; // let the gibs settle before the epilogue speaks
     this.autosave();
+    this.updateMusic(); // the boss theme dies with him
   }
 
   /* ---------------- triggers & dialogue ---------------- */
@@ -516,6 +556,31 @@ export class PlayScene implements Scene {
       if (cd > 0) {
         g.fillStyle = COLORS.steelDark;
         g.fillRect(sx, 21, Math.round(5 * (cd / cdMax)), 1);
+      }
+      // Purse.
+      g.drawImage(ICON_COIN, 6, 23);
+      drawText(g, String(p.gold), 14, 24, COLORS.gold);
+      // Active buffs/debuffs: chip + remaining-time sliver.
+      let by = 33;
+      for (const s of p.statuses.list()) {
+        g.fillStyle = s.def.color;
+        g.fillRect(6, by, 4, 4);
+        drawText(g, s.def.name, 13, by, s.def.color);
+        g.fillStyle = s.def.color;
+        g.fillRect(13, by + 6, Math.round(textWidth(s.def.name) * s.fraction), 1);
+        by += 10;
+      }
+      // Swallowed: the escape prompt IS the HUD priority.
+      if (p.fsm.is('swallowed')) {
+        drawText(g, 'MASH TO ESCAPE!', gm.width / 2, 84, COLORS.white, 2, 'center');
+        const w = 60;
+        const x = gm.width / 2 - w / 2;
+        g.fillStyle = '#07070d';
+        g.fillRect(x - 1, 97, w + 2, 5);
+        g.strokeStyle = COLORS.purple;
+        g.strokeRect(x - 1.5, 96.5, w + 3, 6);
+        g.fillStyle = COLORS.white;
+        g.fillRect(x, 98, Math.round(w * Math.min(1, p.escapeN / p.escapeNeed)), 3);
       }
     }
     drawText(g, `SCORE ${this.score}`, gm.width - 6, 7, COLORS.white, 1, 'right');

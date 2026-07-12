@@ -4,6 +4,7 @@ import { Game } from '@engine/index';
 export type Action =
   | 'left' | 'right' | 'up' | 'down'
   | 'jump' | 'attack' | 'dash' | 'skill'
+  | 'interact'
   | 'confirm' | 'cancel' | 'menu';
 
 /** A key may serve several actions (ArrowUp jumps in-game, navigates in menus). */
@@ -16,6 +17,7 @@ export const KEYMAP: Record<string, Action | Action[]> = {
   KeyZ: ['attack', 'confirm'], KeyJ: ['attack', 'confirm'], Enter: 'confirm',
   KeyX: ['dash', 'cancel'], KeyK: ['dash', 'cancel'], ShiftLeft: 'dash',
   KeyC: 'skill', KeyL: 'skill',
+  KeyE: 'interact', KeyF: 'interact',
   Escape: 'menu',
 };
 
@@ -31,6 +33,10 @@ export interface GameEvents extends Record<string, unknown> {
   pickup: { id: string };
   /** A level trigger region fired. */
   trigger: { event: string; props?: Record<string, unknown> };
+  /** A Devourer got you. */
+  playerSwallowed: Record<string, never>;
+  /** A shop transaction happened. */
+  purchase: { id: string; price: number };
 }
 
 export type ActionGame = Game<Action, GameEvents>;

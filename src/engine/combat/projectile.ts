@@ -31,6 +31,8 @@ export interface ProjectileOptions {
   strike: StrikeOptions;
   /** Visuals. Trail/glow effects belong here too. */
   draw(g: CanvasRenderingContext2D, p: Projectile): void;
+  /** Called per target hit — apply statuses, spawn children, etc. */
+  onHit?(target: import('../world/entity').Actor, p: Projectile): void;
   /** Called once when the projectile dies (wall, timeout, or final hit). */
   onExpire?(p: Projectile): void;
 }
@@ -107,6 +109,7 @@ export class Projectile extends Entity {
     // Targets — the strike brings the full feedback bundle with it.
     const hits = this.strike.apply(this.box);
     if (hits.length) {
+      if (this.opts.onHit) for (const t of hits) this.opts.onHit(t, this);
       this.pierceLeft -= hits.length;
       if (this.pierceLeft <= 0) return this.expire();
     }

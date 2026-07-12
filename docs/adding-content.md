@@ -229,6 +229,58 @@ The pattern: every attack is a telegraphed FSM state that ends in a `Strike` or 
 
 `src/game/save.ts` defines the save shape: current room, inventory/equipment/skills, story flags, fired one-shot triggers, best score. Checkpoints happen automatically at every room entrance and on boss defeat; death returns you to the last checkpoint at full HP. To persist a new thing, add it to `SaveData` and bump the `JsonStore` version (old saves invalidate cleanly).
 
+## A song (BGM)
+
+In `src/game/content/music.ts` — songs are step patterns on oscillator tracks (`'noise'` for percussion). Tracks of different lengths drift for free variation:
+
+```ts
+defineSong('shop-theme', {
+  bpm: 96, div: 2,
+  tracks: [
+    { wave: 'triangle', volume: 0.06, steps: ['C3','-','G3','-','E3','-','G3','-'] },
+    { wave: 'noise', volume: 0.015, steps: ['x','-','-','-'] },
+  ],
+});
+```
+
+Play with `game.music.play('shop-theme')` — rooms pick their track via `props.music` (or the PlayScene's fallback map), and boss rooms override with `boss` while the boss lives. Volume channels (master/music/sfx) live on `game.audio` and persist through the pause menu's OPTIONS page.
+
+## A buff or debuff
+
+In `src/game/content/statuses.ts` — stat modifiers apply for the status's lifetime and remove themselves:
+
+```ts
+defineStatus('poison', {
+  name: 'POISON', color: COLORS.purpleLight, duration: 4,
+  tickEvery: 1,
+  onTick(a) { /* chip damage, drip particles */ },
+});
+```
+
+Apply from anywhere: `player.statuses.apply('poison')` — commonly from a projectile's `onHit` (see the slime ball) or an item's `use` (see the haste draught). Active statuses show as HUD chips with remaining-time bars.
+
+## An NPC (and a shop)
+
+NPCs are friendly actors with a greeting conversation; walk close and press E:
+
+```ts
+defineNpc('blacksmith', {
+  name: 'BLACKSMITH', sprite: SMITH_SPRITE,
+  greet: 'blacksmith-greet',        // a conversation; a choice starting
+  shop: 'blacksmith',               // with "SHOW" opens this shop
+});
+```
+
+Shops are ware lists (`content/shops.ts`): `{ item, price }[]` — prices in gold, coins drop from monsters at 5g each. Place the NPC in a room's `entities` like any monster; the PlayScene routes by registry.
+
+## An enemy attack pattern
+
+The built-ins show the three tiers, all resolving through Strikes/Projectiles so feedback stays uniform:
+
+- **Ranged debuff** (slime): at range, lob a 0-damage projectile whose `onHit` applies a status. Zero-damage hits skip damage numbers and player i-frames automatically.
+- **Telegraph → lunge** (devourer, boss slam): a shiver/windup state the player can read, then the attack. Never skip the telegraph — readable attacks are what make hard fights fair.
+- **Grab mechanics** (devourer): the swallow moves the *player* into a special FSM state (`swallowed`: input locked to mashing, position pinned, escape counter) while the monster ticks damage on its own timer. The stolen weapon lives in `monster.state.stolenItem` and drops on kill — grabs that cost something recoverable are scary without being unfair.
+
 ## A new player attack state
 
 Model it like the existing attack (see `Player.beginAttack`):

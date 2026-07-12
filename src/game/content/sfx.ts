@@ -51,4 +51,21 @@ export function registerSounds(sfx: Sfx): void {
   sfx.define('menuOpen', (s) => s.tone(220, 440, 0.1, 'triangle', 0.08));
   sfx.define('menuClose', (s) => s.tone(440, 220, 0.1, 'triangle', 0.08));
   sfx.define('blip', (s) => s.tone(700, 740, 0.03, 'square', 0.03));
+  sfx.define('gulp', (s) => {
+    s.tone(400, 80, 0.3, 'sine', 0.25);
+    s.hiss(0.15, 0.12);
+  });
+  sfx.define('denied', (s) => {
+    s.tone(220, 180, 0.09, 'square', 0.1);
+    s.toneAt(90, 180, 150, 0.12, 'square', 0.1);
+  });
+  sfx.define('buy', (s) => {
+    s.tone(660, 660, 0.06, 'square', 0.08);
+    s.toneAt(70, 880, 880, 0.06, 'square', 0.08);
+    s.toneAt(140, 1320, 1320, 0.12, 'square', 0.08);
+  });
+  sfx.define('splat', (s) => {
+    s.hiss(0.08, 0.14);
+    s.tone(260, 60, 0.12, 'sine', 0.14);
+  });
 }

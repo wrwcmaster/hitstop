@@ -18,16 +18,18 @@ export interface SaveData {
     inventory: ItemStack[];
     equipped: [string, string][];
     skills: string[];
+    gold: number;
   };
 }
 
-export const saveStore = new JsonStore<SaveData>('hitstop.save', 1);
+export const saveStore = new JsonStore<SaveData>('hitstop.save', 2);
 
 export function snapshotPlayer(p: Player): SaveData['player'] {
   return {
     inventory: p.inventory.slots.map((s) => ({ ...s })),
     equipped: p.equipment.slots(),
     skills: [...p.skills.known],
+    gold: p.gold,
   };
 }
 
@@ -37,6 +39,7 @@ export function restorePlayer(p: Player, data: SaveData['player']): void {
   p.equipment.clear();
   for (const [, id] of data.equipped) p.equipment.equip(id);
   for (const id of data.skills) p.skills.learn(id);
+  p.gold = data.gold;
   p.syncStats();
   p.hp = p.maxHp;
   p.mp = p.maxMp;

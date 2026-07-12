@@ -193,3 +193,29 @@ export const ICON_COIN = sprite([
   'YYYYY',
   '.YYY.',
 ], PAL);
+
+export const ICON_HASTE = sprite([
+  '..OO..',
+  '..OO..',
+  '.OYYO.',
+  'OYYWYO',
+  'OYWYYO',
+  '.OOOO.',
+], PAL);
+
+/* ---------------- NPCs ---------------- */
+
+export const MERCHANT = sprite([
+  '...VVVV....',
+  '..VVVVVV...',
+  '..VVvvVV...',
+  '..Vv..vV...',
+  '..V.WW.V...',
+  '..VVVVVV...',
+  '.VVDYYDVV..',
+  '.VV.YY.VV..',
+  'OV..YY..VO.',
+  '.V.DDDD.V..',
+  '.VVVVVVVV..',
+  '..DD..DD...',
+], PAL);

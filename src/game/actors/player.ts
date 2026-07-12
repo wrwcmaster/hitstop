@@ -20,6 +20,7 @@ import {
   Inventory,
   Equipment,
   SkillBook,
+  Statuses,
 } from '@engine/index';
 import { KNIGHT_ANIMS } from '../content/sprites';
 import { COLORS } from '../content/palette';
@@ -61,10 +62,17 @@ export class Player extends Actor {
   hp = PLAYER_TUNING.maxHp;
   maxHp = PLAYER_TUNING.maxHp;
 
-  /** Base stats; equipment projects modifiers in via `equipment`. */
-  stats = new Stats({ maxHp: PLAYER_TUNING.maxHp, maxMp: PLAYER_TUNING.maxMp, attack: 0 });
+  /** Base stats; equipment and statuses project modifiers in. */
+  stats = new Stats({
+    maxHp: PLAYER_TUNING.maxHp,
+    maxMp: PLAYER_TUNING.maxMp,
+    attack: 0,
+    speed: PLAYER_TUNING.runSpeed,
+  });
   inventory = new Inventory();
   equipment = new Equipment(this.stats);
+  statuses = new Statuses(this);
+  gold = 0;
   skills = new SkillBook<SkillCtx>({
     canAfford: (cost) => this.mp >= cost,
     spend: (cost) => {
@@ -90,6 +98,11 @@ export class Player extends Actor {
   private attackDur = 0;
   private strike: Strike | null = null;
   deadT = 0;
+
+  /** Swallowed-by-a-Devourer state. */
+  swallowedBy: Monster | null = null;
+  escapeN = 0;
+  escapeNeed = 7;
 
   fsm: FSM<Player>;
 
@@ -132,6 +145,73 @@ export class Player extends Actor {
   /** The attack spec of whatever's in the weapon slot (fists if empty). */
   get weapon(): WeaponSpec {
     return weaponSpecOf(this.equipment.get('weapon'));
+  }
+
+  /* ---------------- swallowed (the Devourer) ---------------- */
+
+  /** A monster gulps the player down — and takes the weapon with it. */
+  swallowBy(m: Monster): void {
+    if (this.fsm.is('dead', 'swallowed') || this.invulnT > 0) return;
+    this.swallowedBy = m;
+    this.escapeN = 0;
+    // The weapon is swallowed too: it comes back when the beast dies.
+    const weaponId = this.equipment.get('weapon');
+    if (weaponId) {
+      this.equipment.unequip('weapon');
+      this.inventory.remove(weaponId, this.inventory.count(weaponId)); // it's GONE, not in the bag
+      this.syncStats();
+      m.state.stolenItem = weaponId;
+      this.feel.text(this.cx, this.y - 16, 'WEAPON SWALLOWED!', COLORS.red);
+    }
+    this.statuses.apply('devoured');
+    this.fsm.set('swallowed');
+    this.feel.hitstop(0.12);
+    this.feel.shake(0.6);
+    this.feel.flash(0.3, COLORS.purple);
+    this.feel.sfx.play('gulp');
+    this.game.events.emit('playerSwallowed', {});
+  }
+
+  swallowedUpdate(): string | void {
+    const m = this.swallowedBy;
+    if (!m || m.dead || this.hp <= 0) return this.releaseFromSwallow(false);
+    // Pinned inside the beast.
+    this.x = m.cx - this.w / 2;
+    this.y = m.cy - this.h / 2;
+    this.vx = 0;
+    this.vy = 0;
+    // Mash anything to struggle free.
+    let mashed = 0;
+    if (this.input.consumePress('attack')) mashed++;
+    if (this.input.consumePress('jump')) mashed++;
+    if (this.input.consumePress('dash')) mashed++;
+    if (mashed > 0) {
+      this.escapeN += mashed;
+      this.feel.sfx.play('blip');
+      this.feel.shake(0.08);
+      this.feel.burst(m.cx, m.cy, 3, {
+        color: [COLORS.purple, COLORS.white], speed: 50, life: 0.2, drag: 4,
+      });
+      if (this.escapeN >= this.escapeNeed) return this.releaseFromSwallow(true);
+    }
+  }
+
+  /** Pop back out — burst free (with i-frames) or slide out of a corpse. */
+  private releaseFromSwallow(burst: boolean): string {
+    const m = this.swallowedBy;
+    this.swallowedBy = null;
+    this.statuses.remove('devoured');
+    if (burst && m && !m.dead) {
+      const dir = (m.facing * -1) as 1 | -1;
+      this.vx = dir * 190;
+      this.vy = -230;
+      this.invulnT = 1.2;
+      m.state.digestCd = 4; // the beast needs a breather before the next gulp
+      m.state.victim = false;
+      this.feel.impact(this.cx, this.cy, { strength: 0.7, dir, colors: [COLORS.purple, COLORS.white] });
+      this.feel.sfx.play('dash');
+    }
+    return this.hp <= 0 ? 'dead' : 'move';
   }
 
   get input() {
@@ -246,12 +326,14 @@ export class Player extends Actor {
    * knockback and the impact bundle; this adds the player-specific
    * channels: i-frames, red flash, hurt sound, combo reset.
    */
-  onHurt(): void {
+  onHurt(info: import('@engine/index').HitInfo): void {
+    // Zero-damage hits (slime balls) skip i-frames and the hurt drama.
+    if (info.damage <= 0) return;
     this.invulnT = PLAYER_TUNING.hurtInvuln;
     this.feel.sfx.play('hurt');
     this.feel.flash(0.35, COLORS.red);
     this.game.events.emit('playerHurt', { hp: this.hp });
-    if (this.hp > 0 && !this.fsm.is('dead')) this.fsm.set('move');
+    if (this.hp > 0 && !this.fsm.is('dead', 'swallowed')) this.fsm.set('move');
   }
 
   /** Called by Combat when hp hits 0. The corpse entity stays in the world. */
@@ -285,7 +367,14 @@ export class Player extends Actor {
     this.comboWin.update(dt);
     this.dashCd = Math.max(0, this.dashCd - dt);
     this.skills.update(dt);
+    this.statuses.update(dt);
     this.squash += (1 - this.squash) * Math.min(1, dt * 10);
+
+    // Inside a Devourer: no physics, no buffers — just the struggle.
+    if (this.fsm.is('swallowed')) {
+      this.fsm.update(dt);
+      return;
+    }
 
     if (this.input.pressed('jump')) this.jumpBuf.set();
     if (this.input.pressed('attack')) this.atkBuf.set();
@@ -332,7 +421,7 @@ export class Player extends Actor {
     // Contact damage (dashing passes through; i-frames blink through).
     if (!this.fsm.is('dead', 'dash') && this.invulnT <= 0) {
       for (const e of this.world.actors('enemy')) {
-        if (e instanceof Monster && overlaps(this, e.hurtbox)) {
+        if (e instanceof Monster && !e.def.noContactDamage && overlaps(this, e.hurtbox)) {
           this.hurt(e);
           break;
         }
@@ -343,10 +432,11 @@ export class Player extends Actor {
   /** Ground/air movement control shared by the move state. */
   private runControls(dt: number): void {
     const T = PLAYER_TUNING;
+    const speed = this.stats.get('speed'); // buffs/debuffs live here
     const dir = this.input.axis('left', 'right');
     if (dir !== 0) {
       this.facing = dir as 1 | -1;
-      this.vx = clamp(this.vx + dir * T.runAccel * dt, -T.runSpeed, T.runSpeed);
+      this.vx = clamp(this.vx + dir * T.runAccel * dt, -speed, speed);
       if (this.onGround && chance(dt * 8)) {
         this.feel.particles.spawn({
           x: this.cx - this.facing * 3, y: this.y + this.h - 1,
@@ -362,6 +452,8 @@ export class Player extends Actor {
   /* ---------------- render ---------------- */
 
   render(g: CanvasRenderingContext2D): void {
+    // Inside a Devourer: the beast draws the bulge, not us.
+    if (this.fsm.is('swallowed')) return;
     // I-frame blink.
     if (this.invulnT > 0 && !this.fsm.is('dead') && Math.floor(this.invulnT * 20) % 2) return;
 
@@ -440,5 +532,8 @@ const PLAYER_STATES: Record<string, StateDef<Player>> = {
     update: (p, dt) => {
       p.deadT += dt;
     },
+  },
+  swallowed: {
+    update: (p) => p.swallowedUpdate(),
   },
 };

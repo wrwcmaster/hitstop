@@ -7,6 +7,7 @@ import {
   ICON_ORB,
   ICON_CHARM,
   ICON_COIN,
+  ICON_HASTE,
 } from './sprites';
 import type { ActionGame } from '../defs';
 import type { Player } from '../actors/player';
@@ -111,12 +112,25 @@ defineItem<ItemCtx>('mana-orb', {
 
 defineItem<ItemCtx>('coin', {
   name: 'COIN',
-  desc: 'Shiny. The score likes it.',
+  desc: 'The merchant accepts these.',
   icon: ICON_COIN,
   kind: 'instant',
   onPickup({ game, player }) {
+    player.gold += 5;
     game.events.emit('score', { points: 25, x: player.cx, y: player.y - 8 });
     game.feel.sfx.play('coin');
+  },
+});
+
+defineItem<ItemCtx>('haste-draught', {
+  name: 'HASTE DRAUGHT',
+  desc: 'Move like the wind for 6 seconds.',
+  icon: ICON_HASTE,
+  kind: 'consumable',
+  stack: 3,
+  use({ game, player }) {
+    player.statuses.apply('haste');
+    game.feel.sfx.play('heal');
   },
 });
 

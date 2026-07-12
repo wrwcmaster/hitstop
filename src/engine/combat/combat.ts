@@ -133,7 +133,10 @@ export class Combat {
       dir,
       colors: opts.colors,
     });
-    this.feel.text(centerX(target.hurtbox), target.hurtbox.y - 4, opts.damage, s > 0.6 ? '#ffcd75' : '#f4f4f4', s > 0.6 ? 2 : 1);
+    // Zero-damage hits (slows, knockback-only pushes) skip the number.
+    if (opts.damage > 0) {
+      this.feel.text(centerX(target.hurtbox), target.hurtbox.y - 4, opts.damage, s > 0.6 ? '#ffcd75' : '#f4f4f4', s > 0.6 ? 2 : 1);
+    }
 
     target.onHurt(info);
     this.events.emit('hit', info);

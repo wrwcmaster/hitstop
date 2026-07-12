@@ -41,7 +41,8 @@
 | `input/input.ts` | Action-based input + `Buffer` | Gameplay reads *actions*, never keys. `Buffer` implements input buffering / coyote time — core feel tools. |
 | `gfx/` | Pixel canvas, text-grid sprites, animation, 3×5 font, camera | Sprites are authored as text + palette: diffable, hand-editable, tool-friendly. Flip/tint/white-flash variants are cached. |
 | `feel/` | **The selling point.** Particles, floating text, and `Feel` — hitstop, slowmo, flash, shake, kick, and the composed `impact()` | One `strength` knob (0..1) scales the whole bundle so feedback stays coherent. |
-| `audio/sfx.ts` | Zero-asset synth (tone sweep + noise burst), sound registry | Sounds are content, referenced by id. |
+| `audio/` | `AudioBus` mixer (master/music/sfx gains), synth SFX registry, `Music` chip-tune sequencer | Songs are step patterns in a registry, scheduled ahead against the AudioContext clock; volume settings are just gain values on the bus. |
+| `status/` | `StatusDef` registry + per-actor `Statuses` bag | Buffs/debuffs are content: duration, stat mods (auto-applied via sourced modifiers), periodic ticks, apply/expire hooks. |
 | `physics/body.ts` | AABB bodies, gravity, axis-separated collide vs solids + one-way platforms | Deliberately simple platformer physics — predictable and tunable beats realistic. |
 | `world/` | `Entity`/`Actor` base classes, `World` with deferred spawn/remove and pluggable systems | Classic entities, not ECS (see below). |
 | `combat/combat.ts` | `Strike` (hitbox + damage payload + once-per-target tracking) and hit application | **Feedback is applied inside the combat resolver**, so every hit in every future weapon/skill feels right by default. |

@@ -10,6 +10,7 @@ import type { ActionGame, Action } from '../defs';
 import type { Player } from '../actors/player';
 import type { ItemCtx } from '../content/items';
 import { COLORS } from '../content/palette';
+import { saveSettings } from '../settings';
 
 /**
  * The system menu: an overlay scene (the frozen world stays visible
@@ -18,9 +19,10 @@ import { COLORS } from '../content/palette';
  * backs out.
  */
 export class PauseScene implements Scene {
-  private page: 'main' | 'inventory' = 'main';
+  private page: 'main' | 'inventory' | 'options' = 'main';
   private mainMenu: Menu<Action>;
   private invMenu: Menu<Action> = new Menu([], MENU_ACTIONS);
+  private optionsMenu: Menu<Action>;
 
   constructor(
     private game: ActionGame,
@@ -32,14 +34,10 @@ export class PauseScene implements Scene {
         { label: 'RESUME', onSelect: () => this.close() },
         { label: 'INVENTORY', onSelect: () => this.openInventory() },
         {
-          label: () => `VOLUME: ${Math.round(this.game.sfx.volume * 100)}%`,
-          onAdjust: (dir) => {
-            this.game.sfx.volume = clamp(this.game.sfx.volume + dir * 0.25, 0, 1);
-            this.game.sfx.play('menuMove');
-          },
+          label: 'OPTIONS',
           onSelect: () => {
-            this.game.sfx.volume = this.game.sfx.volume >= 1 ? 0 : this.game.sfx.volume + 0.25;
-            this.game.sfx.play('menuMove');
+            this.page = 'options';
+            this.game.sfx.play('menuSelect');
           },
         },
         {
@@ -47,6 +45,36 @@ export class PauseScene implements Scene {
           onSelect: () => {
             this.close();
             this.hooks.onRestart();
+          },
+        },
+      ],
+      MENU_ACTIONS,
+    );
+
+    const volumeRow = (label: string, channel: 'master' | 'music' | 'sfx') => ({
+      label: () => `${label}: ${Math.round(this.game.audio.getVolume(channel) * 100)}%`,
+      onAdjust: (dir: -1 | 1) => {
+        this.game.audio.setVolume(channel, clamp(this.game.audio.getVolume(channel) + dir * 0.1, 0, 1));
+        saveSettings(this.game);
+        this.game.sfx.play('menuMove');
+      },
+      onSelect: () => {
+        const v = this.game.audio.getVolume(channel);
+        this.game.audio.setVolume(channel, v >= 1 ? 0 : v + 0.25);
+        saveSettings(this.game);
+        this.game.sfx.play('menuMove');
+      },
+    });
+    this.optionsMenu = new Menu<Action>(
+      [
+        volumeRow('MASTER', 'master'),
+        volumeRow('MUSIC', 'music'),
+        volumeRow('SFX', 'sfx'),
+        {
+          label: 'BACK',
+          onSelect: () => {
+            this.page = 'main';
+            this.game.sfx.play('menuClose');
           },
         },
       ],
@@ -105,7 +133,7 @@ export class PauseScene implements Scene {
   update(_dt: number): void {
     const input = this.game.input;
     if (input.consumePress('menu') || input.consumePress('cancel')) {
-      if (this.page === 'inventory') {
+      if (this.page !== 'main') {
         this.page = 'main';
         this.game.sfx.play('menuClose');
       } else {
@@ -113,7 +141,9 @@ export class PauseScene implements Scene {
       }
       return;
     }
-    (this.page === 'main' ? this.mainMenu : this.invMenu).update(input);
+    const menu =
+      this.page === 'main' ? this.mainMenu : this.page === 'inventory' ? this.invMenu : this.optionsMenu;
+    menu.update(input);
   }
 
   render(g: CanvasRenderingContext2D): void {
@@ -124,13 +154,22 @@ export class PauseScene implements Scene {
 
     if (this.page === 'main') {
       const bw = 150;
-      const bh = 90;
+      const bh = 100;
       const x = (W - bw) / 2;
       const y = (H - bh) / 2;
       drawPanel(g, x, y, bw, bh);
       drawText(g, 'PAUSED', W / 2, y + 8, COLORS.gold, 2, 'center');
       this.mainMenu.render(g, x + 24, y + 30, { width: bw - 40, lineHeight: 13 });
       drawText(g, 'ESC: CLOSE', W / 2, y + bh - 9, COLORS.steelDark, 1, 'center');
+    } else if (this.page === 'options') {
+      const bw = 170;
+      const bh = 100;
+      const x = (W - bw) / 2;
+      const y = (H - bh) / 2;
+      drawPanel(g, x, y, bw, bh);
+      drawText(g, 'OPTIONS', W / 2, y + 8, COLORS.gold, 2, 'center');
+      this.optionsMenu.render(g, x + 24, y + 30, { width: bw - 40, lineHeight: 13 });
+      drawText(g, 'LEFT/RIGHT: ADJUST', W / 2, y + bh - 9, COLORS.steelDark, 1, 'center');
     } else {
       const bw = 240;
       const bh = 150;

@@ -39,6 +39,26 @@ defineConversation('boss-intro', {
   ],
 });
 
+defineConversation('merchant-greet', {
+  lines: [
+    { speaker: 'MERCHANT', text: 'AH. A CUSTOMER WITH A PULSE. RARE, DOWN HERE.' },
+    { speaker: 'MERCHANT', text: 'COINS FOR GOODS. GOODS FOR SURVIVING. EVERYONE WINS.' },
+  ],
+  choices: [
+    { label: 'SHOW ME YOUR WARES.' },
+    { label: 'WHERE AM I?', then: 'merchant-lore' },
+    { label: 'JUST PASSING.' },
+  ],
+});
+
+defineConversation('merchant-lore', {
+  lines: [
+    { speaker: 'MERCHANT', text: 'THE CAVERN UNDER THE ARENA. THE KING SITS PAST THE EAST GATE.' },
+    { speaker: 'MERCHANT', text: 'HE EATS SWORDS, YOU KNOW. AND THE KNIGHTS HOLDING THEM.' },
+    { speaker: 'MERCHANT', text: 'THE LITTLE ONES SPIT NOW TOO. STICKY BUSINESS. BUY A DRAUGHT.' },
+  ],
+});
+
 defineConversation('victory', {
   lines: [
     { speaker: 'VOICE', text: 'THE CROWN ROLLS. THE THRONE SITS EMPTY.' },

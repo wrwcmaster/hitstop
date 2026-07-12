@@ -26,7 +26,11 @@ export { Feel, type ImpactOptions } from './feel/feel';
 export { Particles, type BurstOptions } from './feel/particles';
 export { Floaters } from './feel/floaters';
 
+export { AudioBus } from './audio/bus';
 export { Sfx, type SoundFn } from './audio/sfx';
+export { Music, songs, defineSong, noteHz, type SongDef, type SongTrack } from './audio/music';
+
+export { statuses, defineStatus, Statuses, type StatusDef, type StatusHost } from './status/status';
 
 export {
   applyGravity,
