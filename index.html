@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="icon" href="data:," />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>hitstop — game feel is the foundation</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #07070d; overflow: hidden; }
+    body { display: flex; align-items: center; justify-content: center; }
+    canvas { image-rendering: pixelated; image-rendering: crisp-edges; background: #07070d; }
+    #tc { position: fixed; inset: 0; pointer-events: none; font-family: monospace; }
+    .btn {
+      position: absolute; width: 56px; height: 56px; border-radius: 12px;
+      background: rgba(148, 176, 194, 0.14); border: 2px solid rgba(148, 176, 194, 0.35);
+      color: #94b0c2; font-size: 20px; display: flex; align-items: center; justify-content: center;
+      pointer-events: auto; user-select: none; -webkit-user-select: none; touch-action: none;
+    }
+    .btn:active { background: rgba(148, 176, 194, 0.3); }
+    #bL { left: 16px; bottom: 88px; }
+    #bR { left: 84px; bottom: 88px; }
+    #bJ { right: 16px; bottom: 150px; }
+    #bA { right: 84px; bottom: 88px; }
+    #bD { right: 16px; bottom: 88px; }
+    @media (pointer: fine) { #tc { display: none; } }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="tc">
+    <div class="btn" id="bL">&#9664;</div>
+    <div class="btn" id="bR">&#9654;</div>
+    <div class="btn" id="bJ">&#9650;</div>
+    <div class="btn" id="bA">&#9876;</div>
+    <div class="btn" id="bD">&#9889;</div>
+  </div>
+  <script type="module" src="/src/game/main.ts"></script>
+</body>
+</html>
