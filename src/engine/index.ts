@@ -41,10 +41,37 @@ export { Entity, Actor, type Team } from './world/entity';
 export { World, type System } from './world/world';
 
 export { Combat, Strike, type StrikeOptions, type HitInfo, type CombatEvents } from './combat/combat';
+export { Projectile, type ProjectileOptions } from './combat/projectile';
 
 export { FSM, type StateDef } from './fsm/fsm';
 
 export { Tilemap, tiles, type TileDef } from './level/tilemap';
 export { buildTilemap, validateRoom, type RoomDef, type RoomEntity } from './level/room';
+export { Triggers, type TriggerDef, type TriggerFire } from './level/triggers';
+
+export { Stats, type StatMods } from './items/stats';
+export {
+  items,
+  defineItem,
+  itemDef,
+  Inventory,
+  Equipment,
+  type ItemDef,
+  type ItemStack,
+} from './items/items';
+
+export { skills, defineSkill, skillDef, SkillBook, type SkillDef, type ResourcePool } from './skills/skills';
+
+export { drawPanel, Menu, DEFAULT_PANEL, type MenuEntry, type MenuActions, type PanelStyle } from './ui/widgets';
+export {
+  conversations,
+  defineConversation,
+  DialogueScene,
+  type ConversationDef,
+  type ConversationLine,
+  type ConversationChoice,
+  type DialogueOptions,
+} from './ui/dialogue';
+export { Minimap, type MinimapMarker } from './ui/minimap';
 
 export { DebugOverlay } from './debug/overlay';

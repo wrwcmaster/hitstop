@@ -14,11 +14,17 @@ export class Input<A extends string = string> {
   private held_ = new Set<A>();
   private pressed_ = new Set<A>();
   private released_ = new Set<A>();
-  private keymap: Record<string, A>;
+  private keymap: Record<string, A | A[]>;
   private anyPressListeners: (() => void)[] = [];
 
-  constructor(keymap: Record<string, A>) {
+  /** A key may map to several actions (ArrowUp = jump in-game AND up in menus). */
+  constructor(keymap: Record<string, A | A[]>) {
     this.keymap = keymap;
+  }
+
+  private actionsFor(code: string): A[] {
+    const a = this.keymap[code];
+    return a === undefined ? [] : Array.isArray(a) ? a : [a];
   }
 
   /** Is the action currently down? */
@@ -83,17 +89,16 @@ export class Input<A extends string = string> {
   /** Listen to keyboard events on `target` using the keymap. */
   attachKeyboard(target: GlobalEventHandlers = window): void {
     target.addEventListener('keydown', (e: KeyboardEvent) => {
-      const a = this.keymap[e.code];
-      if (a !== undefined) {
+      const actions = this.actionsFor(e.code);
+      if (actions.length) {
         e.preventDefault();
-        if (!e.repeat) this.press(a);
+        if (!e.repeat) for (const a of actions) this.press(a);
       } else if (!e.repeat) {
         for (const fn of this.anyPressListeners) fn();
       }
     });
     target.addEventListener('keyup', (e: KeyboardEvent) => {
-      const a = this.keymap[e.code];
-      if (a !== undefined) this.release(a);
+      for (const a of this.actionsFor(e.code)) this.release(a);
     });
   }
 

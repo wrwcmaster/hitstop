@@ -15,8 +15,16 @@ import {
   type CollisionSource,
   type Rect,
 } from '@engine/index';
+import {
+  Stats,
+  Inventory,
+  Equipment,
+  SkillBook,
+} from '@engine/index';
 import { KNIGHT_ANIMS } from '../content/sprites';
 import { COLORS } from '../content/palette';
+import { weaponSpecOf, type WeaponSpec } from '../content/items';
+import type { SkillCtx } from '../content/skills';
 import { Monster } from './monster';
 import type { ActionGame } from '../defs';
 
@@ -38,6 +46,7 @@ export const PLAYER_TUNING = {
   comboWindow: 0.28,
   hurtInvuln: 1.1,
   maxHp: 5,
+  maxMp: 3,
 };
 
 /**
@@ -51,6 +60,22 @@ export class Player extends Actor {
   h = 13;
   hp = PLAYER_TUNING.maxHp;
   maxHp = PLAYER_TUNING.maxHp;
+
+  /** Base stats; equipment projects modifiers in via `equipment`. */
+  stats = new Stats({ maxHp: PLAYER_TUNING.maxHp, maxMp: PLAYER_TUNING.maxMp, attack: 0 });
+  inventory = new Inventory();
+  equipment = new Equipment(this.stats);
+  skills = new SkillBook<SkillCtx>({
+    canAfford: (cost) => this.mp >= cost,
+    spend: (cost) => {
+      this.mp -= cost;
+    },
+  });
+  mp = PLAYER_TUNING.maxMp;
+
+  get maxMp(): number {
+    return Math.round(this.stats.get('maxMp'));
+  }
 
   private jumpBuf = new Buffer(PLAYER_TUNING.jumpBufferTime);
   private atkBuf = new Buffer(PLAYER_TUNING.attackBufferTime);
@@ -78,7 +103,35 @@ export class Player extends Actor {
     this.x = x;
     this.y = y;
     this.layer = 10;
+    // Starting kit: a weapon in hand, a potion in the bag, one spell known.
+    this.inventory.add('rusty-sword');
+    this.equipment.equip('rusty-sword');
+    this.inventory.add('potion');
+    this.skills.learn('fireball');
+    this.syncStats();
+    this.hp = this.maxHp;
+    this.mp = this.maxMp;
     this.fsm = new FSM<Player>(this, PLAYER_STATES, 'move');
+  }
+
+  /** Pull derived values from stats (call after equipment changes). */
+  syncStats(): void {
+    this.maxHp = Math.round(this.stats.get('maxHp'));
+    this.hp = Math.min(this.hp, this.maxHp);
+    this.mp = Math.min(this.mp, this.maxMp);
+  }
+
+  heal(n: number): void {
+    this.hp = Math.min(this.maxHp, this.hp + n);
+  }
+
+  restoreMp(n: number): void {
+    this.mp = Math.min(this.maxMp, this.mp + n);
+  }
+
+  /** The attack spec of whatever's in the weapon slot (fists if empty). */
+  get weapon(): WeaponSpec {
+    return weaponSpecOf(this.equipment.get('weapon'));
   }
 
   get input() {
@@ -95,19 +148,24 @@ export class Player extends Actor {
     this.runControls(dt);
     if (this.atkBuf.consume()) return 'attack';
     if (this.input.consumePress('dash') && this.dashCd <= 0) return 'dash';
+    if (this.input.consumePress('skill')) {
+      this.skills.cast('fireball', { game: this.game, player: this });
+    }
   }
 
   beginAttack(): void {
+    const w = this.weapon;
     this.attackIndex = this.comboWin.consume() ? (this.attackIndex + 1) % 3 : 0;
     const heavy = this.attackIndex === 2;
     this.attackDur = heavy ? 0.3 : 0.2;
     this.vx += this.facing * (heavy ? 150 : 45);
+    // Damage/feel come from the equipped weapon; flat bonus from stats.
     this.strike = this.game.combat.strike({
-      damage: heavy ? 2 : 1,
+      damage: (heavy ? w.heavyDamage : w.lightDamage) + Math.round(this.stats.get('attack')),
       targets: 'enemy',
       attacker: this,
-      strength: heavy ? 0.8 : 0.45,
-      colors: [COLORS.white, COLORS.gold],
+      strength: heavy ? w.heavyStrength : w.lightStrength,
+      colors: w.colors,
     });
     this.feel.sfx.play('slash');
   }
@@ -155,8 +213,9 @@ export class Player extends Actor {
   /** Active attack hitbox in world space (only valid during attack state). */
   attackBox(): Rect {
     const heavy = this.attackIndex === 2;
-    const w = heavy ? 26 : 20;
-    const h = heavy ? 20 : 16;
+    const reach = this.weapon.reach;
+    const w = (heavy ? 26 : 20) + reach;
+    const h = (heavy ? 20 : 16) + Math.max(0, reach / 2);
     return {
       x: this.facing === 1 ? this.x + this.w - 2 : this.x - w + 2,
       y: this.y + this.h / 2 - h / 2,
@@ -212,6 +271,7 @@ export class Player extends Actor {
     this.coyote.update(dt);
     this.comboWin.update(dt);
     this.dashCd = Math.max(0, this.dashCd - dt);
+    this.skills.update(dt);
     this.squash += (1 - this.squash) * Math.min(1, dt * 10);
 
     if (this.input.pressed('jump')) this.jumpBuf.set();
@@ -329,7 +389,7 @@ export class Player extends Actor {
   private renderSlash(g: CanvasRenderingContext2D, cx: number, my: number): void {
     const prog = Math.min(1, this.fsm.t / this.attackDur);
     const heavy = this.attackIndex === 2;
-    const r = heavy ? 17 : 13;
+    const r = (heavy ? 17 : 13) + Math.max(0, Math.round(this.weapon.reach / 2));
     const flipV = this.attackIndex === 1 ? -1 : 1;
     const sweep = (-1.3 + 2.6 * Math.min(1, prog * 1.7)) * flipV;
     const a = this.facing === 1 ? sweep : Math.PI - sweep;

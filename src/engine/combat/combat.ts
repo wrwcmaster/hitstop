@@ -2,6 +2,8 @@ import { Actor, Team } from '../world/entity';
 import { Rect, overlaps, centerX, centerY } from '../math/rect';
 import { Feel } from '../feel/feel';
 import { EventBus } from '../core/events';
+import { Projectile, ProjectileOptions } from './projectile';
+import { CollisionSource } from '../physics/body';
 
 /**
  * Combat resolution with feedback built in.
@@ -89,6 +91,11 @@ export class Combat {
   /** Begin an attack. Keep the Strike for the attack's active frames. */
   strike(opts: StrikeOptions): Strike {
     return new Strike(this, opts);
+  }
+
+  /** Fire a projectile: a moving hitbox carrying a strike. */
+  shoot(opts: ProjectileOptions, collision: CollisionSource): Projectile {
+    return this.world.spawn(new Projectile(opts, this.feel, collision, (o) => this.strike(o)));
   }
 
   /**

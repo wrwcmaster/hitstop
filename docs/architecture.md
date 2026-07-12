@@ -37,7 +37,7 @@
 | `core/loop.ts` | Fixed 60Hz simulation, render every frame | **Hitstop and slowmo are implemented in the loop itself** — a frozen frame freezes everything with zero cooperation from gameplay code. |
 | `core/events.ts` | Typed pub/sub | Systems communicate through events (`hit`, `kill`, `waveStart`) so scoring/UI/AI can react without coupling. |
 | `core/registry.ts` | Named content registries | The backbone of data-driven content; tools enumerate these to build their palettes. |
-| `core/scene.ts` | Top-level game states | Title/play/pause/game-over. |
+| `core/scene.ts` | Top-level game states on a **stack** | Only the top scene updates; every scene renders. Push a pause menu or dialogue and the frozen world stays visible under it — pausing falls out of the architecture instead of needing a flag. |
 | `input/input.ts` | Action-based input + `Buffer` | Gameplay reads *actions*, never keys. `Buffer` implements input buffering / coyote time — core feel tools. |
 | `gfx/` | Pixel canvas, text-grid sprites, animation, 3×5 font, camera | Sprites are authored as text + palette: diffable, hand-editable, tool-friendly. Flip/tint/white-flash variants are cached. |
 | `feel/` | **The selling point.** Particles, floating text, and `Feel` — hitstop, slowmo, flash, shake, kick, and the composed `impact()` | One `strength` knob (0..1) scales the whole bundle so feedback stays coherent. |
@@ -45,8 +45,12 @@
 | `physics/body.ts` | AABB bodies, gravity, axis-separated collide vs solids + one-way platforms | Deliberately simple platformer physics — predictable and tunable beats realistic. |
 | `world/` | `Entity`/`Actor` base classes, `World` with deferred spawn/remove and pluggable systems | Classic entities, not ECS (see below). |
 | `combat/combat.ts` | `Strike` (hitbox + damage payload + once-per-target tracking) and hit application | **Feedback is applied inside the combat resolver**, so every hit in every future weapon/skill feels right by default. |
+| `combat/projectile.ts` | Bullets/bolts: a moving hitbox carrying a Strike | Projectiles produce the same feedback bundle as melee — one tuning surface for all damage. |
 | `fsm/fsm.ts` | Tiny state machine with time-in-state | Player states, enemy AI, boss phases. |
-| `level/` | Tile registry, `Tilemap` (collision + culling render), `RoomDef` JSON format | Rooms are plain JSON — the level editor's native format. |
+| `level/` | Tile registry, `Tilemap` (collision + culling render), `RoomDef` JSON format, `Triggers` (event regions) | Rooms are plain JSON — the level editor's native format. Triggers let rooms script conversations/ambushes with zero code. |
+| `items/` | `Stats` (sourced modifiers), `ItemDef` registry, `Inventory`, `Equipment` | Items are data + hooks; equipment projects stat mods under removable source keys. Weapons are just equipment whose props carry an attack spec. |
+| `skills/` | `SkillDef` registry + `SkillBook` (cooldowns, resource gating) | The resource (mana/stamina/ammo) is abstracted behind two callbacks; casts usually fire Strikes/Projectiles so feedback comes free. |
+| `ui/` | `drawPanel`/`Menu` widgets, `DialogueScene` (typewriter + choices), `Minimap` (baked tiles + live markers) | Conversations are data in a registry; menus are the same widget everywhere. |
 | `debug/overlay.ts` | Hurtboxes, counts, time scale (`` ` `` key) | The fastest tuning loop is seeing the numbers live. |
 
 ## Why entities + registries, not a full ECS
@@ -90,11 +94,22 @@ Two subtleties worth knowing:
 
 The level editor imports the *game's* content modules; its tile palette is `tiles.ids()` and its entity palette is `monsters.ids()`. Register a new tile or monster and both editors know about it with zero editor changes. Test-play writes the room JSON to `localStorage` and opens the game with `?room=local` — a full edit→play loop in one click.
 
+## The RPG layer (items / skills / dialogue / menus)
+
+The second wave of systems keeps the same shape — registries of data + small hooks, engine mechanics with no game knowledge:
+
+- **Weapons** are equipment items whose `props.weapon` carries an attack spec (damage, feel strength, reach, colors). The player's swing reads whatever is in the weapon slot; new weapons never touch player code.
+- **Consumables/instants** (`potion`, `mana-orb`, `coin`) are `use`/`onPickup` hooks with a game-provided context. The `Pickup` entity (game side) handles the drop → magnet → collect loop.
+- **Skills** cast via a `SkillBook` that gates on cooldown + resource; the fireball is ~40 lines in `content/skills.ts`, most of it visuals.
+- **Conversations** are `ConversationDef` data played by `DialogueScene` as a stack overlay; rooms start them through `talk` triggers, so a level designer wires dialogue in the editor without code.
+- **System menu** (`scenes/pause.ts`) composes the engine `Menu` widget; inventory/equip/volume/restart are menu entries with callbacks.
+- **Minimap** bakes the tilemap once and draws live entity markers each frame.
+
 ## Where this goes next (Metroidvania roadmap)
 
 The seams are already in place for:
 
-- **Multiple rooms + transitions**: `RoomDef` is one screen-plus of world; a `RoomManager` scene that swaps tilemaps and preserves the player is the next layer. Exits fit in `RoomDef.props`.
-- **Skills/abilities**: model them like the player's attack — an FSM state + a `Strike`. A `SkillDef` registry mirrors `MonsterDef`.
+- **Multiple rooms + transitions**: `RoomDef` is one screen-plus of world; a `RoomManager` scene that swaps tilemaps and preserves the player is the next layer. A `door` trigger event + target room id in `props` is the natural encoding.
 - **Bosses**: `Monster` with an `FSM` in `init`/`update`, using multi-phase state machines; `feel.impact` strength 1.0 moments are already tuned.
-- **Persistence**: save = current room id + player state + event flags; the typed `EventBus` is where "defeated boss X" flags originate.
+- **Persistence**: save = current room id + player state (inventory/equipment serialize as plain id/count data) + event flags; the typed `EventBus` is where "defeated boss X" flags originate.
+- **Fog-of-war minimap**: `Minimap.bake` is the single place that reads tiles; an explored mask slots in there.

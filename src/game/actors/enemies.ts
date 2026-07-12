@@ -12,6 +12,10 @@ import { COLORS } from '../content/palette';
 defineMonster('slime', {
   hp: 3, damage: 1, w: 12, h: 7, score: 100,
   colors: [COLORS.green, COLORS.greenDark, COLORS.greenLight],
+  drops: [
+    { id: 'coin', chance: 0.4 },
+    { id: 'potion', chance: 0.06 },
+  ],
   init(m) {
     m.state.hopT = rand(0.6, 1.6);
   },
@@ -36,6 +40,10 @@ defineMonster('slime', {
 defineMonster('bat', {
   hp: 2, damage: 1, w: 12, h: 6, score: 150, flies: true,
   colors: [COLORS.purple, COLORS.purpleLight, COLORS.white],
+  drops: [
+    { id: 'coin', chance: 0.4 },
+    { id: 'mana-orb', chance: 0.3 },
+  ],
   init(m) {
     m.state.phase = rand(0, 9);
   },
@@ -63,6 +71,12 @@ defineMonster('bat', {
 defineMonster('brute', {
   hp: 8, damage: 1, w: 22, h: 13, score: 400, mass: 2.2,
   colors: [COLORS.red, COLORS.redDark, COLORS.gold],
+  drops: [
+    { id: 'potion', chance: 0.45 },
+    { id: 'mana-orb', chance: 0.3 },
+    { id: 'great-sword', chance: 0.35 }, // skipped by PlayScene once owned
+    { id: 'iron-charm', chance: 0.2 },   // same
+  ],
   init(m) {
     m.state.hopT = 1.2;
     m.state.landPop = false;

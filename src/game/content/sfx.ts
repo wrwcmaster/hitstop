@@ -29,4 +29,26 @@ export function registerSounds(sfx: Sfx): void {
     s.toneAt(120, 440, 880, 0.22, 'triangle', 0.12);
   });
   sfx.define('combo', (s) => s.tone(880, 1320, 0.08, 'square', 0.06));
+  sfx.define('fireball', (s) => {
+    s.hiss(0.12, 0.14);
+    s.tone(520, 140, 0.22, 'sawtooth', 0.1);
+  });
+  sfx.define('pickup', (s) => s.tone(660, 990, 0.09, 'triangle', 0.1));
+  sfx.define('coin', (s) => {
+    s.tone(880, 880, 0.05, 'square', 0.07);
+    s.toneAt(60, 1175, 1175, 0.12, 'square', 0.07);
+  });
+  sfx.define('heal', (s) => {
+    s.tone(440, 660, 0.15, 'triangle', 0.12);
+    s.toneAt(100, 550, 880, 0.18, 'triangle', 0.1);
+  });
+  sfx.define('equip', (s) => {
+    s.hiss(0.05, 0.1);
+    s.tone(330, 220, 0.1, 'square', 0.1);
+  });
+  sfx.define('menuMove', (s) => s.tone(440, 460, 0.04, 'square', 0.04));
+  sfx.define('menuSelect', (s) => s.tone(550, 770, 0.07, 'square', 0.06));
+  sfx.define('menuOpen', (s) => s.tone(220, 440, 0.1, 'triangle', 0.08));
+  sfx.define('menuClose', (s) => s.tone(440, 220, 0.1, 'triangle', 0.08));
+  sfx.define('blip', (s) => s.tone(700, 740, 0.03, 'square', 0.03));
 }

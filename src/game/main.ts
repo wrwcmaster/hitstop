@@ -2,6 +2,9 @@ import { Game, validateRoom } from '@engine/index';
 import { KEYMAP, VIEW_W, VIEW_H, type Action, type GameEvents } from './defs';
 import { registerSounds } from './content/sfx';
 import { registerEnemies } from './actors/enemies';
+import { registerItems } from './content/items';
+import { registerSkills } from './content/skills';
+import { registerConversations } from './content/conversations';
 import './content/tiles';
 import { PlayScene } from './scenes/play';
 import arenaJson from './content/rooms/arena.json';
@@ -22,6 +25,9 @@ const game = new Game<Action, GameEvents>({
 
 registerSounds(game.sfx);
 registerEnemies();
+registerItems();
+registerSkills();
+registerConversations();
 
 // Touch controls (hidden by CSS on pointer:fine devices).
 const bind = (id: string, action: Action) => {

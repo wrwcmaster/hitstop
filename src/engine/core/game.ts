@@ -15,8 +15,8 @@ export interface GameOptions<A extends string> {
   canvas: HTMLCanvasElement;
   width: number;
   height: number;
-  /** KeyboardEvent.code -> action. */
-  keymap: Record<string, A>;
+  /** KeyboardEvent.code -> action(s). A key may serve several actions. */
+  keymap: Record<string, A | A[]>;
 }
 
 /**

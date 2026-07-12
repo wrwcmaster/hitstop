@@ -14,7 +14,7 @@ npm run dev          # game:          http://localhost:5173/
 npm run build        # typecheck + production build to dist/
 ```
 
-In-game, press `` ` `` (backquote) for the debug overlay (hurtboxes, entity counts, live time scale).
+In-game: arrows/WASD move, Space jumps, `Z`/`J` attack, `X`/`K` dash, `C`/`L` cast fireball, `Esc` opens the system menu (inventory, volume, restart), `` ` `` (backquote) toggles the debug overlay (hurtboxes, entity counts, live time scale).
 
 `demo.html` is the original single-file proof of concept — zero dependencies, open it directly in a browser. Everything else in this repo is that POC grown into a real architecture.
 
@@ -22,8 +22,8 @@ In-game, press `` ` `` (backquote) for the debug overlay (hurtboxes, entity coun
 
 | Path | What it is |
 | --- | --- |
-| `src/engine/` | The engine: loop, events, input, graphics, **feel**, audio, physics, world, combat, FSM, levels. No game knowledge. |
-| `src/game/` | The game built on it: player, enemies, waves, scenes — mostly *content definitions*, not engine plumbing. |
+| `src/engine/` | The engine: loop, events, input, graphics, **feel**, audio, physics, world, combat + projectiles, FSM, levels + triggers, items/equipment/stats, skills, UI (menus, dialogue, minimap). No game knowledge. |
+| `src/game/` | The game built on it: player, enemies, weapons, spells, drops, conversations, pause menu, HUD — mostly *content definitions*, not engine plumbing. |
 | `tools/` | Browser-based design tools: level editor and sprite editor, sharing the game's registries. |
 | `docs/` | Architecture, game-feel guide, content cookbook, and a game-dev primer for software engineers. |
 

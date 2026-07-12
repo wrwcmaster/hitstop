@@ -120,3 +120,76 @@ export const HEART_EMPTY = sprite([
   '..EEE..',
   '...E...',
 ], PAL);
+
+export const MANA_PIP = sprite([
+  '..B..',
+  '.BBB.',
+  'BBWBB',
+  '.BBB.',
+  '..B..',
+], PAL);
+
+export const MANA_PIP_EMPTY = sprite([
+  '..E..',
+  '.EEE.',
+  'EEEEE',
+  '.EEE.',
+  '..E..',
+], PAL);
+
+/* ---------------- item icons ---------------- */
+
+export const ICON_SWORD = sprite([
+  '......W.',
+  '.....WS.',
+  '....WS..',
+  '...WS...',
+  'O.WS....',
+  '.OS.....',
+  '.YO.....',
+  'Y..O....',
+], PAL);
+
+export const ICON_GREATSWORD = sprite([
+  '......WW',
+  '.....WWS',
+  '....WWS.',
+  '...WWS..',
+  'O.WWS...',
+  '.OWS....',
+  '.YO.....',
+  'YY.OO...',
+], PAL);
+
+export const ICON_POTION = sprite([
+  '..OO..',
+  '..OO..',
+  '.ORRO.',
+  'ORRRRO',
+  'ORWRRO',
+  '.OOOO.',
+], PAL);
+
+export const ICON_ORB = sprite([
+  '.BBB.',
+  'BBWBB',
+  'BWWBB',
+  'BBBBB',
+  '.BBB.',
+], PAL);
+
+export const ICON_CHARM = sprite([
+  '.YYY.',
+  'Y.O.Y',
+  'Y.G.Y',
+  'Y...Y',
+  '.YYY.',
+], PAL);
+
+export const ICON_COIN = sprite([
+  '.YYY.',
+  'YYWYY',
+  'YWYYY',
+  'YYYYY',
+  '.YYY.',
+], PAL);

@@ -106,15 +106,107 @@ sfx.define('fireball', (s) => {
 
 Play it from anywhere with `game.feel.sfx.play('fireball')` or pass `sfx: 'fireball'` to `feel.impact`.
 
-## A new player skill / attack
+## A new item (consumable, equipment, pickup)
+
+In `src/game/content/items.ts` — an item is data + hooks with a typed context:
+
+```ts
+defineItem<ItemCtx>('haste-draught', {
+  name: 'HASTE DRAUGHT', desc: 'Move like the wind for a while.',
+  icon: MY_ICON, kind: 'consumable', stack: 3,
+  use({ game, player }) {
+    player.stats.setSource('buff:haste', { mult: { speed: 1.5 } });
+    game.feel.sfx.play('heal');
+    // (a World system or timer should removeSource later)
+  },
+});
+```
+
+Kinds: `consumable` (usable from the inventory menu; return `false` from `use` to abort without consuming), `equipment` (occupies a `slot`, contributes `mods` to stats while worn), `instant` (applies on pickup — coins, mana orbs), `key` (inert, held).
+
+Drop it from monsters by adding to their `drops` table, place it in a room, or grant it in code with `player.inventory.add(id)`. The `Pickup` entity handles the pop-out → magnet → collect flow and the name toast.
+
+## A new weapon
+
+A weapon is an equipment item whose `props.weapon` carries the attack spec the player's swing reads:
+
+```ts
+defineItem<ItemCtx>('dagger', {
+  name: 'DAGGER', desc: 'Fast and mean.',
+  icon: ICON_DAGGER, kind: 'equipment', slot: 'weapon',
+  props: {
+    weapon: {
+      lightDamage: 1, heavyDamage: 2,
+      lightStrength: 0.3, heavyStrength: 0.6,   // feel scale per hit
+      reach: -4,                                 // hitbox size delta
+      colors: [COLORS.white],
+    } satisfies WeaponSpec,
+  },
+});
+```
+
+No player-code changes: damage, feel strength, reach, slash colors all flow from the equipped item. Stat bonuses (`mods: { add: { attack: 1 } }`) stack on top.
+
+## A new skill / spell
+
+In `src/game/content/skills.ts`. A skill is cooldown + cost + a cast that usually fires a `Strike` or a projectile — so impact feedback comes free:
+
+```ts
+defineSkill<SkillCtx>('ice-shard', {
+  name: 'ICE SHARD', desc: 'A piercing cold bolt.',
+  cooldown: 0.8, cost: 1,
+  cast({ game, player }) {
+    game.combat.shoot({
+      x: player.cx, y: player.cy, vx: player.facing * 300, vy: -20,
+      gravity: 200, pierce: 1,
+      strike: { damage: 1, targets: 'enemy', attacker: player, strength: 0.5 },
+      draw(g, p) { g.fillStyle = '#a8dadc'; g.fillRect(p.x - 2, p.y - 2, 4, 4); },
+    }, player.collision);
+  },
+});
+```
+
+Teach it with `player.skills.learn('ice-shard')` and cast from an input binding or AI. The `SkillBook` handles cooldowns and mana; return `false` from `cast` to abort without charging.
+
+## A conversation
+
+In `src/game/content/conversations.ts` — pure data, with optional branching:
+
+```ts
+defineConversation('blacksmith', {
+  lines: [
+    { speaker: 'SMITH', text: 'THAT SWORD HAS SEEN BETTER DAYS.' },
+  ],
+  choices: [
+    { label: 'REFORGE IT.', then: 'blacksmith-reforge' },
+    { label: 'LEAVE.' },
+  ],
+});
+```
+
+Start it from a room trigger (below), or in code:
+`scene.openConversation('blacksmith')` / push a `DialogueScene`. React to outcomes via the `onEnd` callback or events.
+
+## A level event (trigger region)
+
+Rooms carry `triggers` — rectangles that fire a named event when the player enters (drawn by dragging in the level editor's trigger mode):
+
+```json
+"triggers": [
+  { "x": 180, "y": 140, "w": 110, "h": 92, "event": "talk", "once": true,
+    "props": { "conversation": "intro" } }
+]
+```
+
+`talk` is handled by the PlayScene (opens the conversation). Any other event name is yours: listen with `game.events.on('trigger', ({ event, props }) => ...)` for ambushes, checkpoints, doors, boss walls.
+
+## A new player attack state
 
 Model it like the existing attack (see `Player.beginAttack`):
 
 1. Add an FSM state (or extend `attack`) in `actors/player.ts`.
 2. Create a `Strike` with damage/strength/knockback, and `apply()` it during active frames.
 3. Feedback comes free via the strike; add a signature flourish (particles, sfx) in the state's `enter`.
-
-For charge attacks / spells, the pattern is the same — a state with a windup timer, then a strike (or a spawned projectile `Entity`).
 
 ## Game-wide reactions (drops, quests, achievements)
 

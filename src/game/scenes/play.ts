@@ -1,21 +1,34 @@
 import {
   type Scene,
   type RoomDef,
+  type TriggerDef,
   buildTilemap,
   Tilemap,
   tiles,
   drawText,
   DebugOverlay,
+  Triggers,
+  DialogueScene,
+  Minimap,
+  itemDef,
   chance,
   rand,
   clamp,
 } from '@engine/index';
-import type { ActionGame } from '../defs';
+import type { ActionGame, Action } from '../defs';
 import { Player } from '../actors/player';
 import { Monster, monsters } from '../actors/monster';
+import { Pickup } from '../actors/pickup';
+import { PauseScene } from './pause';
 import { Background } from './background';
 import { COLORS } from '../content/palette';
-import { HEART, HEART_EMPTY, KNIGHT_IDLE_SPRITE } from '../content/sprites';
+import {
+  HEART,
+  HEART_EMPTY,
+  MANA_PIP,
+  MANA_PIP_EMPTY,
+  KNIGHT_IDLE_SPRITE,
+} from '../content/sprites';
 
 /** A monster queued to spawn, currently telegraphing. */
 interface PendingSpawn {
@@ -36,6 +49,8 @@ export class PlayScene implements Scene {
   private tilemap: Tilemap;
   private bg: Background;
   private debug: DebugOverlay;
+  private triggers: Triggers;
+  private minimap: Minimap;
 
   private phase: Phase = 'title';
   private player: Player | null = null;
@@ -62,6 +77,10 @@ export class PlayScene implements Scene {
     this.tilemap = buildTilemap(room);
     this.bg = new Background(game.width, game.height);
     this.debug = new DebugOverlay(game as never);
+    // Trigger fired-state persists across runs on purpose: the intro
+    // conversation plays once per session, not once per death.
+    this.triggers = new Triggers(room.triggers ?? []);
+    this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
     game.camera.setBounds(0, -30, this.tilemap.worldW, this.tilemap.worldH);
 
     // Scoring, combo and flow react to combat via events — content and
@@ -80,6 +99,11 @@ export class PlayScene implements Scene {
       const pts = info.target.def.score * mult;
       this.score += pts;
       game.feel.text(info.target.cx, info.target.y - 8, pts, COLORS.gold);
+      this.rollDrops(info.target);
+    });
+    game.events.on('score', ({ points, x, y }) => {
+      this.score += points;
+      game.feel.text(x, y, points, COLORS.gold);
     });
     game.events.on('playerHurt', () => {
       this.combo = 0;
@@ -118,6 +142,44 @@ export class PlayScene implements Scene {
     this.clearT = 0;
     this.phase = 'play';
     this.nextWave();
+  }
+
+  /* ---------------- loot ---------------- */
+
+  private rollDrops(m: Monster): void {
+    if (!m.def.drops || !this.player) return;
+    for (const drop of m.def.drops) {
+      // Equipment is once-per-session: skip if already owned.
+      const def = itemDef(drop.id);
+      if (def.kind === 'equipment' &&
+          (this.player.inventory.has(drop.id) || this.player.equipment.isEquipped(drop.id))) {
+        continue;
+      }
+      if (chance(drop.chance)) {
+        this.game.world.spawn(new Pickup(drop.id, this.game, this.tilemap, m.cx, m.cy));
+      }
+    }
+  }
+
+  /* ---------------- triggers & dialogue ---------------- */
+
+  private handleTrigger(def: TriggerDef): void {
+    this.game.events.emit('trigger', { event: def.event, props: def.props });
+    // 'talk' triggers open the conversation named in props.
+    if (def.event === 'talk' && typeof def.props?.conversation === 'string') {
+      this.openConversation(def.props.conversation);
+    }
+  }
+
+  private openConversation(id: string): void {
+    this.game.scenes.push(
+      new DialogueScene<Action>(this.game, id, {
+        confirm: 'confirm',
+        up: 'up',
+        down: 'down',
+        blip: () => this.game.feel.sfx.play('blip'),
+      }),
+    );
   }
 
   /* ---------------- waves ---------------- */
@@ -196,11 +258,18 @@ export class PlayScene implements Scene {
 
   update(dt: number): void {
     const g = this.game;
+    if (this.phase === 'play' && this.player && g.input.consumePress('menu')) {
+      g.scenes.push(new PauseScene(g, this.player, { onRestart: () => this.startRun() }));
+      return;
+    }
     if (this.phase !== 'title') {
       g.world.update(dt);
       this.updateSpawns(dt);
       this.comboT = Math.max(0, this.comboT - dt);
       if (this.comboT <= 0) this.combo = 0;
+      if (this.phase === 'play' && this.player && this.player.hp > 0) {
+        this.triggers.update(this.player, (f) => this.handleTrigger(f.def));
+      }
     }
     this.bannerT = Math.max(0, this.bannerT - dt);
 
@@ -259,15 +328,50 @@ export class PlayScene implements Scene {
       for (let i = 0; i < p.maxHp; i++) {
         g.drawImage(i < p.hp ? HEART : HEART_EMPTY, 6 + i * 9, 6);
       }
+      for (let i = 0; i < p.maxMp; i++) {
+        g.drawImage(i < p.mp ? MANA_PIP : MANA_PIP_EMPTY, 7 + i * 7, 15);
+      }
+      // Skill readiness: fireball cooldown wedge next to the mana row.
+      const cdMax = 1.1;
+      const cd = p.skills.cooldownLeft('fireball');
+      const ready = p.skills.ready('fireball');
+      const sx = 10 + p.maxMp * 7;
+      drawText(g, 'C', sx, 15, ready ? COLORS.gold : COLORS.steelDark);
+      if (cd > 0) {
+        g.fillStyle = COLORS.steelDark;
+        g.fillRect(sx, 21, Math.round(5 * (cd / cdMax)), 1);
+      }
     }
     drawText(g, `SCORE ${this.score}`, gm.width - 6, 7, COLORS.white, 1, 'right');
     drawText(g, `WAVE ${this.wave}`, gm.width / 2, 7, COLORS.steel, 1, 'center');
+    this.renderMinimap(g);
     if (this.combo >= 2) {
       drawText(g, `COMBO X${this.combo}`, gm.width / 2, 18, COLORS.gold, 1, 'center');
       g.fillStyle = COLORS.gold;
       g.fillRect(Math.round(gm.width / 2 - 15), 26, Math.round((30 * this.comboT) / 2), 2);
     }
     if (this.bannerT > 0) drawText(g, this.banner, gm.width / 2, 58, COLORS.white, 3, 'center');
+  }
+
+  private renderMinimap(g: CanvasRenderingContext2D): void {
+    const gm = this.game;
+    const markers: { x: number; y: number; color: string }[] = [
+      ...gm.world.actors('enemy').map((e) => ({ x: e.cx, y: e.cy, color: COLORS.red })),
+      ...gm.world
+        .all()
+        .filter((e): e is Pickup => e instanceof Pickup && !e.dead)
+        .map((e) => ({ x: e.x, y: e.y, color: COLORS.gold })),
+    ];
+    if (this.player && this.player.hp > 0) {
+      markers.push({ x: this.player.cx, y: this.player.cy, color: COLORS.green });
+    }
+    this.minimap.render(
+      g,
+      gm.width - this.minimap.width - 6,
+      16,
+      markers,
+      { x: gm.camera.x, y: Math.max(0, gm.camera.y), w: gm.width, h: gm.height },
+    );
   }
 
   private renderTitle(g: CanvasRenderingContext2D): void {
@@ -281,9 +385,9 @@ export class PlayScene implements Scene {
     g.restore();
     drawText(g, 'HITSTOP', gm.width / 2, 52, COLORS.white, 4, 'center');
     drawText(g, 'GAME FEEL IS THE FOUNDATION', gm.width / 2, 84, COLORS.steel, 1, 'center');
-    drawText(g, 'MOVE: ARROWS / WASD', gm.width / 2, 176, COLORS.steelDark, 1, 'center');
+    drawText(g, 'MOVE: ARROWS / WASD - JUMP: SPACE', gm.width / 2, 176, COLORS.steelDark, 1, 'center');
     drawText(g, 'ATTACK: Z OR J - DASH: X OR K', gm.width / 2, 188, COLORS.steelDark, 1, 'center');
-    drawText(g, 'JUMP: SPACE / W / UP', gm.width / 2, 200, COLORS.steelDark, 1, 'center');
+    drawText(g, 'SKILL: C OR L - MENU: ESC', gm.width / 2, 200, COLORS.steelDark, 1, 'center');
     if (Math.floor(performance.now() / 400) % 2) {
       drawText(g, 'PRESS ANY KEY', gm.width / 2, 226, COLORS.gold, 2, 'center');
     }

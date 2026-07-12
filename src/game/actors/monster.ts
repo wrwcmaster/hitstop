@@ -27,6 +27,8 @@ export interface MonsterDef {
   colors: string[];
   mass?: number;
   flies?: boolean;
+  /** Loot rolled on death (each entry rolls independently). */
+  drops?: { id: string; chance: number }[];
   /** One-time setup; stash per-instance state on the monster. */
   init?(m: Monster): void;
   /** Behavior. Physics (gravity + collide) runs after this. */
