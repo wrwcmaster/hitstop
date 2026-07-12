@@ -10,6 +10,7 @@ import {
   Triggers,
   DialogueScene,
   Minimap,
+  Menu,
   itemDef,
   chance,
   rand,
@@ -22,6 +23,8 @@ import { Pickup } from '../actors/pickup';
 import { PauseScene } from './pause';
 import { Background } from './background';
 import { COLORS } from '../content/palette';
+import { ROOMS, START_ROOM } from '../content/rooms';
+import { saveStore, snapshotPlayer, restorePlayer, type SaveData } from '../save';
 import {
   HEART,
   HEART_EMPTY,
@@ -38,54 +41,85 @@ interface PendingSpawn {
   type: string;
 }
 
+/** A door transition in progress: fade out, swap rooms, fade in. */
+interface Transition {
+  t: number;
+  roomId: string;
+  x: number;
+  y: number;
+}
+
+const TRANSITION_TIME = 0.6;
+
 type Phase = 'title' | 'play' | 'over';
 
 /**
- * The wave-survival arena. One scene, three phases: title overlay,
- * playing, game-over overlay (the world keeps simulating through death —
- * corpses fall, particles settle).
+ * The game proper. One scene, three phases (title menu / playing / game
+ * over), a world of connected rooms behind fade transitions, wave combat
+ * where the room asks for it, a boss where the room placed one, and
+ * checkpoint saves at every room entrance.
  */
 export class PlayScene implements Scene {
-  private tilemap: Tilemap;
+  private roomId = START_ROOM;
+  private room!: RoomDef;
+  private tilemap!: Tilemap;
+  private minimap!: Minimap;
+  private triggers!: Triggers;
   private bg: Background;
   private debug: DebugOverlay;
-  private triggers: Triggers;
-  private minimap: Minimap;
 
   private phase: Phase = 'title';
   private player: Player | null = null;
+  private transition: Transition | null = null;
+
+  /** Story flags ('bossDefeated', ...). Serialized into saves. */
+  private flags = new Set<string>();
+  /** Fired once-trigger indices per room. Serialized into saves. */
+  private firedTriggers: Record<string, number[]> = {};
 
   private score = 0;
   private best = 0;
-  private wave = 0;
   private combo = 0;
   private comboT = 0;
   private banner = '';
   private bannerT = 0;
   private overT = 0;
+  private victoryT = 0;
 
+  private wave = 0;
   private queue: string[] = [];
   private pending: PendingSpawn[] = [];
   private spawnT = 0;
   private clearT = 0;
   private clearShown = false;
 
+  private titleMenu: Menu<Action>;
+
   constructor(
     private game: ActionGame,
-    private room: RoomDef,
+    /** Level-editor test rooms replace the whole world with one room. */
+    private testRoom?: RoomDef,
   ) {
-    this.tilemap = buildTilemap(room);
     this.bg = new Background(game.width, game.height);
     this.debug = new DebugOverlay(game as never);
-    // Trigger fired-state persists across runs on purpose: the intro
-    // conversation plays once per session, not once per death.
-    this.triggers = new Triggers(room.triggers ?? []);
-    this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
-    game.camera.setBounds(0, -30, this.tilemap.worldW, this.tilemap.worldH);
+    this.setRoom(this.startRoomId());
+    this.best = saveStore.load()?.best ?? 0;
 
-    // Scoring, combo and flow react to combat via events — content and
-    // engine never know about score.
-    game.events.on('hit', () => {
+    this.titleMenu = new Menu<Action>(
+      [
+        { label: 'NEW GAME', onSelect: () => this.startRun(null) },
+        {
+          label: 'CONTINUE',
+          disabled: () => !saveStore.exists(),
+          onSelect: () => this.startRun(saveStore.load()),
+        },
+      ],
+      { up: 'up', down: 'down', confirm: 'confirm' },
+    );
+
+    /* ---- combat & flow reactions (events, not couplings) ---- */
+    game.events.on('hit', (info) => {
+      if (info.target.team !== 'enemy') return; // the player being hit is not a combo
       this.combo++;
       this.comboT = 2;
       if (this.combo > 0 && this.combo % 5 === 0 && this.player) {
@@ -100,6 +134,7 @@ export class PlayScene implements Scene {
       this.score += pts;
       game.feel.text(info.target.cx, info.target.y - 8, pts, COLORS.gold);
       this.rollDrops(info.target);
+      if (info.target.def.boss) this.onBossDefeated();
     });
     game.events.on('score', ({ points, x, y }) => {
       this.score += points;
@@ -113,35 +148,121 @@ export class PlayScene implements Scene {
       this.phase = 'over';
       this.overT = 1.4;
       this.best = Math.max(this.best, this.score);
+      // Persist the improved best onto the existing checkpoint.
+      const save = saveStore.load();
+      if (save && this.best > save.best) {
+        save.best = this.best;
+        saveStore.save(save);
+      }
     });
 
-    game.input.onAnyPress(() => this.onAnyPress());
+    game.input.onAnyPress(() => {
+      if (this.phase === 'over' && this.overT <= 0) this.startRun(saveStore.load());
+    });
   }
 
-  private onAnyPress(): void {
-    if (this.phase === 'title') this.startRun();
-    else if (this.phase === 'over' && this.overT <= 0) this.startRun();
+  private startRoomId(): string {
+    return this.testRoom ? 'test' : START_ROOM;
   }
 
-  private startRun(): void {
+  private roomById(id: string): RoomDef {
+    if (this.testRoom && id === 'test') return this.testRoom;
+    return ROOMS[id] ?? ROOMS[START_ROOM];
+  }
+
+  /* ---------------- runs & rooms ---------------- */
+
+  private startRun(save: SaveData | null): void {
     const g = this.game;
     g.world.clear();
     g.feel.reset();
-    this.player = g.world.spawn(new Player(g, this.tilemap, this.room.playerSpawn.x, this.room.playerSpawn.y));
-    // Rooms can pre-place monsters (the arena spawns via waves instead).
-    for (const e of this.room.entities) {
-      if (monsters.has(e.type)) g.world.spawn(new Monster(e.type, g, this.tilemap, e.x, e.y));
+    this.player = new Player(g, this.tilemap, 0, 0); // positioned by setRoom
+    g.world.spawn(this.player);
+    if (save) {
+      restorePlayer(this.player, save.player);
+      this.flags = new Set(save.flags);
+      this.firedTriggers = { ...save.firedTriggers };
+      this.best = Math.max(this.best, save.best);
+    } else {
+      this.flags.clear();
+      this.firedTriggers = {};
     }
     this.score = 0;
-    this.wave = 0;
     this.combo = 0;
     this.comboT = 0;
+    this.victoryT = 0;
+    this.phase = 'play';
+    this.setRoom(save?.roomId ?? this.startRoomId());
+    this.game.sfx.play('menuSelect');
+  }
+
+  /**
+   * Make `id` the live room: rebuild tilemap/minimap/triggers, keep only
+   * the player, place them, spawn the room's monsters, start waves if the
+   * room wants them, and drop a checkpoint save.
+   */
+  private setRoom(id: string, spawnX?: number, spawnY?: number): void {
+    const g = this.game;
+    this.roomId = id;
+    this.room = this.roomById(id);
+    this.tilemap = buildTilemap(this.room);
+    this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
+    this.triggers = new Triggers(this.room.triggers ?? []);
+    this.triggers.importFired(this.firedTriggers[id] ?? []);
+    g.camera.setBounds(0, -30, this.tilemap.worldW, this.tilemap.worldH);
+
+    g.world.retain((e) => e === this.player);
+    g.feel.particles.clear();
+    g.feel.floaters.clear();
+
+    // Reset wave machinery; arm it only if this room runs waves.
     this.queue = [];
     this.pending = [];
     this.spawnT = 0;
     this.clearT = 0;
-    this.phase = 'play';
-    this.nextWave();
+    this.wave = 0;
+
+    if (this.player) {
+      this.player.collision = this.tilemap;
+      this.player.x = spawnX ?? this.room.playerSpawn.x;
+      this.player.y = spawnY ?? this.room.playerSpawn.y;
+      this.player.vx = 0;
+      this.player.vy = 0;
+      // Snap the camera so the new room doesn't smear in.
+      g.camera.x = clamp(this.player.cx - g.width / 2, 0, Math.max(0, this.tilemap.worldW - g.width));
+      g.camera.y = 0;
+    }
+
+    // Pre-placed monsters; a defeated boss stays defeated.
+    for (const e of this.room.entities) {
+      if (!monsters.has(e.type)) continue;
+      if (monsters.get(e.type).boss && this.flags.has('bossDefeated')) continue;
+      this.game.world.spawn(new Monster(e.type, this.game, this.tilemap, e.x, e.y));
+    }
+
+    if (this.phase === 'play') {
+      if (this.roomWantsWaves()) this.nextWave();
+      this.autosave();
+      if (id !== START_ROOM || this.bannerT <= 0) {
+        this.banner = this.room.name.toUpperCase();
+        this.bannerT = 1.2;
+      }
+    }
+  }
+
+  private roomWantsWaves(): boolean {
+    return !!this.room.props?.waves;
+  }
+
+  private autosave(): void {
+    if (this.testRoom || !this.player) return;
+    saveStore.save({
+      roomId: this.roomId,
+      best: this.best,
+      flags: [...this.flags],
+      firedTriggers: this.firedTriggers,
+      player: snapshotPlayer(this.player),
+    });
   }
 
   /* ---------------- loot ---------------- */
@@ -149,7 +270,7 @@ export class PlayScene implements Scene {
   private rollDrops(m: Monster): void {
     if (!m.def.drops || !this.player) return;
     for (const drop of m.def.drops) {
-      // Equipment is once-per-session: skip if already owned.
+      // Equipment is once-per-save: skip if already owned.
       const def = itemDef(drop.id);
       if (def.kind === 'equipment' &&
           (this.player.inventory.has(drop.id) || this.player.equipment.isEquipped(drop.id))) {
@@ -161,13 +282,38 @@ export class PlayScene implements Scene {
     }
   }
 
+  /* ---------------- boss ---------------- */
+
+  private currentBoss(): Monster | null {
+    for (const a of this.game.world.actors('enemy')) {
+      if (a instanceof Monster && a.def.boss) return a;
+    }
+    return null;
+  }
+
+  private onBossDefeated(): void {
+    this.flags.add('bossDefeated');
+    this.banner = 'VICTORY!';
+    this.bannerT = 2;
+    this.victoryT = 1.6; // let the gibs settle before the epilogue speaks
+    this.autosave();
+  }
+
   /* ---------------- triggers & dialogue ---------------- */
 
   private handleTrigger(def: TriggerDef): void {
+    this.firedTriggers[this.roomId] = this.triggers.exportFired();
     this.game.events.emit('trigger', { event: def.event, props: def.props });
-    // 'talk' triggers open the conversation named in props.
     if (def.event === 'talk' && typeof def.props?.conversation === 'string') {
       this.openConversation(def.props.conversation);
+    } else if (def.event === 'door' && typeof def.props?.room === 'string') {
+      this.transition = {
+        t: 0,
+        roomId: def.props.room,
+        x: (def.props.x as number) ?? this.roomById(def.props.room).playerSpawn.x,
+        y: (def.props.y as number) ?? this.roomById(def.props.room).playerSpawn.y,
+      };
+      this.game.sfx.play('menuOpen');
     }
   }
 
@@ -201,7 +347,7 @@ export class PlayScene implements Scene {
   }
 
   private updateSpawns(dt: number): void {
-    if (this.phase !== 'play') return;
+    if (this.phase !== 'play' || !this.roomWantsWaves()) return;
     const g = this.game;
     this.spawnT -= dt;
     if (this.queue.length && this.spawnT <= 0) {
@@ -258,18 +404,39 @@ export class PlayScene implements Scene {
 
   update(dt: number): void {
     const g = this.game;
-    if (this.phase === 'play' && this.player && g.input.consumePress('menu')) {
-      g.scenes.push(new PauseScene(g, this.player, { onRestart: () => this.startRun() }));
+
+    if (this.phase === 'title') {
+      this.titleMenu.update(g.input);
       return;
     }
-    if (this.phase !== 'title') {
-      g.world.update(dt);
-      this.updateSpawns(dt);
-      this.comboT = Math.max(0, this.comboT - dt);
-      if (this.comboT <= 0) this.combo = 0;
-      if (this.phase === 'play' && this.player && this.player.hp > 0) {
-        this.triggers.update(this.player, (f) => this.handleTrigger(f.def));
+
+    // Door transition: the world holds its breath while the screen fades.
+    if (this.transition) {
+      const tr = this.transition;
+      const before = tr.t;
+      tr.t += dt;
+      if (before < TRANSITION_TIME / 2 && tr.t >= TRANSITION_TIME / 2) {
+        this.setRoom(tr.roomId, tr.x, tr.y);
       }
+      if (tr.t >= TRANSITION_TIME) this.transition = null;
+      return;
+    }
+
+    if (this.phase === 'play' && this.player && g.input.consumePress('menu')) {
+      g.scenes.push(new PauseScene(g, this.player, { onRestart: () => this.startRun(saveStore.load()) }));
+      return;
+    }
+
+    g.world.update(dt);
+    this.updateSpawns(dt);
+    this.comboT = Math.max(0, this.comboT - dt);
+    if (this.comboT <= 0) this.combo = 0;
+    if (this.phase === 'play' && this.player && this.player.hp > 0) {
+      this.triggers.update(this.player, (f) => this.handleTrigger(f.def));
+    }
+    if (this.victoryT > 0) {
+      this.victoryT -= dt;
+      if (this.victoryT <= 0) this.openConversation('victory');
     }
     this.bannerT = Math.max(0, this.bannerT - dt);
 
@@ -299,6 +466,15 @@ export class PlayScene implements Scene {
     if (this.phase === 'title') this.renderTitle(ctx);
     else this.renderHUD(ctx);
     if (this.phase === 'over') this.renderOver(ctx);
+    if (this.transition) {
+      const tr = this.transition;
+      const half = TRANSITION_TIME / 2;
+      const a = tr.t < half ? tr.t / half : (TRANSITION_TIME - tr.t) / half;
+      ctx.globalAlpha = clamp(a, 0, 1);
+      ctx.fillStyle = '#07070d';
+      ctx.fillRect(0, 0, g.width, g.height);
+      ctx.globalAlpha = 1;
+    }
     this.debug.renderScreen(ctx);
   }
 
@@ -343,8 +519,10 @@ export class PlayScene implements Scene {
       }
     }
     drawText(g, `SCORE ${this.score}`, gm.width - 6, 7, COLORS.white, 1, 'right');
-    drawText(g, `WAVE ${this.wave}`, gm.width / 2, 7, COLORS.steel, 1, 'center');
+    const label = this.roomWantsWaves() ? `WAVE ${this.wave}` : this.room.name.toUpperCase();
+    drawText(g, label, gm.width / 2, 7, COLORS.steel, 1, 'center');
     this.renderMinimap(g);
+    this.renderBossBar(g);
     if (this.combo >= 2) {
       drawText(g, `COMBO X${this.combo}`, gm.width / 2, 18, COLORS.gold, 1, 'center');
       g.fillStyle = COLORS.gold;
@@ -353,10 +531,29 @@ export class PlayScene implements Scene {
     if (this.bannerT > 0) drawText(g, this.banner, gm.width / 2, 58, COLORS.white, 3, 'center');
   }
 
+  private renderBossBar(g: CanvasRenderingContext2D): void {
+    const boss = this.currentBoss();
+    if (!boss) return;
+    const gm = this.game;
+    const w = 160;
+    const x = (gm.width - w) / 2;
+    const y = gm.height - 18;
+    drawText(g, boss.def.displayName ?? 'BOSS', gm.width / 2, y - 8, COLORS.gold, 1, 'center');
+    g.fillStyle = '#07070d';
+    g.fillRect(x - 1, y - 1, w + 2, 6);
+    g.strokeStyle = COLORS.navyLight;
+    g.strokeRect(x - 1.5, y - 1.5, w + 3, 7);
+    g.fillStyle = boss.hp <= boss.maxHp / 2 ? COLORS.red : COLORS.green;
+    g.fillRect(x, y, Math.round(w * Math.max(0, boss.hp) / boss.maxHp), 4);
+  }
+
   private renderMinimap(g: CanvasRenderingContext2D): void {
     const gm = this.game;
-    const markers: { x: number; y: number; color: string }[] = [
-      ...gm.world.actors('enemy').map((e) => ({ x: e.cx, y: e.cy, color: COLORS.red })),
+    const markers: { x: number; y: number; color: string; size?: number }[] = [
+      ...gm.world.actors('enemy').map((e) => ({
+        x: e.cx, y: e.cy, color: COLORS.red,
+        size: e instanceof Monster && e.def.boss ? 2 : 1,
+      })),
       ...gm.world
         .all()
         .filter((e): e is Pickup => e instanceof Pickup && !e.dead)
@@ -379,18 +576,16 @@ export class PlayScene implements Scene {
     g.fillStyle = 'rgba(7,7,13,0.55)';
     g.fillRect(0, 0, gm.width, gm.height);
     g.save();
-    g.translate(gm.width / 2 - 18, 118);
+    g.translate(gm.width / 2 - 18, 108);
     g.scale(3, 3);
     g.drawImage(KNIGHT_IDLE_SPRITE, 0, 0);
     g.restore();
-    drawText(g, 'HITSTOP', gm.width / 2, 52, COLORS.white, 4, 'center');
-    drawText(g, 'GAME FEEL IS THE FOUNDATION', gm.width / 2, 84, COLORS.steel, 1, 'center');
-    drawText(g, 'MOVE: ARROWS / WASD - JUMP: SPACE', gm.width / 2, 176, COLORS.steelDark, 1, 'center');
-    drawText(g, 'ATTACK: Z OR J - DASH: X OR K', gm.width / 2, 188, COLORS.steelDark, 1, 'center');
-    drawText(g, 'SKILL: C OR L - MENU: ESC', gm.width / 2, 200, COLORS.steelDark, 1, 'center');
-    if (Math.floor(performance.now() / 400) % 2) {
-      drawText(g, 'PRESS ANY KEY', gm.width / 2, 226, COLORS.gold, 2, 'center');
-    }
+    drawText(g, 'HITSTOP', gm.width / 2, 48, COLORS.white, 4, 'center');
+    drawText(g, 'GAME FEEL IS THE FOUNDATION', gm.width / 2, 80, COLORS.steel, 1, 'center');
+    this.titleMenu.render(g, gm.width / 2 - 24, 162, { lineHeight: 13 });
+    drawText(g, 'MOVE: ARROWS / WASD - JUMP: SPACE', gm.width / 2, 208, COLORS.steelDark, 1, 'center');
+    drawText(g, 'ATTACK: Z - DASH: X - SKILL: C - MENU: ESC', gm.width / 2, 220, COLORS.steelDark, 1, 'center');
+    drawText(g, 'Z OR ENTER TO SELECT', gm.width / 2, 238, COLORS.gold, 1, 'center');
   }
 
   private renderOver(g: CanvasRenderingContext2D): void {
@@ -400,7 +595,9 @@ export class PlayScene implements Scene {
     drawText(g, 'GAME OVER', gm.width / 2, 70, COLORS.red, 4, 'center');
     drawText(g, `SCORE ${this.score}`, gm.width / 2, 110, COLORS.white, 2, 'center');
     drawText(g, `BEST ${this.best}`, gm.width / 2, 130, COLORS.steel, 1, 'center');
-    drawText(g, `WAVES SURVIVED: ${Math.max(0, this.wave - 1)}`, gm.width / 2, 144, COLORS.steel, 1, 'center');
+    if (saveStore.exists()) {
+      drawText(g, 'YOU WILL WAKE AT THE LAST GATE', gm.width / 2, 148, COLORS.steel, 1, 'center');
+    }
     if (this.overT <= 0 && Math.floor(performance.now() / 400) % 2) {
       drawText(g, 'PRESS ANY KEY', gm.width / 2, 190, COLORS.gold, 2, 'center');
     }

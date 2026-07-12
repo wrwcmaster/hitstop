@@ -224,26 +224,39 @@ export class Player extends Actor {
     };
   }
 
+  /** Contact damage routes through Combat like every other hit source. */
   hurt(source: Monster): void {
-    const T = PLAYER_TUNING;
-    this.hp -= source.def.damage;
-    this.invulnT = T.hurtInvuln;
-    this.flashT = 0.15;
-    const dir = this.cx < source.cx ? -1 : 1;
-    this.vx = dir * 170;
-    this.vy = -160;
+    this.game.combat.hit(
+      this,
+      {
+        damage: source.def.damage,
+        targets: 'player',
+        strength: 0.55,
+        knockback: 170,
+        popY: -160,
+        colors: [COLORS.red, COLORS.white],
+      },
+      source,
+    );
+  }
+
+  /**
+   * Post-damage reaction for ANY hit on the player (contact, boss
+   * shockwaves, projectiles). Combat has already applied damage,
+   * knockback and the impact bundle; this adds the player-specific
+   * channels: i-frames, red flash, hurt sound, combo reset.
+   */
+  onHurt(): void {
+    this.invulnT = PLAYER_TUNING.hurtInvuln;
     this.feel.sfx.play('hurt');
-    this.feel.shake(0.5);
-    this.feel.kick(dir * 4, -2);
-    this.feel.hitstop(0.09);
     this.feel.flash(0.35, COLORS.red);
-    this.feel.burst(this.cx, this.cy, 10, {
-      color: [COLORS.red, COLORS.white],
-      speed: 110, life: 0.4, grav: 300, drag: 2,
-    });
     this.game.events.emit('playerHurt', { hp: this.hp });
-    if (this.hp <= 0) this.die();
-    else this.fsm.set('move');
+    if (this.hp > 0 && !this.fsm.is('dead')) this.fsm.set('move');
+  }
+
+  /** Called by Combat when hp hits 0. The corpse entity stays in the world. */
+  onDeath(): void {
+    this.die();
   }
 
   private die(): void {

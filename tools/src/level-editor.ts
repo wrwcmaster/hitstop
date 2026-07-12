@@ -195,13 +195,23 @@ function commitTriggerDrag(): void {
   const h = Math.round(Math.abs(dragEnd.y - dragStart.y));
   dragStart = dragEnd = null;
   if (w < 4 || h < 4) return; // accidental click
-  const event = prompt('trigger event name (e.g. talk, ambush, checkpoint):', 'talk');
+  const event = prompt('trigger event name (talk, door, or custom):', 'talk');
   if (!event) return;
   const trigger: { x: number; y: number; w: number; h: number; event: string; once: boolean; props?: Record<string, unknown> } =
     { x, y, w, h, event, once: true };
   if (event === 'talk') {
     const convo = prompt('conversation id:', 'intro');
     if (convo) trigger.props = { conversation: convo };
+  } else if (event === 'door') {
+    trigger.once = false; // doors re-fire on every entry
+    const target = prompt('target room id:', 'arena');
+    if (target) {
+      const spawn = prompt('spawn "x,y" in the target room (blank = its playerSpawn):', '');
+      const [sx, sy] = (spawn ?? '').split(',').map((v) => Number(v.trim()));
+      trigger.props = Number.isFinite(sx) && Number.isFinite(sy)
+        ? { room: target, x: sx, y: sy }
+        : { room: target };
+    }
   }
   (room.triggers ??= []).push(trigger);
   flash(`trigger "${event}" added`);

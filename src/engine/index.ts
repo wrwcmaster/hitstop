@@ -8,6 +8,7 @@ export { Game, type GameOptions } from './core/game';
 export { Loop, STEP, type LoopHooks } from './core/loop';
 export { EventBus, type Unsubscribe } from './core/events';
 export { Registry } from './core/registry';
+export { JsonStore } from './core/storage';
 export { SceneManager, type Scene } from './core/scene';
 
 export * from './math/util';

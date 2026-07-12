@@ -52,4 +52,14 @@ export class Triggers {
     this.fired.clear();
     this.inside.clear();
   }
+
+  /** Fired once-trigger indices, for save files. */
+  exportFired(): number[] {
+    return [...this.fired];
+  }
+
+  /** Restore fired state from a save file. */
+  importFired(indices: number[]): void {
+    this.fired = new Set(indices);
+  }
 }

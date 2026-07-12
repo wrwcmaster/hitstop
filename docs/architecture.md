@@ -105,11 +105,17 @@ The second wave of systems keeps the same shape — registries of data + small h
 - **System menu** (`scenes/pause.ts`) composes the engine `Menu` widget; inventory/equip/volume/restart are menu entries with callbacks.
 - **Minimap** bakes the tilemap once and draws live entity markers each frame.
 
+## The world layer (rooms / boss / saves)
+
+- **Rooms & doors**: the world is a `ROOMS` registry of RoomDefs connected by `door` triggers (`props.room` + spawn point). `PlayScene.setRoom` rebuilds tilemap/minimap/triggers behind a fade, `World.retain` keeps only the player, and waves run only in rooms with `props.waves`. The level editor's trigger mode places doors.
+- **Bosses**: a boss is a monster with `boss: true` and an engine `FSM` driving telegraphed attack states (see the Slime King in `actors/boss.ts`); every attack resolves through Strikes/Projectiles so feedback is uniform. The `bossDefeated` flag keeps him dead across saves. Contact damage on the player also routes through `Combat.hit` — `Player.onHurt` adds the player-specific channels (i-frames, red flash, combo reset) on top of the standard bundle, whatever the damage source.
+- **Saves**: `JsonStore` (versioned localStorage) + `save.ts`. Checkpoints at every room entrance and boss defeat; death → last checkpoint at full HP; title screen offers CONTINUE. Fired one-shot triggers persist so intro dialogue doesn't replay.
+
 ## Where this goes next (Metroidvania roadmap)
 
 The seams are already in place for:
 
-- **Multiple rooms + transitions**: `RoomDef` is one screen-plus of world; a `RoomManager` scene that swaps tilemaps and preserves the player is the next layer. A `door` trigger event + target room id in `props` is the natural encoding.
-- **Bosses**: `Monster` with an `FSM` in `init`/`update`, using multi-phase state machines; `feel.impact` strength 1.0 moments are already tuned.
-- **Persistence**: save = current room id + player state (inventory/equipment serialize as plain id/count data) + event flags; the typed `EventBus` is where "defeated boss X" flags originate.
+- **Ability gating**: doors are triggers, so a locked door is a trigger handler that checks a flag/item before starting the transition.
+- **A world map screen**: `ROOMS` + door graph is the data; a paused overlay scene rendering visited rooms (flags) is the UI.
 - **Fog-of-war minimap**: `Minimap.bake` is the single place that reads tiles; an explored mask slots in there.
+- **NPCs**: an `Actor` with a `talk` interaction — the dialogue system and conversation registry are already in place.

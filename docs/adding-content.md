@@ -198,7 +198,36 @@ Rooms carry `triggers` — rectangles that fire a named event when the player en
 ]
 ```
 
-`talk` is handled by the PlayScene (opens the conversation). Any other event name is yours: listen with `game.events.on('trigger', ({ event, props }) => ...)` for ambushes, checkpoints, doors, boss walls.
+Two events are built in: `talk` opens the conversation named in `props.conversation`, and `door` transitions to `props.room` (spawning at `props.x/y`, with a fade; use `"once": false` so doors re-fire). Any other event name is yours: listen with `game.events.on('trigger', ({ event, props }) => ...)` for ambushes, checkpoints, boss walls.
+
+## A new room in the world
+
+1. Build it in the level editor (or generate the JSON), download into `src/game/content/rooms/`.
+2. Register it in `content/rooms/index.ts` (`ROOMS.myroom = validateRoom(myroomJson)`).
+3. Connect it: draw `gate` tiles where the doorway should look like one, and drag a `door` trigger over them pointing at the target room (and one pointing back). Spawn points should sit a couple of tiles clear of the return door so you don't ping-pong.
+
+Entering a room spawns its `entities`, arms its `triggers`, starts waves only if `props.waves` is set, and drops a checkpoint save.
+
+## A boss
+
+A boss is a monster with `boss: true`, a `displayName` (drives the HP bar), and an engine `FSM` in its state — see `src/game/actors/boss.ts` for the full Slime King:
+
+```ts
+defineMonster('my-boss', {
+  hp: 45, damage: 1, w: 42, h: 30, score: 5000, mass: 6,
+  boss: true, displayName: 'THE SLIME KING',
+  colors: [...], drops: [...],
+  init(m) { m.state.fsm = makeFsm(m); },       // states: idle/hop/slam/spit/summon
+  update(m, dt) { (m.state.fsm as FSM<Monster>).update(dt); },
+  draw(g, m) { /* scaled sprite + crown */ },
+});
+```
+
+The pattern: every attack is a telegraphed FSM state that ends in a `Strike` or `combat.shoot(...)`, so boss damage carries the same feedback as everything else. Phase changes are just a condition read inside states (`hp <= maxHp/2`). The PlayScene shows the HP bar whenever a `boss: true` monster is alive, sets the `bossDefeated` flag on kill (so it stays dead across saves), and plays the `victory` conversation.
+
+## Saves
+
+`src/game/save.ts` defines the save shape: current room, inventory/equipment/skills, story flags, fired one-shot triggers, best score. Checkpoints happen automatically at every room entrance and on boss defeat; death returns you to the last checkpoint at full HP. To persist a new thing, add it to `SaveData` and bump the `JsonStore` version (old saves invalidate cleanly).
 
 ## A new player attack state
 

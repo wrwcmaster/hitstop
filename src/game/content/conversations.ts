@@ -20,7 +20,29 @@ defineConversation('intro', {
 defineConversation('intro-who', {
   lines: [
     { speaker: 'VOICE', text: 'THE LAST ONE WHO ASKED IS WAVE SEVEN NOW.' },
-    { speaker: 'VOICE', text: 'FIGHT WELL, KNIGHT.' },
+    { speaker: 'VOICE', text: 'FIGHT WELL, KNIGHT. THE GATE EAST OPENS TO THE CAVERN, IF THE WAVES BORE YOU.' },
+  ],
+});
+
+defineConversation('cavern-entry', {
+  lines: [
+    { speaker: 'VOICE', text: 'THE CAVERN. QUIETER THAN THE ARENA. NOT SAFER.' },
+    { speaker: 'VOICE', text: 'SOMETHING OLD AND GREEN SITS ON A THRONE PAST THE EAST GATE.' },
+  ],
+});
+
+defineConversation('boss-intro', {
+  lines: [
+    { speaker: 'VOICE', text: 'BOW, OR DO NOT. HE CANNOT TELL.' },
+    { speaker: 'SLIME KING', text: '...BLORP.' },
+    { speaker: 'VOICE', text: 'WHEN HE SHIVERS, MOVE. WHEN HE BURNS RED, PRAY.' },
+  ],
+});
+
+defineConversation('victory', {
+  lines: [
+    { speaker: 'VOICE', text: 'THE CROWN ROLLS. THE THRONE SITS EMPTY.' },
+    { speaker: 'VOICE', text: 'YOU ARE WHAT THE ARENA REMEMBERS NOW, KNIGHT.' },
   ],
 });
 
