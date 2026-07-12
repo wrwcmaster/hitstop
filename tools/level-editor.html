@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="icon" href="data:," />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>hitstop — level editor</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: #0d1026; color: #94b0c2; font: 13px/1.5 monospace; }
+    body { display: flex; flex-direction: column; }
+    header { padding: 8px 12px; background: #07070d; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    header h1 { font-size: 14px; margin: 0 12px 0 0; color: #f4f4f4; }
+    main { flex: 1; display: flex; min-height: 0; }
+    #side { width: 230px; padding: 10px; background: #101430; overflow-y: auto; flex-shrink: 0; }
+    #viewport { flex: 1; overflow: auto; background: #07070d; }
+    canvas { image-rendering: pixelated; display: block; cursor: crosshair; }
+    h2 { font-size: 12px; color: #ffcd75; margin: 14px 0 6px; text-transform: uppercase; }
+    h2:first-child { margin-top: 0; }
+    button, select, input {
+      background: #1f2a57; color: #f4f4f4; border: 1px solid #33447f;
+      border-radius: 4px; padding: 4px 8px; font: inherit; cursor: pointer;
+    }
+    button:hover { background: #33447f; }
+    button.active { background: #38b764; color: #07070d; border-color: #38b764; }
+    .swatch { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+    .swatch button { flex: 1; text-align: left; }
+    .chip { width: 14px; height: 14px; border: 1px solid #566c86; display: inline-block; flex-shrink: 0; }
+    label { display: block; margin: 4px 0; }
+    input[type=number] { width: 60px; }
+    textarea { width: 100%; height: 120px; background: #07070d; color: #94b0c2; border: 1px solid #33447f; font: 11px monospace; }
+    .hint { color: #566c86; font-size: 11px; }
+    #status { color: #38b764; margin-left: auto; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>hitstop level editor</h1>
+    <button id="btnPlay" title="Save to localStorage and open the game">&#9654; test play</button>
+    <button id="btnExport">export json</button>
+    <button id="btnImport">import json</button>
+    <button id="btnDownload">download</button>
+    <span id="status"></span>
+  </header>
+  <main>
+    <div id="side">
+      <h2>mode</h2>
+      <div id="modes"></div>
+      <h2>tiles</h2>
+      <div id="tiles"></div>
+      <h2>entities</h2>
+      <div id="entities"></div>
+      <h2>room</h2>
+      <label>name <input id="roomName" type="text" style="width:110px"></label>
+      <label>cols <input id="cols" type="number" min="20" max="400"></label>
+      <label>rows <input id="rows" type="number" min="10" max="200"></label>
+      <button id="btnResize">resize</button>
+      <h2>json</h2>
+      <textarea id="json" spellcheck="false"></textarea>
+      <p class="hint">
+        paint: left-drag &middot; erase: right-drag<br>
+        entity/spawn modes: click places, right-click removes<br>
+        test play uses localStorage (?room=local)
+      </p>
+    </div>
+    <div id="viewport"><canvas id="ed"></canvas></div>
+  </main>
+  <script type="module" src="/tools/src/level-editor.ts"></script>
+</body>
+</html>
