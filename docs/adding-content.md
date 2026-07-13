@@ -277,7 +277,7 @@ Shops are ware lists (`content/shops.ts`): `{ item, price }[]` — prices in gol
 
 The built-ins show the three tiers, all resolving through Strikes/Projectiles so feedback stays uniform:
 
-- **Ranged debuff** (slime): at range, lob a 0-damage projectile whose `onHit` applies a status. Zero-damage hits skip damage numbers and player i-frames automatically.
+- **Ranged debuff** (the Slime King's sticky spit): lob a 0-damage projectile whose `onHit` applies a status. Zero-damage hits skip damage numbers and player i-frames automatically.
 - **Telegraph → lunge** (devourer, boss slam): a shiver/windup state the player can read, then the attack. Never skip the telegraph — readable attacks are what make hard fights fair.
 - **Grab mechanics** (devourer): the swallow moves the *player* into a special FSM state (`swallowed`: input locked to mashing, position pinned, escape counter) while the monster ticks damage on its own timer. The stolen weapon lives in `monster.state.stolenItem` and drops on kill — grabs that cost something recoverable are scary without being unfair.
 

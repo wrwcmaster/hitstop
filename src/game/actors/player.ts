@@ -10,6 +10,7 @@ import {
   friction,
   clamp,
   overlaps,
+  expand,
   chance,
   type StateDef,
   type CollisionSource,
@@ -492,9 +493,11 @@ export class Player extends Actor {
     this.wasGround = this.onGround;
 
     // Contact damage (dashing passes through; i-frames blink through).
+    // contactInset shrinks the touch box for round-sprited monsters.
     if (!this.fsm.is('dead', 'dash') && this.invulnT <= 0) {
       for (const e of this.world.actors('enemy')) {
-        if (e instanceof Monster && !e.def.noContactDamage && overlaps(this, e.hurtbox)) {
+        if (e instanceof Monster && !e.def.noContactDamage &&
+            overlaps(this, expand(e.hurtbox, -(e.def.contactInset ?? 0)))) {
           this.hurt(e);
           break;
         }

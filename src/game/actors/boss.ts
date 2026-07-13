@@ -3,6 +3,53 @@ import { defineMonster, Monster } from './monster';
 import { SLIME1, SLIME2 } from '../content/sprites';
 import { tintOf, whiteOf } from '@engine/index';
 import { COLORS } from '../content/palette';
+import type { Player } from './player';
+
+/** Lob a sticky slime ball: no damage, applies the slow on hit. */
+function throwStickyBall(b: Monster): void {
+  const p = b.player;
+  const dx = p ? p.cx - b.cx : 100;
+  b.game.combat.shoot(
+    {
+      x: b.cx,
+      y: b.y + 6,
+      vx: dx * rand(0.9, 1.3),
+      vy: rand(-240, -180),
+      w: 5,
+      h: 5,
+      life: 3,
+      gravity: 420,
+      strike: {
+        damage: 0, // it slows; it doesn't wound
+        targets: 'player',
+        attacker: b,
+        strength: 0.25,
+        knockback: 40,
+        popY: 0,
+        colors: [COLORS.green, COLORS.greenLight],
+      },
+      onHit(t) {
+        (t as Player).statuses?.apply('sticky');
+        b.game.feel.sfx.play('splat');
+      },
+      draw(g, pr) {
+        g.fillStyle = Math.floor(pr.t * 16) % 2 ? COLORS.green : COLORS.greenLight;
+        g.fillRect(Math.round(pr.x - 2), Math.round(pr.y - 2), 5, 5);
+        // dripping trail
+        if (Math.floor(pr.t * 30) % 3 === 0) {
+          b.game.feel.particles.spawn({
+            x: pr.x, y: pr.y, vy: 20, life: 0.3, size: 1, color: COLORS.green, drag: 1,
+          });
+        }
+      },
+      onExpire(pr) {
+        b.game.feel.burst(pr.x, pr.y, 5, { color: COLORS.green, speed: 50, life: 0.25, drag: 3 });
+      },
+    },
+    b.collision,
+  );
+  b.game.feel.sfx.play('slash');
+}
 
 /**
  * THE SLIME KING — the proof that bosses are just monsters with a state
@@ -30,7 +77,9 @@ function makeFsm(m: Monster): FSM<Monster> {
       update(b) {
         b.vx *= 0.8;
         if (fsm.t < (b.state.wait as number)) return;
-        const options = enraged(b) ? ['hop', 'slam', 'spit', 'summon'] : ['hop', 'hop', 'slam'];
+        const options = enraged(b)
+          ? ['hop', 'slam', 'spit', 'summon']
+          : ['hop', 'hop', 'slam', 'stickySpit'];
         return pick(options);
       },
     },
@@ -104,7 +153,23 @@ function makeFsm(m: Monster): FSM<Monster> {
       },
     },
 
-    /** Enraged: spit three arcing globs at the player. */
+    /** Phase 1: hock two sticky balls that slow but don't wound. */
+    stickySpit: {
+      enter(b) {
+        b.state.spat = 0;
+        b.vx = 0;
+      },
+      update(b) {
+        const spat = b.state.spat as number;
+        if (spat < 2 && fsm.t > 0.3 + spat * 0.3) {
+          b.state.spat = spat + 1;
+          throwStickyBall(b);
+        }
+        if (fsm.t > 1.1) return 'idle';
+      },
+    },
+
+    /** Enraged: spit three arcing globs at the player (and they stick). */
     spit: {
       enter(b) {
         b.state.spat = 0;
@@ -123,6 +188,9 @@ function makeFsm(m: Monster): FSM<Monster> {
               strike: {
                 damage: 1, targets: 'player', attacker: b,
                 strength: 0.5, colors: [COLORS.green, COLORS.white],
+              },
+              onHit(t) {
+                (t as Player).statuses?.apply('sticky');
               },
               draw(g, pr) {
                 g.fillStyle = Math.floor(pr.t * 20) % 2 ? COLORS.green : COLORS.greenLight;
@@ -167,6 +235,9 @@ defineMonster('slime-king', {
   damage: 1,
   w: 42,
   h: 30,
+  // His sprite is a rounded blob: brushing the empty AABB corners
+  // shouldn't hurt. Player attacks still test the full-size hurtbox.
+  contactInset: 5,
   score: 5000,
   mass: 6,
   boss: true,
