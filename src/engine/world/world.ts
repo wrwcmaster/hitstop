@@ -80,4 +80,13 @@ export class World {
     this.entities.length = 0;
     this.toAdd.length = 0;
   }
+
+  /** Remove everything the predicate rejects (room transitions keep the player). */
+  retain(pred: (e: Entity) => boolean): void {
+    for (const e of this.entities) {
+      if (!pred(e)) e.onRemove();
+    }
+    this.entities = this.entities.filter(pred);
+    this.toAdd = this.toAdd.filter(pred);
+  }
 }

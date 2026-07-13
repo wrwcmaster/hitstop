@@ -45,6 +45,17 @@ tiles.register('rockTop', {
   },
 });
 
+/** Doorway glow: non-solid, purely visual. Pair with a `door` trigger. */
+tiles.register('gate', {
+  draw(g, px, py, size) {
+    g.fillStyle = 'rgba(59,93,201,0.25)';
+    g.fillRect(px, py, size, size);
+    g.fillStyle = 'rgba(148,176,194,0.5)';
+    g.fillRect(px, py, 1, size);
+    g.fillRect(px + size - 1, py, 1, size);
+  },
+});
+
 /** One-way platform: jump through from below, stand on top. */
 tiles.register('platform', {
   oneWay: true,

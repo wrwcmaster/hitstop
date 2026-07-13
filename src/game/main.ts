@@ -1,10 +1,18 @@
 import { Game, validateRoom } from '@engine/index';
 import { KEYMAP, VIEW_W, VIEW_H, type Action, type GameEvents } from './defs';
 import { registerSounds } from './content/sfx';
+import { registerSongs } from './content/music';
 import { registerEnemies } from './actors/enemies';
+import { registerBosses } from './actors/boss';
+import { registerNpcs } from './actors/npc';
+import { registerItems } from './content/items';
+import { registerSkills } from './content/skills';
+import { registerStatuses } from './content/statuses';
+import { registerConversations } from './content/conversations';
+import { registerShops } from './content/shops';
+import { loadSettings } from './settings';
 import './content/tiles';
 import { PlayScene } from './scenes/play';
-import arenaJson from './content/rooms/arena.json';
 
 /**
  * Bootstrap: create the Game, register content, start the first scene.
@@ -21,18 +29,28 @@ const game = new Game<Action, GameEvents>({
 });
 
 registerSounds(game.sfx);
+registerSongs();
 registerEnemies();
+registerBosses();
+registerNpcs();
+registerItems();
+registerSkills();
+registerStatuses();
+registerConversations();
+registerShops();
+loadSettings(game);
 
-// Touch controls (hidden by CSS on pointer:fine devices).
-const bind = (id: string, action: Action) => {
+// Touch controls (hidden by CSS on pointer:fine devices). Buttons carry
+// menu actions too, so touch players can drive dialogue and menus.
+const bind = (id: string, ...actions: Action[]) => {
   const el = document.getElementById(id);
-  if (el) game.input.bindTouchButton(el, action);
+  if (el) for (const a of actions) game.input.bindTouchButton(el, a);
 };
 bind('bL', 'left');
 bind('bR', 'right');
-bind('bJ', 'jump');
-bind('bA', 'attack');
-bind('bD', 'dash');
+bind('bJ', 'jump', 'up');
+bind('bA', 'attack', 'confirm');
+bind('bD', 'dash', 'down');
 
 // Taps on the canvas count as "any key" (start/restart on mobile).
 canvas.addEventListener('pointerdown', () => {
@@ -41,22 +59,23 @@ canvas.addEventListener('pointerdown', () => {
 });
 
 // The level editor test-plays via localStorage: it writes the room JSON
-// and opens the game with ?room=local.
-function loadRoom() {
+// and opens the game with ?room=local, which replaces the whole world
+// with that single room.
+function testRoom() {
   if (new URLSearchParams(location.search).get('room') === 'local') {
     const raw = localStorage.getItem('hitstop.room');
     if (raw) {
       try {
         return validateRoom(JSON.parse(raw));
       } catch (err) {
-        console.error('bad room in localStorage, falling back to arena', err);
+        console.error('bad room in localStorage, ignoring', err);
       }
     }
   }
-  return validateRoom(arenaJson);
+  return undefined;
 }
 
-game.scenes.switch(new PlayScene(game, loadRoom()));
+game.scenes.switch(new PlayScene(game, testRoom()));
 game.start();
 
 // Handy for poking at the game from the console / bug reports.

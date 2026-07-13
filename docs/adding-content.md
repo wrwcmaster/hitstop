@@ -106,15 +106,188 @@ sfx.define('fireball', (s) => {
 
 Play it from anywhere with `game.feel.sfx.play('fireball')` or pass `sfx: 'fireball'` to `feel.impact`.
 
-## A new player skill / attack
+## A new item (consumable, equipment, pickup)
+
+In `src/game/content/items.ts` — an item is data + hooks with a typed context:
+
+```ts
+defineItem<ItemCtx>('haste-draught', {
+  name: 'HASTE DRAUGHT', desc: 'Move like the wind for a while.',
+  icon: MY_ICON, kind: 'consumable', stack: 3,
+  use({ game, player }) {
+    player.stats.setSource('buff:haste', { mult: { speed: 1.5 } });
+    game.feel.sfx.play('heal');
+    // (a World system or timer should removeSource later)
+  },
+});
+```
+
+Kinds: `consumable` (usable from the inventory menu; return `false` from `use` to abort without consuming), `equipment` (occupies a `slot`, contributes `mods` to stats while worn), `instant` (applies on pickup — coins, mana orbs), `key` (inert, held).
+
+Drop it from monsters by adding to their `drops` table, place it in a room, or grant it in code with `player.inventory.add(id)`. The `Pickup` entity handles the pop-out → magnet → collect flow and the name toast.
+
+## A new weapon
+
+A weapon is an equipment item whose `props.weapon` carries the attack spec the player's swing reads:
+
+```ts
+defineItem<ItemCtx>('dagger', {
+  name: 'DAGGER', desc: 'Fast and mean.',
+  icon: ICON_DAGGER, kind: 'equipment', slot: 'weapon',
+  props: {
+    weapon: {
+      lightDamage: 1, heavyDamage: 2,
+      lightStrength: 0.3, heavyStrength: 0.6,   // feel scale per hit
+      reach: -4,                                 // hitbox size delta
+      colors: [COLORS.white],
+    } satisfies WeaponSpec,
+  },
+});
+```
+
+No player-code changes: damage, feel strength, reach, slash colors all flow from the equipped item. Stat bonuses (`mods: { add: { attack: 1 } }`) stack on top.
+
+## A new skill / spell
+
+In `src/game/content/skills.ts`. A skill is cooldown + cost + a cast that usually fires a `Strike` or a projectile — so impact feedback comes free:
+
+```ts
+defineSkill<SkillCtx>('ice-shard', {
+  name: 'ICE SHARD', desc: 'A piercing cold bolt.',
+  cooldown: 0.8, cost: 1,
+  cast({ game, player }) {
+    game.combat.shoot({
+      x: player.cx, y: player.cy, vx: player.facing * 300, vy: -20,
+      gravity: 200, pierce: 1,
+      strike: { damage: 1, targets: 'enemy', attacker: player, strength: 0.5 },
+      draw(g, p) { g.fillStyle = '#a8dadc'; g.fillRect(p.x - 2, p.y - 2, 4, 4); },
+    }, player.collision);
+  },
+});
+```
+
+Teach it with `player.skills.learn('ice-shard')` and cast from an input binding or AI. The `SkillBook` handles cooldowns and mana; return `false` from `cast` to abort without charging.
+
+## A conversation
+
+In `src/game/content/conversations.ts` — pure data, with optional branching:
+
+```ts
+defineConversation('blacksmith', {
+  lines: [
+    { speaker: 'SMITH', text: 'THAT SWORD HAS SEEN BETTER DAYS.' },
+  ],
+  choices: [
+    { label: 'REFORGE IT.', then: 'blacksmith-reforge' },
+    { label: 'LEAVE.' },
+  ],
+});
+```
+
+Start it from a room trigger (below), or in code:
+`scene.openConversation('blacksmith')` / push a `DialogueScene`. React to outcomes via the `onEnd` callback or events.
+
+## A level event (trigger region)
+
+Rooms carry `triggers` — rectangles that fire a named event when the player enters (drawn by dragging in the level editor's trigger mode):
+
+```json
+"triggers": [
+  { "x": 180, "y": 140, "w": 110, "h": 92, "event": "talk", "once": true,
+    "props": { "conversation": "intro" } }
+]
+```
+
+Two events are built in: `talk` opens the conversation named in `props.conversation`, and `door` transitions to `props.room` (spawning at `props.x/y`, with a fade; use `"once": false` so doors re-fire). Any other event name is yours: listen with `game.events.on('trigger', ({ event, props }) => ...)` for ambushes, checkpoints, boss walls.
+
+## A new room in the world
+
+1. Build it in the level editor (or generate the JSON), download into `src/game/content/rooms/`.
+2. Register it in `content/rooms/index.ts` (`ROOMS.myroom = validateRoom(myroomJson)`).
+3. Connect it: draw `gate` tiles where the doorway should look like one, and drag a `door` trigger over them pointing at the target room (and one pointing back). Spawn points should sit a couple of tiles clear of the return door so you don't ping-pong.
+
+Entering a room spawns its `entities`, arms its `triggers`, starts waves only if `props.waves` is set, and drops a checkpoint save.
+
+## A boss
+
+A boss is a monster with `boss: true`, a `displayName` (drives the HP bar), and an engine `FSM` in its state — see `src/game/actors/boss.ts` for the full Slime King:
+
+```ts
+defineMonster('my-boss', {
+  hp: 45, damage: 1, w: 42, h: 30, score: 5000, mass: 6,
+  boss: true, displayName: 'THE SLIME KING',
+  colors: [...], drops: [...],
+  init(m) { m.state.fsm = makeFsm(m); },       // states: idle/hop/slam/spit/summon
+  update(m, dt) { (m.state.fsm as FSM<Monster>).update(dt); },
+  draw(g, m) { /* scaled sprite + crown */ },
+});
+```
+
+The pattern: every attack is a telegraphed FSM state that ends in a `Strike` or `combat.shoot(...)`, so boss damage carries the same feedback as everything else. Phase changes are just a condition read inside states (`hp <= maxHp/2`). The PlayScene shows the HP bar whenever a `boss: true` monster is alive, sets the `bossDefeated` flag on kill (so it stays dead across saves), and plays the `victory` conversation.
+
+## Saves
+
+`src/game/save.ts` defines the save shape: current room, inventory/equipment/skills, story flags, fired one-shot triggers, best score. Checkpoints happen automatically at every room entrance and on boss defeat; death returns you to the last checkpoint at full HP. To persist a new thing, add it to `SaveData` and bump the `JsonStore` version (old saves invalidate cleanly).
+
+## A song (BGM)
+
+In `src/game/content/music.ts` — songs are step patterns on oscillator tracks (`'noise'` for percussion). Tracks of different lengths drift for free variation:
+
+```ts
+defineSong('shop-theme', {
+  bpm: 96, div: 2,
+  tracks: [
+    { wave: 'triangle', volume: 0.06, steps: ['C3','-','G3','-','E3','-','G3','-'] },
+    { wave: 'noise', volume: 0.015, steps: ['x','-','-','-'] },
+  ],
+});
+```
+
+Play with `game.music.play('shop-theme')` — rooms pick their track via `props.music` (or the PlayScene's fallback map), and boss rooms override with `boss` while the boss lives. Volume channels (master/music/sfx) live on `game.audio` and persist through the pause menu's OPTIONS page.
+
+## A buff or debuff
+
+In `src/game/content/statuses.ts` — stat modifiers apply for the status's lifetime and remove themselves:
+
+```ts
+defineStatus('poison', {
+  name: 'POISON', color: COLORS.purpleLight, duration: 4,
+  tickEvery: 1,
+  onTick(a) { /* chip damage, drip particles */ },
+});
+```
+
+Apply from anywhere: `player.statuses.apply('poison')` — commonly from a projectile's `onHit` (see the slime ball) or an item's `use` (see the haste draught). Active statuses show as HUD chips with remaining-time bars.
+
+## An NPC (and a shop)
+
+NPCs are friendly actors with a greeting conversation; walk close and press E:
+
+```ts
+defineNpc('blacksmith', {
+  name: 'BLACKSMITH', sprite: SMITH_SPRITE,
+  greet: 'blacksmith-greet',        // a conversation; a choice starting
+  shop: 'blacksmith',               // with "SHOW" opens this shop
+});
+```
+
+Shops are ware lists (`content/shops.ts`): `{ item, price }[]` — prices in gold, coins drop from monsters at 5g each. Place the NPC in a room's `entities` like any monster; the PlayScene routes by registry.
+
+## An enemy attack pattern
+
+The built-ins show the three tiers, all resolving through Strikes/Projectiles so feedback stays uniform:
+
+- **Ranged debuff** (slime): at range, lob a 0-damage projectile whose `onHit` applies a status. Zero-damage hits skip damage numbers and player i-frames automatically.
+- **Telegraph → lunge** (devourer, boss slam): a shiver/windup state the player can read, then the attack. Never skip the telegraph — readable attacks are what make hard fights fair.
+- **Grab mechanics** (devourer): the swallow moves the *player* into a special FSM state (`swallowed`: input locked to mashing, position pinned, escape counter) while the monster ticks damage on its own timer. The stolen weapon lives in `monster.state.stolenItem` and drops on kill — grabs that cost something recoverable are scary without being unfair.
+
+## A new player attack state
 
 Model it like the existing attack (see `Player.beginAttack`):
 
 1. Add an FSM state (or extend `attack`) in `actors/player.ts`.
 2. Create a `Strike` with damage/strength/knockback, and `apply()` it during active frames.
 3. Feedback comes free via the strike; add a signature flourish (particles, sfx) in the state's `enter`.
-
-For charge attacks / spells, the pattern is the same — a state with a windup timer, then a strike (or a spawned projectile `Entity`).
 
 ## Game-wide reactions (drops, quests, achievements)
 

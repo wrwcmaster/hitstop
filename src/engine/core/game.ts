@@ -2,7 +2,9 @@ import { createPixelCanvas, PixelCanvas } from '../gfx/canvas';
 import { Loop } from './loop';
 import { SceneManager } from './scene';
 import { Input } from '../input/input';
+import { AudioBus } from '../audio/bus';
 import { Sfx } from '../audio/sfx';
+import { Music } from '../audio/music';
 import { Camera } from '../gfx/camera';
 import { Particles } from '../feel/particles';
 import { Floaters } from '../feel/floaters';
@@ -15,8 +17,8 @@ export interface GameOptions<A extends string> {
   canvas: HTMLCanvasElement;
   width: number;
   height: number;
-  /** KeyboardEvent.code -> action. */
-  keymap: Record<string, A>;
+  /** KeyboardEvent.code -> action(s). A key may serve several actions. */
+  keymap: Record<string, A | A[]>;
 }
 
 /**
@@ -34,7 +36,9 @@ export class Game<A extends string = string, E extends Record<string, unknown> =
   readonly loop: Loop;
   readonly scenes = new SceneManager();
   readonly input: Input<A>;
-  readonly sfx = new Sfx();
+  readonly audio = new AudioBus();
+  readonly sfx = new Sfx(this.audio);
+  readonly music = new Music(this.audio);
   readonly camera: Camera;
   readonly feel: Feel;
   readonly world = new World();

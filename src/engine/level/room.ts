@@ -1,4 +1,5 @@
 import { Tilemap } from './tilemap';
+import { TriggerDef } from './triggers';
 
 /**
  * Room file format — the unit of level design, and what the level editor
@@ -17,6 +18,8 @@ export interface RoomDef {
   tiles: string[];
   playerSpawn: { x: number; y: number };
   entities: RoomEntity[];
+  /** Regions that fire named events on entry (see level/triggers.ts). */
+  triggers?: TriggerDef[];
   /** Optional per-room properties (music, ambience, wave table id...). */
   props?: Record<string, unknown>;
 }
@@ -52,5 +55,6 @@ export function validateRoom(def: unknown): RoomDef {
   if (!d.legend || typeof d.legend !== 'object') throw new Error('room: missing legend');
   if (!d.playerSpawn) throw new Error('room: missing playerSpawn');
   if (!Array.isArray(d.entities)) throw new Error('room: missing entities');
+  if (d.triggers !== undefined && !Array.isArray(d.triggers)) throw new Error('room: triggers must be an array');
   return d as RoomDef;
 }

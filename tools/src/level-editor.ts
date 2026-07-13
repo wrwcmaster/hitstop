@@ -19,7 +19,7 @@ import arenaJson from '@game/content/rooms/arena.json';
 
 const ZOOM = 3;
 
-type Mode = 'tile' | 'entity' | 'spawn';
+type Mode = 'tile' | 'entity' | 'spawn' | 'trigger';
 
 /* ---------------- state ---------------- */
 
@@ -30,6 +30,9 @@ let tileChar = '#';
 let entityType = 'slime';
 let painting = false;
 let erasing = false;
+/** In-progress trigger rectangle (drag in trigger mode). */
+let dragStart: { x: number; y: number } | null = null;
+let dragEnd: { x: number; y: number } | null = null;
 
 /** Chars available for the legend, in palette order. */
 const LEGEND_CHARS = ['#', '=', '-', '~', '%', '&', '@', '$'];
@@ -69,9 +72,10 @@ function ensureLegend(tileId: string): string {
 function buildModeButtons(): void {
   const host = $('modes');
   host.innerHTML = '';
-  (['tile', 'entity', 'spawn'] as Mode[]).forEach((m) => {
+  (['tile', 'entity', 'spawn', 'trigger'] as Mode[]).forEach((m) => {
     const b = document.createElement('button');
-    b.textContent = m === 'spawn' ? 'player spawn' : m === 'tile' ? 'tiles' : 'entities';
+    b.textContent =
+      m === 'spawn' ? 'player spawn' : m === 'tile' ? 'tiles' : m === 'entity' ? 'entities' : 'triggers';
     b.className = mode === m ? 'active' : '';
     b.onclick = () => {
       mode = m;
@@ -172,19 +176,73 @@ function applyPaint(e: MouseEvent): void {
   } else if (mode === 'spawn' && !erasing) {
     room.playerSpawn = { x: Math.round(x), y: Math.round(y) };
     redraw();
+  } else if (mode === 'trigger' && erasing) {
+    const triggers = room.triggers ?? [];
+    const idx = triggers.findIndex(
+      (t) => x >= t.x && x < t.x + t.w && y >= t.y && y < t.y + t.h,
+    );
+    if (idx >= 0) triggers.splice(idx, 1);
+    redraw();
   }
+}
+
+/** Finish a trigger drag: prompt for the event name and payload. */
+function commitTriggerDrag(): void {
+  if (!dragStart || !dragEnd) return;
+  const x = Math.round(Math.min(dragStart.x, dragEnd.x));
+  const y = Math.round(Math.min(dragStart.y, dragEnd.y));
+  const w = Math.round(Math.abs(dragEnd.x - dragStart.x));
+  const h = Math.round(Math.abs(dragEnd.y - dragStart.y));
+  dragStart = dragEnd = null;
+  if (w < 4 || h < 4) return; // accidental click
+  const event = prompt('trigger event name (talk, door, or custom):', 'talk');
+  if (!event) return;
+  const trigger: { x: number; y: number; w: number; h: number; event: string; once: boolean; props?: Record<string, unknown> } =
+    { x, y, w, h, event, once: true };
+  if (event === 'talk') {
+    const convo = prompt('conversation id:', 'intro');
+    if (convo) trigger.props = { conversation: convo };
+  } else if (event === 'door') {
+    trigger.once = false; // doors re-fire on every entry
+    const target = prompt('target room id:', 'arena');
+    if (target) {
+      const spawn = prompt('spawn "x,y" in the target room (blank = its playerSpawn):', '');
+      const [sx, sy] = (spawn ?? '').split(',').map((v) => Number(v.trim()));
+      trigger.props = Number.isFinite(sx) && Number.isFinite(sy)
+        ? { room: target, x: sx, y: sy }
+        : { room: target };
+    }
+  }
+  (room.triggers ??= []).push(trigger);
+  flash(`trigger "${event}" added`);
 }
 
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('mousedown', (e) => {
   erasing = e.button === 2;
+  if (mode === 'trigger' && !erasing) {
+    const { x, y } = cellFromEvent(e);
+    dragStart = dragEnd = { x, y };
+    redraw();
+    return;
+  }
   applyPaint(e);
   painting = true;
 });
 canvas.addEventListener('mousemove', (e) => {
+  if (dragStart) {
+    const { x, y } = cellFromEvent(e);
+    dragEnd = { x, y };
+    redraw();
+    return;
+  }
   if (painting && mode === 'tile') applyPaint(e);
 });
 window.addEventListener('mouseup', () => {
+  if (dragStart) {
+    commitTriggerDrag();
+    redraw();
+  }
   painting = false;
   syncJson();
 });
@@ -228,6 +286,30 @@ function redraw(): void {
     ctx.fillStyle = '#f4f4f4';
     ctx.font = '4px monospace';
     ctx.fillText(en.type, en.x, en.y - 1);
+  }
+
+  // Triggers.
+  for (const t of room.triggers ?? []) {
+    ctx.fillStyle = 'rgba(255,205,117,0.12)';
+    ctx.fillRect(t.x, t.y, t.w, t.h);
+    ctx.strokeStyle = '#ffcd75';
+    ctx.lineWidth = 1 / ZOOM;
+    ctx.strokeRect(t.x, t.y, t.w, t.h);
+    ctx.fillStyle = '#ffcd75';
+    ctx.font = '4px monospace';
+    ctx.fillText(t.event, t.x + 1, t.y + 5);
+  }
+  // In-progress trigger drag.
+  if (dragStart && dragEnd) {
+    ctx.strokeStyle = '#ffcd75';
+    ctx.setLineDash([2, 2]);
+    ctx.strokeRect(
+      Math.min(dragStart.x, dragEnd.x),
+      Math.min(dragStart.y, dragEnd.y),
+      Math.abs(dragEnd.x - dragStart.x),
+      Math.abs(dragEnd.y - dragStart.y),
+    );
+    ctx.setLineDash([]);
   }
 
   // Player spawn.

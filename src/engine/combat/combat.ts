@@ -2,6 +2,8 @@ import { Actor, Team } from '../world/entity';
 import { Rect, overlaps, centerX, centerY } from '../math/rect';
 import { Feel } from '../feel/feel';
 import { EventBus } from '../core/events';
+import { Projectile, ProjectileOptions } from './projectile';
+import { CollisionSource } from '../physics/body';
 
 /**
  * Combat resolution with feedback built in.
@@ -91,6 +93,11 @@ export class Combat {
     return new Strike(this, opts);
   }
 
+  /** Fire a projectile: a moving hitbox carrying a strike. */
+  shoot(opts: ProjectileOptions, collision: CollisionSource): Projectile {
+    return this.world.spawn(new Projectile(opts, this.feel, collision, (o) => this.strike(o)));
+  }
+
   /**
    * Apply one hit to a target: damage, hit-flash, knockback, i-frames on
    * kill-less hits are the target's business (set in onHurt), plus the
@@ -126,7 +133,10 @@ export class Combat {
       dir,
       colors: opts.colors,
     });
-    this.feel.text(centerX(target.hurtbox), target.hurtbox.y - 4, opts.damage, s > 0.6 ? '#ffcd75' : '#f4f4f4', s > 0.6 ? 2 : 1);
+    // Zero-damage hits (slows, knockback-only pushes) skip the number.
+    if (opts.damage > 0) {
+      this.feel.text(centerX(target.hurtbox), target.hurtbox.y - 4, opts.damage, s > 0.6 ? '#ffcd75' : '#f4f4f4', s > 0.6 ? 2 : 1);
+    }
 
     target.onHurt(info);
     this.events.emit('hit', info);

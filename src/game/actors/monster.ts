@@ -27,6 +27,14 @@ export interface MonsterDef {
   colors: string[];
   mass?: number;
   flies?: boolean;
+  /** Loot rolled on death (each entry rolls independently). */
+  drops?: { id: string; chance: number }[];
+  /** Bosses get an HP bar and a bigger death. */
+  boss?: boolean;
+  /** Shown on the boss HP bar. */
+  displayName?: string;
+  /** Touching this monster doesn't hurt (it attacks some other way). */
+  noContactDamage?: boolean;
   /** One-time setup; stash per-instance state on the monster. */
   init?(m: Monster): void;
   /** Behavior. Physics (gravity + collide) runs after this. */
@@ -43,8 +51,8 @@ export function defineMonster(id: string, def: MonsterDef): void {
 
 export class Monster extends Actor {
   def: MonsterDef;
-  /** Free-form per-instance state for defs (hop timers, phases...). */
-  state: Record<string, number | boolean> = {};
+  /** Free-form per-instance state for defs (hop timers, phases, FSMs...). */
+  state: Record<string, unknown> = {};
 
   constructor(
     public readonly type: string,
@@ -103,6 +111,15 @@ export class Monster extends Actor {
       grav: 320,
       drag: 1.5,
     });
+    if (this.def.boss) {
+      // A boss death is an event: slow the world down and paint it.
+      feel.slowmo(1.2, 0.25);
+      feel.shake(1);
+      feel.flash(0.5, '#ffffff');
+      feel.burst(this.cx, this.cy, 60, {
+        color: this.def.colors, speed: 240, life: 1.0, grav: 260, drag: 1.2,
+      });
+    }
   }
 
   onHurt(): void {
