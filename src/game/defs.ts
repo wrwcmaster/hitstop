@@ -3,7 +3,7 @@ import { Game } from '@engine/index';
 /** The game's input actions and default bindings. */
 export type Action =
   | 'left' | 'right' | 'up' | 'down'
-  | 'jump' | 'attack' | 'dash' | 'skill'
+  | 'jump' | 'attack' | 'dash' | 'skill' | 'skill2'
   | 'interact'
   | 'confirm' | 'cancel' | 'menu';
 
@@ -17,6 +17,7 @@ export const KEYMAP: Record<string, Action | Action[]> = {
   KeyZ: ['attack', 'confirm'], KeyJ: ['attack', 'confirm'], Enter: 'confirm',
   KeyX: ['dash', 'cancel'], KeyK: ['dash', 'cancel'], ShiftLeft: 'dash',
   KeyC: 'skill', KeyL: 'skill',
+  KeyV: 'skill2',
   KeyE: 'interact', KeyF: 'interact',
   Escape: 'menu',
 };
@@ -37,6 +38,8 @@ export interface GameEvents extends Record<string, unknown> {
   playerSwallowed: Record<string, never>;
   /** A shop transaction happened. */
   purchase: { id: string; price: number };
+  /** Ding. */
+  levelUp: { level: number };
 }
 
 export type ActionGame = Game<Action, GameEvents>;

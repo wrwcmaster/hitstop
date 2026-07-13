@@ -33,6 +33,17 @@ export { Music, songs, defineSong, noteHz, type SongDef, type SongTrack } from '
 export { statuses, defineStatus, Statuses, type StatusDef, type StatusHost } from './status/status';
 
 export {
+  Progression,
+  SkillTree,
+  treeNodes,
+  defineTreeNode,
+  treeNodeDef,
+  type LevelCurve,
+  type TreeNodeDef,
+  type TreeHost,
+} from './progression/progression';
+
+export {
   applyGravity,
   moveAndCollide,
   GRAVITY,

@@ -55,7 +55,7 @@ defineConversation('merchant-lore', {
   lines: [
     { speaker: 'MERCHANT', text: 'THE CAVERN UNDER THE ARENA. THE KING SITS PAST THE EAST GATE.' },
     { speaker: 'MERCHANT', text: 'HE EATS SWORDS, YOU KNOW. AND THE KNIGHTS HOLDING THEM.' },
-    { speaker: 'MERCHANT', text: 'THE LITTLE ONES SPIT NOW TOO. STICKY BUSINESS. BUY A DRAUGHT.' },
+    { speaker: 'MERCHANT', text: 'AND HE SPITS. STICKY BUSINESS, THAT. A DRAUGHT BURNS IT RIGHT OFF.' },
   ],
 });
 

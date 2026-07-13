@@ -47,6 +47,24 @@ defineSkill<SkillCtx>('fireball', {
           g.fillRect(Math.round(p.x - 1), Math.round(p.y - 1), 3, 3);
         },
         onExpire(p) {
+          // PYRE (skill tree): the bolt goes out with a bang.
+          if (player.tree.has('m4')) {
+            const blast = game.combat.strike({
+              damage: 2,
+              targets: 'enemy',
+              attacker: player,
+              strength: 0.8,
+              colors: [COLORS.gold, COLORS.red, COLORS.white],
+            });
+            blast.apply({ x: p.x - 26, y: p.y - 22, w: 52, h: 44 });
+            game.feel.shake(0.3);
+            game.feel.flash(0.12, COLORS.gold);
+            game.feel.sfx.play('nova');
+            game.feel.burst(p.x, p.y, 20, {
+              color: [COLORS.gold, COLORS.red, COLORS.white], speed: 150, life: 0.4, grav: 150, drag: 2.5,
+            });
+            return;
+          }
           game.feel.burst(p.x, p.y, 8, {
             color: [COLORS.gold, COLORS.red], speed: 90, life: 0.3, drag: 3,
           });
@@ -64,6 +82,41 @@ defineSkill<SkillCtx>('fireball', {
     });
     // Trail system: a few embers per cast frame come from the projectile's
     // draw; heavier trails would go in a world system.
+  },
+});
+
+/**
+ * NOVA — the skill tree's capstone: a ring of force around the knight.
+ * Unlocked via the MAGIC branch, cast with V.
+ */
+defineSkill<SkillCtx>('nova', {
+  name: 'NOVA',
+  desc: 'A ring of force blasts everything nearby.',
+  cooldown: 4,
+  cost: 2,
+  cast({ game, player }) {
+    const strike = game.combat.strike({
+      damage: 3,
+      targets: 'enemy',
+      attacker: player,
+      strength: 0.9,
+      knockback: 320,
+      popY: -160,
+      colors: [COLORS.blue, COLORS.white, COLORS.gold],
+    });
+    strike.apply({ x: player.cx - 45, y: player.cy - 35, w: 90, h: 70 });
+
+    // The blast itself: two expanding rings of particles + a flash.
+    game.feel.hitstop(0.06);
+    game.feel.shake(0.5);
+    game.feel.flash(0.25, COLORS.blue);
+    game.feel.sfx.play('nova');
+    game.feel.burst(player.cx, player.cy, 26, {
+      color: [COLORS.blue, COLORS.white], speed: 220, life: 0.35, drag: 3.5,
+    });
+    game.feel.burst(player.cx, player.cy, 14, {
+      color: [COLORS.gold, COLORS.white], speed: 120, life: 0.45, drag: 3,
+    });
   },
 });
 

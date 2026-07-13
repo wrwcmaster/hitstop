@@ -43,6 +43,7 @@
 | `feel/` | **The selling point.** Particles, floating text, and `Feel` — hitstop, slowmo, flash, shake, kick, and the composed `impact()` | One `strength` knob (0..1) scales the whole bundle so feedback stays coherent. |
 | `audio/` | `AudioBus` mixer (master/music/sfx gains), synth SFX registry, `Music` chip-tune sequencer | Songs are step patterns in a registry, scheduled ahead against the AudioContext clock; volume settings are just gain values on the bus. |
 | `status/` | `StatusDef` registry + per-actor `Statuses` bag | Buffs/debuffs are content: duration, stat mods (auto-applied via sourced modifiers), periodic ticks, apply/expire hooks. |
+| `progression/` | `Progression` (XP ledger with pluggable curve, skill points) + `TreeNodeDef` registry + `SkillTree` runtime | Tree effects are stat mods and/or unlock hooks; `restore()` re-applies everything from a save without re-spending points. |
 | `physics/body.ts` | AABB bodies, gravity, axis-separated collide vs solids + one-way platforms | Deliberately simple platformer physics — predictable and tunable beats realistic. |
 | `world/` | `Entity`/`Actor` base classes, `World` with deferred spawn/remove and pluggable systems | Classic entities, not ECS (see below). |
 | `combat/combat.ts` | `Strike` (hitbox + damage payload + once-per-target tracking) and hit application | **Feedback is applied inside the combat resolver**, so every hit in every future weapon/skill feels right by default. |

@@ -35,6 +35,14 @@ export interface MonsterDef {
   displayName?: string;
   /** Touching this monster doesn't hurt (it attacks some other way). */
   noContactDamage?: boolean;
+  /**
+   * Shrink the CONTACT damage box by this many px per side (round
+   * sprites whose AABB corners are empty). The hurtbox the player's
+   * attacks test against stays full size — forgiving both ways.
+   */
+  contactInset?: number;
+  /** XP granted on kill (default: score / 20). */
+  xp?: number;
   /** One-time setup; stash per-instance state on the monster. */
   init?(m: Monster): void;
   /** Behavior. Physics (gravity + collide) runs after this. */

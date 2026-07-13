@@ -4,51 +4,6 @@ import { SLIME1, SLIME2, BAT1, BAT2 } from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { Player } from './player';
 
-/** Lob a sticky slime ball at the player: no damage, applies the slow. */
-function spitSlimeBall(m: Monster, target: Player): void {
-  const dx = target.cx - m.cx;
-  m.game.combat.shoot(
-    {
-      x: m.cx,
-      y: m.y + 2,
-      vx: dx * rand(1.0, 1.4),
-      vy: rand(-230, -170),
-      w: 5,
-      h: 5,
-      life: 3,
-      gravity: 420,
-      strike: {
-        damage: 0, // it slows; it doesn't wound
-        targets: 'player',
-        attacker: m,
-        strength: 0.25,
-        knockback: 40,
-        popY: 0,
-        colors: [COLORS.green, COLORS.greenLight],
-      },
-      onHit(t) {
-        (t as Player).statuses?.apply('sticky');
-        m.game.feel.sfx.play('splat');
-      },
-      draw(g, pr) {
-        g.fillStyle = Math.floor(pr.t * 16) % 2 ? COLORS.green : COLORS.greenLight;
-        g.fillRect(Math.round(pr.x - 2), Math.round(pr.y - 2), 5, 5);
-        // dripping trail
-        if (Math.floor(pr.t * 30) % 3 === 0) {
-          m.game.feel.particles.spawn({
-            x: pr.x, y: pr.y, vy: 20, life: 0.3, size: 1, color: COLORS.green, drag: 1,
-          });
-        }
-      },
-      onExpire(pr) {
-        m.game.feel.burst(pr.x, pr.y, 5, { color: COLORS.green, speed: 50, life: 0.25, drag: 3 });
-      },
-    },
-    m.collision,
-  );
-  m.game.feel.sfx.play('slash');
-}
-
 /**
  * The built-in bestiary. Each entry is the proof-of-extensibility: data +
  * a couple of small callbacks. Add your own in a new file and import it
@@ -64,23 +19,13 @@ defineMonster('slime', {
   ],
   init(m) {
     m.state.hopT = rand(0.6, 1.6);
-    m.state.spitCd = rand(2, 4);
   },
   update(m, dt) {
     m.vx *= Math.pow(0.01, dt);
-    m.state.spitCd = (m.state.spitCd as number) - dt;
-    const player = m.player;
     if (m.onGround) {
-      // A distant player gets a sticky slime ball instead of a hop.
-      const dist = player ? Math.abs(player.cx - m.cx) : 0;
-      if (player instanceof Player && (m.state.spitCd as number) <= 0 && dist > 70 && dist < 220) {
-        m.state.spitCd = rand(2.5, 4.5);
-        m.state.hopT = rand(0.5, 0.9); // recover before hopping again
-        spitSlimeBall(m, player);
-        return;
-      }
       m.state.hopT = (m.state.hopT as number) - dt;
       if ((m.state.hopT as number) <= 0) {
+        const player = m.player;
         const d = player && player.cx > m.cx ? 1 : -1;
         m.vy = -190;
         m.vx = d * rand(55, 85);

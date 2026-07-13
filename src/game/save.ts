@@ -19,10 +19,12 @@ export interface SaveData {
     equipped: [string, string][];
     skills: string[];
     gold: number;
+    progression: { xp: number; level: number; skillPoints: number };
+    tree: string[];
   };
 }
 
-export const saveStore = new JsonStore<SaveData>('hitstop.save', 2);
+export const saveStore = new JsonStore<SaveData>('hitstop.save', 3);
 
 export function snapshotPlayer(p: Player): SaveData['player'] {
   return {
@@ -30,6 +32,8 @@ export function snapshotPlayer(p: Player): SaveData['player'] {
     equipped: p.equipment.slots(),
     skills: [...p.skills.known],
     gold: p.gold,
+    progression: p.progression.snapshot(),
+    tree: p.tree.ownedIds(),
   };
 }
 
@@ -40,6 +44,9 @@ export function restorePlayer(p: Player, data: SaveData['player']): void {
   for (const [, id] of data.equipped) p.equipment.equip(id);
   for (const id of data.skills) p.skills.learn(id);
   p.gold = data.gold;
+  p.progression.restore(data.progression);
+  // Re-applies stat mods and onUnlock effects (learned skills) without cost.
+  p.tree.restore(data.tree, { game: p.game, player: p });
   p.syncStats();
   p.hp = p.maxHp;
   p.mp = p.maxMp;

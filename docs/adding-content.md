@@ -277,9 +277,27 @@ Shops are ware lists (`content/shops.ts`): `{ item, price }[]` — prices in gol
 
 The built-ins show the three tiers, all resolving through Strikes/Projectiles so feedback stays uniform:
 
-- **Ranged debuff** (slime): at range, lob a 0-damage projectile whose `onHit` applies a status. Zero-damage hits skip damage numbers and player i-frames automatically.
+- **Ranged debuff** (the Slime King's sticky spit): lob a 0-damage projectile whose `onHit` applies a status. Zero-damage hits skip damage numbers and player i-frames automatically.
 - **Telegraph → lunge** (devourer, boss slam): a shiver/windup state the player can read, then the attack. Never skip the telegraph — readable attacks are what make hard fights fair.
 - **Grab mechanics** (devourer): the swallow moves the *player* into a special FSM state (`swallowed`: input locked to mashing, position pinned, escape counter) while the monster ticks damage on its own timer. The stolen weapon lives in `monster.state.stolenItem` and drops on kill — grabs that cost something recoverable are scary without being unfair.
+
+## A skill tree node
+
+In `src/game/content/skilltree.ts`. Nodes are stat mods (auto-applied and save-restored) and/or an `onUnlock` hook, arranged on a branch/tier grid the UI reads:
+
+```ts
+defineTreeNode<TreeCtx>('w5', {
+  name: 'BLOODLUST', desc: 'KILLS RESTORE 1 MP',
+  cost: 3, branch: 0, tier: 4, requires: ['w4'],
+  // stat effects: mods: { add: { attack: 1 } }
+  // mechanics: check tree.has('w4') where the mechanic lives,
+  // or flip something here in onUnlock (runs again on save load)
+});
+```
+
+Add the id to `TREE_GRID` so the tree screen shows it. Three effect styles, by example: declarative stat mods (`SHARP STEEL`), a named check where the mechanic lives (`EXECUTIONER` in `Player.beginAttack`, `SECOND WIND` in the wave-clear handler, `ARCANE FLOW` in the SkillBook's cooldown scale), or an imperative unlock (`NOVA` calls `player.skills.learn`).
+
+XP itself: monsters grant `def.xp ?? score/20` on kill; the curve lives in the Player's `Progression` constructor (40 XP for level 2, +25 per level after); each level awards a skill point, fully heals, and autosaves.
 
 ## A new player attack state
 
