@@ -52,6 +52,8 @@ export const PLAYER_TUNING = {
   dashTime: 0.16,
   dashCooldown: 0.45,
   dashInvuln: 0.2,
+  attackLunge: 45,
+  heavyAttackLunge: 150,
   comboWindow: 0.28,
   hurtInvuln: 1.1,
   maxHp: 5,
@@ -287,7 +289,13 @@ export class Player extends Actor {
     this.attackIndex = this.comboWin.consume() ? (this.attackIndex + 1) % 3 : 0;
     const heavy = this.attackIndex === 2;
     this.attackDur = heavy ? 0.3 : 0.2;
-    this.vx += this.facing * (heavy ? 150 : 45);
+    // The lunge follows intent: full step when holding toward the target,
+    // a nudge when neutral, NONE when holding away — so you can poke a
+    // dangerous boss without being carried into his contact damage.
+    const held = this.input.axis('left', 'right');
+    const base = heavy ? PLAYER_TUNING.heavyAttackLunge : PLAYER_TUNING.attackLunge;
+    const lunge = held === this.facing ? base : held === 0 ? base * 0.25 : 0;
+    this.vx += this.facing * lunge;
     // Damage/feel come from the equipped weapon; flat bonus from stats;
     // EXECUTIONER (skill tree) boosts the finisher.
     const executioner = heavy && this.tree.has('w3') ? 2 : 0;
