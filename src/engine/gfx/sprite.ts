@@ -21,6 +21,40 @@ export interface SpriteData {
   palette: Palette;
 }
 
+/**
+ * EPX / Scale2x upscale of a text grid: each cell becomes 2×2, with
+ * corners filled from matching neighbors — the classic pixel-art
+ * smoothing that rounds silhouettes without inventing colors. Author at
+ * 1×, render at 2× texel density (`sprite(epx(rows), pal)` drawn at
+ * half size on a zoomed canvas), or hand-author native 2× art.
+ */
+export function epx(rows: string[]): string[] {
+  const h = rows.length;
+  const w = Math.max(...rows.map((r) => r.length));
+  const at = (x: number, y: number): string =>
+    y < 0 || y >= h || x < 0 || x >= w ? '.' : (rows[y][x] ?? '.');
+  const out: string[][] = Array.from({ length: h * 2 }, () => Array(w * 2).fill('.'));
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const P = at(x, y);
+      const A = at(x, y - 1); // above
+      const B = at(x + 1, y); // right
+      const C = at(x - 1, y); // left
+      const D = at(x, y + 1); // below
+      let p1 = P, p2 = P, p3 = P, p4 = P;
+      if (C === A && C !== D && A !== B) p1 = A;
+      if (A === B && A !== C && B !== D) p2 = B;
+      if (D === C && D !== B && C !== A) p3 = C;
+      if (B === D && B !== A && D !== C) p4 = D;
+      out[y * 2][x * 2] = p1;
+      out[y * 2][x * 2 + 1] = p2;
+      out[y * 2 + 1][x * 2] = p3;
+      out[y * 2 + 1][x * 2 + 1] = p4;
+    }
+  }
+  return out.map((r) => r.join(''));
+}
+
 export function sprite(rows: string[], palette: Palette): HTMLCanvasElement {
   const h = rows.length;
   const w = Math.max(...rows.map((r) => r.length));

@@ -34,6 +34,8 @@ import {
   MANA_PIP_EMPTY,
   ICON_COIN,
   KNIGHT_IDLE_SPRITE,
+  TEXEL,
+  blit,
 } from '../content/sprites';
 
 /** Fallback music per room (rooms can override via props.music). */
@@ -513,6 +515,7 @@ export class PlayScene implements Scene {
     g.feel.renderWorld(ctx);
     this.debug.renderWorld(ctx);
     g.camera.end(ctx);
+    this.bg.renderVignette(ctx);
 
     if (this.phase === 'title') this.renderTitle(ctx);
     else this.renderHUD(ctx);
@@ -553,10 +556,10 @@ export class PlayScene implements Scene {
     const p = this.player;
     if (p) {
       for (let i = 0; i < p.maxHp; i++) {
-        g.drawImage(i < p.hp ? HEART : HEART_EMPTY, 6 + i * 9, 6);
+        blit(g, i < p.hp ? HEART : HEART_EMPTY, 6 + i * 9, 6);
       }
       for (let i = 0; i < p.maxMp; i++) {
-        g.drawImage(i < p.mp ? MANA_PIP : MANA_PIP_EMPTY, 7 + i * 7, 15);
+        blit(g, i < p.mp ? MANA_PIP : MANA_PIP_EMPTY, 7 + i * 7, 15);
       }
       // Skill readiness: fireball cooldown wedge next to the mana row.
       const cdMax = 1.1;
@@ -569,7 +572,7 @@ export class PlayScene implements Scene {
         g.fillRect(sx, 21, Math.round(5 * (cd / cdMax)), 1);
       }
       // Purse.
-      g.drawImage(ICON_COIN, 6, 23);
+      blit(g, ICON_COIN, 6, 23);
       drawText(g, String(p.gold), 14, 24, COLORS.gold);
       // Level + XP bar (+ a nudge when skill points are waiting).
       drawText(g, `LV ${p.progression.level}`, 6, 33, COLORS.white);
@@ -663,7 +666,7 @@ export class PlayScene implements Scene {
     g.save();
     g.translate(gm.width / 2 - 18, 108);
     g.scale(3, 3);
-    g.drawImage(KNIGHT_IDLE_SPRITE, 0, 0);
+    g.drawImage(KNIGHT_IDLE_SPRITE, 0, 0, KNIGHT_IDLE_SPRITE.width / TEXEL, KNIGHT_IDLE_SPRITE.height / TEXEL);
     g.restore();
     drawText(g, 'HITSTOP', gm.width / 2, 48, COLORS.white, 4, 'center');
     drawText(g, 'GAME FEEL IS THE FOUNDATION', gm.width / 2, 80, COLORS.steel, 1, 'center');

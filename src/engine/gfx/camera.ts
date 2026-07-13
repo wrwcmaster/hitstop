@@ -29,6 +29,12 @@ export class Camera {
   shakeAmp = 7;
   /** Trauma decay per second. */
   traumaDecay = 1.6;
+  /**
+   * Render offset quantization in logical pixels. 1 on a 1× canvas;
+   * 1/zoom on zoomed canvases so scrolling lands on device pixels
+   * (half-pixel camera = visibly smoother pans at 2×).
+   */
+  snap = 1;
 
   constructor(
     public viewW: number,
@@ -79,7 +85,8 @@ export class Camera {
   /** Apply the camera transform for world-space drawing. */
   begin(g: CanvasRenderingContext2D): void {
     g.save();
-    g.translate(Math.round(-this.x + this.offsetX()), Math.round(-this.y + this.offsetY()));
+    const q = (v: number) => Math.round(v / this.snap) * this.snap;
+    g.translate(q(-this.x + this.offsetX()), q(-this.y + this.offsetY()));
   }
 
   end(g: CanvasRenderingContext2D): void {

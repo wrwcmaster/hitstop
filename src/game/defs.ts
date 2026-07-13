@@ -101,3 +101,5 @@ export type ActionGame = Game<Action, GameEvents>;
 
 export const VIEW_W = 480;
 export const VIEW_H = 270;
+/** Device pixels per logical pixel: 960×540 backing store, 2× art density. */
+export const ZOOM = 2;

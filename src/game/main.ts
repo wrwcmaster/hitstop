@@ -1,5 +1,5 @@
 import { Game, GamepadInput, validateRoom } from '@engine/index';
-import { KEYMAP, GAMEPAD, VIEW_W, VIEW_H, type Action, type GameEvents } from './defs';
+import { KEYMAP, GAMEPAD, VIEW_W, VIEW_H, ZOOM, type Action, type GameEvents } from './defs';
 import { registerSounds } from './content/sfx';
 import { registerSongs } from './content/music';
 import { registerEnemies } from './actors/enemies';
@@ -26,6 +26,7 @@ const game = new Game<Action, GameEvents>({
   canvas,
   width: VIEW_W,
   height: VIEW_H,
+  zoom: ZOOM,
   keymap: KEYMAP,
 });
 

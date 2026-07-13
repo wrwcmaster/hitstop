@@ -1,12 +1,22 @@
-import { sprite, withFacing, type AnimSet } from '@engine/index';
+import { sprite, epx, withFacing, type AnimSet } from '@engine/index';
 import { PAL } from './palette';
 
 /**
- * All pixel art, authored as text grids (see docs/adding-content.md, or
- * use tools/sprite-editor.html to paint these visually and export).
+ * All pixel art, authored as 1x text grids (see docs/adding-content.md,
+ * or paint in tools/sprite-editor.html), then EPX-upscaled to 2x texel
+ * density (smoothed silhouettes) and blitted at half size onto the
+ * zoomed canvas — same on-screen size, twice the detail.
  */
+export const TEXEL = 2;
 
-const KNIGHT_IDLE = sprite([
+/** Draw a TEXEL-density sprite at its logical (world) size. */
+export function blit(g: CanvasRenderingContext2D, img: HTMLCanvasElement, x: number, y: number): void {
+  g.drawImage(img, Math.round(x), Math.round(y), img.width / TEXEL, img.height / TEXEL);
+}
+
+const hd = (rows: string[]) => sprite(epx(rows), PAL);
+
+const KNIGHT_IDLE = hd([
   '....PP......',
   '...OPPO.....',
   '..OSSSSO....',
@@ -21,9 +31,9 @@ const KNIGHT_IDLE = sprite([
   '...OBBO.....',
   '...OB.BO....',
   '...DD.DD....',
-], PAL);
+]);
 
-const KNIGHT_RUN1 = sprite([
+const KNIGHT_RUN1 = hd([
   '....PP......',
   '...OPPO.....',
   '..OSSSSO....',
@@ -38,9 +48,9 @@ const KNIGHT_RUN1 = sprite([
   '..OB..BO....',
   '.OB....BO...',
   '.DD....DD...',
-], PAL);
+]);
 
-const KNIGHT_RUN2 = sprite([
+const KNIGHT_RUN2 = hd([
   '....PP......',
   '...OPPO.....',
   '..OSSSSO....',
@@ -55,7 +65,7 @@ const KNIGHT_RUN2 = sprite([
   '...OBBO.....',
   '...OBBO.....',
   '...DDDD....',
-], PAL);
+]);
 
 export const KNIGHT_ANIMS = withFacing({
   idle: { frames: [KNIGHT_IDLE, KNIGHT_RUN2], fps: 2 },
@@ -65,7 +75,7 @@ export const KNIGHT_ANIMS = withFacing({
 
 export const KNIGHT_IDLE_SPRITE = KNIGHT_IDLE;
 
-export const SLIME1 = sprite([
+export const SLIME1 = hd([
   '...GGGGGG...',
   '..GGGGGGGG..',
   '.GGWGGGGWGG.',
@@ -73,9 +83,9 @@ export const SLIME1 = sprite([
   'GGGGGGGGGGGG',
   'gGGGGGGGGGGg',
   '.gggggggggg.',
-], PAL);
+]);
 
-export const SLIME2 = sprite([
+export const SLIME2 = hd([
   '............',
   '..GGGGGGGG..',
   '.GGWGGGGWGG.',
@@ -83,63 +93,63 @@ export const SLIME2 = sprite([
   'GGGGGGGGGGGG',
   'gGgggggggGgg',
   '.gggggggggg.',
-], PAL);
+]);
 
-export const BAT1 = sprite([
+export const BAT1 = hd([
   'V..........V',
   'VV...VV...VV',
   '.VVVvVVvVVV.',
   '..VvWVVWvV..',
   '...VVVVVV...',
   '....V..V....',
-], PAL);
+]);
 
-export const BAT2 = sprite([
+export const BAT2 = hd([
   '............',
   '....vVVv....',
   '.VVVvVVvVVV.',
   'VVVvWVVWvVVV',
   'V..VVVVVV..V',
   '....V..V....',
-], PAL);
+]);
 
-export const HEART = sprite([
+export const HEART = hd([
   '.RR.RR.',
   'RWRRRRR',
   'RRRRRRR',
   '.RRRRR.',
   '..RRR..',
   '...R...',
-], PAL);
+]);
 
-export const HEART_EMPTY = sprite([
+export const HEART_EMPTY = hd([
   '.EE.EE.',
   'EEEEEEE',
   'EEEEEEE',
   '.EEEEE.',
   '..EEE..',
   '...E...',
-], PAL);
+]);
 
-export const MANA_PIP = sprite([
+export const MANA_PIP = hd([
   '..B..',
   '.BBB.',
   'BBWBB',
   '.BBB.',
   '..B..',
-], PAL);
+]);
 
-export const MANA_PIP_EMPTY = sprite([
+export const MANA_PIP_EMPTY = hd([
   '..E..',
   '.EEE.',
   'EEEEE',
   '.EEE.',
   '..E..',
-], PAL);
+]);
 
 /* ---------------- item icons ---------------- */
 
-export const ICON_SWORD = sprite([
+export const ICON_SWORD = hd([
   '......W.',
   '.....WS.',
   '....WS..',
@@ -148,9 +158,9 @@ export const ICON_SWORD = sprite([
   '.OS.....',
   '.YO.....',
   'Y..O....',
-], PAL);
+]);
 
-export const ICON_GREATSWORD = sprite([
+export const ICON_GREATSWORD = hd([
   '......WW',
   '.....WWS',
   '....WWS.',
@@ -159,53 +169,53 @@ export const ICON_GREATSWORD = sprite([
   '.OWS....',
   '.YO.....',
   'YY.OO...',
-], PAL);
+]);
 
-export const ICON_POTION = sprite([
+export const ICON_POTION = hd([
   '..OO..',
   '..OO..',
   '.ORRO.',
   'ORRRRO',
   'ORWRRO',
   '.OOOO.',
-], PAL);
+]);
 
-export const ICON_ORB = sprite([
+export const ICON_ORB = hd([
   '.BBB.',
   'BBWBB',
   'BWWBB',
   'BBBBB',
   '.BBB.',
-], PAL);
+]);
 
-export const ICON_CHARM = sprite([
+export const ICON_CHARM = hd([
   '.YYY.',
   'Y.O.Y',
   'Y.G.Y',
   'Y...Y',
   '.YYY.',
-], PAL);
+]);
 
-export const ICON_COIN = sprite([
+export const ICON_COIN = hd([
   '.YYY.',
   'YYWYY',
   'YWYYY',
   'YYYYY',
   '.YYY.',
-], PAL);
+]);
 
-export const ICON_HASTE = sprite([
+export const ICON_HASTE = hd([
   '..OO..',
   '..OO..',
   '.OYYO.',
   'OYYWYO',
   'OYWYYO',
   '.OOOO.',
-], PAL);
+]);
 
 /* ---------------- NPCs ---------------- */
 
-export const MERCHANT = sprite([
+export const MERCHANT = hd([
   '...VVVV....',
   '..VVVVVV...',
   '..VVvvVV...',
@@ -218,4 +228,4 @@ export const MERCHANT = sprite([
   '.V.DDDD.V..',
   '.VVVVVVVV..',
   '..DD..DD...',
-], PAL);
+]);
