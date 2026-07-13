@@ -102,33 +102,43 @@ Notes:
 
 Source: `tools/sprite-editor.html` + `tools/src/sprite-editor.ts`.
 
-Sprites in this engine are **text grids**: rows of palette characters plus a `{ char → color | null }` palette (`src/engine/gfx/sprite.ts`). The editor round-trips `{ palette, frames, fps }` and previews the animation live. Its palette is seeded from the game's shared palette `PAL` (`src/game/content/palette.ts`).
+Sprites are **text grids**: rows of palette characters plus a `{ char → color | null }` palette (`src/engine/gfx/sprite.ts`). Each sprite/character is one **JSON file** under `src/game/content/sprites/` — a palette plus a set of **named animations**, which is exactly what the editor imports and exports:
+
+```jsonc
+{
+  "hd": true,                 // EPX-upscale to the game's 4x texel density at load
+  "palette": { "S": "#a8b8c8", "R": "#b13e53" },   // extends the shared PAL
+  "anims": {
+    "idle": { "fps": 2,  "frames": [ ["...PP...", "..OPPO.."], ["…"] ] },
+    "run":  { "fps": 10, "frames": [ ["…"], ["…"] ] },
+    "air":  { "fps": 1,  "frames": [ ["…"] ] }
+  }
+}
+```
+
+A single static sprite is just one animation with one frame. `loadSprite` (`src/engine/gfx/spritefile.ts`) bakes these files; `src/game/content/sprites.ts` wires the loaded frames to the names the game uses.
 
 ### Controls
 
 - **Paint / erase** — left-drag paints the selected palette character; right-drag erases (`.` = transparent).
-- **palette** — click a swatch to select it. **add color** takes a character + a color and adds it to the working palette.
-- **frames** — numbered buttons switch frames. **add frame** (blank), **dup frame** (copy current), **del frame**.
-- **resize (w × h)** — reshape every frame (content preserved top-left).
-- **fps** — animation speed; the **preview** panel plays the frames at 1×, 2×, and 4×.
-- **export** copies `{ palette, frames, fps }` JSON to the clipboard; **import** loads it back from the textarea.
+- **palette** — click a swatch to select it; **add** takes a character + color and adds it to the file's palette.
+- **animations** — a button per animation; click to edit it. **+ anim** / **rename** / **del**, and an **fps** for the selected one.
+- **frames** — numbered buttons switch frames within the selected animation. **+ frame** (blank), **dup**, **del**.
+- **size (w × h) → resize** — reshape every frame across all animations (content preserved top-left), keeping the sprite uniform.
+- **preview** — plays **every animation at once** at its own fps. The **hd** checkbox toggles between the raw art and the EPX-upscaled version the game actually renders, at the same on-screen size.
+- **export** copies the sprite JSON to the clipboard; **import** loads whatever is in the textarea (the older single-animation `{ palette, frames, fps }` shape is accepted too).
 
 ### Getting your work into the game
 
-Sprites are authored in `src/game/content/sprites.ts` via the `sprite(rows, palette)` helper (game art uses `hd(rows)`, which EPX-upscales twice for 4× texel density):
-
-```ts
-// Paste your exported frame rows here:
-const MY_SPRITE = hd([
-  '....PP......',
-  '...OPPO.....',
-  // …
-]);
-```
-
-- **Single image** → one `hd([...])` call.
-- **Animation** → wire the frames into an `AnimSet` with `withFacing({ idle: { frames: [F1, F2], fps: 6 }, … })` (see `KNIGHT_ANIMS`).
-- **Custom colors** → if you added palette characters in the editor, add the same `char → color` entries to `PAL` in `src/game/content/palette.ts` so the game's shared palette knows them.
+1. **export** the sprite JSON and save it as `src/game/content/sprites/<name>.json` (or edit an existing one — paste it into the editor's textarea and **import** to round-trip it).
+2. Load it in `src/game/content/sprites.ts` and wire the frames to names:
+   ```ts
+   import goblinJson from './sprites/goblin.json';
+   const goblin = load(goblinJson);
+   export const GOBLIN_ANIMS = withFacing(goblin.animSet());   // animated actor
+   export const GOBLIN_IDLE = goblin.frame('idle', 0);          // a single frame
+   ```
+3. **Custom colors** — palette characters added in the editor travel *in the file* (`palette`), so they just work. Put a color in `PAL` (`src/game/content/palette.ts`) only if you want it shared across sprites.
 
 ---
 
