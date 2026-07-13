@@ -114,11 +114,18 @@ defineMonster('brute', {
   },
 });
 
+/** A Devourer still carrying swallowed gear (until it's killed). */
+function ladenDevourer(m: Monster): boolean {
+  const s = m.state.stolenItems;
+  return Array.isArray(s) && s.length > 0;
+}
+
 /**
  * THE DEVOURER: doesn't bite — it swallows. It creeps close, shivers
- * (the tell), lunges, and on contact gulps the player down: the equipped
- * weapon is swallowed with you, and your health ticks away until you
- * mash your way out. Kill it to get the weapon back.
+ * (the tell), lunges, and on contact gulps the player down: everything
+ * you have equipped is swallowed with you, and your health ticks away
+ * until you mash free. It then turns sluggish, weighed down by its loot;
+ * kill THAT one to get your gear back.
  */
 defineMonster('devourer', {
   hp: 12, damage: 1, w: 26, h: 16, score: 600, mass: 3,
@@ -168,11 +175,14 @@ defineMonster('devourer', {
     }
     const dist = player.cx - m.cx;
     m.facing = dist > 0 ? 1 : -1;
+    // A laden beast (still carrying your gear) is sluggish and satiated:
+    // it crawls slower and won't gulp again until it's been killed.
+    const laden = ladenDevourer(m);
 
     if (mode === 'creep') {
-      // Slow, hungry approach.
-      if (m.onGround) m.vx = m.facing * 28;
-      if (Math.abs(dist) < 46 && m.onGround && (m.state.digestCd as number) <= 0) {
+      // Slow, hungry approach — slower still when weighed down by loot.
+      if (m.onGround) m.vx = m.facing * (laden ? 15 : 28);
+      if (!laden && Math.abs(dist) < 46 && m.onGround && (m.state.digestCd as number) <= 0) {
         m.state.mode = 'windup';
         m.state.modeT = 0;
         m.vx = 0;
@@ -194,8 +204,8 @@ defineMonster('devourer', {
       }
     }
 
-    // The gulp: any overlap while it's hungry.
-    if ((m.state.digestCd as number) <= 0 && player.swallowedBy === null &&
+    // The gulp: any overlap while it's hungry (a laden one is satiated).
+    if (!laden && (m.state.digestCd as number) <= 0 && player.swallowedBy === null &&
         player.x < m.x + m.w && player.x + player.w > m.x &&
         player.y < m.y + m.h && player.y + player.h > m.y) {
       player.swallowBy(m);
@@ -211,18 +221,30 @@ defineMonster('devourer', {
   draw(g, m) {
     const img = m.onGround ? SLIME1 : SLIME2;
     const digesting = m.state.victim as boolean;
-    // Digesting: visibly bulging — a slow pulse.
-    const pulse = digesting ? 1 + Math.sin(m.animT * 6) * 0.08 : 1;
-    const base = m.flashT > 0 ? m.img(img) : tintOf(img, COLORS.purple, 0.55);
+    const laden = ladenDevourer(m);
+    // Bulging while it holds something (a live victim or swallowed gear).
+    const bulge = digesting || laden;
+    const pulse = bulge ? 1 + Math.sin(m.animT * 6) * 0.08 : 1;
+    // Laden with loot reads gold-tinged; an empty hunter stays deep purple.
+    const base = m.flashT > 0
+      ? m.img(img)
+      : laden
+        ? tintOf(tintOf(img, COLORS.purple, 0.5), COLORS.gold, 0.28)
+        : tintOf(img, COLORS.purple, 0.55);
     g.save();
     g.translate(Math.round(m.cx * 4) / 4, Math.round((m.y + m.h) * 4) / 4);
-    g.scale((26 / 12) * pulse, (16 / 7) * (digesting ? 1.12 : 1));
+    g.scale((26 / 12) * pulse, (16 / 7) * (bulge ? 1.12 : 1));
     g.drawImage(base, -6, -7, base.width / TEXEL, base.height / TEXEL);
     g.restore();
     if (digesting) {
       // A hint of knight inside.
       g.fillStyle = COLORS.steel;
       g.fillRect(Math.round(m.cx) - 2, Math.round(m.cy) - 3, 4, 5);
+    } else if (laden) {
+      // A glint of swallowed gear, bobbing in the gut.
+      g.fillStyle = COLORS.gold;
+      const bob = Math.round(Math.sin(m.animT * 5));
+      g.fillRect(Math.round(m.cx) - 1, Math.round(m.cy) - 1 + bob, 3, 3);
     }
   },
 });

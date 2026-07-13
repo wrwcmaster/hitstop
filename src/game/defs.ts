@@ -1,4 +1,4 @@
-import { Game, type GamepadMapping } from '@engine/index';
+import { Game, type GamepadMapping, type GamepadInput } from '@engine/index';
 
 /** The game's input actions and default bindings. */
 export type Action =
@@ -77,6 +77,16 @@ export function prettyCode(code: string): string {
   return named[code] ?? code.toUpperCase();
 }
 
+/** Human-readable name for a standard-layout gamepad button index. */
+export function prettyButton(index: number): string {
+  const named: Record<number, string> = {
+    0: 'A', 1: 'B', 2: 'X', 3: 'Y', 4: 'LB', 5: 'RB', 6: 'LT', 7: 'RT',
+    8: 'SELECT', 9: 'START', 10: 'L3', 11: 'R3',
+    12: 'UP', 13: 'DOWN', 14: 'LEFT', 15: 'RIGHT', 16: 'HOME',
+  };
+  return named[index] ?? `B${index}`;
+}
+
 /** Game-level events (combat events come from the engine). */
 export interface GameEvents extends Record<string, unknown> {
   playerHurt: { hp: number };
@@ -97,7 +107,9 @@ export interface GameEvents extends Record<string, unknown> {
   levelUp: { level: number };
 }
 
-export type ActionGame = Game<Action, GameEvents>;
+/** The game plus its polled gamepad (attached in main.ts, used by the
+ * controls UI for button rebinding). */
+export type ActionGame = Game<Action, GameEvents> & { pad?: GamepadInput<Action> };
 
 export const VIEW_W = 480;
 export const VIEW_H = 270;

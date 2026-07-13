@@ -207,14 +207,19 @@ export class Player extends Actor {
     if (this.fsm.is('dead', 'swallowed') || this.invulnT > 0) return;
     this.swallowedBy = m;
     this.escapeN = 0;
-    // The weapon is swallowed too: it comes back when the beast dies.
-    const weaponId = this.equipment.get('weapon');
-    if (weaponId) {
-      this.equipment.unequip('weapon');
-      this.inventory.remove(weaponId, this.inventory.count(weaponId)); // it's GONE, not in the bag
+    // Everything you're wearing goes down with you and rides inside the
+    // beast until it dies — kill THIS one to get your gear back. (Snapshot
+    // the slots first: unequip mutates the map we're iterating.)
+    const taken: string[] = [];
+    for (const [slot, id] of this.equipment.slots()) {
+      this.equipment.unequip(slot);
+      this.inventory.remove(id, this.inventory.count(id)); // GONE from the bag too
+      taken.push(id);
+    }
+    if (taken.length) {
       this.syncStats();
-      m.state.stolenItem = weaponId;
-      this.feel.text(this.cx, this.y - 16, 'WEAPON SWALLOWED!', COLORS.red);
+      m.state.stolenItems = taken;
+      this.feel.text(this.cx, this.y - 16, taken.length > 1 ? 'GEAR SWALLOWED!' : 'WEAPON SWALLOWED!', COLORS.red);
     }
     this.statuses.apply('devoured');
     this.fsm.set('swallowed');

@@ -147,11 +147,15 @@ export class PlayScene implements Scene {
       game.feel.text(info.target.cx, info.target.y - 8, pts, COLORS.gold);
       this.player?.gainXp(info.target.def.xp ?? Math.round(info.target.def.score / 20));
       this.rollDrops(info.target);
-      // A Devourer that swallowed the weapon coughs it back up.
-      const stolen = info.target.state.stolenItem;
-      if (typeof stolen === 'string') {
-        game.world.spawn(new Pickup(stolen, game, this.tilemap, info.target.cx, info.target.y));
-        game.feel.text(info.target.cx, info.target.y - 16, 'WEAPON FREED!', COLORS.gold);
+      // A Devourer that swallowed your gear coughs it all back up — only
+      // this one carried it, so only this kill returns it.
+      const stolen = info.target.state.stolenItems;
+      if (Array.isArray(stolen) && stolen.length) {
+        stolen.forEach((id, i) => {
+          const dx = (i - (stolen.length - 1) / 2) * 7;
+          game.world.spawn(new Pickup(id as string, game, this.tilemap, info.target.cx + dx, info.target.y));
+        });
+        game.feel.text(info.target.cx, info.target.y - 16, 'GEAR FREED!', COLORS.gold);
       }
       if (info.target.def.boss) this.onBossDefeated();
     });

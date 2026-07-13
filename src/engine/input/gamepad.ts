@@ -36,6 +36,9 @@ export class GamepadInput<A extends string = string> {
   connected = false;
 
   private held = new Set<A>();
+  /** Raw button indices down last poll — for capture edge detection. */
+  private prevButtons = new Set<number>();
+  private captureFn: ((index: number) => void) | null = null;
 
   constructor(
     private input: Input<A>,
@@ -46,16 +49,17 @@ export class GamepadInput<A extends string = string> {
   poll(): void {
     if (typeof navigator === 'undefined' || !navigator.getGamepads) return;
     const now = new Set<A>();
+    const down = new Set<number>();
     let sawPad = false;
 
     for (const pad of navigator.getGamepads()) {
       if (!pad || !pad.connected) continue;
       sawPad = true;
-      for (const [idxStr, actions] of Object.entries(this.mapping.buttons)) {
-        const b = pad.buttons[Number(idxStr)];
-        if (b && (b.pressed || b.value > 0.5)) {
-          for (const a of asArray(actions)) now.add(a);
-        }
+      // Collect ALL pressed button indices (not just mapped ones), so a
+      // rebind UI can capture any button.
+      for (let i = 0; i < pad.buttons.length; i++) {
+        const b = pad.buttons[i];
+        if (b && (b.pressed || b.value > 0.5)) down.add(i);
       }
       for (const axis of this.mapping.axes ?? []) {
         const v = pad.axes[axis.index] ?? 0;
@@ -66,6 +70,29 @@ export class GamepadInput<A extends string = string> {
     }
     this.connected = this.connected || sawPad;
 
+    // A rebind UI is listening: hand it the first NEWLY-pressed button and
+    // swallow input until it releases (so the button that armed the capture
+    // isn't the one bound).
+    if (this.captureFn) {
+      for (const idx of down) {
+        if (!this.prevButtons.has(idx)) {
+          const fn = this.captureFn;
+          this.captureFn = null;
+          this.prevButtons = down;
+          fn(idx);
+          return;
+        }
+      }
+      this.prevButtons = down;
+      return;
+    }
+
+    // Map pressed buttons to actions.
+    for (const idx of down) {
+      const actions = this.mapping.buttons[idx];
+      if (actions !== undefined) for (const a of asArray(actions)) now.add(a);
+    }
+
     // Edge-diff into the shared Input.
     for (const a of now) {
       if (!this.held.has(a)) this.input.press(a);
@@ -74,5 +101,52 @@ export class GamepadInput<A extends string = string> {
       if (!now.has(a)) this.input.release(a);
     }
     this.held = now;
+    this.prevButtons = down;
+  }
+
+  /* ---- rebinding (key config UIs) ---- */
+
+  /** Button indices currently bound to an action. */
+  buttonsFor(action: A): number[] {
+    return Object.keys(this.mapping.buttons)
+      .filter((k) => asArray(this.mapping.buttons[Number(k)]).includes(action))
+      .map(Number);
+  }
+
+  /**
+   * Rebind: `index` becomes the ONLY button for `action` (plus aliases,
+   * e.g. jump also confirming in menus). Mirrors Input.rebind for keys.
+   */
+  rebindButton(action: A, index: number, aliases: A[] = []): void {
+    for (const key of Object.keys(this.mapping.buttons)) {
+      const i = Number(key);
+      const rest = asArray(this.mapping.buttons[i]).filter((a) => a !== action);
+      if (rest.length) this.mapping.buttons[i] = rest;
+      else delete this.mapping.buttons[i];
+    }
+    this.mapping.buttons[index] = [action, ...aliases];
+  }
+
+  /** Snapshot of the button bindings (for settings persistence). */
+  getButtonMap(): Record<number, A[]> {
+    const out: Record<number, A[]> = {};
+    for (const key of Object.keys(this.mapping.buttons)) {
+      out[Number(key)] = asArray(this.mapping.buttons[Number(key)]);
+    }
+    return out;
+  }
+
+  /** Replace the button bindings (restoring saved settings / defaults). */
+  setButtonMap(map: Record<number, A | A[]>): void {
+    this.mapping.buttons = { ...map };
+  }
+
+  /** Capture the next new button press as a raw index (rebind UIs). */
+  captureNextButton(fn: (index: number) => void): void {
+    this.captureFn = fn;
+  }
+
+  cancelCapture(): void {
+    this.captureFn = null;
   }
 }
