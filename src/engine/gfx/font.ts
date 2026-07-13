@@ -2,15 +2,20 @@ import { epx } from './sprite';
 import { offscreen } from './canvas';
 
 /**
- * Built-in pixel font.
+ * Built-in pixel font — mixed case.
  *
- * Glyphs are authored on the classic 3×5 grid but RENDERED as 6×10
- * bitmaps at half-logical scale — each glyph pixel is 2×2 device pixels
- * on the 4× canvas instead of 4×4, so text is twice as sharp while
- * every metric (textWidth, advance, line height) is unchanged and no
- * layout anywhere needs to move. The 6×10 bitmaps come from EPX
- * (Scale2x) smoothing of the 3×5 masters, with hand-tuned overrides
- * where the algorithm's rounding hurts a letterform.
+ * Uppercase, digits and symbols are authored on the classic 3×5 grid
+ * and RENDERED as 6×10 bitmaps at half-logical scale — each glyph pixel
+ * is 2×2 device pixels on the 4× canvas instead of 4×4, so text is
+ * twice as sharp while every metric (textWidth, advance, line height)
+ * is unchanged. The 6×10 bitmaps come from EPX (Scale2x) smoothing of
+ * the 3×5 masters, with hand-tuned overrides where the algorithm's
+ * rounding hurts a letterform.
+ *
+ * Lowercase is hand-authored directly on the finer grid in a 6×12 cell:
+ * cap-height rows 0–8, x-height rows 3–8, descenders in rows 9–11
+ * (one logical pixel below the uppercase baseline). Nothing is
+ * force-uppercased anymore — strings render in the case they're written.
  *
  * Rendering bakes each (glyph, color) pair to a tiny offscreen canvas
  * once, so drawing is one drawImage per character.
@@ -86,11 +91,58 @@ const HD_OVERRIDES: Record<string, string[]> = {
   ],
 };
 
-/** Expand a 15-bit 3×5 glyph into '#'-rows, EPX-smooth to 6×10. */
+/** Pad a lowercase glyph down to its row offset inside the 6×12 cell. */
+function lc(top: number, rows: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < top; i++) out.push('......');
+  return out.concat(rows);
+}
+
+/**
+ * Hand-authored lowercase, 6 wide in a 12-row cell. x-height spans
+ * rows 3–8, ascenders (b d f h k l, and t a step lower) reach the cap
+ * line, descenders (g j p q y) drop into rows 9–11.
+ */
+const LOWERCASE: Record<string, string[]> = {
+  a: lc(3, ['.####.', '....##', '.#####', '##..##', '##..##', '.#####']),
+  b: lc(0, ['##....', '##....', '##....', '#####.', '##..##', '##..##', '##..##', '##..##', '#####.']),
+  c: lc(3, ['.####.', '##..##', '##....', '##....', '##..##', '.####.']),
+  d: lc(0, ['....##', '....##', '....##', '.#####', '##..##', '##..##', '##..##', '##..##', '.#####']),
+  e: lc(3, ['.####.', '##..##', '######', '##....', '##..##', '.####.']),
+  f: lc(0, ['..###.', '.##...', '.##...', '####..', '.##...', '.##...', '.##...', '.##...', '.##...']),
+  g: lc(3, ['.#####', '##..##', '##..##', '##..##', '##..##', '.#####', '....##', '.####.']),
+  h: lc(0, ['##....', '##....', '##....', '#####.', '##..##', '##..##', '##..##', '##..##', '##..##']),
+  i: lc(0, ['..##..', '..##..', '......', '.###..', '..##..', '..##..', '..##..', '..##..', '.####.']),
+  j: lc(0, ['...##.', '...##.', '......', '..###.', '...##.', '...##.', '...##.', '...##.', '...##.', '...##.', '####..']),
+  k: lc(0, ['##....', '##....', '##....', '##..##', '##.##.', '####..', '##.##.', '##..##', '##..##']),
+  l: lc(0, ['.##...', '.##...', '.##...', '.##...', '.##...', '.##...', '.##...', '.##...', '..###.']),
+  m: lc(3, ['######', '##.#.#', '##.#.#', '##.#.#', '##.#.#', '##.#.#']),
+  n: lc(3, ['#####.', '##..##', '##..##', '##..##', '##..##', '##..##']),
+  o: lc(3, ['.####.', '##..##', '##..##', '##..##', '##..##', '.####.']),
+  p: lc(3, ['#####.', '##..##', '##..##', '##..##', '##..##', '#####.', '##....', '##....']),
+  q: lc(3, ['.#####', '##..##', '##..##', '##..##', '##..##', '.#####', '....##', '....##']),
+  r: lc(3, ['#####.', '##..##', '##....', '##....', '##....', '##....']),
+  s: lc(3, ['.####.', '##....', '.####.', '....##', '....##', '#####.']),
+  t: lc(1, ['.##...', '.##...', '####..', '.##...', '.##...', '.##...', '.##...', '..###.']),
+  u: lc(3, ['##..##', '##..##', '##..##', '##..##', '##..##', '.#####']),
+  v: lc(3, ['##..##', '##..##', '##..##', '##..##', '.####.', '..##..']),
+  w: lc(3, ['#.#.##', '#.#.##', '#.#.##', '#.#.##', '#.#.##', '######']),
+  x: lc(3, ['##..##', '.####.', '..##..', '..##..', '.####.', '##..##']),
+  y: lc(3, ['##..##', '##..##', '##..##', '##..##', '##..##', '.#####', '....##', '.####.']),
+  z: lc(3, ['######', '...##.', '..##..', '.##...', '##....', '######']),
+};
+
+/**
+ * Resolve a glyph to '#'-rows on the fine grid: lowercase from the
+ * hand-authored set, everything else from overrides or EPX-smoothed
+ * 3×5 masters. Unknown lowercase falls back to its uppercase form.
+ */
 function buildHd(ch: string): string[] | undefined {
+  const lower = LOWERCASE[ch];
+  if (lower) return lower;
   const override = HD_OVERRIDES[ch];
   if (override) return override;
-  const bits = GLYPHS[ch];
+  const bits = GLYPHS[ch] ?? GLYPHS[ch.toUpperCase()];
   if (!bits) return undefined;
   const rows: string[] = [];
   for (let r = 0; r < 5; r++) {
@@ -117,7 +169,7 @@ function glyphCanvas(ch: string, color: string): HTMLCanvasElement | undefined {
   if (hit) return hit;
   const rows = hdGlyph(ch);
   if (!rows) return undefined;
-  const [c, g] = offscreen(6, 10);
+  const [c, g] = offscreen(6, 12);
   g.fillStyle = color;
   rows.forEach((row, y) => {
     for (let x = 0; x < row.length; x++) {
@@ -144,7 +196,7 @@ export function drawText(
   align: TextAlign = 'left',
 ): void {
   const s = scale;
-  const text = String(str).toUpperCase();
+  const text = String(str);
   if (align === 'center') x -= textWidth(text, s) / 2;
   if (align === 'right') x -= textWidth(text, s);
   // Glyph pixels are half-logical: keep positions on that grid.
@@ -152,7 +204,9 @@ export function drawText(
   y = Math.round(y * 2) / 2;
   for (const ch of text) {
     const img = glyphCanvas(ch, color);
-    if (img) g.drawImage(img, x, y, 3 * s, 5 * s);
+    // The 12-row cell adds one logical pixel of descender room below
+    // the 5px cap box; metrics and line layout are unchanged.
+    if (img) g.drawImage(img, x, y, 3 * s, 6 * s);
     x += 4 * s;
   }
 }

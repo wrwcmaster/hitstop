@@ -44,12 +44,12 @@ export class SkillTreeScene implements Scene {
     const p = this.player;
     const id = this.selectedId;
     if (p.tree.has(id)) {
-      this.say('ALREADY LEARNED');
+      this.say('Already learned');
       this.game.sfx.play('denied');
       return;
     }
     if (!p.tree.reachable(id)) {
-      this.say('LEARN THE NODE ABOVE FIRST');
+      this.say('Learn the node above first');
       this.game.sfx.play('denied');
       return;
     }
@@ -58,7 +58,7 @@ export class SkillTreeScene implements Scene {
       this.say(`${treeNodeDef(id).name} LEARNED!`);
       this.game.feel.flash(0.15, COLORS.gold);
     } else {
-      this.say('NOT ENOUGH SKILL POINTS');
+      this.say('Not enough skill points');
       this.game.sfx.play('denied');
     }
   }
@@ -159,6 +159,6 @@ export class SkillTreeScene implements Scene {
     } else {
       drawText(g, sel.desc, gm.width / 2, descY, COLORS.steel, 1, 'center');
     }
-    drawText(g, 'Z: LEARN - ESC: BACK', gm.width / 2, y + bh - 11, COLORS.steelDark, 1, 'center');
+    drawText(g, 'Z: learn - Esc: back', gm.width / 2, y + bh - 11, COLORS.steelDark, 1, 'center');
   }
 }

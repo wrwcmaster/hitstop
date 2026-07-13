@@ -679,11 +679,11 @@ export class PlayScene implements Scene {
     g.drawImage(KNIGHT_IDLE_SPRITE, 0, 0, KNIGHT_IDLE_SPRITE.width / TEXEL, KNIGHT_IDLE_SPRITE.height / TEXEL);
     g.restore();
     drawText(g, 'HITSTOP', gm.width / 2, 48, COLORS.white, 4, 'center');
-    drawText(g, 'GAME FEEL IS THE FOUNDATION', gm.width / 2, 80, COLORS.steel, 1, 'center');
+    drawText(g, 'Game feel is the foundation', gm.width / 2, 80, COLORS.steel, 1, 'center');
     this.titleMenu.render(g, gm.width / 2 - 24, 162, { lineHeight: 13 });
-    drawText(g, 'MOVE: ARROWS / WASD - JUMP: SPACE', gm.width / 2, 208, COLORS.steelDark, 1, 'center');
-    drawText(g, 'ATTACK: Z - DASH: X - SKILL: C - MENU: ESC', gm.width / 2, 220, COLORS.steelDark, 1, 'center');
-    drawText(g, 'Z OR ENTER TO SELECT', gm.width / 2, 238, COLORS.gold, 1, 'center');
+    drawText(g, 'Move: Arrows / WASD - Jump: Space', gm.width / 2, 208, COLORS.steelDark, 1, 'center');
+    drawText(g, 'Attack: Z - Dash: X - Skill: C - Menu: Esc', gm.width / 2, 220, COLORS.steelDark, 1, 'center');
+    drawText(g, 'Z or Enter to select', gm.width / 2, 238, COLORS.gold, 1, 'center');
   }
 
   private renderOver(g: CanvasRenderingContext2D): void {
@@ -694,10 +694,10 @@ export class PlayScene implements Scene {
     drawText(g, `SCORE ${this.score}`, gm.width / 2, 110, COLORS.white, 2, 'center');
     drawText(g, `BEST ${this.best}`, gm.width / 2, 130, COLORS.steel, 1, 'center');
     if (saveStore.exists()) {
-      drawText(g, 'YOU WILL WAKE AT THE LAST GATE', gm.width / 2, 148, COLORS.steel, 1, 'center');
+      drawText(g, 'You will wake at the last gate', gm.width / 2, 148, COLORS.steel, 1, 'center');
     }
     if (this.overT <= 0 && Math.floor(performance.now() / 400) % 2) {
-      drawText(g, 'PRESS ANY KEY', gm.width / 2, 190, COLORS.gold, 2, 'center');
+      drawText(g, 'Press any key', gm.width / 2, 190, COLORS.gold, 2, 'center');
     }
   }
 }

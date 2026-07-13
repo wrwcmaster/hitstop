@@ -162,7 +162,7 @@ export class PauseScene implements Scene {
     const entries = p.inventory.slots.map((s) => {
       const def = itemDef<ItemCtx>(s.id);
       return {
-        label: `${def.name}${s.count > 1 ? ` X${s.count}` : ''}`,
+        label: `${def.name}${s.count > 1 ? ` x${s.count}` : ''}`,
         hint: () =>
           def.kind === 'equipment'
             ? p.equipment.isEquipped(s.id) ? 'EQUIPPED' : 'EQUIP'
@@ -184,7 +184,7 @@ export class PauseScene implements Scene {
       };
     });
     if (!entries.length) {
-      entries.push({ label: 'NOTHING YET', hint: () => '', onSelect: () => {} });
+      entries.push({ label: 'Nothing yet', hint: () => '', onSelect: () => {} });
     }
     const keepIndex = Math.min(this.invMenu.index, entries.length - 1);
     this.invMenu = new Menu(entries, MENU_ACTIONS);
@@ -228,7 +228,7 @@ export class PauseScene implements Scene {
       drawPanel(g, x, y, bw, bh);
       drawText(g, 'PAUSED', W / 2, y + 8, COLORS.gold, 2, 'center');
       this.mainMenu.render(g, x + 24, y + 30, { width: bw - 40, lineHeight: 13 });
-      drawText(g, 'ESC: CLOSE', W / 2, y + bh - 9, COLORS.steelDark, 1, 'center');
+      drawText(g, 'Esc: close', W / 2, y + bh - 9, COLORS.steelDark, 1, 'center');
     } else if (this.page === 'options') {
       const bw = 170;
       const bh = 112;
@@ -237,7 +237,7 @@ export class PauseScene implements Scene {
       drawPanel(g, x, y, bw, bh);
       drawText(g, 'OPTIONS', W / 2, y + 8, COLORS.gold, 2, 'center');
       this.optionsMenu.render(g, x + 24, y + 30, { width: bw - 40, lineHeight: 13 });
-      drawText(g, 'LEFT/RIGHT: ADJUST', W / 2, y + bh - 9, COLORS.steelDark, 1, 'center');
+      drawText(g, 'Left/Right: adjust', W / 2, y + bh - 9, COLORS.steelDark, 1, 'center');
     } else if (this.page === 'controls') {
       const bw = 210;
       const bh = 156;
@@ -247,10 +247,10 @@ export class PauseScene implements Scene {
       drawText(g, 'CONTROLS', W / 2, y + 8, COLORS.gold, 2, 'center');
       this.controlsMenu.render(g, x + 20, y + 26, { width: bw - 36, lineHeight: 11 });
       if (this.rebinding) {
-        drawText(g, `PRESS A KEY FOR ${this.rebinding}`, W / 2, y + bh - 20, COLORS.gold, 1, 'center');
-        drawText(g, 'ESC TO CANCEL', W / 2, y + bh - 11, COLORS.steelDark, 1, 'center');
+        drawText(g, `Press a key for ${this.rebinding}`, W / 2, y + bh - 20, COLORS.gold, 1, 'center');
+        drawText(g, 'Esc to cancel', W / 2, y + bh - 11, COLORS.steelDark, 1, 'center');
       } else {
-        drawText(g, 'GAMEPAD: STANDARD LAYOUT, PLUG AND PLAY', W / 2, y + bh - 11, COLORS.steelDark, 1, 'center');
+        drawText(g, 'Gamepad: standard layout, plug and play', W / 2, y + bh - 11, COLORS.steelDark, 1, 'center');
       }
     } else {
       const bw = 240;
@@ -273,8 +273,8 @@ export class PauseScene implements Scene {
       drawText(g, `MP ${p.mp}/${p.maxMp}`, x + 70, statY, COLORS.blue);
       drawText(g, `ATK +${Math.round(p.stats.get('attack'))}`, x + 124, statY, COLORS.white);
       const weapon = p.equipment.get('weapon');
-      drawText(g, weapon ? itemDef(weapon).name : 'BARE HANDS', x + 12, statY + 9, COLORS.steel);
-      drawText(g, 'ESC: BACK', x + bw - 12, statY + 9, COLORS.steelDark, 1, 'right');
+      drawText(g, weapon ? itemDef(weapon).name : 'Bare hands', x + 12, statY + 9, COLORS.steel);
+      drawText(g, 'Esc: back', x + bw - 12, statY + 9, COLORS.steelDark, 1, 'right');
     }
   }
 }
