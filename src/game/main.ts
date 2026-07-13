@@ -1,5 +1,5 @@
 import { Game, GamepadInput, validateRoom } from '@engine/index';
-import { KEYMAP, GAMEPAD, VIEW_W, VIEW_H, ZOOM, WORLD_ZOOM, type Action, type GameEvents } from './defs';
+import { KEYMAP, GAMEPAD, VIEW_W, VIEW_H, ZOOM, WORLD_ZOOM, type Action, type GameEvents, type ActionGame } from './defs';
 import { registerSounds } from './content/sfx';
 import { registerSongs } from './content/music';
 import { registerEnemies } from './actors/enemies';
@@ -22,7 +22,7 @@ import { PlayScene } from './scenes/play';
  */
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 
-const game = new Game<Action, GameEvents>({
+const game: ActionGame = new Game<Action, GameEvents>({
   canvas,
   width: VIEW_W,
   height: VIEW_H,
@@ -45,6 +45,14 @@ registerSkillTree();
 registerStatuses();
 registerConversations();
 registerShops();
+
+// Gamepad: polled every frame, feeding the same action system. Attached to
+// the game so the controls UI can rebind its buttons. Created before
+// loadSettings so a saved pad mapping can be restored.
+export const gamepad = new GamepadInput<Action>(game.input, GAMEPAD);
+game.pad = gamepad;
+game.onFrame(() => gamepad.poll());
+
 loadSettings(game);
 
 // Touch controls (hidden by CSS on pointer:fine devices). Buttons carry
@@ -64,10 +72,6 @@ canvas.addEventListener('pointerdown', () => {
   game.sfx.unlock();
   game.input.notifyAnyPress();
 });
-
-// Gamepad: polled every frame, feeding the same action system.
-export const gamepad = new GamepadInput<Action>(game.input, GAMEPAD);
-game.onFrame(() => gamepad.poll());
 
 // The level editor test-plays via localStorage: it writes the room JSON
 // and opens the game with ?room=local, which replaces the whole world

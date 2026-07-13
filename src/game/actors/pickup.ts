@@ -13,6 +13,7 @@ import { COLORS } from '../content/palette';
 import { TEXEL, blit } from '../content/sprites';
 import type { ItemCtx } from '../content/items';
 import type { ActionGame } from '../defs';
+import { PromptScene } from '../scenes/prompt';
 import { Player } from './player';
 
 /**
@@ -112,6 +113,29 @@ export class Pickup extends Entity implements Body {
       def.onPickup?.(ctx);
       this.game.feel.sfx.play('pickup');
       this.game.feel.text(player.cx, this.y - 6, def.name, COLORS.gold);
+      // Equipment offers to go on right away, so you're not menu-diving
+      // mid-run (and it's how you re-equip gear a Devourer coughed up).
+      if (def.kind === 'equipment' && def.slot && !player.equipment.isEquipped(this.itemId)) {
+        this.game.scenes.push(
+          new PromptScene(
+            this.game,
+            `Equip ${def.name}?`,
+            [
+              {
+                label: 'Equip',
+                onSelect: () => {
+                  player.equipment.equip(this.itemId);
+                  player.syncStats();
+                  this.game.feel.sfx.play('equip');
+                  this.game.feel.flash(0.12, COLORS.gold);
+                },
+              },
+              { label: 'Keep in bag', onSelect: () => {} },
+            ],
+            def.icon,
+          ),
+        );
+      }
     }
     this.game.events.emit('pickup', { id: this.itemId });
     this.game.feel.burst(this.x + this.w / 2, this.y + this.h / 2, 6, {

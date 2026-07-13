@@ -8,6 +8,8 @@ export interface Settings {
   sfx: number;
   /** Full keyboard bindings snapshot (code -> actions). Absent = defaults. */
   keys?: Record<string, Action[]>;
+  /** Gamepad button bindings snapshot (index -> actions). Absent = defaults. */
+  pad?: Record<number, Action[]>;
 }
 
 export const settingsStore = new JsonStore<Settings>('hitstop.settings', 2);
@@ -19,6 +21,7 @@ export function loadSettings(game: ActionGame): void {
   game.audio.setVolume('music', s.music);
   game.audio.setVolume('sfx', s.sfx);
   if (s.keys) game.input.setKeymap(s.keys);
+  if (s.pad && game.pad) game.pad.setButtonMap(s.pad);
 }
 
 export function saveSettings(game: ActionGame): void {
@@ -27,5 +30,6 @@ export function saveSettings(game: ActionGame): void {
     music: game.audio.getVolume('music'),
     sfx: game.audio.getVolume('sfx'),
     keys: game.input.getKeymap(),
+    pad: game.pad?.getButtonMap(),
   });
 }

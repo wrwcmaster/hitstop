@@ -6,7 +6,7 @@ import {
   itemDef,
   clamp,
 } from '@engine/index';
-import { KEYMAP, REBINDABLE, prettyCode, type ActionGame, type Action } from '../defs';
+import { KEYMAP, GAMEPAD, REBINDABLE, prettyCode, prettyButton, type ActionGame, type Action } from '../defs';
 import type { Player } from '../actors/player';
 import type { ItemCtx } from '../content/items';
 import { COLORS } from '../content/palette';
@@ -27,6 +27,10 @@ export class PauseScene implements Scene {
   private controlsMenu: Menu<Action>;
   /** Label of the action currently waiting for a key press, if any. */
   private rebinding: string | null = null;
+  /** Which device the CONTROLS page is rebinding. */
+  private device: 'keyboard' | 'gamepad' = 'keyboard';
+  /** True while waiting for a gamepad button (vs a key). */
+  private padCapturing = false;
 
   constructor(
     private game: ActionGame,
@@ -102,18 +106,20 @@ export class PauseScene implements Scene {
 
     this.controlsMenu = new Menu<Action>(
       [
+        {
+          // Toggle which device the rows below rebind.
+          label: () => `DEVICE: ${this.device === 'keyboard' ? 'KEYBOARD' : 'GAMEPAD'}`,
+          onSelect: () => this.toggleDevice(),
+          onAdjust: () => this.toggleDevice(),
+        },
         ...REBINDABLE.map((r) => ({
           label: r.label,
-          hint: () => this.game.input.codesFor(r.action).map(prettyCode).slice(0, 2).join(' / ') || '---',
-          onSelect: () => this.beginRebind(r.action, r.label, r.aliases),
+          hint: () => this.bindingHint(r.action),
+          onSelect: () => this.beginRebindActive(r.action, r.label, r.aliases),
         })),
         {
           label: 'RESET DEFAULTS',
-          onSelect: () => {
-            this.game.input.setKeymap(KEYMAP);
-            saveSettings(this.game);
-            this.game.sfx.play('unlock');
-          },
+          onSelect: () => this.resetActiveDevice(),
         },
         {
           label: 'BACK',
@@ -127,9 +133,40 @@ export class PauseScene implements Scene {
     );
   }
 
+  private toggleDevice(): void {
+    this.device = this.device === 'keyboard' ? 'gamepad' : 'keyboard';
+    this.game.sfx.play('menuMove');
+  }
+
+  /** Current binding(s) for an action on the active device, for the hint. */
+  private bindingHint(action: Action): string {
+    if (this.device === 'keyboard') {
+      return this.game.input.codesFor(action).map(prettyCode).slice(0, 2).join(' / ') || '---';
+    }
+    const pad = this.game.pad;
+    if (!pad) return 'NO PAD';
+    return pad.buttonsFor(action).map(prettyButton).slice(0, 2).join(' / ') || '---';
+  }
+
+  private beginRebindActive(action: Action, label: string, aliases: Action[]): void {
+    if (this.device === 'keyboard') this.beginRebind(action, label, aliases);
+    else this.beginPadRebind(action, label, aliases);
+  }
+
+  private resetActiveDevice(): void {
+    if (this.device === 'keyboard') {
+      this.game.input.setKeymap(KEYMAP);
+    } else {
+      this.game.pad?.setButtonMap(GAMEPAD.buttons);
+    }
+    saveSettings(this.game);
+    this.game.sfx.play('unlock');
+  }
+
   /** Arm the next-key capture; Esc cancels rather than binding. */
   private beginRebind(action: Action, label: string, aliases: Action[]): void {
     this.rebinding = label;
+    this.padCapturing = false;
     this.game.sfx.play('menuSelect');
     this.game.input.captureNextKey((code) => {
       this.rebinding = null;
@@ -138,6 +175,25 @@ export class PauseScene implements Scene {
         return;
       }
       this.game.input.rebind(action, code, aliases);
+      saveSettings(this.game);
+      this.game.sfx.play('unlock');
+    });
+  }
+
+  /** Arm the next gamepad-button capture; Esc cancels. */
+  private beginPadRebind(action: Action, label: string, aliases: Action[]): void {
+    const pad = this.game.pad;
+    if (!pad) {
+      this.game.sfx.play('denied');
+      return;
+    }
+    this.rebinding = label;
+    this.padCapturing = true;
+    this.game.sfx.play('menuSelect');
+    pad.captureNextButton((index) => {
+      this.rebinding = null;
+      this.padCapturing = false;
+      pad.rebindButton(action, index, aliases);
       saveSettings(this.game);
       this.game.sfx.play('unlock');
     });
@@ -193,7 +249,17 @@ export class PauseScene implements Scene {
 
   update(_dt: number): void {
     const input = this.game.input;
-    if (this.rebinding) return; // waiting for the capture callback
+    if (this.rebinding) {
+      // A key rebind cancels itself through captureNextKey; a pad rebind
+      // has no keydown to intercept, so let Esc back out of it here.
+      if (this.padCapturing && input.consumePress('menu')) {
+        this.game.pad?.cancelCapture();
+        this.rebinding = null;
+        this.padCapturing = false;
+        this.game.sfx.play('menuClose');
+      }
+      return;
+    }
     if (input.consumePress('menu') || input.consumePress('cancel')) {
       if (this.page === 'controls') {
         this.page = 'options';
@@ -240,17 +306,20 @@ export class PauseScene implements Scene {
       drawText(g, 'Left/Right: adjust', W / 2, y + bh - 9, COLORS.steelDark, 1, 'center');
     } else if (this.page === 'controls') {
       const bw = 210;
-      const bh = 156;
+      const bh = 170;
       const x = (W - bw) / 2;
       const y = (H - bh) / 2;
       drawPanel(g, x, y, bw, bh);
       drawText(g, 'CONTROLS', W / 2, y + 8, COLORS.gold, 2, 'center');
       this.controlsMenu.render(g, x + 20, y + 26, { width: bw - 36, lineHeight: 11 });
       if (this.rebinding) {
-        drawText(g, `Press a key for ${this.rebinding}`, W / 2, y + bh - 20, COLORS.gold, 1, 'center');
+        const what = this.padCapturing ? 'button' : 'key';
+        drawText(g, `Press a ${what} for ${this.rebinding}`, W / 2, y + bh - 20, COLORS.gold, 1, 'center');
         drawText(g, 'Esc to cancel', W / 2, y + bh - 11, COLORS.steelDark, 1, 'center');
+      } else if (this.device === 'gamepad' && !this.game.pad?.connected) {
+        drawText(g, 'Connect a pad, then Z to bind a button', W / 2, y + bh - 11, COLORS.steelDark, 1, 'center');
       } else {
-        drawText(g, 'Gamepad: standard layout, plug and play', W / 2, y + bh - 11, COLORS.steelDark, 1, 'center');
+        drawText(g, 'Left/Right: switch device - Z: rebind', W / 2, y + bh - 11, COLORS.steelDark, 1, 'center');
       }
     } else {
       const bw = 240;
