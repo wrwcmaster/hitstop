@@ -729,8 +729,11 @@ export class PlayScene implements Scene {
     g.save();
     const kw = KNIGHT_IDLE_SPRITE.width / TEXEL;
     const kh = KNIGHT_IDLE_SPRITE.height / TEXEL;
-    const ks = 2.5;
-    g.translate(gm.width / 2 - (kw * ks) / 2, 150 - kh * ks);
+    // A compact hero portrait sitting in the band between the subtitle and
+    // the menu, so it never overlaps the title text.
+    const ks = 1.0;
+    const midY = 118;
+    g.translate(gm.width / 2 - (kw * ks) / 2, midY - (kh * ks) / 2);
     g.scale(ks, ks);
     g.drawImage(KNIGHT_IDLE_SPRITE, 0, 0, kw, kh);
     g.restore();
