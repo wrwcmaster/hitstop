@@ -42,7 +42,7 @@ Conventions:
 
 Two options:
 
-1. **Sprite editor** (`/tools/sprite-editor.html`): paint, animate, export — then paste rows into a `sprite([...], PAL)` call in `src/game/content/sprites.ts`.
+1. **Sprite editor** (`/tools/sprite-editor.html`): paint, animate, export — then paste rows into a `sprite([...], PAL)` call in `src/game/content/sprites.ts`. Full walkthrough in [design-tools.md](design-tools.md).
 2. **By hand**: sprites are text; the palette chars are defined in `src/game/content/palette.ts`.
 
 ```ts

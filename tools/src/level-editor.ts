@@ -367,7 +367,11 @@ $('btnDownload').onclick = () => {
 $('btnPlay').onclick = () => {
   room.name = ($('roomName') as HTMLInputElement).value || room.name;
   localStorage.setItem('hitstop.room', JSON.stringify(room));
-  window.open('/?room=local', 'hitstop-testplay');
+  // The game is one level up from tools/. Resolve relative to this page so
+  // it works under any base path (dev root, a GitHub Pages project subpath,
+  // a custom domain) — an absolute "/?room=local" would break on Pages.
+  const gameUrl = new URL('../index.html?room=local', location.href).href;
+  window.open(gameUrl, 'hitstop-testplay');
 };
 
 ($('roomName') as HTMLInputElement).onchange = (e) => {
