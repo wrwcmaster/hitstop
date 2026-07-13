@@ -31,8 +31,8 @@ In-game: arrows/WASD move, Space jumps, `Z`/`J` attack, `X`/`K` dash, `C`/`L` fi
 | --- | --- |
 | `src/engine/` | The engine: loop, events, input, graphics, **feel**, audio, physics, world, combat + projectiles, FSM, levels + triggers, items/equipment/stats, skills, UI (menus, dialogue, minimap). No game knowledge. |
 | `src/game/` | The game built on it: player, enemies, weapons, spells, drops, conversations, pause menu, HUD — mostly *content definitions*, not engine plumbing. |
-| `tools/` | Browser-based design tools: level editor and sprite editor, sharing the game's registries. |
-| `docs/` | Architecture, game-feel guide, content cookbook, and a game-dev primer for software engineers. |
+| `tools/` | Browser-based design tools: level editor and sprite editor, sharing the game's registries ([guide](docs/design-tools.md)). |
+| `docs/` | Architecture, game-feel guide, content cookbook, design-tools guide, and a game-dev primer for software engineers. |
 
 ## The pitch, in code
 
@@ -50,4 +50,5 @@ A complete new enemy is ~20 lines of data + behavior (see `src/game/actors/enemi
 - [docs/architecture.md](docs/architecture.md) — how the engine is put together and why
 - [docs/game-feel.md](docs/game-feel.md) — the feel system: what each primitive does and how to tune it
 - [docs/adding-content.md](docs/adding-content.md) — cookbook: new enemies, tiles, rooms, sounds, skills
+- [docs/design-tools.md](docs/design-tools.md) — the level editor and sprite editor: controls, formats, and shipping your work
 - [docs/game-dev-primer.md](docs/game-dev-primer.md) — game-dev concepts for software engineers, mapped to this codebase
