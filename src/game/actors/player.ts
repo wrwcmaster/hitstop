@@ -69,8 +69,8 @@ export const PLAYER_TUNING = {
  */
 export class Player extends Actor {
   team = 'player' as const;
-  w = 9;
-  h = 13;
+  w = 10;
+  h = 18;
   hp = PLAYER_TUNING.maxHp;
   maxHp = PLAYER_TUNING.maxHp;
 
@@ -640,6 +640,10 @@ export class Player extends Actor {
 
     const cx = this.cx;
     const by = this.y + this.h;
+    // The sprite is drawn at its own size, anchored at the feet — so art
+    // taller than the hitbox (head/hair above) just works.
+    const dw = img.width / TEXEL;
+    const dh = img.height / TEXEL;
 
     const q = (v: number) => Math.round(v * 4) / 4;
     if (this.fsm.is('dead')) {
@@ -648,7 +652,7 @@ export class Player extends Actor {
       g.translate(q(cx), q(by - 4));
       g.rotate(this.facing * (Math.PI / 2) * Math.min(1, this.deadT * 3));
       g.globalAlpha = Math.max(0, 1 - Math.max(0, this.deadT - 0.8));
-      g.drawImage(img, -6, -9, img.width / TEXEL, img.height / TEXEL);
+      g.drawImage(img, -dw / 2, -dh * 0.7, dw, dh);
       g.restore();
       g.globalAlpha = 1;
       return;
@@ -664,25 +668,25 @@ export class Player extends Actor {
     g.translate(q(cx + pose.ox), q(by + pose.oy));
     g.scale(sx, sy);
     if (pose.shear) g.transform(1, 0, pose.shear, 1, 0, 0);
-    g.drawImage(img, -6, -14, img.width / TEXEL, img.height / TEXEL);
+    g.drawImage(img, -dw / 2, -dh, dw, dh);
     // Gear rides the body transform so it leans/squashes with the knight.
     // During an attack the slash arc IS the weapon, so the held one hides.
     if (this.flashT <= 0) {
-      if (this.equipment.get('charm')) this.renderCharm(g);
-      if (!this.fsm.is('attack')) this.renderWeapon(g);
+      if (this.equipment.get('charm')) this.renderCharm(g, dh);
+      if (!this.fsm.is('attack')) this.renderWeapon(g, dw, dh);
     }
     g.restore();
 
-    if (this.fsm.is('attack')) this.renderSlash(g, cx, this.y + this.h * 0.55);
+    if (this.fsm.is('attack')) this.renderSlash(g, cx, by - dh * 0.45);
   }
 
   /** The equipped weapon, held at rest in the hand (body-local coords). */
-  private renderWeapon(g: CanvasRenderingContext2D): void {
+  private renderWeapon(g: CanvasRenderingContext2D, dw: number, dh: number): void {
     const w = this.weapon;
     if (!w.bladeLen) return; // bare hands
     const f = this.facing;
-    const hx = f * 3; // hand, in front of the body
-    const hy = -6;
+    const hx = f * Math.round(dw * 0.3); // hand, in front of the body
+    const hy = -Math.round(dh * 0.42);
     // Crossguard at the grip.
     g.fillStyle = w.hilt;
     g.fillRect(hx - 1, hy, 3, 1);
@@ -699,11 +703,12 @@ export class Player extends Actor {
   }
 
   /** A small charm glint on the chest when a charm is worn. */
-  private renderCharm(g: CanvasRenderingContext2D): void {
+  private renderCharm(g: CanvasRenderingContext2D, dh: number): void {
+    const cy = -Math.round(dh * 0.5);
     g.fillStyle = COLORS.gold;
-    g.fillRect(-1, -7, 2, 2);
+    g.fillRect(-1, cy, 2, 2);
     g.fillStyle = COLORS.white;
-    g.fillRect(0, -7, 1, 1);
+    g.fillRect(0, cy, 1, 1);
   }
 
   /** Sword arc: a sweeping stroke with a bright leading tip. */
