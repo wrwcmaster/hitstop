@@ -1,31 +1,40 @@
-import { sprite, type Palette } from '@engine/index';
+import { sprite, epx, type Palette, type SpriteFile } from '@engine/index';
 import { PAL } from '@game/content/palette';
 
 /**
- * Sprite editor for the engine's text-grid pixel art format.
- *
- * Paint on a zoomed grid using palette characters (seeded with the game's
- * shared palette, extensible with custom colors), manage animation frames,
- * watch a live preview, then export rows+palette ready to paste into a
- * content file (or feed to sprite()).
+ * Sprite editor for the engine's per-sprite JSON format
+ * (content/sprites/*.json): a palette plus named animations of 1x text
+ * grids. Paint on a zoomed grid, manage animations and their frames, watch
+ * every animation play at once (optionally EPX-upscaled to the game's 4x
+ * "hd" density), then export/import the exact file the game loads.
  */
 
 const CELL = 24;
 
 /* ---------------- state ---------------- */
 
-let palette: Palette = { ...PAL };
-let currentChar = 'S';
-let frames: string[][] = [emptyFrame(12, 14)];
+let file: SpriteFile = {
+  hd: true,
+  palette: { ...PAL },
+  anims: { idle: { fps: 8, frames: [emptyFrame(12, 14)] } },
+};
+let animName = 'idle';
 let frameIdx = 0;
+let currentChar = firstPaintChar();
 let painting = false;
 let erasing = false;
 
 function emptyFrame(w: number, h: number): string[] {
   return Array.from({ length: h }, () => '.'.repeat(w));
 }
+function firstPaintChar(): string {
+  const entry = Object.entries(file.palette ?? {}).find(([, c]) => c);
+  return entry ? entry[0] : 'S';
+}
 
-const cur = () => frames[frameIdx];
+const pal = (): Palette => file.palette ?? {};
+const anim = () => file.anims[animName];
+const cur = () => anim().frames[frameIdx];
 const W = () => cur()[0].length;
 const H = () => cur().length;
 
@@ -50,7 +59,7 @@ function flash(msg: string): void {
 function buildPalette(): void {
   const host = $('palette');
   host.innerHTML = '';
-  for (const [ch, color] of Object.entries(palette)) {
+  for (const [ch, color] of Object.entries(pal())) {
     const row = document.createElement('div');
     row.className = 'swatch';
     const chip = document.createElement('span');
@@ -72,10 +81,72 @@ function buildPalette(): void {
 $('btnAddColor').onclick = () => {
   const ch = ($('newChar') as HTMLInputElement).value || '?';
   const color = ($('newColor') as HTMLInputElement).value;
-  palette[ch] = color;
+  (file.palette ??= {})[ch] = color;
   currentChar = ch;
   buildPalette();
   redraw();
+};
+
+/* ---------------- animations ui ---------------- */
+
+function buildAnims(): void {
+  const host = $('anims');
+  host.innerHTML = '';
+  for (const name of Object.keys(file.anims)) {
+    const b = document.createElement('button');
+    b.textContent = name;
+    b.className = name === animName ? 'active' : '';
+    b.style.marginRight = '4px';
+    b.onclick = () => {
+      animName = name;
+      frameIdx = 0;
+      refreshUI();
+    };
+    host.appendChild(b);
+  }
+  ($('fps') as HTMLInputElement).value = String(anim().fps);
+}
+
+$('btnAddAnim').onclick = () => {
+  const name = prompt('animation name (e.g. idle, run, air):', '')?.trim();
+  if (!name) return;
+  if (file.anims[name]) {
+    flash('already exists');
+    return;
+  }
+  file.anims[name] = { fps: 8, frames: [emptyFrame(W(), H())] };
+  animName = name;
+  frameIdx = 0;
+  refreshUI();
+};
+$('btnRenameAnim').onclick = () => {
+  const name = prompt('rename animation:', animName)?.trim();
+  if (!name || name === animName) return;
+  if (file.anims[name]) {
+    flash('already exists');
+    return;
+  }
+  // Rebuild in order, swapping the key so button order is stable.
+  const next: SpriteFile['anims'] = {};
+  for (const [k, v] of Object.entries(file.anims)) next[k === animName ? name : k] = v;
+  file.anims = next;
+  animName = name;
+  refreshUI();
+};
+$('btnDelAnim').onclick = () => {
+  const names = Object.keys(file.anims);
+  if (names.length <= 1) {
+    flash('need at least one');
+    return;
+  }
+  delete file.anims[animName];
+  animName = Object.keys(file.anims)[0];
+  frameIdx = 0;
+  refreshUI();
+};
+($('fps') as HTMLInputElement).onchange = (e) => {
+  anim().fps = Number((e.target as HTMLInputElement).value) || 1;
+  syncIO();
 };
 
 /* ---------------- editing ---------------- */
@@ -96,8 +167,13 @@ grid.addEventListener('mousemove', (e) => {
   if (painting) paint(e);
 });
 window.addEventListener('mouseup', () => {
-  painting = false;
-  syncIO();
+  // Only re-serialize after an actual paint stroke — otherwise clicking a
+  // button (e.g. Import) would clobber whatever's in the textarea before
+  // its handler could read it.
+  if (painting) {
+    painting = false;
+    syncIO();
+  }
 });
 
 function paint(e: MouseEvent): void {
@@ -113,7 +189,7 @@ function paint(e: MouseEvent): void {
 function buildFrames(): void {
   const host = $('frames');
   host.innerHTML = '';
-  frames.forEach((_, i) => {
+  anim().frames.forEach((_, i) => {
     const b = document.createElement('button');
     b.textContent = String(i + 1);
     b.className = i === frameIdx ? 'active' : '';
@@ -124,37 +200,44 @@ function buildFrames(): void {
     };
     host.appendChild(b);
   });
+  $('frameOf').textContent = `${animName} · ${frameIdx + 1}/${anim().frames.length}`;
 }
 
 $('btnAddFrame').onclick = () => {
-  frames.push(emptyFrame(W(), H()));
-  frameIdx = frames.length - 1;
+  anim().frames.push(emptyFrame(W(), H()));
+  frameIdx = anim().frames.length - 1;
   buildFrames();
   redraw();
+  syncIO();
 };
 $('btnDupFrame').onclick = () => {
-  frames.splice(frameIdx + 1, 0, [...cur()]);
+  anim().frames.splice(frameIdx + 1, 0, [...cur()]);
   frameIdx++;
   buildFrames();
   redraw();
+  syncIO();
 };
 $('btnDelFrame').onclick = () => {
-  if (frames.length <= 1) return;
-  frames.splice(frameIdx, 1);
-  frameIdx = Math.min(frameIdx, frames.length - 1);
+  if (anim().frames.length <= 1) return;
+  anim().frames.splice(frameIdx, 1);
+  frameIdx = Math.min(frameIdx, anim().frames.length - 1);
   buildFrames();
   redraw();
+  syncIO();
 };
 
 $('btnResize').onclick = () => {
   const w = Number(($('w') as HTMLInputElement).value);
   const h = Number(($('h') as HTMLInputElement).value);
   if (!(w >= 1 && h >= 1 && w <= 64 && h <= 64)) return;
-  frames = frames.map((f) => {
-    const next: string[] = [];
-    for (let y = 0; y < h; y++) next.push((f[y] ?? '').slice(0, w).padEnd(w, '.'));
-    return next;
-  });
+  // Resize every frame of every animation so the sprite stays uniform.
+  for (const a of Object.values(file.anims)) {
+    a.frames = a.frames.map((f) => {
+      const next: string[] = [];
+      for (let y = 0; y < h; y++) next.push((f[y] ?? '').slice(0, w).padEnd(w, '.'));
+      return next;
+    });
+  }
   redraw();
   syncIO();
 };
@@ -165,13 +248,11 @@ function redraw(): void {
   grid.width = W() * CELL;
   grid.height = H() * CELL;
   gctx.imageSmoothingEnabled = false;
-  // Checkerboard for transparency.
   for (let y = 0; y < H(); y++) {
     for (let x = 0; x < W(); x++) {
       gctx.fillStyle = (x + y) % 2 ? '#141830' : '#0f1226';
       gctx.fillRect(x * CELL, y * CELL, CELL, CELL);
-      const ch = cur()[y][x];
-      const color = palette[ch];
+      const color = pal()[cur()[y][x]];
       if (color) {
         gctx.fillStyle = color;
         gctx.fillRect(x * CELL, y * CELL, CELL, CELL);
@@ -193,41 +274,54 @@ function redraw(): void {
   }
 }
 
-/** Animated preview at 1x, 2x, 4x. */
+/**
+ * Every animation, playing at once. Raw art is drawn at 4x; the "hd"
+ * toggle instead EPX-upscales twice (the game's 4x texel density) and
+ * draws at 1x — the same on-screen size, so you see the smoothing the
+ * game applies. The selected animation is highlighted.
+ */
 function renderPreview(): void {
-  const fps = Number(($('fps') as HTMLInputElement).value) || 8;
+  const hd = ($('hd') as HTMLInputElement).checked;
+  const p = pal();
   const t = performance.now() / 1000;
-  const idx = Math.floor(t * fps) % frames.length;
-  const img = sprite(frames[idx], palette);
+  const names = Object.keys(file.anims);
+
+  const rowHeights = names.map((n) => (file.anims[n].frames[0]?.length ?? 1) * 4 + 16);
+  let maxW = 40;
+  for (const n of names) maxW = Math.max(maxW, (file.anims[n].frames[0]?.[0]?.length ?? 1) * 4);
+  preview.width = maxW + 16;
+  preview.height = rowHeights.reduce((a, b) => a + b, 0) + 8;
+
   pctx.imageSmoothingEnabled = false;
-  pctx.clearRect(0, 0, preview.width, preview.height);
-  let x = 8;
-  for (const scale of [1, 2, 4]) {
+  pctx.fillStyle = '#0a0c1c';
+  pctx.fillRect(0, 0, preview.width, preview.height);
+
+  let y = 6;
+  names.forEach((name, i) => {
+    const a = file.anims[name];
+    const idx = a.frames.length ? Math.floor(t * (a.fps || 1)) % a.frames.length : 0;
+    const rows = a.frames[idx] ?? [];
+    pctx.fillStyle = name === animName ? '#ffcd75' : '#94b0c2';
+    pctx.font = '11px monospace';
+    pctx.fillText(`${name}  ${a.fps}fps`, 6, y + 9);
+    const img = sprite(hd ? epx(epx(rows)) : rows, p);
+    const scale = hd ? 1 : 4;
     pctx.save();
-    pctx.translate(x, 8);
+    pctx.translate(8, y + 14);
     pctx.scale(scale, scale);
     pctx.drawImage(img, 0, 0);
     pctx.restore();
-    x += img.width * scale + 10;
-  }
+    y += rowHeights[i];
+  });
   requestAnimationFrame(renderPreview);
 }
 
 /* ---------------- io ---------------- */
 
-interface SpriteFile {
-  palette: Palette;
-  frames: string[][];
-  fps: number;
-}
-
 function syncIO(): void {
-  const data: SpriteFile = {
-    palette,
-    frames,
-    fps: Number(($('fps') as HTMLInputElement).value) || 8,
-  };
-  ($('io') as HTMLTextAreaElement).value = JSON.stringify(data, null, 1);
+  ($('io') as HTMLTextAreaElement).value = JSON.stringify(file, null, 2);
+  ($('w') as HTMLInputElement).value = String(W());
+  ($('h') as HTMLInputElement).value = String(H());
 }
 
 $('btnExport').onclick = () => {
@@ -238,27 +332,45 @@ $('btnExport').onclick = () => {
 
 $('btnImport').onclick = () => {
   try {
-    const data = JSON.parse(($('io') as HTMLTextAreaElement).value) as SpriteFile;
-    if (!Array.isArray(data.frames) || !data.frames.length) throw new Error('missing frames');
-    palette = data.palette ?? palette;
-    frames = data.frames;
+    const raw = JSON.parse(($('io') as HTMLTextAreaElement).value);
+    file = normalize(raw);
+    animName = Object.keys(file.anims)[0];
     frameIdx = 0;
-    if (data.fps) ($('fps') as HTMLInputElement).value = String(data.fps);
-    ($('w') as HTMLInputElement).value = String(W());
-    ($('h') as HTMLInputElement).value = String(H());
-    buildPalette();
-    buildFrames();
-    redraw();
+    currentChar = firstPaintChar();
+    refreshUI();
     flash('imported');
   } catch (err) {
     flash(`import failed: ${(err as Error).message}`);
   }
 };
 
+/** Accept the SpriteFile format, or the older { palette, frames, fps }. */
+function normalize(raw: unknown): SpriteFile {
+  const r = raw as Record<string, unknown>;
+  if (r && typeof r === 'object' && r.anims) {
+    const f = r as unknown as SpriteFile;
+    if (!f.anims || !Object.keys(f.anims).length) throw new Error('no animations');
+    return { hd: f.hd ?? true, palette: f.palette ?? { ...PAL }, anims: f.anims };
+  }
+  if (r && Array.isArray(r.frames)) {
+    return {
+      hd: true,
+      palette: (r.palette as Palette) ?? { ...PAL },
+      anims: { idle: { fps: Number(r.fps) || 8, frames: r.frames as string[][] } },
+    };
+  }
+  throw new Error('unrecognized sprite json');
+}
+
 /* ---------------- boot ---------------- */
 
-buildPalette();
-buildFrames();
-redraw();
-syncIO();
+function refreshUI(): void {
+  buildPalette();
+  buildAnims();
+  buildFrames();
+  redraw();
+  syncIO();
+}
+
+refreshUI();
 renderPreview();

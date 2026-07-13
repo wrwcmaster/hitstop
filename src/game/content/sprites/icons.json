@@ -1,0 +1,97 @@
+{
+  "hd": true,
+  "anims": {
+    "sword": {
+      "fps": 1,
+      "frames": [
+        [
+          "......W.",
+          ".....WS.",
+          "....WS..",
+          "...WS...",
+          "O.WS....",
+          ".OS.....",
+          ".YO.....",
+          "Y..O...."
+        ]
+      ]
+    },
+    "greatsword": {
+      "fps": 1,
+      "frames": [
+        [
+          "......WW",
+          ".....WWS",
+          "....WWS.",
+          "...WWS..",
+          "O.WWS...",
+          ".OWS....",
+          ".YO.....",
+          "YY.OO..."
+        ]
+      ]
+    },
+    "potion": {
+      "fps": 1,
+      "frames": [
+        [
+          "..OO..",
+          "..OO..",
+          ".ORRO.",
+          "ORRRRO",
+          "ORWRRO",
+          ".OOOO."
+        ]
+      ]
+    },
+    "orb": {
+      "fps": 1,
+      "frames": [
+        [
+          ".BBB.",
+          "BBWBB",
+          "BWWBB",
+          "BBBBB",
+          ".BBB."
+        ]
+      ]
+    },
+    "charm": {
+      "fps": 1,
+      "frames": [
+        [
+          ".YYY.",
+          "Y.O.Y",
+          "Y.G.Y",
+          "Y...Y",
+          ".YYY."
+        ]
+      ]
+    },
+    "coin": {
+      "fps": 1,
+      "frames": [
+        [
+          ".YYY.",
+          "YYWYY",
+          "YWYYY",
+          "YYYYY",
+          ".YYY."
+        ]
+      ]
+    },
+    "haste": {
+      "fps": 1,
+      "frames": [
+        [
+          "..OO..",
+          "..OO..",
+          ".OYYO.",
+          "OYYWYO",
+          "OYWYYO",
+          ".OOOO."
+        ]
+      ]
+    }
+  }
+}

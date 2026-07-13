@@ -20,6 +20,12 @@ export { GamepadInput, type GamepadMapping, type GamepadAxisMapping } from './in
 export { createPixelCanvas, offscreen, type PixelCanvas } from './gfx/canvas';
 export { sprite, epx, flipped, whiteOf, tintOf, type Palette, type SpriteData } from './gfx/sprite';
 export { withFacing, frameAt, type Anim, type AnimSet, type FacingAnimSet } from './gfx/animation';
+export {
+  loadSprite,
+  type SpriteFile,
+  type SpriteAnimData,
+  type LoadedSprite,
+} from './gfx/spritefile';
 export { drawText, textWidth, type TextAlign } from './gfx/font';
 export { Camera } from './gfx/camera';
 

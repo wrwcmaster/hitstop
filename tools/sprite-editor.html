@@ -55,24 +55,29 @@
         <input type="text" id="newChar" maxlength="1" placeholder="ch" style="width:34px">
         <button id="btnAddColor">add</button>
       </div>
+      <h2>animations</h2>
+      <div id="anims"></div>
+      <button id="btnAddAnim">+ anim</button>
+      <button id="btnRenameAnim">rename</button>
+      <button id="btnDelAnim">del</button>
+      <label>fps <input id="fps" type="number" min="1" max="30" value="8"></label>
       <h2>size</h2>
       <label>w <input id="w" type="number" min="1" max="64" value="12">
              h <input id="h" type="number" min="1" max="64" value="14"></label>
       <button id="btnResize">resize</button>
-      <h2>frames</h2>
+      <h2>frames <span id="frameOf" class="hint"></span></h2>
       <div id="frames"></div>
       <button id="btnAddFrame">+ frame</button>
       <button id="btnDupFrame">dup</button>
       <button id="btnDelFrame">del</button>
-      <label>fps <input id="fps" type="number" min="1" max="30" value="8"></label>
-      <h2>preview</h2>
-      <canvas id="preview" width="160" height="80"></canvas>
-      <h2>text format</h2>
+      <h2>preview <label style="display:inline"><input type="checkbox" id="hd" checked> hd</label></h2>
+      <canvas id="preview" width="200" height="80"></canvas>
+      <h2>sprite json</h2>
       <textarea id="io" spellcheck="false"></textarea>
       <p class="hint">
         paint: left-drag &middot; erase: right-drag<br>
-        export produces rows + palette for engine's sprite() —
-        paste straight into a content file
+        export/import the per-sprite file the game loads
+        (content/sprites/*.json) &mdash; every animation previews above
       </p>
     </div>
     <div id="center"><canvas id="grid"></canvas></div>

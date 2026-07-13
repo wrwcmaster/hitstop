@@ -1,0 +1,100 @@
+{
+  "hd": true,
+  "anims": {
+    "idle": {
+      "fps": 2,
+      "frames": [
+        [
+          "....PP......",
+          "...OPPO.....",
+          "..OSSSSO....",
+          "..OSWWSO....",
+          "..OSSSSO....",
+          "...OOOO.....",
+          "..ODSSDO....",
+          ".OYDSSDYO...",
+          ".O.DSSD.O...",
+          "...DSSD.....",
+          "...ODDO.....",
+          "...OBBO.....",
+          "...OB.BO....",
+          "...DD.DD...."
+        ],
+        [
+          "....PP......",
+          "...OPPO.....",
+          "..OSSSSO....",
+          "..OSWWSO....",
+          "..OSSSSO....",
+          "...OOOO.....",
+          "..ODSSDO....",
+          ".OYDSSDYO...",
+          ".O.DSSD.O...",
+          "...DSSD.....",
+          "...ODDO.....",
+          "...OBBO.....",
+          "...OBBO.....",
+          "...DDDD...."
+        ]
+      ]
+    },
+    "run": {
+      "fps": 10,
+      "frames": [
+        [
+          "....PP......",
+          "...OPPO.....",
+          "..OSSSSO....",
+          "..OSWWSO....",
+          "..OSSSSO....",
+          "...OOOO.....",
+          "..ODSSDO....",
+          ".OYDSSDYO...",
+          ".O.DSSD.O...",
+          "...DSSD.....",
+          "...ODDO.....",
+          "..OB..BO....",
+          ".OB....BO...",
+          ".DD....DD..."
+        ],
+        [
+          "....PP......",
+          "...OPPO.....",
+          "..OSSSSO....",
+          "..OSWWSO....",
+          "..OSSSSO....",
+          "...OOOO.....",
+          "..ODSSDO....",
+          ".OYDSSDYO...",
+          ".O.DSSD.O...",
+          "...DSSD.....",
+          "...ODDO.....",
+          "...OBBO.....",
+          "...OBBO.....",
+          "...DDDD...."
+        ]
+      ]
+    },
+    "air": {
+      "fps": 1,
+      "frames": [
+        [
+          "....PP......",
+          "...OPPO.....",
+          "..OSSSSO....",
+          "..OSWWSO....",
+          "..OSSSSO....",
+          "...OOOO.....",
+          "..ODSSDO....",
+          ".OYDSSDYO...",
+          ".O.DSSD.O...",
+          "...DSSD.....",
+          "...ODDO.....",
+          "..OB..BO....",
+          ".OB....BO...",
+          ".DD....DD..."
+        ]
+      ]
+    }
+  }
+}
