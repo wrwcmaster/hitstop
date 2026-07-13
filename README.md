@@ -6,7 +6,7 @@ Frame-freeze hitstop, trauma-based screenshake, directional camera kicks, hit-fl
 
 ## Play online
 
-**▶ [Play in your browser](https://wrwcmaster.github.io/hitstop/)** — the game is auto-deployed to GitHub Pages from `main` on every push (see `.github/workflows/deploy-pages.yml`). The design tools ship too: [level editor](https://wrwcmaster.github.io/hitstop/tools/level-editor.html) · [sprite editor](https://wrwcmaster.github.io/hitstop/tools/sprite-editor.html).
+**▶ [Play in your browser](https://wrwcmaster.github.io/hitstop/)** — the game is auto-deployed to GitHub Pages from `main` on every push (see `.github/workflows/deploy-pages.yml`). The design tools ship too: [level editor](https://wrwcmaster.github.io/hitstop/tools/level-editor.html) · [sprite editor](https://wrwcmaster.github.io/hitstop/tools/sprite-editor.html) · [sheet slicer](https://wrwcmaster.github.io/hitstop/tools/sheet-slicer.html).
 
 ## Quick start
 
@@ -15,6 +15,7 @@ npm install
 npm run dev          # game:          http://localhost:5173/
                      # level editor:  http://localhost:5173/tools/level-editor.html
                      # sprite editor: http://localhost:5173/tools/sprite-editor.html
+                     # sheet slicer:  http://localhost:5173/tools/sheet-slicer.html
 npm run build        # typecheck + production build to dist/
 npm run build:single # compile everything into hitstop.html (one file, no server)
 ```
@@ -50,5 +51,5 @@ A complete new enemy is ~20 lines of data + behavior (see `src/game/actors/enemi
 - [docs/architecture.md](docs/architecture.md) — how the engine is put together and why
 - [docs/game-feel.md](docs/game-feel.md) — the feel system: what each primitive does and how to tune it
 - [docs/adding-content.md](docs/adding-content.md) — cookbook: new enemies, tiles, rooms, sounds, skills
-- [docs/design-tools.md](docs/design-tools.md) — the level editor and sprite editor: controls, formats, and shipping your work
+- [docs/design-tools.md](docs/design-tools.md) — the level editor, sprite editor, and PNG sheet slicer: controls, formats, and shipping your work
 - [docs/game-dev-primer.md](docs/game-dev-primer.md) — game-dev concepts for software engineers, mapped to this codebase

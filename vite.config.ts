@@ -25,6 +25,7 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
         'level-editor': resolve(__dirname, 'tools/level-editor.html'),
         'sprite-editor': resolve(__dirname, 'tools/sprite-editor.html'),
+        'sheet-slicer': resolve(__dirname, 'tools/sheet-slicer.html'),
       },
     },
   },

@@ -26,6 +26,13 @@ export {
   type SpriteAnimData,
   type LoadedSprite,
 } from './gfx/spritefile';
+export {
+  loadSheet,
+  loadImage,
+  type SheetDescriptor,
+  type SheetAnimData,
+  type SheetRect,
+} from './gfx/spritesheet';
 export { drawText, textWidth, type TextAlign } from './gfx/font';
 export { Camera } from './gfx/camera';
 

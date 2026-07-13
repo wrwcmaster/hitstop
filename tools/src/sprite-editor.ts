@@ -330,6 +330,41 @@ $('btnExport').onclick = () => {
   flash('copied to clipboard');
 };
 
+// Load a .json sprite file straight from disk.
+$('btnLoad').onclick = () => ($('fileInput') as HTMLInputElement).click();
+($('fileInput') as HTMLInputElement).onchange = (e) => {
+  const input = e.target as HTMLInputElement;
+  const f = input.files?.[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      file = normalize(JSON.parse(String(reader.result)));
+      animName = Object.keys(file.anims)[0];
+      frameIdx = 0;
+      currentChar = firstPaintChar();
+      refreshUI();
+      flash(`loaded ${f.name}`);
+    } catch (err) {
+      flash(`load failed: ${(err as Error).message}`);
+    }
+  };
+  reader.readAsText(f);
+  input.value = ''; // allow re-loading the same file
+};
+
+// Save the current sprite as a downloadable .json.
+$('btnSave').onclick = () => {
+  syncIO();
+  const blob = new Blob([($('io') as HTMLTextAreaElement).value], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${animName || 'sprite'}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  flash('saved');
+};
+
 $('btnImport').onclick = () => {
   try {
     const raw = JSON.parse(($('io') as HTMLTextAreaElement).value);
