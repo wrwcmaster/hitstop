@@ -58,7 +58,11 @@
                spacing <input id="spacing" type="number" min="0" value="0"></label>
       </div>
       <div id="rectControls" style="display:none">
-        <p class="hint">drag on the sheet to add a frame &middot; right-click a frame to remove it</p>
+        <label>new frame w <input id="rw" type="number" min="1" value="32">
+               h <input id="rh" type="number" min="1" value="48"></label>
+        <p class="hint">tap a blank spot to drop a frame that size, or drag any
+          rectangle &middot; right-click a frame to remove it &middot; edit x/y/w/h below</p>
+        <button id="btnAddRect" style="margin-bottom:6px">+ frame</button>
         <div id="rectList"></div>
       </div>
       <label>texel <input id="texel" type="number" min="1" value="4">
