@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
+import { readFileSync } from 'fs';
 import { viteSingleFile } from 'vite-plugin-singlefile';
+
+const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8'));
 
 /**
  * Single-file build: the whole game compiled into one self-contained
@@ -15,6 +18,9 @@ export default defineConfig({
       '@engine': resolve(__dirname, 'src/engine'),
       '@game': resolve(__dirname, 'src/game'),
     },
+  },
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
   },
   plugins: [viteSingleFile()],
   build: {

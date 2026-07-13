@@ -126,6 +126,9 @@ export class Player extends Actor {
   private castDur = 0;
   deadT = 0;
 
+  /** Debug god mode (cheat): no damage, always topped up. */
+  godMode = false;
+
   /** Swallowed-by-a-Devourer state. */
   swallowedBy: Monster | null = null;
   escapeN = 0;
@@ -458,6 +461,12 @@ export class Player extends Actor {
 
   update(dt: number): void {
     const T = PLAYER_TUNING;
+    // God mode (cheat): keep i-frames live and resources topped up.
+    if (this.godMode) {
+      this.invulnT = Math.max(this.invulnT, 0.5);
+      this.hp = this.maxHp;
+      this.mp = this.maxMp;
+    }
     this.tickTimers(dt);
     this.jumpBuf.update(dt);
     this.atkBuf.update(dt);
@@ -620,8 +629,8 @@ export class Player extends Actor {
   render(g: CanvasRenderingContext2D): void {
     // Inside a Devourer: the beast draws the bulge, not us.
     if (this.fsm.is('swallowed')) return;
-    // I-frame blink.
-    if (this.invulnT > 0 && !this.fsm.is('dead') && Math.floor(this.invulnT * 20) % 2) return;
+    // I-frame blink (god mode holds i-frames but shouldn't strobe).
+    if (this.invulnT > 0 && !this.godMode && !this.fsm.is('dead') && Math.floor(this.invulnT * 20) % 2) return;
 
     let anim = 'air';
     if (this.onGround) anim = Math.abs(this.vx) > 8 ? 'run' : 'idle';
@@ -656,9 +665,45 @@ export class Player extends Actor {
     g.scale(sx, sy);
     if (pose.shear) g.transform(1, 0, pose.shear, 1, 0, 0);
     g.drawImage(img, -6, -14, img.width / TEXEL, img.height / TEXEL);
+    // Gear rides the body transform so it leans/squashes with the knight.
+    // During an attack the slash arc IS the weapon, so the held one hides.
+    if (this.flashT <= 0) {
+      if (this.equipment.get('charm')) this.renderCharm(g);
+      if (!this.fsm.is('attack')) this.renderWeapon(g);
+    }
     g.restore();
 
     if (this.fsm.is('attack')) this.renderSlash(g, cx, this.y + this.h * 0.55);
+  }
+
+  /** The equipped weapon, held at rest in the hand (body-local coords). */
+  private renderWeapon(g: CanvasRenderingContext2D): void {
+    const w = this.weapon;
+    if (!w.bladeLen) return; // bare hands
+    const f = this.facing;
+    const hx = f * 3; // hand, in front of the body
+    const hy = -6;
+    // Crossguard at the grip.
+    g.fillStyle = w.hilt;
+    g.fillRect(hx - 1, hy, 3, 1);
+    // Blade steps forward and up from the hand — a resting sword.
+    g.fillStyle = w.blade;
+    for (let i = 1; i <= w.bladeLen; i++) {
+      const bx = hx + f * i - (f < 0 ? w.bladeW - 1 : 0);
+      const by = hy - Math.round(i * 0.6);
+      g.fillRect(bx, by, w.bladeW, 1);
+    }
+    // Bright tip.
+    g.fillStyle = COLORS.white;
+    g.fillRect(hx + f * w.bladeLen - (f < 0 ? 1 : 0), hy - Math.round(w.bladeLen * 0.6), 1, 1);
+  }
+
+  /** A small charm glint on the chest when a charm is worn. */
+  private renderCharm(g: CanvasRenderingContext2D): void {
+    g.fillStyle = COLORS.gold;
+    g.fillRect(-1, -7, 2, 2);
+    g.fillStyle = COLORS.white;
+    g.fillRect(0, -7, 1, 1);
   }
 
   /** Sword arc: a sweeping stroke with a bright leading tip. */

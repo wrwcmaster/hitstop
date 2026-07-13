@@ -17,7 +17,7 @@ import {
   rand,
   clamp,
 } from '@engine/index';
-import type { ActionGame, Action } from '../defs';
+import { VERSION, type ActionGame, type Action } from '../defs';
 import { Player } from '../actors/player';
 import { Monster, monsters } from '../actors/monster';
 import { Npc, npcs } from '../actors/npc';
@@ -116,6 +116,9 @@ export class PlayScene implements Scene {
     this.debug = new DebugOverlay(game as never);
     this.setRoom(this.startRoomId());
     this.best = saveStore.load()?.best ?? 0;
+
+    // Debug cheats: only live while the debug overlay (backquote) is on.
+    window.addEventListener('keydown', (e) => this.onCheatKey(e));
 
     this.titleMenu = new Menu<Action>(
       [
@@ -544,6 +547,52 @@ export class PlayScene implements Scene {
       ctx.globalAlpha = 1;
     }
     this.debug.renderScreen(ctx);
+    if (this.debug.enabled && this.phase === 'play') this.renderCheatLegend(ctx);
+  }
+
+  /* ---------------- debug cheats (only when the overlay is on) ---------------- */
+
+  private onCheatKey(e: KeyboardEvent): void {
+    if (!this.debug.enabled || this.phase !== 'play') return;
+    const p = this.player;
+    if (!p || p.hp <= 0) return;
+    const feel = this.game.feel;
+    const say = (t: string, c: string = COLORS.gold) => feel.text(p.cx, p.y - 18, t, c);
+    switch (e.code) {
+      case 'Digit1': p.gold += 100; say('GOLD +100'); break;
+      case 'Digit2': p.gainXp(100); break; // gainXp shows its own floater
+      case 'Digit3': p.progression.skillPoints += 3; say('SKILL +3', COLORS.blue); break;
+      case 'Digit4': p.hp = p.maxHp; p.mp = p.maxMp; feel.flash(0.12, COLORS.white); say('FULL HEAL', COLORS.red); break;
+      case 'Digit5': p.godMode = !p.godMode; say(p.godMode ? 'GOD ON' : 'GOD OFF'); break;
+      case 'Digit6':
+        for (const id of ['great-sword', 'iron-charm', 'potion', 'potion', 'haste-draught']) p.inventory.add(id);
+        say('GEAR GRANTED');
+        break;
+      case 'Digit7':
+        for (const en of this.game.world.actors('enemy')) {
+          if (en instanceof Monster) {
+            this.game.combat.hit(en, {
+              damage: 9999, targets: 'enemy', attacker: p, strength: 0.6, colors: [COLORS.white],
+            });
+          }
+        }
+        say('KILL ALL', COLORS.red);
+        break;
+      case 'Digit8':
+        this.game.world.spawn(new Monster('devourer', this.game, this.tilemap, p.cx + 34, p.cy - 24));
+        say('DEVOURER', COLORS.purple);
+        break;
+      default:
+        return;
+    }
+    this.game.sfx.play('unlock');
+  }
+
+  private renderCheatLegend(g: CanvasRenderingContext2D): void {
+    const x = this.game.width - 4;
+    drawText(g, 'CHEATS', x, 22, COLORS.gold, 1, 'right');
+    const items = ['1 gold', '2 xp', '3 skill', '4 heal', '5 god', '6 gear', '7 kill', '8 devourer'];
+    items.forEach((t, i) => drawText(g, t, x, 32 + i * 8, '#38b764', 1, 'right'));
   }
 
   /* ---------------- drawing ---------------- */
@@ -688,6 +737,8 @@ export class PlayScene implements Scene {
     drawText(g, 'Move: Arrows / WASD - Jump: Space', gm.width / 2, 208, COLORS.steelDark, 1, 'center');
     drawText(g, 'Attack: Z - Dash: X - Skill: C - Menu: Esc', gm.width / 2, 220, COLORS.steelDark, 1, 'center');
     drawText(g, 'Z or Enter to select', gm.width / 2, 238, COLORS.gold, 1, 'center');
+    // Small build version, tucked in the corner.
+    drawText(g, `v${VERSION}`, gm.width - 6, gm.height - 10, COLORS.steelDark, 1, 'right');
   }
 
   private renderOver(g: CanvasRenderingContext2D): void {
