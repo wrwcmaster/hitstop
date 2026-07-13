@@ -1,0 +1,28 @@
+{
+  "hd": true,
+  "anims": {
+    "idle": {
+      "fps": 3,
+      "frames": [
+        [
+          "...GGGGGG...",
+          "..GGGGGGGG..",
+          ".GGWGGGGWGG.",
+          ".GGOGGGGOGG.",
+          "GGGGGGGGGGGG",
+          "gGGGGGGGGGGg",
+          ".gggggggggg."
+        ],
+        [
+          "............",
+          "..GGGGGGGG..",
+          ".GGWGGGGWGG.",
+          "GGGOGGGGOGGG",
+          "GGGGGGGGGGGG",
+          "gGgggggggGgg",
+          ".gggggggggg."
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "hd": true,
+  "anims": {
+    "heart": {
+      "fps": 1,
+      "frames": [
+        [
+          ".RR.RR.",
+          "RWRRRRR",
+          "RRRRRRR",
+          ".RRRRR.",
+          "..RRR..",
+          "...R..."
+        ]
+      ]
+    },
+    "heartEmpty": {
+      "fps": 1,
+      "frames": [
+        [
+          ".EE.EE.",
+          "EEEEEEE",
+          "EEEEEEE",
+          ".EEEEE.",
+          "..EEE..",
+          "...E..."
+        ]
+      ]
+    },
+    "manaPip": {
+      "fps": 1,
+      "frames": [
+        [
+          "..B..",
+          ".BBB.",
+          "BBWBB",
+          ".BBB.",
+          "..B.."
+        ]
+      ]
+    },
+    "manaPipEmpty": {
+      "fps": 1,
+      "frames": [
+        [
+          "..E..",
+          ".EEE.",
+          "EEEEE",
+          ".EEE.",
+          "..E.."
+        ]
+      ]
+    }
+  }
+}

@@ -1,12 +1,18 @@
-import { sprite, epx, withFacing, type AnimSet } from '@engine/index';
+import { loadSprite, withFacing, type SpriteFile } from '@engine/index';
 import { PAL } from './palette';
+import knightJson from './sprites/knight.json';
+import slimeJson from './sprites/slime.json';
+import batJson from './sprites/bat.json';
+import merchantJson from './sprites/merchant.json';
+import iconsJson from './sprites/icons.json';
+import hudJson from './sprites/hud.json';
 
 /**
- * All pixel art, authored as 1x text grids (see docs/adding-content.md,
- * or paint in tools/sprite-editor.html), then EPX-upscaled TWICE to 4x
- * texel density — iterated Scale2x rounds silhouettes progressively —
- * and blitted at quarter size onto the zoomed canvas: same on-screen
- * size, 4x the detail.
+ * Pixel art lives in per-sprite JSON files under `sprites/`, authored and
+ * previewed in tools/sprite-editor.html and loaded here. Each file is a
+ * palette + named animations of 1x text grids; `loadSprite` EPX-upscales
+ * them TWICE to 4x texel density (iterated Scale2x) and bakes each frame.
+ * This module just wires the loaded sprites to the names the game uses.
  */
 export const TEXEL = 4;
 
@@ -17,218 +23,43 @@ export function blit(g: CanvasRenderingContext2D, img: HTMLCanvasElement, x: num
   g.drawImage(img, q(x), q(y), img.width / TEXEL, img.height / TEXEL);
 }
 
-const hd = (rows: string[]) => sprite(epx(epx(rows)), PAL);
+const load = (file: unknown) => loadSprite(file as SpriteFile, PAL);
 
-const KNIGHT_IDLE = hd([
-  '....PP......',
-  '...OPPO.....',
-  '..OSSSSO....',
-  '..OSWWSO....',
-  '..OSSSSO....',
-  '...OOOO.....',
-  '..ODSSDO....',
-  '.OYDSSDYO...',
-  '.O.DSSD.O...',
-  '...DSSD.....',
-  '...ODDO.....',
-  '...OBBO.....',
-  '...OB.BO....',
-  '...DD.DD....',
-]);
+/* ---------------- knight ---------------- */
 
-const KNIGHT_RUN1 = hd([
-  '....PP......',
-  '...OPPO.....',
-  '..OSSSSO....',
-  '..OSWWSO....',
-  '..OSSSSO....',
-  '...OOOO.....',
-  '..ODSSDO....',
-  '.OYDSSDYO...',
-  '.O.DSSD.O...',
-  '...DSSD.....',
-  '...ODDO.....',
-  '..OB..BO....',
-  '.OB....BO...',
-  '.DD....DD...',
-]);
+const knight = load(knightJson);
+export const KNIGHT_ANIMS = withFacing(knight.animSet());
+export const KNIGHT_IDLE_SPRITE = knight.frame('idle', 0);
 
-const KNIGHT_RUN2 = hd([
-  '....PP......',
-  '...OPPO.....',
-  '..OSSSSO....',
-  '..OSWWSO....',
-  '..OSSSSO....',
-  '...OOOO.....',
-  '..ODSSDO....',
-  '.OYDSSDYO...',
-  '.O.DSSD.O...',
-  '...DSSD.....',
-  '...ODDO.....',
-  '...OBBO.....',
-  '...OBBO.....',
-  '...DDDD....',
-]);
+/* ---------------- enemies ---------------- */
 
-export const KNIGHT_ANIMS = withFacing({
-  idle: { frames: [KNIGHT_IDLE, KNIGHT_RUN2], fps: 2 },
-  run: { frames: [KNIGHT_RUN1, KNIGHT_RUN2], fps: 10 },
-  air: { frames: [KNIGHT_RUN1], fps: 1 },
-} satisfies AnimSet);
+const slime = load(slimeJson);
+export const SLIME1 = slime.frame('idle', 0);
+export const SLIME2 = slime.frame('idle', 1);
 
-export const KNIGHT_IDLE_SPRITE = KNIGHT_IDLE;
+const bat = load(batJson);
+export const BAT1 = bat.frame('fly', 0);
+export const BAT2 = bat.frame('fly', 1);
 
-export const SLIME1 = hd([
-  '...GGGGGG...',
-  '..GGGGGGGG..',
-  '.GGWGGGGWGG.',
-  '.GGOGGGGOGG.',
-  'GGGGGGGGGGGG',
-  'gGGGGGGGGGGg',
-  '.gggggggggg.',
-]);
+/* ---------------- HUD ---------------- */
 
-export const SLIME2 = hd([
-  '............',
-  '..GGGGGGGG..',
-  '.GGWGGGGWGG.',
-  'GGGOGGGGOGGG',
-  'GGGGGGGGGGGG',
-  'gGgggggggGgg',
-  '.gggggggggg.',
-]);
-
-export const BAT1 = hd([
-  'V..........V',
-  'VV...VV...VV',
-  '.VVVvVVvVVV.',
-  '..VvWVVWvV..',
-  '...VVVVVV...',
-  '....V..V....',
-]);
-
-export const BAT2 = hd([
-  '............',
-  '....vVVv....',
-  '.VVVvVVvVVV.',
-  'VVVvWVVWvVVV',
-  'V..VVVVVV..V',
-  '....V..V....',
-]);
-
-export const HEART = hd([
-  '.RR.RR.',
-  'RWRRRRR',
-  'RRRRRRR',
-  '.RRRRR.',
-  '..RRR..',
-  '...R...',
-]);
-
-export const HEART_EMPTY = hd([
-  '.EE.EE.',
-  'EEEEEEE',
-  'EEEEEEE',
-  '.EEEEE.',
-  '..EEE..',
-  '...E...',
-]);
-
-export const MANA_PIP = hd([
-  '..B..',
-  '.BBB.',
-  'BBWBB',
-  '.BBB.',
-  '..B..',
-]);
-
-export const MANA_PIP_EMPTY = hd([
-  '..E..',
-  '.EEE.',
-  'EEEEE',
-  '.EEE.',
-  '..E..',
-]);
+const hud = load(hudJson);
+export const HEART = hud.frame('heart');
+export const HEART_EMPTY = hud.frame('heartEmpty');
+export const MANA_PIP = hud.frame('manaPip');
+export const MANA_PIP_EMPTY = hud.frame('manaPipEmpty');
 
 /* ---------------- item icons ---------------- */
 
-export const ICON_SWORD = hd([
-  '......W.',
-  '.....WS.',
-  '....WS..',
-  '...WS...',
-  'O.WS....',
-  '.OS.....',
-  '.YO.....',
-  'Y..O....',
-]);
-
-export const ICON_GREATSWORD = hd([
-  '......WW',
-  '.....WWS',
-  '....WWS.',
-  '...WWS..',
-  'O.WWS...',
-  '.OWS....',
-  '.YO.....',
-  'YY.OO...',
-]);
-
-export const ICON_POTION = hd([
-  '..OO..',
-  '..OO..',
-  '.ORRO.',
-  'ORRRRO',
-  'ORWRRO',
-  '.OOOO.',
-]);
-
-export const ICON_ORB = hd([
-  '.BBB.',
-  'BBWBB',
-  'BWWBB',
-  'BBBBB',
-  '.BBB.',
-]);
-
-export const ICON_CHARM = hd([
-  '.YYY.',
-  'Y.O.Y',
-  'Y.G.Y',
-  'Y...Y',
-  '.YYY.',
-]);
-
-export const ICON_COIN = hd([
-  '.YYY.',
-  'YYWYY',
-  'YWYYY',
-  'YYYYY',
-  '.YYY.',
-]);
-
-export const ICON_HASTE = hd([
-  '..OO..',
-  '..OO..',
-  '.OYYO.',
-  'OYYWYO',
-  'OYWYYO',
-  '.OOOO.',
-]);
+const icons = load(iconsJson);
+export const ICON_SWORD = icons.frame('sword');
+export const ICON_GREATSWORD = icons.frame('greatsword');
+export const ICON_POTION = icons.frame('potion');
+export const ICON_ORB = icons.frame('orb');
+export const ICON_CHARM = icons.frame('charm');
+export const ICON_COIN = icons.frame('coin');
+export const ICON_HASTE = icons.frame('haste');
 
 /* ---------------- NPCs ---------------- */
 
-export const MERCHANT = hd([
-  '...VVVV....',
-  '..VVVVVV...',
-  '..VVvvVV...',
-  '..Vv..vV...',
-  '..V.WW.V...',
-  '..VVVVVV...',
-  '.VVDYYDVV..',
-  '.VV.YY.VV..',
-  'OV..YY..VO.',
-  '.V.DDDD.V..',
-  '.VVVVVVVV..',
-  '..DD..DD...',
-]);
+export const MERCHANT = load(merchantJson).frame('idle');

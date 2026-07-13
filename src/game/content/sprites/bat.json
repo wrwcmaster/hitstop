@@ -1,0 +1,26 @@
+{
+  "hd": true,
+  "anims": {
+    "fly": {
+      "fps": 6,
+      "frames": [
+        [
+          "V..........V",
+          "VV...VV...VV",
+          ".VVVvVVvVVV.",
+          "..VvWVVWvV..",
+          "...VVVVVV...",
+          "....V..V...."
+        ],
+        [
+          "............",
+          "....vVVv....",
+          ".VVVvVVvVVV.",
+          "VVVvWVVWvVVV",
+          "V..VVVVVV..V",
+          "....V..V...."
+        ]
+      ]
+    }
+  }
+}
