@@ -101,8 +101,9 @@ export type ActionGame = Game<Action, GameEvents>;
 
 export const VIEW_W = 480;
 export const VIEW_H = 270;
-/** Device pixels per logical pixel: 960×540 backing store, 2× art density. */
-export const ZOOM = 2;
+/** Device pixels per logical pixel: 1920×1080 backing store — native
+ * 1080p, CSS-scaled 1:1 on full-HD screens and 2:1 on 4K. */
+export const ZOOM = 4;
 /**
  * World zoom: the camera renders the world this much larger (a 240×135
  * window), putting characters at Hollow Knight-ish scale (~10% of screen

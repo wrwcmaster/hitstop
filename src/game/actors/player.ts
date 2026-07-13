@@ -550,10 +550,11 @@ export class Player extends Actor {
     const cx = this.cx;
     const by = this.y + this.h;
 
+    const q = (v: number) => Math.round(v * 4) / 4;
     if (this.fsm.is('dead')) {
       // Keel over and fade.
       g.save();
-      g.translate(Math.round(cx), Math.round(by - 4));
+      g.translate(q(cx), q(by - 4));
       g.rotate(this.facing * (Math.PI / 2) * Math.min(1, this.deadT * 3));
       g.globalAlpha = Math.max(0, 1 - Math.max(0, this.deadT - 0.8));
       g.drawImage(img, -6, -9, img.width / TEXEL, img.height / TEXEL);
@@ -566,7 +567,7 @@ export class Player extends Actor {
     const sy = this.squash;
     const sx = 1 + (1 - sy) * 0.7;
     g.save();
-    g.translate(Math.round(cx), Math.round(by));
+    g.translate(q(cx), q(by));
     g.scale(sx, sy);
     g.drawImage(img, -6, -14, img.width / TEXEL, img.height / TEXEL);
     g.restore();

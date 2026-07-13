@@ -87,12 +87,12 @@ export class Particles {
   }
 
   render(g: CanvasRenderingContext2D): void {
-    // Half-pixel granularity: on a zoomed canvas the smallest spark is a
-    // single device pixel, so embers shrink all the way down as they die.
-    const q = (v: number) => Math.round(v * 2) / 2;
+    // Quarter-pixel granularity: on a zoomed canvas the smallest spark is
+    // a single device pixel, so embers shrink all the way down as they die.
+    const q = (v: number) => Math.round(v * 4) / 4;
     for (const p of this.parts) {
       const k = 1 - p.t / p.life;
-      const s = Math.max(0.5, q(p.size * k));
+      const s = Math.max(0.25, q(p.size * k));
       g.fillStyle = p.color;
       g.fillRect(q(p.x - s / 2), q(p.y - s / 2), s, s);
     }

@@ -2,7 +2,7 @@ import { offscreen } from '@engine/index';
 import { COLORS } from '../content/palette';
 
 /** Sky/vignette bake density — matches the game's ZOOM. */
-const D = 2;
+const D = 4;
 
 /**
  * Parallax night-sky backdrop, baked at device density: a smooth
@@ -28,38 +28,43 @@ export class Background {
       g.fillStyle = col;
       g.fillRect(0, i * bandH, w, bandH);
     });
-    // Two star sizes: distant dust (1 device px) and near stars (2px, brighter).
+    // Three star tiers: distant dust, near stars, and a few bright ones.
     g.fillStyle = COLORS.white;
-    for (let i = 0; i < 160; i++) {
-      g.globalAlpha = 0.15 + Math.random() * 0.5;
+    for (let i = 0; i < 340; i++) {
+      g.globalAlpha = 0.12 + Math.random() * 0.45;
       g.fillRect(Math.floor(Math.random() * w), Math.floor(Math.random() * (h * 0.72)), 1, 1);
     }
-    for (let i = 0; i < 40; i++) {
-      g.globalAlpha = 0.5 + Math.random() * 0.5;
+    for (let i = 0; i < 80; i++) {
+      g.globalAlpha = 0.45 + Math.random() * 0.45;
       g.fillRect(Math.floor(Math.random() * w), Math.floor(Math.random() * (h * 0.6)), 2, 2);
+    }
+    for (let i = 0; i < 16; i++) {
+      g.globalAlpha = 0.7 + Math.random() * 0.3;
+      g.fillRect(Math.floor(Math.random() * w), Math.floor(Math.random() * (h * 0.5)), 3, 3);
     }
     g.globalAlpha = 1;
     // Moon with a soft glow halo and craters.
     const mx = w * 0.82;
     const my = h * 0.18;
-    const glow = g.createRadialGradient(mx, my, 20, mx, my, 90);
+    const R = D; // radii below are in logical px; scale to bake density
+    const glow = g.createRadialGradient(mx, my, 10 * R, mx, my, 45 * R);
     glow.addColorStop(0, 'rgba(232,224,200,0.28)');
     glow.addColorStop(1, 'rgba(232,224,200,0)');
     g.fillStyle = glow;
-    g.fillRect(mx - 90, my - 90, 180, 180);
+    g.fillRect(mx - 45 * R, my - 45 * R, 90 * R, 90 * R);
     g.fillStyle = '#e8e0c8';
     g.beginPath();
-    g.arc(mx, my, 34, 0, 7);
+    g.arc(mx, my, 17 * R, 0, 7);
     g.fill();
     g.fillStyle = '#d5cbae';
     g.beginPath();
-    g.arc(mx - 10, my - 8, 7, 0, 7);
+    g.arc(mx - 5 * R, my - 4 * R, 3.5 * R, 0, 7);
     g.fill();
     g.beginPath();
-    g.arc(mx + 9, my + 12, 8, 0, 7);
+    g.arc(mx + 4.5 * R, my + 6 * R, 4 * R, 0, 7);
     g.fill();
     g.beginPath();
-    g.arc(mx + 2, my - 18, 5, 0, 7);
+    g.arc(mx + R, my - 9 * R, 2.5 * R, 0, 7);
     g.fill();
     this.sky = c;
 
