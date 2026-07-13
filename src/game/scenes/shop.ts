@@ -59,7 +59,7 @@ export class ShopScene implements Scene {
     const p = this.player;
     if (p.gold < price) {
       this.game.sfx.play('denied');
-      this.say('NOT ENOUGH GOLD');
+      this.say('Not enough gold');
       return;
     }
     p.gold -= price;
@@ -67,7 +67,7 @@ export class ShopScene implements Scene {
     const def = itemDef<ItemCtx>(item);
     def.onPickup?.({ game: this.game, player: p });
     this.game.sfx.play('buy');
-    this.say(`${def.name} - A PLEASURE`);
+    this.say(`${def.name} - a pleasure`);
     this.game.events.emit('purchase', { id: item, price });
     this.rebuild();
   }
@@ -119,6 +119,6 @@ export class ShopScene implements Scene {
     } else if (sel) {
       drawText(g, itemDef(sel.item).desc, gm.width / 2, descY, COLORS.steel, 1, 'center');
     }
-    drawText(g, 'ESC: LEAVE', gm.width / 2, y + bh - 11, COLORS.steelDark, 1, 'center');
+    drawText(g, 'Esc: leave', gm.width / 2, y + bh - 11, COLORS.steelDark, 1, 'center');
   }
 }

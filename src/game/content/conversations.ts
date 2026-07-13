@@ -2,67 +2,68 @@ import { defineConversation } from '@engine/index';
 
 /**
  * Conversations are pure data (see engine/ui/dialogue.ts). Choices can
- * chain into other conversations via `then`.
+ * chain into other conversations via `then`. Dialogue is written in
+ * sentence case; speaker names stay uppercase as headers.
  */
 defineConversation('intro', {
   lines: [
-    { speaker: 'VOICE', text: 'ANOTHER KNIGHT. THE ARENA REMEMBERS THEM ALL.' },
-    { speaker: 'VOICE', text: 'THE SLIMES COME IN WAVES. THE BATS COME FOR YOUR HEAD.' },
-    { speaker: 'VOICE', text: 'STRIKE THRICE FOR THE HEAVY BLOW. DASH THROUGH WHAT YOU CANNOT BLOCK.' },
-    { speaker: 'VOICE', text: 'AND WHEN YOUR HANDS BURN... PRESS C. YOU WILL UNDERSTAND.' },
+    { speaker: 'VOICE', text: 'Another knight. The arena remembers them all.' },
+    { speaker: 'VOICE', text: 'The slimes come in waves. The bats come for your head.' },
+    { speaker: 'VOICE', text: 'Strike thrice for the heavy blow. Dash through what you cannot block.' },
+    { speaker: 'VOICE', text: 'And when your hands burn... press C. You will understand.' },
   ],
   choices: [
-    { label: 'I AM READY.' },
-    { label: 'WHO ARE YOU?', then: 'intro-who' },
+    { label: 'I am ready.' },
+    { label: 'Who are you?', then: 'intro-who' },
   ],
 });
 
 defineConversation('intro-who', {
   lines: [
-    { speaker: 'VOICE', text: 'THE LAST ONE WHO ASKED IS WAVE SEVEN NOW.' },
-    { speaker: 'VOICE', text: 'FIGHT WELL, KNIGHT. THE GATE EAST OPENS TO THE CAVERN, IF THE WAVES BORE YOU.' },
+    { speaker: 'VOICE', text: 'The last one who asked is wave seven now.' },
+    { speaker: 'VOICE', text: 'Fight well, knight. The gate east opens to the cavern, if the waves bore you.' },
   ],
 });
 
 defineConversation('cavern-entry', {
   lines: [
-    { speaker: 'VOICE', text: 'THE CAVERN. QUIETER THAN THE ARENA. NOT SAFER.' },
-    { speaker: 'VOICE', text: 'SOMETHING OLD AND GREEN SITS ON A THRONE PAST THE EAST GATE.' },
+    { speaker: 'VOICE', text: 'The cavern. Quieter than the arena. Not safer.' },
+    { speaker: 'VOICE', text: 'Something old and green sits on a throne past the east gate.' },
   ],
 });
 
 defineConversation('boss-intro', {
   lines: [
-    { speaker: 'VOICE', text: 'BOW, OR DO NOT. HE CANNOT TELL.' },
-    { speaker: 'SLIME KING', text: '...BLORP.' },
-    { speaker: 'VOICE', text: 'WHEN HE SHIVERS, MOVE. WHEN HE BURNS RED, PRAY.' },
+    { speaker: 'VOICE', text: 'Bow, or do not. He cannot tell.' },
+    { speaker: 'SLIME KING', text: '...Blorp.' },
+    { speaker: 'VOICE', text: 'When he shivers, move. When he burns red, pray.' },
   ],
 });
 
 defineConversation('merchant-greet', {
   lines: [
-    { speaker: 'MERCHANT', text: 'AH. A CUSTOMER WITH A PULSE. RARE, DOWN HERE.' },
-    { speaker: 'MERCHANT', text: 'COINS FOR GOODS. GOODS FOR SURVIVING. EVERYONE WINS.' },
+    { speaker: 'MERCHANT', text: 'Ah. A customer with a pulse. Rare, down here.' },
+    { speaker: 'MERCHANT', text: 'Coins for goods. Goods for surviving. Everyone wins.' },
   ],
   choices: [
-    { label: 'SHOW ME YOUR WARES.' },
-    { label: 'WHERE AM I?', then: 'merchant-lore' },
-    { label: 'JUST PASSING.' },
+    { label: 'Show me your wares.' },
+    { label: 'Where am I?', then: 'merchant-lore' },
+    { label: 'Just passing.' },
   ],
 });
 
 defineConversation('merchant-lore', {
   lines: [
-    { speaker: 'MERCHANT', text: 'THE CAVERN UNDER THE ARENA. THE KING SITS PAST THE EAST GATE.' },
-    { speaker: 'MERCHANT', text: 'HE EATS SWORDS, YOU KNOW. AND THE KNIGHTS HOLDING THEM.' },
-    { speaker: 'MERCHANT', text: 'AND HE SPITS. STICKY BUSINESS, THAT. A DRAUGHT BURNS IT RIGHT OFF.' },
+    { speaker: 'MERCHANT', text: 'The cavern under the arena. The king sits past the east gate.' },
+    { speaker: 'MERCHANT', text: 'He eats swords, you know. And the knights holding them.' },
+    { speaker: 'MERCHANT', text: 'And he spits. Sticky business, that. A draught burns it right off.' },
   ],
 });
 
 defineConversation('victory', {
   lines: [
-    { speaker: 'VOICE', text: 'THE CROWN ROLLS. THE THRONE SITS EMPTY.' },
-    { speaker: 'VOICE', text: 'YOU ARE WHAT THE ARENA REMEMBERS NOW, KNIGHT.' },
+    { speaker: 'VOICE', text: 'The crown rolls. The throne sits empty.' },
+    { speaker: 'VOICE', text: 'You are what the arena remembers now, knight.' },
   ],
 });
 

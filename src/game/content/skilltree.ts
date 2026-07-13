@@ -30,28 +30,28 @@ export const TREE_GRID: string[][] = [
 
 defineTreeNode<TreeCtx>('w1', {
   name: 'SHARP STEEL',
-  desc: '+1 ATTACK ON EVERY SWING',
+  desc: '+1 attack on every swing',
   cost: 1, branch: 0, tier: 0,
   mods: { add: { attack: 1 } },
 });
 
 defineTreeNode<TreeCtx>('w2', {
   name: 'HEAVY HANDS',
-  desc: '+1 MORE ATTACK',
+  desc: '+1 more attack',
   cost: 1, branch: 0, tier: 1, requires: ['w1'],
   mods: { add: { attack: 1 } },
 });
 
 defineTreeNode<TreeCtx>('w3', {
   name: 'EXECUTIONER',
-  desc: 'HEAVY FINISHER DEALS +2 DAMAGE',
+  desc: 'Heavy finisher deals +2 damage',
   cost: 2, branch: 0, tier: 2, requires: ['w2'],
   // Checked by name in Player.beginAttack.
 });
 
 defineTreeNode<TreeCtx>('w4', {
   name: 'DASH STRIKE',
-  desc: 'DASHING THROUGH ENEMIES CUTS THEM',
+  desc: 'Dashing through enemies cuts them',
   cost: 3, branch: 0, tier: 3, requires: ['w3'],
   // Checked by name in Player.beginDash.
 });
@@ -60,28 +60,28 @@ defineTreeNode<TreeCtx>('w4', {
 
 defineTreeNode<TreeCtx>('v1', {
   name: 'TOUGH SKIN',
-  desc: '+1 MAX HP',
+  desc: '+1 max HP',
   cost: 1, branch: 1, tier: 0,
   mods: { add: { maxHp: 1 } },
 });
 
 defineTreeNode<TreeCtx>('v2', {
   name: 'STOUT HEART',
-  desc: '+2 MAX HP',
+  desc: '+2 max HP',
   cost: 1, branch: 1, tier: 1, requires: ['v1'],
   mods: { add: { maxHp: 2 } },
 });
 
 defineTreeNode<TreeCtx>('v3', {
   name: 'SECOND WIND',
-  desc: 'HEAL 1 HP ON EVERY WAVE CLEAR',
+  desc: 'Heal 1 HP on every wave clear',
   cost: 2, branch: 1, tier: 2, requires: ['v2'],
   // Checked by name in the PlayScene's waveClear handler.
 });
 
 defineTreeNode<TreeCtx>('v4', {
   name: 'SKY DANCER',
-  desc: 'DOUBLE JUMP: PRESS JUMP AGAIN IN THE AIR',
+  desc: 'Double jump: press jump again in the air',
   cost: 3, branch: 1, tier: 3, requires: ['v3'],
   // Checked by name in the Player's landing logic (airJumps refresh).
 });
@@ -90,21 +90,21 @@ defineTreeNode<TreeCtx>('v4', {
 
 defineTreeNode<TreeCtx>('m1', {
   name: 'DEEP WELL',
-  desc: '+1 MAX MP',
+  desc: '+1 max MP',
   cost: 1, branch: 2, tier: 0,
   mods: { add: { maxMp: 1 } },
 });
 
 defineTreeNode<TreeCtx>('m2', {
   name: 'ARCANE FLOW',
-  desc: 'SKILL COOLDOWNS HALVED',
+  desc: 'Skill cooldowns halved',
   cost: 1, branch: 2, tier: 1, requires: ['m1'],
   // Checked by name in the Player's SkillBook cooldownScale.
 });
 
 defineTreeNode<TreeCtx>('m3', {
   name: 'NOVA',
-  desc: 'LEARN NOVA: RING BLAST ON V. 2 MP.',
+  desc: 'Learn NOVA: ring blast on V. 2 MP.',
   cost: 2, branch: 2, tier: 2, requires: ['m2'],
   onUnlock({ player }) {
     player.skills.learn('nova');
@@ -113,7 +113,7 @@ defineTreeNode<TreeCtx>('m3', {
 
 defineTreeNode<TreeCtx>('m4', {
   name: 'PYRE',
-  desc: 'FIREBALLS EXPLODE WHERE THEY DIE',
+  desc: 'Fireballs explode where they die',
   cost: 3, branch: 2, tier: 3, requires: ['m3'],
   // Checked by name in the fireball's onExpire.
 });

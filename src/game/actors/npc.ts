@@ -26,7 +26,7 @@ export interface NpcDef {
   greet: string;
   /** Shop opened when a choice labeled with `shopChoice` is picked. */
   shop?: string;
-  /** The choice label that opens the shop (default: starts with 'SHOW'). */
+  /** The choice label that opens the shop (default: starts with 'show'). */
   shopChoice?: string;
 }
 
@@ -94,7 +94,7 @@ export class Npc extends Actor {
     if (!choice || !this.def.shop) return;
     const opens = this.def.shopChoice
       ? choice.label === this.def.shopChoice
-      : choice.label.startsWith('SHOW');
+      : choice.label.toUpperCase().startsWith('SHOW');
     if (opens) {
       const p = this.world.first(Player);
       if (p) this.game.scenes.push(new ShopScene(this.game, p, this.def.shop));
