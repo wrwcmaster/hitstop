@@ -107,7 +107,7 @@ defineMonster('brute', {
     const img = m.onGround ? SLIME1 : SLIME2;
     const drawn = m.flashT > 0 ? m.img(img) : tintOf(img, COLORS.red, 0.55);
     g.save();
-    g.translate(Math.round(m.x), Math.round(m.y - 1));
+    g.translate(Math.round(m.x * 4) / 4, Math.round((m.y - 1) * 4) / 4);
     g.scale(22 / 12, 2);
     g.drawImage(drawn, 0, 0, drawn.width / TEXEL, drawn.height / TEXEL);
     g.restore();
@@ -215,7 +215,7 @@ defineMonster('devourer', {
     const pulse = digesting ? 1 + Math.sin(m.animT * 6) * 0.08 : 1;
     const base = m.flashT > 0 ? m.img(img) : tintOf(img, COLORS.purple, 0.55);
     g.save();
-    g.translate(Math.round(m.cx), Math.round(m.y + m.h));
+    g.translate(Math.round(m.cx * 4) / 4, Math.round((m.y + m.h) * 4) / 4);
     g.scale((26 / 12) * pulse, (16 / 7) * (digesting ? 1.12 : 1));
     g.drawImage(base, -6, -7, base.width / TEXEL, base.height / TEXEL);
     g.restore();

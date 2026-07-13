@@ -3,18 +3,21 @@ import { PAL } from './palette';
 
 /**
  * All pixel art, authored as 1x text grids (see docs/adding-content.md,
- * or paint in tools/sprite-editor.html), then EPX-upscaled to 2x texel
- * density (smoothed silhouettes) and blitted at half size onto the
- * zoomed canvas — same on-screen size, twice the detail.
+ * or paint in tools/sprite-editor.html), then EPX-upscaled TWICE to 4x
+ * texel density — iterated Scale2x rounds silhouettes progressively —
+ * and blitted at quarter size onto the zoomed canvas: same on-screen
+ * size, 4x the detail.
  */
-export const TEXEL = 2;
+export const TEXEL = 4;
 
-/** Draw a TEXEL-density sprite at its logical (world) size. */
+/** Draw a TEXEL-density sprite at its logical (world) size, quantized to
+ * the art's texel grid so motion steps are texel-fine, not world-pixel. */
 export function blit(g: CanvasRenderingContext2D, img: HTMLCanvasElement, x: number, y: number): void {
-  g.drawImage(img, Math.round(x), Math.round(y), img.width / TEXEL, img.height / TEXEL);
+  const q = (v: number) => Math.round(v * TEXEL) / TEXEL;
+  g.drawImage(img, q(x), q(y), img.width / TEXEL, img.height / TEXEL);
 }
 
-const hd = (rows: string[]) => sprite(epx(rows), PAL);
+const hd = (rows: string[]) => sprite(epx(epx(rows)), PAL);
 
 const KNIGHT_IDLE = hd([
   '....PP......',

@@ -275,7 +275,7 @@ defineMonster('slime-king', {
         ? tintOf(img, COLORS.red, 0.3)
         : tintOf(img, COLORS.gold, 0.18);
     g.save();
-    g.translate(Math.round(m.x), Math.round(m.y));
+    g.translate(Math.round(m.x * 4) / 4, Math.round(m.y * 4) / 4);
     g.scale(SCALE_X, SCALE_Y);
     g.drawImage(base, 0, 0, base.width / TEXEL, base.height / TEXEL);
     g.restore();
