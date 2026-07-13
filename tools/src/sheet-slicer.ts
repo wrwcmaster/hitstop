@@ -1,10 +1,10 @@
-import { loadSheet, type SheetDescriptor } from '@engine/index';
+import { loadSheet, type SheetDescriptor, type SheetRect } from '@engine/index';
 
 /**
- * Sprite-sheet slicer: load a PNG, describe its grid, list which frames
- * make up each animation, preview them, and export a SheetDescriptor JSON
- * the game loads with `loadSheet`. This is the bridge for full-colour art
- * that the text-grid sprite format can't express.
+ * Sprite-sheet slicer: load a PNG, describe how to cut it into frames —
+ * either a uniform GRID, or free RECTS you drag per frame (for irregular
+ * sheets) — list which frames make up each animation, preview them, and
+ * export a SheetDescriptor JSON the game loads with `loadSheet`.
  */
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -15,11 +15,16 @@ const pctx = preview.getContext('2d')!;
 
 let img: HTMLImageElement | null = null;
 let imageName = 'sheet.png';
+let mode: 'grid' | 'rects' = 'grid';
+let zoom = 3;
+/** Explicit per-frame rects (rects mode). */
+let rects: SheetRect[] = [];
+/** In-progress drag rectangle (image pixel coords). */
+let drag: { x: number; y: number; x2: number; y2: number } | null = null;
 /** anim name -> { frames:number[], fps } */
 const anims: Record<string, { frames: number[]; fps: number }> = {
   idle: { frames: [0], fps: 4 },
 };
-const VIEW_ZOOM = 3;
 
 function flash(msg: string): void {
   const s = $('status');
@@ -38,11 +43,47 @@ function cols(): number {
   const g = grid();
   return g.frameW > 0 ? Math.max(1, Math.floor((img.width - g.margin + g.spacing) / (g.frameW + g.spacing))) : 1;
 }
-function frameCount(): number {
+function gridCount(): number {
   if (!img) return 0;
   const g = grid();
   const rows = g.frameH > 0 ? Math.max(1, Math.floor((img.height - g.margin + g.spacing) / (g.frameH + g.spacing))) : 1;
   return cols() * rows;
+}
+function frameCount(): number {
+  return mode === 'rects' ? rects.length : gridCount();
+}
+function rectOf(i: number): SheetRect {
+  if (mode === 'rects') return rects[i];
+  const g = grid();
+  const c = i % cols();
+  const r = Math.floor(i / cols());
+  return { x: g.margin + c * (g.frameW + g.spacing), y: g.margin + r * (g.frameH + g.spacing), w: g.frameW, h: g.frameH };
+}
+
+/* ---------------- modes ---------------- */
+
+function buildModeBtns(): void {
+  const host = $('modeBtns');
+  host.innerHTML = '';
+  (['grid', 'rects'] as const).forEach((m) => {
+    const b = document.createElement('button');
+    b.textContent = m;
+    b.style.marginRight = '4px';
+    b.className = mode === m ? 'active' : '';
+    if (mode === m) {
+      b.style.background = '#38b764';
+      b.style.color = '#07070d';
+    }
+    b.onclick = () => {
+      mode = m;
+      ($('gridControls') as HTMLElement).style.display = m === 'grid' ? '' : 'none';
+      ($('rectControls') as HTMLElement).style.display = m === 'rects' ? '' : 'none';
+      buildModeBtns();
+      drawSheet();
+      syncIO();
+    };
+    host.appendChild(b);
+  });
 }
 
 /* ---------------- load ---------------- */
@@ -72,33 +113,129 @@ for (const id of ['fw', 'fh', 'margin', 'spacing', 'texel']) {
   ($(id) as HTMLInputElement).onchange = () => { drawSheet(); syncIO(); };
 }
 
-/* ---------------- sheet view with numbered grid ---------------- */
+/* ---------------- zoom ---------------- */
+
+function setZoom(z: number): void {
+  zoom = Math.max(1, Math.min(16, z));
+  $('zoomLbl').textContent = `${zoom}×`;
+  drawSheet();
+}
+$('btnZoomIn').onclick = () => setZoom(zoom + 1);
+$('btnZoomOut').onclick = () => setZoom(zoom - 1);
+$('view').addEventListener('wheel', (e) => {
+  if (!e.ctrlKey && !e.metaKey) return; // ctrl/cmd + wheel zooms; plain wheel scrolls
+  e.preventDefault();
+  setZoom(zoom + (e.deltaY < 0 ? 1 : -1));
+}, { passive: false });
+
+/* ---------------- rect drawing ---------------- */
+
+function sheetPos(e: MouseEvent): { x: number; y: number } {
+  const r = sheet.getBoundingClientRect();
+  return {
+    x: Math.max(0, Math.min(img ? img.width : 0, Math.round((e.clientX - r.left) / zoom))),
+    y: Math.max(0, Math.min(img ? img.height : 0, Math.round((e.clientY - r.top) / zoom))),
+  };
+}
+function normRect(d: { x: number; y: number; x2: number; y2: number }): SheetRect {
+  return { x: Math.min(d.x, d.x2), y: Math.min(d.y, d.y2), w: Math.abs(d.x2 - d.x), h: Math.abs(d.y2 - d.y) };
+}
+sheet.addEventListener('contextmenu', (e) => e.preventDefault());
+sheet.addEventListener('mousedown', (e) => {
+  if (mode !== 'rects' || !img) return;
+  const p = sheetPos(e);
+  if (e.button === 2) {
+    // Remove the topmost rect under the cursor.
+    for (let i = rects.length - 1; i >= 0; i--) {
+      const r = rects[i];
+      if (p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h) {
+        rects.splice(i, 1);
+        buildRectList();
+        drawSheet();
+        syncIO();
+        return;
+      }
+    }
+    return;
+  }
+  drag = { x: p.x, y: p.y, x2: p.x, y2: p.y };
+});
+sheet.addEventListener('mousemove', (e) => {
+  if (!drag) return;
+  const p = sheetPos(e);
+  drag.x2 = p.x;
+  drag.y2 = p.y;
+  drawSheet();
+});
+window.addEventListener('mouseup', () => {
+  if (!drag) return;
+  const r = normRect(drag);
+  drag = null;
+  if (r.w >= 2 && r.h >= 2) {
+    rects.push(r);
+    buildRectList();
+    syncIO();
+  }
+  drawSheet();
+});
+
+function buildRectList(): void {
+  const host = $('rectList');
+  host.innerHTML = '';
+  rects.forEach((r, i) => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.style.cssText = 'display:flex;gap:3px;align-items:center;margin:2px 0';
+    row.innerHTML = `<span style="width:16px;color:#ffcd75">${i}</span>`;
+    (['x', 'y', 'w', 'h'] as const).forEach((k) => {
+      const inp = document.createElement('input');
+      inp.type = 'number';
+      inp.value = String(r[k]);
+      inp.style.width = '46px';
+      inp.title = k;
+      inp.onchange = () => { r[k] = Number(inp.value) || 0; drawSheet(); syncIO(); };
+      row.appendChild(inp);
+    });
+    const del = document.createElement('button');
+    del.textContent = '×';
+    del.onclick = () => { rects.splice(i, 1); buildRectList(); drawSheet(); syncIO(); };
+    row.appendChild(del);
+    host.appendChild(row);
+  });
+}
+
+/* ---------------- sheet view with numbered frames ---------------- */
 
 function drawSheet(): void {
   if (!img) return;
-  sheet.width = img.width * VIEW_ZOOM;
-  sheet.height = img.height * VIEW_ZOOM;
+  sheet.width = img.width * zoom;
+  sheet.height = img.height * zoom;
   sctx.imageSmoothingEnabled = false;
   sctx.clearRect(0, 0, sheet.width, sheet.height);
   sctx.drawImage(img, 0, 0, sheet.width, sheet.height);
 
-  const g = grid();
-  if (g.frameW <= 0 || g.frameH <= 0) return;
-  const c = cols();
   const n = frameCount();
-  sctx.strokeStyle = 'rgba(255,205,117,0.7)';
-  sctx.fillStyle = '#ffcd75';
-  sctx.font = `${10 * VIEW_ZOOM}px monospace`;
+  sctx.lineWidth = 1;
+  sctx.font = `${Math.max(9, 4 * zoom)}px monospace`;
   sctx.textBaseline = 'top';
   for (let i = 0; i < n; i++) {
-    const cx = i % c, ry = Math.floor(i / c);
-    const x = (g.margin + cx * (g.frameW + g.spacing)) * VIEW_ZOOM;
-    const y = (g.margin + ry * (g.frameH + g.spacing)) * VIEW_ZOOM;
-    sctx.strokeRect(x + 0.5, y + 0.5, g.frameW * VIEW_ZOOM, g.frameH * VIEW_ZOOM);
-    sctx.fillStyle = 'rgba(7,7,13,0.7)';
-    sctx.fillRect(x + 2, y + 2, 20 * VIEW_ZOOM * 0.6, 12 * VIEW_ZOOM * 0.6);
+    const r = rectOf(i);
+    if (!r || r.w <= 0 || r.h <= 0) continue;
+    const x = r.x * zoom, y = r.y * zoom;
+    sctx.strokeStyle = 'rgba(255,205,117,0.8)';
+    sctx.strokeRect(x + 0.5, y + 0.5, r.w * zoom, r.h * zoom);
+    sctx.fillStyle = 'rgba(7,7,13,0.75)';
+    sctx.fillRect(x + 1, y + 1, 16, 12);
     sctx.fillStyle = '#ffcd75';
-    sctx.fillText(String(i), x + 3, y + 2);
+    sctx.fillText(String(i), x + 2, y + 1);
+  }
+  // In-progress drag.
+  if (drag) {
+    const r = normRect(drag);
+    sctx.strokeStyle = '#38b764';
+    sctx.setLineDash([4, 3]);
+    sctx.strokeRect(r.x * zoom + 0.5, r.y * zoom + 0.5, r.w * zoom, r.h * zoom);
+    sctx.setLineDash([]);
   }
 }
 
@@ -152,7 +289,9 @@ $('btnAddAnim').onclick = () => {
 
 function descriptor(): SheetDescriptor {
   const g = grid();
-  return { image: imageName, frameW: g.frameW, frameH: g.frameH, margin: g.margin, spacing: g.spacing, texel: g.texel, anims };
+  const base = { image: imageName, texel: g.texel, anims } as SheetDescriptor;
+  if (mode === 'rects') return { ...base, frameW: 0, frameH: 0, rects };
+  return { ...base, frameW: g.frameW, frameH: g.frameH, margin: g.margin, spacing: g.spacing };
 }
 
 function renderPreview(): void {
@@ -182,7 +321,6 @@ function renderPreview(): void {
     if (frames.length) {
       const idx = Math.floor(t * (a.fps || 1)) % frames.length;
       const f = frames[idx];
-      // TEXEL=4 in the game; show at ~game logical size ×3.
       const dw = (f.width / 4) * 3, dh = (f.height / 4) * 3;
       pctx.drawImage(f, 8, y + 12, dw, dh);
     }
@@ -202,6 +340,8 @@ $('btnExport').onclick = () => {
   flash('descriptor copied to clipboard');
 };
 
+buildModeBtns();
 buildAnims();
+buildRectList();
 syncIO();
 renderPreview();
