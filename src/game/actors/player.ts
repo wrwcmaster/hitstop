@@ -55,6 +55,8 @@ export const PLAYER_TUNING = {
   attackLunge: 45,
   heavyAttackLunge: 150,
   comboWindow: 0.28,
+  castTime: 0.2, // brief commit while a spell leaves the hand
+  castRecoil: 40, // backward brace when a spell fires
   hurtInvuln: 1.1,
   maxHp: 5,
   maxMp: 3,
@@ -119,6 +121,9 @@ export class Player extends Actor {
   private attackIndex = 0;
   private attackDur = 0;
   private strike: Strike | null = null;
+  /** Active spell + its animation window (the `cast` state). */
+  private pendingSkill: string | null = null;
+  private castDur = 0;
   deadT = 0;
 
   /** Swallowed-by-a-Devourer state. */
@@ -276,12 +281,30 @@ export class Player extends Actor {
     this.runControls(dt);
     if (this.atkBuf.consume()) return 'attack';
     if (this.input.consumePress('dash') && this.dashCd <= 0) return 'dash';
-    if (this.input.consumePress('skill')) {
-      this.skills.cast('fireball', { game: this.game, player: this });
+    // Shooting is a real action: enter `cast` so the body recoils.
+    if (this.input.consumePress('skill') && this.skills.ready('fireball')) {
+      this.pendingSkill = 'fireball';
+      return 'cast';
     }
-    if (this.input.consumePress('skill2')) {
-      this.skills.cast('nova', { game: this.game, player: this });
+    if (this.input.consumePress('skill2') && this.skills.ready('nova')) {
+      this.pendingSkill = 'nova';
+      return 'cast';
     }
+  }
+
+  /** Fire the queued spell and brace into a recoil for the cast window. */
+  beginCast(): void {
+    const id = this.pendingSkill ?? 'fireball';
+    this.pendingSkill = null;
+    this.castDur = PLAYER_TUNING.castTime;
+    const fired = this.skills.cast(id, { game: this.game, player: this });
+    if (fired) this.vx -= this.facing * PLAYER_TUNING.castRecoil;
+    else this.castDur = 0.08; // nothing left the hand — bail out fast
+  }
+
+  castUpdate(): string | void {
+    this.vx *= 0.86; // braced stance
+    if (this.fsm.t >= this.castDur) return 'move';
   }
 
   beginAttack(): void {
@@ -535,6 +558,60 @@ export class Player extends Actor {
 
   /* ---------------- render ---------------- */
 
+  /**
+   * Procedural body English, layered on top of squash & stretch so each
+   * action reads distinctly even though the sprite set is tiny. Returns a
+   * horizontal shear (upper body lean; negative leans the head toward +x),
+   * a pixel offset, and extra scale. Anchored at the feet in render.
+   */
+  private bodyPose(): { shear: number; ox: number; oy: number; sx: number; sy: number } {
+    const f = this.facing;
+
+    if (this.fsm.is('dash')) {
+      // Streak: head thrown ahead of the trailing feet.
+      return { shear: -f * 0.34, ox: f * 1.5, oy: 0, sx: 1, sy: 1 };
+    }
+
+    if (this.fsm.is('attack')) {
+      const prog = clamp(this.fsm.t / this.attackDur, 0, 1);
+      const heavy = this.attackIndex === 2;
+      const upper = this.attackIndex === 1;
+      const mag = heavy ? 1.4 : 1;
+      let shear: number;
+      let ox: number;
+      if (prog < 0.28) {
+        const w = prog / 0.28; // wind up: coil back
+        shear = f * 0.22 * mag * w;
+        ox = -f * 2 * mag * w;
+      } else if (prog < 0.55) {
+        const s = (prog - 0.28) / 0.27; // strike: whip through
+        shear = (f * 0.22 - f * 0.52 * s) * mag;
+        ox = (-f * 2 + f * 5 * s) * mag;
+      } else {
+        const r = (prog - 0.55) / 0.45; // recover: settle to neutral
+        shear = -f * 0.3 * mag * (1 - r);
+        ox = f * 3 * mag * (1 - r);
+      }
+      let oy = 0;
+      if (heavy) oy -= 3 * Math.sin(prog * Math.PI); // a committed hop
+      if (upper) oy -= 2 * Math.sin(prog * Math.PI); // the uppercut rises
+      return { shear, ox, oy, sx: 1, sy: 1 };
+    }
+
+    if (this.fsm.is('cast')) {
+      const prog = clamp(this.fsm.t / this.castDur, 0, 1);
+      const k = prog < 0.3 ? prog / 0.3 : 1 - (prog - 0.3) / 0.7; // snap back, ease out
+      return { shear: f * 0.26 * k, ox: -f * 2 * k, oy: -k, sx: 1, sy: 1 };
+    }
+
+    // move / air: lean into horizontal motion; stretch on a fast rise,
+    // pinch slightly on the fall — a subtle jump arc.
+    const shear = -clamp(this.vx / 900, -0.18, 0.18);
+    let sy = 1;
+    if (!this.onGround) sy = 1 + clamp(-this.vy / 1600, -0.06, 0.1);
+    return { shear, ox: 0, oy: 0, sx: 2 - sy, sy };
+  }
+
   render(g: CanvasRenderingContext2D): void {
     // Inside a Devourer: the beast draws the bulge, not us.
     if (this.fsm.is('swallowed')) return;
@@ -563,12 +640,16 @@ export class Player extends Actor {
       return;
     }
 
-    // Squash & stretch anchored at the feet.
-    const sy = this.squash;
-    const sx = 1 + (1 - sy) * 0.7;
+    // Squash & stretch + per-action body English, anchored at the feet.
+    const pose = this.bodyPose();
+    const baseSy = this.squash;
+    const baseSx = 1 + (1 - baseSy) * 0.7;
+    const sx = baseSx * pose.sx;
+    const sy = baseSy * pose.sy;
     g.save();
-    g.translate(q(cx), q(by));
+    g.translate(q(cx + pose.ox), q(by + pose.oy));
     g.scale(sx, sy);
+    if (pose.shear) g.transform(1, 0, pose.shear, 1, 0, 0);
     g.drawImage(img, -6, -14, img.width / TEXEL, img.height / TEXEL);
     g.restore();
 
@@ -612,6 +693,10 @@ const PLAYER_STATES: Record<string, StateDef<Player>> = {
   dash: {
     enter: (p) => p.beginDash(),
     update: (p) => p.dashUpdate(),
+  },
+  cast: {
+    enter: (p) => p.beginCast(),
+    update: (p) => p.castUpdate(),
   },
   dead: {
     update: (p, dt) => {
