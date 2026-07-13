@@ -12,7 +12,10 @@ npm run dev          # game:          http://localhost:5173/
                      # level editor:  http://localhost:5173/tools/level-editor.html
                      # sprite editor: http://localhost:5173/tools/sprite-editor.html
 npm run build        # typecheck + production build to dist/
+npm run build:single # compile everything into hitstop.html (one file, no server)
 ```
+
+No setup at all? Open **[`hitstop.html`](hitstop.html)** — the whole game compiled into a single self-contained file (committed for convenience; regenerate with `npm run build:single` after changes).
 
 In-game: arrows/WASD move, Space jumps, `Z`/`J` attack, `X`/`K` dash, `C`/`L` cast fireball, `Esc` opens the system menu (inventory, volume, restart), `` ` `` (backquote) toggles the debug overlay (hurtboxes, entity counts, live time scale).
 
