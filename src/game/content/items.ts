@@ -32,12 +32,18 @@ export interface WeaponSpec {
   reach: number;
   /** Slash/impact particle colors. */
   colors: string[];
+  /** Held-weapon look (drawn in hand). blade length 0 = bare hands. */
+  bladeLen: number;
+  bladeW: number;
+  blade: string;
+  hilt: string;
 }
 
 export function weaponSpecOf(itemId: string | null): WeaponSpec {
   const fallback: WeaponSpec = {
     lightDamage: 1, heavyDamage: 1, lightStrength: 0.3, heavyStrength: 0.5,
     reach: -6, colors: [COLORS.white],
+    bladeLen: 0, bladeW: 1, blade: COLORS.steel, hilt: COLORS.gold, // fists: nothing drawn
   };
   if (!itemId) return fallback;
   return (itemDef(itemId).props?.weapon as WeaponSpec) ?? fallback;
@@ -53,6 +59,7 @@ defineItem<ItemCtx>('rusty-sword', {
     weapon: {
       lightDamage: 1, heavyDamage: 2, lightStrength: 0.45, heavyStrength: 0.8,
       reach: 0, colors: [COLORS.white, COLORS.gold],
+      bladeLen: 7, bladeW: 1, blade: COLORS.steel, hilt: COLORS.gold,
     } satisfies WeaponSpec,
   },
 });
@@ -68,6 +75,7 @@ defineItem<ItemCtx>('great-sword', {
     weapon: {
       lightDamage: 2, heavyDamage: 4, lightStrength: 0.6, heavyStrength: 1.0,
       reach: 5, colors: [COLORS.gold, COLORS.white, COLORS.red],
+      bladeLen: 12, bladeW: 2, blade: COLORS.gold, hilt: COLORS.red,
     } satisfies WeaponSpec,
   },
 });
