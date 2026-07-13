@@ -140,21 +140,36 @@ function sheetPos(e: MouseEvent): { x: number; y: number } {
 function normRect(d: { x: number; y: number; x2: number; y2: number }): SheetRect {
   return { x: Math.min(d.x, d.x2), y: Math.min(d.y, d.y2), w: Math.abs(d.x2 - d.x), h: Math.abs(d.y2 - d.y) };
 }
+/** Default frame size for tap-to-place / + frame (rects mode). */
+function defSize(): { w: number; h: number } {
+  return { w: Math.max(1, num('rw') || 32), h: Math.max(1, num('rh') || 48) };
+}
+/** Index of the topmost rect covering an image-pixel point, or -1. */
+function rectAtIndex(x: number, y: number): number {
+  for (let i = rects.length - 1; i >= 0; i--) {
+    const r = rects[i];
+    if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return i;
+  }
+  return -1;
+}
+/** A default-sized frame anchored top-left at (x,y), clamped inside the image. */
+function placedRect(x: number, y: number): SheetRect {
+  const { w, h } = defSize();
+  const iw = img ? img.width : w, ih = img ? img.height : h;
+  return { x: Math.max(0, Math.min(iw - w, x)), y: Math.max(0, Math.min(ih - h, y)), w, h };
+}
 sheet.addEventListener('contextmenu', (e) => e.preventDefault());
 sheet.addEventListener('mousedown', (e) => {
   if (mode !== 'rects' || !img) return;
   const p = sheetPos(e);
   if (e.button === 2) {
     // Remove the topmost rect under the cursor.
-    for (let i = rects.length - 1; i >= 0; i--) {
-      const r = rects[i];
-      if (p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h) {
-        rects.splice(i, 1);
-        buildRectList();
-        drawSheet();
-        syncIO();
-        return;
-      }
+    const hit = rectAtIndex(p.x, p.y);
+    if (hit >= 0) {
+      rects.splice(hit, 1);
+      buildRectList();
+      drawSheet();
+      syncIO();
     }
     return;
   }
@@ -169,15 +184,29 @@ sheet.addEventListener('mousemove', (e) => {
 });
 window.addEventListener('mouseup', () => {
   if (!drag) return;
-  const r = normRect(drag);
+  const d = drag;
   drag = null;
+  const r = normRect(d);
   if (r.w >= 2 && r.h >= 2) {
-    rects.push(r);
-    buildRectList();
-    syncIO();
+    rects.push(r);                          // a deliberate drag → custom-sized frame
+  } else if (img && rectAtIndex(d.x, d.y) < 0) {
+    rects.push(placedRect(d.x, d.y));       // a tap on blank area → default-sized frame
+  } else {
+    drawSheet();                            // tap on an existing frame → no-op
+    return;
   }
+  buildRectList();
+  syncIO();
   drawSheet();
 });
+
+$('btnAddRect').onclick = () => {
+  if (!img) { flash('load a sheet first'); return; }
+  rects.push(placedRect(0, 0));             // add by coordinates — edit x/y/w/h in the list
+  buildRectList();
+  syncIO();
+  drawSheet();
+};
 
 function buildRectList(): void {
   const host = $('rectList');

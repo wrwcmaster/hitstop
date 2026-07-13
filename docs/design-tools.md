@@ -153,7 +153,7 @@ The text-grid format is great for small hand-drawn sprites, but for **full-colou
 1. **load png** — pick your sheet. Use the **zoom** −/+ (or Ctrl/⌘ + scroll) to inspect it.
 2. Choose how to cut it — two modes:
    - **grid** — uniform cells: set `frame w/h`, plus `margin` (border) and `spacing` (gap) if the frames aren't flush. Frames are numbered left→right, top→bottom.
-   - **rects** — for **irregular sheets**: **drag a rectangle** on the sheet for each frame (right-click a frame to remove it). Each becomes a numbered frame with its own coordinates, editable as `x/y/w/h` in the list.
+   - **rects** — for **irregular sheets**. Set a default **new frame w/h**, then add frames three ways: **tap a blank spot** to drop a default-sized frame there, **drag a rectangle** for a custom size, or **+ frame** to add one you position by number. Every frame is editable as `x/y/w/h` in the list; right-click a frame on the sheet to remove it.
 3. Set **texel** — how many source pixels equal one logical pixel. This sizes the sprite on screen: a 32-px-wide frame with `texel: 2` draws 16 logical px wide (matching text-grid sprites, whose logical size is their grid width). Lower `texel` = bigger on screen.
 4. Add **animations** — each gets a name, a comma-separated **frame list** (the numbers on the overlay), and an fps. The preview plays every animation live.
 5. **export descriptor** copies the JSON (grid mode emits `frameW/frameH/margin/spacing`; rects mode emits an explicit `rects` array).
