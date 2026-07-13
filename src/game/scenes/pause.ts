@@ -6,7 +6,7 @@ import {
   itemDef,
   clamp,
 } from '@engine/index';
-import type { ActionGame, Action } from '../defs';
+import { KEYMAP, REBINDABLE, prettyCode, type ActionGame, type Action } from '../defs';
 import type { Player } from '../actors/player';
 import type { ItemCtx } from '../content/items';
 import { COLORS } from '../content/palette';
@@ -20,10 +20,13 @@ import { SkillTreeScene } from './skilltree';
  * backs out.
  */
 export class PauseScene implements Scene {
-  private page: 'main' | 'inventory' | 'options' = 'main';
+  private page: 'main' | 'inventory' | 'options' | 'controls' = 'main';
   private mainMenu: Menu<Action>;
   private invMenu: Menu<Action> = new Menu([], MENU_ACTIONS);
   private optionsMenu: Menu<Action>;
+  private controlsMenu: Menu<Action>;
+  /** Label of the action currently waiting for a key press, if any. */
+  private rebinding: string | null = null;
 
   constructor(
     private game: ActionGame,
@@ -80,6 +83,13 @@ export class PauseScene implements Scene {
         volumeRow('MUSIC', 'music'),
         volumeRow('SFX', 'sfx'),
         {
+          label: 'CONTROLS',
+          onSelect: () => {
+            this.page = 'controls';
+            this.game.sfx.play('menuSelect');
+          },
+        },
+        {
           label: 'BACK',
           onSelect: () => {
             this.page = 'main';
@@ -89,6 +99,48 @@ export class PauseScene implements Scene {
       ],
       MENU_ACTIONS,
     );
+
+    this.controlsMenu = new Menu<Action>(
+      [
+        ...REBINDABLE.map((r) => ({
+          label: r.label,
+          hint: () => this.game.input.codesFor(r.action).map(prettyCode).slice(0, 2).join(' / ') || '---',
+          onSelect: () => this.beginRebind(r.action, r.label, r.aliases),
+        })),
+        {
+          label: 'RESET DEFAULTS',
+          onSelect: () => {
+            this.game.input.setKeymap(KEYMAP);
+            saveSettings(this.game);
+            this.game.sfx.play('unlock');
+          },
+        },
+        {
+          label: 'BACK',
+          onSelect: () => {
+            this.page = 'options';
+            this.game.sfx.play('menuClose');
+          },
+        },
+      ],
+      MENU_ACTIONS,
+    );
+  }
+
+  /** Arm the next-key capture; Esc cancels rather than binding. */
+  private beginRebind(action: Action, label: string, aliases: Action[]): void {
+    this.rebinding = label;
+    this.game.sfx.play('menuSelect');
+    this.game.input.captureNextKey((code) => {
+      this.rebinding = null;
+      if (code === 'Escape') {
+        this.game.sfx.play('menuClose');
+        return;
+      }
+      this.game.input.rebind(action, code, aliases);
+      saveSettings(this.game);
+      this.game.sfx.play('unlock');
+    });
   }
 
   enter(): void {
@@ -141,8 +193,12 @@ export class PauseScene implements Scene {
 
   update(_dt: number): void {
     const input = this.game.input;
+    if (this.rebinding) return; // waiting for the capture callback
     if (input.consumePress('menu') || input.consumePress('cancel')) {
-      if (this.page !== 'main') {
+      if (this.page === 'controls') {
+        this.page = 'options';
+        this.game.sfx.play('menuClose');
+      } else if (this.page !== 'main') {
         this.page = 'main';
         this.game.sfx.play('menuClose');
       } else {
@@ -151,7 +207,10 @@ export class PauseScene implements Scene {
       return;
     }
     const menu =
-      this.page === 'main' ? this.mainMenu : this.page === 'inventory' ? this.invMenu : this.optionsMenu;
+      this.page === 'main' ? this.mainMenu
+      : this.page === 'inventory' ? this.invMenu
+      : this.page === 'options' ? this.optionsMenu
+      : this.controlsMenu;
     menu.update(input);
   }
 
@@ -172,13 +231,27 @@ export class PauseScene implements Scene {
       drawText(g, 'ESC: CLOSE', W / 2, y + bh - 9, COLORS.steelDark, 1, 'center');
     } else if (this.page === 'options') {
       const bw = 170;
-      const bh = 100;
+      const bh = 112;
       const x = (W - bw) / 2;
       const y = (H - bh) / 2;
       drawPanel(g, x, y, bw, bh);
       drawText(g, 'OPTIONS', W / 2, y + 8, COLORS.gold, 2, 'center');
       this.optionsMenu.render(g, x + 24, y + 30, { width: bw - 40, lineHeight: 13 });
       drawText(g, 'LEFT/RIGHT: ADJUST', W / 2, y + bh - 9, COLORS.steelDark, 1, 'center');
+    } else if (this.page === 'controls') {
+      const bw = 210;
+      const bh = 156;
+      const x = (W - bw) / 2;
+      const y = (H - bh) / 2;
+      drawPanel(g, x, y, bw, bh);
+      drawText(g, 'CONTROLS', W / 2, y + 8, COLORS.gold, 2, 'center');
+      this.controlsMenu.render(g, x + 20, y + 26, { width: bw - 36, lineHeight: 11 });
+      if (this.rebinding) {
+        drawText(g, `PRESS A KEY FOR ${this.rebinding}`, W / 2, y + bh - 20, COLORS.gold, 1, 'center');
+        drawText(g, 'ESC TO CANCEL', W / 2, y + bh - 11, COLORS.steelDark, 1, 'center');
+      } else {
+        drawText(g, 'GAMEPAD: STANDARD LAYOUT, PLUG AND PLAY', W / 2, y + bh - 11, COLORS.steelDark, 1, 'center');
+      }
     } else {
       const bw = 240;
       const bh = 150;

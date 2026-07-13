@@ -1,4 +1,4 @@
-import { Game } from '@engine/index';
+import { Game, type GamepadMapping } from '@engine/index';
 
 /** The game's input actions and default bindings. */
 export type Action =
@@ -21,6 +21,61 @@ export const KEYMAP: Record<string, Action | Action[]> = {
   KeyE: 'interact', KeyF: 'interact',
   Escape: 'menu',
 };
+
+/**
+ * Standard-layout gamepad mapping (A=0 B=1 X=2 Y=3, LB/RB=4/5,
+ * Select/Start=8/9, dpad=12-15, left stick axes 0/1). Menus, dialogue,
+ * and the shop consume the same actions, so a pad drives everything.
+ */
+export const GAMEPAD: GamepadMapping<Action> = {
+  buttons: {
+    0: ['jump', 'confirm'],   // A
+    1: ['dash', 'cancel'],    // B
+    2: 'attack',              // X
+    3: 'interact',            // Y
+    4: 'skill',               // LB — fireball
+    5: 'skill2',              // RB — nova
+    6: 'skill',               // LT
+    7: 'skill2',              // RT
+    8: 'menu',                // Select
+    9: 'menu',                // Start
+    12: 'up',                 // dpad
+    13: 'down',
+    14: 'left',
+    15: 'right',
+  },
+  axes: [
+    { index: 0, neg: 'left', pos: 'right' },
+    // Stick-up is menu-up only — accidental jumps from stick flicks feel bad.
+    { index: 1, neg: 'up', pos: 'down' },
+  ],
+};
+
+/** Actions the CONTROLS page lets players rebind, with menu aliases the
+ * new key inherits (so a rebound jump still navigates menus up, etc). */
+export const REBINDABLE: { action: Action; label: string; aliases: Action[] }[] = [
+  { action: 'jump', label: 'JUMP', aliases: ['up'] },
+  { action: 'attack', label: 'ATTACK', aliases: ['confirm'] },
+  { action: 'dash', label: 'DASH', aliases: ['cancel'] },
+  { action: 'skill', label: 'FIREBALL', aliases: [] },
+  { action: 'skill2', label: 'NOVA', aliases: [] },
+  { action: 'interact', label: 'INTERACT', aliases: [] },
+  { action: 'left', label: 'MOVE LEFT', aliases: [] },
+  { action: 'right', label: 'MOVE RIGHT', aliases: [] },
+];
+
+/** Human-readable key name for a KeyboardEvent.code. */
+export function prettyCode(code: string): string {
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  if (code.startsWith('Arrow')) return code.slice(5).toUpperCase();
+  const named: Record<string, string> = {
+    Space: 'SPACE', ShiftLeft: 'LSHIFT', ShiftRight: 'RSHIFT',
+    ControlLeft: 'LCTRL', ControlRight: 'RCTRL', AltLeft: 'LALT', AltRight: 'RALT',
+    Enter: 'ENTER', Escape: 'ESC', Tab: 'TAB', Backspace: 'BKSP',
+  };
+  return named[code] ?? code.toUpperCase();
+}
 
 /** Game-level events (combat events come from the engine). */
 export interface GameEvents extends Record<string, unknown> {

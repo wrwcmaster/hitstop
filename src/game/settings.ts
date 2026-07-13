@@ -1,14 +1,16 @@
 import { JsonStore } from '@engine/index';
-import type { ActionGame } from './defs';
+import type { ActionGame, Action } from './defs';
 
 /** Persisted user options (separate from save games). */
 export interface Settings {
   master: number;
   music: number;
   sfx: number;
+  /** Full keyboard bindings snapshot (code -> actions). Absent = defaults. */
+  keys?: Record<string, Action[]>;
 }
 
-export const settingsStore = new JsonStore<Settings>('hitstop.settings', 1);
+export const settingsStore = new JsonStore<Settings>('hitstop.settings', 2);
 
 export function loadSettings(game: ActionGame): void {
   const s = settingsStore.load();
@@ -16,6 +18,7 @@ export function loadSettings(game: ActionGame): void {
   game.audio.setVolume('master', s.master);
   game.audio.setVolume('music', s.music);
   game.audio.setVolume('sfx', s.sfx);
+  if (s.keys) game.input.setKeymap(s.keys);
 }
 
 export function saveSettings(game: ActionGame): void {
@@ -23,5 +26,6 @@ export function saveSettings(game: ActionGame): void {
     master: game.audio.getVolume('master'),
     music: game.audio.getVolume('music'),
     sfx: game.audio.getVolume('sfx'),
+    keys: game.input.getKeymap(),
   });
 }

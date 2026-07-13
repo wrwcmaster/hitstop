@@ -15,6 +15,7 @@ export * from './math/util';
 export { type Rect, overlaps, containsPoint, centerX, centerY, expand } from './math/rect';
 
 export { Input, Buffer } from './input/input';
+export { GamepadInput, type GamepadMapping, type GamepadAxisMapping } from './input/gamepad';
 
 export { createPixelCanvas, offscreen, type PixelCanvas } from './gfx/canvas';
 export { sprite, flipped, whiteOf, tintOf, type Palette, type SpriteData } from './gfx/sprite';
