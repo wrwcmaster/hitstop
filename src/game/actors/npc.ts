@@ -8,7 +8,7 @@ import {
   type ConversationChoice,
   type CollisionSource,
 } from '@engine/index';
-import { MERCHANT } from '../content/sprites';
+import { MERCHANT, blit } from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { ShopScene } from '../scenes/shop';
 import type { ActionGame, Action } from '../defs';
@@ -102,7 +102,7 @@ export class Npc extends Actor {
   }
 
   render(g: CanvasRenderingContext2D): void {
-    g.drawImage(this.def.sprite, Math.round(this.x - 1), Math.round(this.y));
+    blit(g, this.def.sprite, this.x - 1, this.y);
     if (this.playerNear()) {
       // Floating interact prompt.
       const bob = Math.sin(this.animT * 4) * 1.5;

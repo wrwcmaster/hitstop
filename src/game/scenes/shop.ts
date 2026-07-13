@@ -6,7 +6,7 @@ import {
   itemDef,
 } from '@engine/index';
 import { shops } from '../content/shops';
-import { ICON_COIN } from '../content/sprites';
+import { ICON_COIN, blit } from '../content/sprites';
 import { COLORS } from '../content/palette';
 import type { ActionGame, Action } from '../defs';
 import type { Player } from '../actors/player';
@@ -101,7 +101,7 @@ export class ShopScene implements Scene {
     drawText(g, def.name, gm.width / 2, y + 8, COLORS.gold, 2, 'center');
 
     // Purse.
-    g.drawImage(ICON_COIN, x + bw - 58, y + 8);
+    blit(g, ICON_COIN, x + bw - 58, y + 8);
     drawText(g, String(this.player.gold), x + bw - 50, y + 9, COLORS.gold);
 
     this.menu.render(g, x + 24, y + 30, { width: bw - 44, lineHeight: 12 });

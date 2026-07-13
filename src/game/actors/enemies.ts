@@ -1,6 +1,6 @@
 import { rand, sign, tintOf } from '@engine/index';
 import { defineMonster, Monster } from './monster';
-import { SLIME1, SLIME2, BAT1, BAT2 } from '../content/sprites';
+import { SLIME1, SLIME2, BAT1, BAT2, TEXEL, blit } from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { Player } from './player';
 
@@ -34,7 +34,7 @@ defineMonster('slime', {
     }
   },
   draw(g, m) {
-    g.drawImage(m.img(m.onGround ? SLIME1 : SLIME2), Math.round(m.x), Math.round(m.y));
+    blit(g, m.img(m.onGround ? SLIME1 : SLIME2), m.x, m.y);
   },
 });
 
@@ -65,7 +65,7 @@ defineMonster('bat', {
   },
   draw(g, m) {
     const frame = Math.floor(m.animT * 8) % 2 ? BAT1 : BAT2;
-    g.drawImage(m.img(frame), Math.round(m.x), Math.round(m.y));
+    blit(g, m.img(frame), m.x, m.y);
   },
 });
 
@@ -109,7 +109,7 @@ defineMonster('brute', {
     g.save();
     g.translate(Math.round(m.x), Math.round(m.y - 1));
     g.scale(22 / 12, 2);
-    g.drawImage(drawn, 0, 0);
+    g.drawImage(drawn, 0, 0, drawn.width / TEXEL, drawn.height / TEXEL);
     g.restore();
   },
 });
@@ -217,7 +217,7 @@ defineMonster('devourer', {
     g.save();
     g.translate(Math.round(m.cx), Math.round(m.y + m.h));
     g.scale((26 / 12) * pulse, (16 / 7) * (digesting ? 1.12 : 1));
-    g.drawImage(base, -6, -7);
+    g.drawImage(base, -6, -7, base.width / TEXEL, base.height / TEXEL);
     g.restore();
     if (digesting) {
       // A hint of knight inside.

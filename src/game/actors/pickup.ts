@@ -10,6 +10,7 @@ import {
   type CollisionSource,
 } from '@engine/index';
 import { COLORS } from '../content/palette';
+import { TEXEL, blit } from '../content/sprites';
 import type { ItemCtx } from '../content/items';
 import type { ActionGame } from '../defs';
 import { Player } from './player';
@@ -44,8 +45,8 @@ export class Pickup extends Entity implements Body {
     super();
     const icon = itemDef(itemId).icon;
     if (icon) {
-      this.w = icon.width;
-      this.h = icon.height;
+      this.w = icon.width / TEXEL;
+      this.h = icon.height / TEXEL;
     }
     this.x = x - this.w / 2;
     this.y = y - this.h / 2;
@@ -123,7 +124,7 @@ export class Pickup extends Entity implements Body {
     if (this.ttl - this.age < 2 && Math.floor(this.age * 8) % 2) return;
     const icon = itemDef(this.itemId).icon;
     if (icon) {
-      g.drawImage(icon, Math.round(this.x), Math.round(this.y));
+      blit(g, icon, this.x, this.y);
     } else {
       g.fillStyle = COLORS.gold;
       g.fillRect(Math.round(this.x), Math.round(this.y), this.w, this.h);

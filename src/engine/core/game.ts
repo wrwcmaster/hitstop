@@ -17,6 +17,8 @@ export interface GameOptions<A extends string> {
   canvas: HTMLCanvasElement;
   width: number;
   height: number;
+  /** Device pixels per logical pixel (art texel density). Default 1. */
+  zoom?: number;
   /** KeyboardEvent.code -> action(s). A key may serve several actions. */
   keymap: Record<string, A | A[]>;
 }
@@ -66,8 +68,10 @@ export class Game<A extends string = string, E extends Record<string, unknown> =
   }
 
   constructor(opts: GameOptions<A>) {
-    this.screen = createPixelCanvas(opts.canvas, opts.width, opts.height);
+    const zoom = opts.zoom ?? 1;
+    this.screen = createPixelCanvas(opts.canvas, opts.width, opts.height, zoom);
     this.camera = new Camera(opts.width, opts.height);
+    this.camera.snap = 1 / zoom;
     this.input = new Input<A>(opts.keymap);
     this.input.attachKeyboard(window);
     this.input.onAnyPress(() => this.sfx.unlock());

@@ -34,6 +34,8 @@ import {
   MANA_PIP_EMPTY,
   ICON_COIN,
   KNIGHT_IDLE_SPRITE,
+  TEXEL,
+  blit,
 } from '../content/sprites';
 
 /** Fallback music per room (rooms can override via props.music). */
@@ -236,7 +238,9 @@ export class PlayScene implements Scene {
     this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
     this.triggers = new Triggers(this.room.triggers ?? []);
     this.triggers.importFired(this.firedTriggers[id] ?? []);
-    g.camera.setBounds(0, -30, this.tilemap.worldW, this.tilemap.worldH);
+    // Stop the view 16px above the room's true bottom so the frame shows
+    // a lip of ground, not a wall of underground rock.
+    g.camera.setBounds(0, -30, this.tilemap.worldW, this.tilemap.worldH - 16);
 
     g.world.retain((e) => e === this.player);
     g.feel.particles.clear();
@@ -249,16 +253,19 @@ export class PlayScene implements Scene {
     this.clearT = 0;
     this.wave = 0;
 
+    // Snap the camera so the new room doesn't smear in; with no player
+    // yet (title screen), aim at the spawn point.
+    const aimX = this.player ? (spawnX ?? this.room.playerSpawn.x) : this.room.playerSpawn.x;
+    const aimY = this.player ? (spawnY ?? this.room.playerSpawn.y) : this.room.playerSpawn.y;
     if (this.player) {
       this.player.collision = this.tilemap;
-      this.player.x = spawnX ?? this.room.playerSpawn.x;
-      this.player.y = spawnY ?? this.room.playerSpawn.y;
+      this.player.x = aimX;
+      this.player.y = aimY;
       this.player.vx = 0;
       this.player.vy = 0;
-      // Snap the camera so the new room doesn't smear in.
-      g.camera.x = clamp(this.player.cx - g.width / 2, 0, Math.max(0, this.tilemap.worldW - g.width));
-      g.camera.y = 0;
     }
+    g.camera.x = clamp(aimX - g.camera.viewW / 2, 0, Math.max(0, this.tilemap.worldW - g.camera.viewW));
+    g.camera.y = clamp(aimY - g.camera.viewH * 0.62, -30, Math.max(-30, this.tilemap.worldH - g.camera.viewH));
 
     // Pre-placed monsters and NPCs; a defeated boss stays defeated.
     for (const e of this.room.entities) {
@@ -407,8 +414,9 @@ export class PlayScene implements Scene {
       const def = monsters.get(type);
       let x: number, y: number;
       if (def.flies) {
-        x = g.camera.x + 40 + rand(0, g.width - 80);
-        y = 36 + rand(0, 44);
+        // Inside the (zoomed) camera view so the telegraph is visible.
+        x = g.camera.x + 24 + rand(0, Math.max(40, g.camera.viewW - 48));
+        y = Math.max(20, g.camera.y + 16) + rand(0, g.camera.viewH * 0.35);
       } else {
         x = chance(0.5) ? 24 : this.tilemap.worldW - 24 - def.w;
         y = this.groundYAt(x) - def.h;
@@ -492,10 +500,14 @@ export class PlayScene implements Scene {
     this.bannerT = Math.max(0, this.bannerT - dt);
 
     if (this.player) {
-      // Camera leads the player: facing offset + velocity lookahead.
+      // Camera leads the player: facing offset + velocity lookahead,
+      // and (with the zoomed-in view) follows vertically too, biased so
+      // more of the world above the knight is visible than below.
       const p = this.player;
-      const tx = p.cx - g.width / 2 + p.facing * 24 + p.vx * 0.12;
-      g.camera.follow(tx, 0, dt);
+      const cam = g.camera;
+      const tx = p.cx - cam.viewW / 2 + p.facing * 18 + p.vx * 0.1;
+      const ty = p.cy - cam.viewH * 0.62 + p.vy * 0.05;
+      cam.follow(tx, ty, dt);
     }
   }
 
@@ -507,12 +519,13 @@ export class PlayScene implements Scene {
     const g = this.game;
     this.bg.render(ctx, g.camera.x);
     g.camera.begin(ctx);
-    this.tilemap.render(ctx, g.camera.x, g.camera.y, g.width, g.height);
+    this.tilemap.render(ctx, g.camera.x, g.camera.y, g.camera.viewW, g.camera.viewH);
     this.renderSpawnMarkers(ctx);
     g.world.render(ctx);
     g.feel.renderWorld(ctx);
     this.debug.renderWorld(ctx);
     g.camera.end(ctx);
+    this.bg.renderVignette(ctx);
 
     if (this.phase === 'title') this.renderTitle(ctx);
     else this.renderHUD(ctx);
@@ -553,10 +566,10 @@ export class PlayScene implements Scene {
     const p = this.player;
     if (p) {
       for (let i = 0; i < p.maxHp; i++) {
-        g.drawImage(i < p.hp ? HEART : HEART_EMPTY, 6 + i * 9, 6);
+        blit(g, i < p.hp ? HEART : HEART_EMPTY, 6 + i * 9, 6);
       }
       for (let i = 0; i < p.maxMp; i++) {
-        g.drawImage(i < p.mp ? MANA_PIP : MANA_PIP_EMPTY, 7 + i * 7, 15);
+        blit(g, i < p.mp ? MANA_PIP : MANA_PIP_EMPTY, 7 + i * 7, 15);
       }
       // Skill readiness: fireball cooldown wedge next to the mana row.
       const cdMax = 1.1;
@@ -569,7 +582,7 @@ export class PlayScene implements Scene {
         g.fillRect(sx, 21, Math.round(5 * (cd / cdMax)), 1);
       }
       // Purse.
-      g.drawImage(ICON_COIN, 6, 23);
+      blit(g, ICON_COIN, 6, 23);
       drawText(g, String(p.gold), 14, 24, COLORS.gold);
       // Level + XP bar (+ a nudge when skill points are waiting).
       drawText(g, `LV ${p.progression.level}`, 6, 33, COLORS.white);
@@ -652,7 +665,7 @@ export class PlayScene implements Scene {
       gm.width - this.minimap.width - 6,
       16,
       markers,
-      { x: gm.camera.x, y: Math.max(0, gm.camera.y), w: gm.width, h: gm.height },
+      { x: gm.camera.x, y: Math.max(0, gm.camera.y), w: gm.camera.viewW, h: gm.camera.viewH },
     );
   }
 
@@ -663,7 +676,7 @@ export class PlayScene implements Scene {
     g.save();
     g.translate(gm.width / 2 - 18, 108);
     g.scale(3, 3);
-    g.drawImage(KNIGHT_IDLE_SPRITE, 0, 0);
+    g.drawImage(KNIGHT_IDLE_SPRITE, 0, 0, KNIGHT_IDLE_SPRITE.width / TEXEL, KNIGHT_IDLE_SPRITE.height / TEXEL);
     g.restore();
     drawText(g, 'HITSTOP', gm.width / 2, 48, COLORS.white, 4, 'center');
     drawText(g, 'GAME FEEL IS THE FOUNDATION', gm.width / 2, 80, COLORS.steel, 1, 'center');

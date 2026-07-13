@@ -17,6 +17,15 @@ export class Camera {
   private kx = 0;
   private ky = 0;
 
+  /**
+   * World zoom: how much larger than 1:1 the world renders. At 2, the
+   * camera shows a half-size window of the world (characters appear
+   * twice as big) while screen-space UI is unaffected. viewW/viewH
+   * shrink accordingly. Shake/kick offsets are normalized by zoom so
+   * feel tuning stays in *screen* pixels.
+   */
+  zoom = 1;
+
   /** World bounds the view is clamped to. */
   minX = 0;
   minY = -Infinity;
@@ -29,11 +38,30 @@ export class Camera {
   shakeAmp = 7;
   /** Trauma decay per second. */
   traumaDecay = 1.6;
+  /**
+   * Render offset quantization in logical pixels. 1 on a 1× canvas;
+   * 1/zoom on zoomed canvases so scrolling lands on device pixels
+   * (half-pixel camera = visibly smoother pans at 2×).
+   */
+  snap = 1;
 
-  constructor(
-    public viewW: number,
-    public viewH: number,
-  ) {}
+  /** Visible world width/height (screen size ÷ zoom). */
+  viewW: number;
+  viewH: number;
+  private baseW: number;
+  private baseH: number;
+
+  constructor(viewW: number, viewH: number) {
+    this.viewW = this.baseW = viewW;
+    this.viewH = this.baseH = viewH;
+  }
+
+  /** Set the world zoom (see `zoom`). */
+  setZoom(z: number): void {
+    this.zoom = z;
+    this.viewW = this.baseW / z;
+    this.viewH = this.baseH / z;
+  }
 
   setBounds(minX: number, minY: number, maxX: number, maxY: number): void {
     this.minX = minX;
@@ -65,21 +93,24 @@ export class Camera {
     this.ky += dy;
   }
 
-  /** Final render offsets, including shake noise and kick. */
+  /** Final render offsets, including shake noise and kick — normalized
+   * by zoom so tuned magnitudes read as SCREEN pixels at any zoom. */
   offsetX(): number {
     const t = this.trauma * this.trauma;
-    return (Math.random() * 2 - 1) * this.shakeAmp * t + this.kx;
+    return ((Math.random() * 2 - 1) * this.shakeAmp * t + this.kx) / this.zoom;
   }
 
   offsetY(): number {
     const t = this.trauma * this.trauma;
-    return (Math.random() * 2 - 1) * this.shakeAmp * 0.7 * t + this.ky;
+    return ((Math.random() * 2 - 1) * this.shakeAmp * 0.7 * t + this.ky) / this.zoom;
   }
 
   /** Apply the camera transform for world-space drawing. */
   begin(g: CanvasRenderingContext2D): void {
     g.save();
-    g.translate(Math.round(-this.x + this.offsetX()), Math.round(-this.y + this.offsetY()));
+    g.scale(this.zoom, this.zoom);
+    const q = (v: number) => Math.round(v / this.snap) * this.snap;
+    g.translate(q(-this.x + this.offsetX()), q(-this.y + this.offsetY()));
   }
 
   end(g: CanvasRenderingContext2D): void {

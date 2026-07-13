@@ -26,7 +26,7 @@ import {
   SkillTree,
 } from '@engine/index';
 import type { TreeCtx } from '../content/skilltree';
-import { KNIGHT_ANIMS } from '../content/sprites';
+import { KNIGHT_ANIMS, TEXEL } from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { weaponSpecOf, type WeaponSpec } from '../content/items';
 import type { SkillCtx } from '../content/skills';
@@ -556,7 +556,7 @@ export class Player extends Actor {
       g.translate(Math.round(cx), Math.round(by - 4));
       g.rotate(this.facing * (Math.PI / 2) * Math.min(1, this.deadT * 3));
       g.globalAlpha = Math.max(0, 1 - Math.max(0, this.deadT - 0.8));
-      g.drawImage(img, -6, -9);
+      g.drawImage(img, -6, -9, img.width / TEXEL, img.height / TEXEL);
       g.restore();
       g.globalAlpha = 1;
       return;
@@ -568,7 +568,7 @@ export class Player extends Actor {
     g.save();
     g.translate(Math.round(cx), Math.round(by));
     g.scale(sx, sy);
-    g.drawImage(img, -6, -14);
+    g.drawImage(img, -6, -14, img.width / TEXEL, img.height / TEXEL);
     g.restore();
 
     if (this.fsm.is('attack')) this.renderSlash(g, cx, this.y + this.h * 0.55);

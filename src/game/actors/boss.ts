@@ -1,6 +1,6 @@
 import { FSM, rand, pick } from '@engine/index';
 import { defineMonster, Monster } from './monster';
-import { SLIME1, SLIME2 } from '../content/sprites';
+import { SLIME1, SLIME2, TEXEL } from '../content/sprites';
 import { tintOf, whiteOf } from '@engine/index';
 import { COLORS } from '../content/palette';
 import type { Player } from './player';
@@ -277,7 +277,7 @@ defineMonster('slime-king', {
     g.save();
     g.translate(Math.round(m.x), Math.round(m.y));
     g.scale(SCALE_X, SCALE_Y);
-    g.drawImage(base, 0, 0);
+    g.drawImage(base, 0, 0, base.width / TEXEL, base.height / TEXEL);
     g.restore();
     // The crown.
     g.fillStyle = COLORS.gold;
