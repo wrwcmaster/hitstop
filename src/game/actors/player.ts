@@ -26,7 +26,7 @@ import {
   SkillTree,
 } from '@engine/index';
 import type { TreeCtx } from '../content/skilltree';
-import { KNIGHT_ANIMS, TEXEL } from '../content/sprites';
+import { KNIGHT_ANIMS } from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { weaponSpecOf, type WeaponSpec } from '../content/items';
 import type { SkillCtx } from '../content/skills';
@@ -640,10 +640,11 @@ export class Player extends Actor {
 
     const cx = this.cx;
     const by = this.y + this.h;
-    // The sprite is drawn at its own size, anchored at the feet — so art
-    // taller than the hitbox (head/hair above) just works.
-    const dw = img.width / TEXEL;
-    const dh = img.height / TEXEL;
+    // Fit the sprite to the hitbox, anchored at the feet, preserving the
+    // art's aspect ratio: its drawn height matches the collision height so
+    // the knight sits exactly on its 10x18 box rather than towering over it.
+    const dh = this.h;
+    const dw = (img.width / img.height) * dh;
 
     const q = (v: number) => Math.round(v * 4) / 4;
     if (this.fsm.is('dead')) {
