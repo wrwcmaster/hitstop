@@ -73,6 +73,20 @@ canvas.addEventListener('pointerdown', () => {
   game.input.notifyAnyPress();
 });
 
+// Belt-and-suspenders against mobile zoom: iOS Safari ignores
+// `user-scalable=no` and touch-action for pinch, firing `gesture*` events
+// instead, and can still double-tap-zoom. Swallow both so a double tap
+// does nothing special. (Fullscreen is a deliberate opt-in in Options.)
+for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+}
+let lastTouchEnd = 0;
+document.addEventListener('touchend', (e) => {
+  const now = e.timeStamp;
+  if (now - lastTouchEnd < 300) e.preventDefault(); // kill the zoom half of a double-tap
+  lastTouchEnd = now;
+}, { passive: false });
+
 // The level editor test-plays via localStorage: it writes the room JSON
 // and opens the game with ?room=local, which replaces the whole world
 // with that single room.
