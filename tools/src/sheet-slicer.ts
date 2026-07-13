@@ -21,6 +21,8 @@ let zoom = 3;
 let rects: SheetRect[] = [];
 /** In-progress drag rectangle (image pixel coords). */
 let drag: { x: number; y: number; x2: number; y2: number } | null = null;
+/** In-progress move of an existing rect: its index + grab offset. */
+let moving: { i: number; dx: number; dy: number; moved: boolean } | null = null;
 /** anim name -> { frames:number[], fps } */
 const anims: Record<string, { frames: number[]; fps: number }> = {
   idle: { frames: [0], fps: 4 },
@@ -173,27 +175,53 @@ sheet.addEventListener('mousedown', (e) => {
     }
     return;
   }
-  drag = { x: p.x, y: p.y, x2: p.x, y2: p.y };
+  // Grab an existing frame to move it; otherwise start drawing a new one.
+  const hit = rectAtIndex(p.x, p.y);
+  if (hit >= 0) {
+    moving = { i: hit, dx: p.x - rects[hit].x, dy: p.y - rects[hit].y, moved: false };
+  } else {
+    drag = { x: p.x, y: p.y, x2: p.x, y2: p.y };
+  }
 });
 sheet.addEventListener('mousemove', (e) => {
-  if (!drag) return;
-  const p = sheetPos(e);
-  drag.x2 = p.x;
-  drag.y2 = p.y;
-  drawSheet();
+  if (moving && img) {
+    const p = sheetPos(e);
+    const r = rects[moving.i];
+    r.x = Math.max(0, Math.min(img.width - r.w, p.x - moving.dx));
+    r.y = Math.max(0, Math.min(img.height - r.h, p.y - moving.dy));
+    moving.moved = true;
+    drawSheet();
+    return;
+  }
+  if (drag) {
+    const p = sheetPos(e);
+    drag.x2 = p.x;
+    drag.y2 = p.y;
+    drawSheet();
+    return;
+  }
+  // Hover feedback: a frame is grabbable (move), blank area draws (crosshair).
+  if (mode === 'rects' && img) {
+    const p = sheetPos(e);
+    sheet.style.cursor = rectAtIndex(p.x, p.y) >= 0 ? 'move' : 'crosshair';
+  }
 });
 window.addEventListener('mouseup', () => {
+  if (moving) {
+    const m = moving;
+    moving = null;
+    if (m.moved) { buildRectList(); syncIO(); }   // committed a reposition
+    drawSheet();                                   // a plain click on a frame just redraws
+    return;
+  }
   if (!drag) return;
   const d = drag;
   drag = null;
   const r = normRect(d);
   if (r.w >= 2 && r.h >= 2) {
     rects.push(r);                          // a deliberate drag → custom-sized frame
-  } else if (img && rectAtIndex(d.x, d.y) < 0) {
-    rects.push(placedRect(d.x, d.y));       // a tap on blank area → default-sized frame
   } else {
-    drawSheet();                            // tap on an existing frame → no-op
-    return;
+    rects.push(placedRect(d.x, d.y));       // a tap on blank area → default-sized frame
   }
   buildRectList();
   syncIO();
@@ -245,7 +273,8 @@ function drawSheet(): void {
 
   const n = frameCount();
   sctx.lineWidth = 1;
-  sctx.font = `${Math.max(9, 4 * zoom)}px monospace`;
+  const fontPx = Math.min(18, Math.max(10, Math.round(3.2 * zoom)));
+  sctx.font = `${fontPx}px monospace`;
   sctx.textBaseline = 'top';
   for (let i = 0; i < n; i++) {
     const r = rectOf(i);
@@ -253,10 +282,14 @@ function drawSheet(): void {
     const x = r.x * zoom, y = r.y * zoom;
     sctx.strokeStyle = 'rgba(255,205,117,0.8)';
     sctx.strokeRect(x + 0.5, y + 0.5, r.w * zoom, r.h * zoom);
-    sctx.fillStyle = 'rgba(7,7,13,0.75)';
-    sctx.fillRect(x + 1, y + 1, 16, 12);
+    // Index badge sized to the label so multi-digit numbers aren't clipped.
+    const label = String(i);
+    const pad = 3;
+    const tw = Math.ceil(sctx.measureText(label).width);
+    sctx.fillStyle = 'rgba(7,7,13,0.78)';
+    sctx.fillRect(x + 1, y + 1, tw + pad * 2, fontPx + 3);
     sctx.fillStyle = '#ffcd75';
-    sctx.fillText(String(i), x + 2, y + 1);
+    sctx.fillText(label, x + 1 + pad, y + 2);
   }
   // In-progress drag.
   if (drag) {
@@ -357,6 +390,101 @@ function renderPreview(): void {
   }
 }
 
+/* ---------------- PNG -> text-grid sprite JSON ---------------- */
+
+// Palette chars a converted sprite may use ('.' is reserved for transparent).
+const CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#@$%&*+='.split('');
+const hex2 = (v: number) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0');
+
+/** Quantize a set of RGB samples to at most `maxColors` buckets by dropping
+ * low bits until the distinct count fits, then averaging each bucket. */
+function buildPalette(samples: number[][], maxColors: number) {
+  const freq = new Map<string, { r: number; g: number; b: number; c: number }>();
+  for (const [r, g, b] of samples) {
+    const k = `${r},${g},${b}`;
+    const e = freq.get(k) ?? { r, g, b, c: 0 };
+    e.c++; freq.set(k, e);
+  }
+  const bucketsAt = (sh: number) => {
+    const m = new Map<string, { r: number; g: number; b: number; c: number }>();
+    for (const { r, g, b, c } of freq.values()) {
+      const k = `${r >> sh},${g >> sh},${b >> sh}`;
+      const e = m.get(k) ?? { r: 0, g: 0, b: 0, c: 0 };
+      e.r += r * c; e.g += g * c; e.b += b * c; e.c += c; m.set(k, e);
+    }
+    return m;
+  };
+  let shift = 0;
+  let buckets = bucketsAt(0);
+  while (buckets.size > maxColors && shift < 8) { shift++; buckets = bucketsAt(shift); }
+  const ordered = [...buckets.entries()].sort((a, b) => b[1].c - a[1].c).slice(0, CHARS.length);
+  const palette: Record<string, string> = {};
+  const keyToChar = new Map<string, string>();
+  ordered.forEach(([k, e], i) => {
+    const ch = CHARS[i];
+    palette[ch] = `#${hex2(Math.round(e.r / e.c))}${hex2(Math.round(e.g / e.c))}${hex2(Math.round(e.b / e.c))}`;
+    keyToChar.set(k, ch);
+  });
+  const charFor = (r: number, g: number, b: number) =>
+    keyToChar.get(`${r >> shift},${g >> shift},${b >> shift}`) ?? CHARS[0];
+  return { palette, charFor };
+}
+
+/** Read each frame's pixels at logical resolution (frame size / texel). */
+function frameLogicalPixels(): { w: number; h: number; data: Uint8ClampedArray | null }[] {
+  const texel = grid().texel;
+  const tmp = document.createElement('canvas');
+  const tctx = tmp.getContext('2d')!;
+  const out: { w: number; h: number; data: Uint8ClampedArray | null }[] = [];
+  for (let i = 0; i < frameCount(); i++) {
+    const r = rectOf(i);
+    if (!img || !r || r.w <= 0 || r.h <= 0) { out.push({ w: 0, h: 0, data: null }); continue; }
+    const lw = Math.max(1, Math.round(r.w / texel)), lh = Math.max(1, Math.round(r.h / texel));
+    tmp.width = lw; tmp.height = lh;
+    tctx.imageSmoothingEnabled = false;
+    tctx.clearRect(0, 0, lw, lh);
+    tctx.drawImage(img, r.x, r.y, r.w, r.h, 0, 0, lw, lh);
+    out.push({ w: lw, h: lh, data: tctx.getImageData(0, 0, lw, lh).data });
+  }
+  return out;
+}
+
+/** Convert the sliced frames + animation lists into a text-grid SpriteFile. */
+function spriteFile() {
+  const px = frameLogicalPixels();
+  const maxColors = Math.max(2, Math.min(CHARS.length, num('maxColors') || 24));
+  const samples: number[][] = [];
+  for (const f of px) {
+    if (!f.data) continue;
+    for (let p = 0; p < f.w * f.h; p++) {
+      if (f.data[p * 4 + 3] >= 128) samples.push([f.data[p * 4], f.data[p * 4 + 1], f.data[p * 4 + 2]]);
+    }
+  }
+  const pal = buildPalette(samples, maxColors);
+  const outAnims: Record<string, { fps: number; frames: string[][] }> = {};
+  for (const name of Object.keys(anims)) {
+    const a = anims[name];
+    const frames = a.frames
+      .filter((fi) => fi >= 0 && fi < px.length && px[fi].data)
+      .map((fi) => {
+        const f = px[fi];
+        const d = f.data!;
+        const rows: string[] = [];
+        for (let y = 0; y < f.h; y++) {
+          let row = '';
+          for (let x = 0; x < f.w; x++) {
+            const o = (y * f.w + x) * 4;
+            row += d[o + 3] < 128 ? '.' : pal.charFor(d[o], d[o + 1], d[o + 2]);
+          }
+          rows.push(row);
+        }
+        return rows;
+      });
+    outAnims[name] = { fps: a.fps, frames };
+  }
+  return { hd: true, palette: pal.palette, anims: outAnims };
+}
+
 /* ---------------- io ---------------- */
 
 function syncIO(): void {
@@ -367,6 +495,15 @@ $('btnExport').onclick = () => {
   syncIO();
   navigator.clipboard?.writeText(($('io') as HTMLTextAreaElement).value);
   flash('descriptor copied to clipboard');
+};
+
+$('btnExportSprite').onclick = () => {
+  if (!img) { flash('load a sheet first'); return; }
+  const sprite = spriteFile();
+  const json = JSON.stringify(sprite, null, 2);
+  ($('io') as HTMLTextAreaElement).value = json;
+  navigator.clipboard?.writeText(json);
+  flash(`sprite json copied (${Object.keys(sprite.palette).length} colors) — paste into the sprite editor`);
 };
 
 buildModeBtns();
