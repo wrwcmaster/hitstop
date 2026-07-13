@@ -4,6 +4,10 @@
 
 Frame-freeze hitstop, trauma-based screenshake, directional camera kicks, hit-flash, particle bursts, and synthesized SFX are first-class, composable primitives, available to every entity from day one. The long-term goal is a Metroidvania-scale action game in the spirit of Hollow Knight — and every layer added along the way has to keep combat feeling this good.
 
+## Play online
+
+**▶ [Play in your browser](https://wrwcmaster.github.io/hitstop/)** — the game is auto-deployed to GitHub Pages from `main` on every push (see `.github/workflows/deploy-pages.yml`). The design tools ship too: [level editor](https://wrwcmaster.github.io/hitstop/tools/level-editor.html) · [sprite editor](https://wrwcmaster.github.io/hitstop/tools/sprite-editor.html).
+
 ## Quick start
 
 ```bash
