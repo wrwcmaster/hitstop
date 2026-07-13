@@ -73,6 +73,7 @@ Combat is half the story; the other half is that *moving* feels right:
 - **Jump buffering** (0.12s): jump pressed slightly before landing still jumps.
 - **Jump cut**: releasing jump clamps upward velocity — variable jump height.
 - **Attack buffering** (0.16s): mash-friendly combo chaining.
+- **Intent-based attack lunge**: swings step you forward only while you hold toward the target (full lunge), barely when neutral (25%), and not at all while holding away — aggression is a choice, not a tax.
 - **Squash & stretch**: 1.35× tall on jump, 0.6× on hard landing, anchored at the feet.
 - **Dash i-frames** (0.2s): dashes read as decisive because they're briefly invincible.
 - **Camera lookahead**: the camera leads by facing + velocity, so you see where you're going.
