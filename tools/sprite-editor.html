@@ -42,8 +42,11 @@
 <body>
   <header>
     <h1>hitstop sprite editor</h1>
-    <button id="btnExport">export</button>
-    <button id="btnImport">import</button>
+    <button id="btnLoad" title="Open a .json sprite file">load file</button>
+    <button id="btnSave" title="Download the current sprite as .json">save</button>
+    <button id="btnExport" title="Copy JSON to clipboard">export</button>
+    <button id="btnImport" title="Import JSON from the textarea">import</button>
+    <input type="file" id="fileInput" accept=".json,application/json" style="display:none">
     <span id="status"></span>
   </header>
   <main>

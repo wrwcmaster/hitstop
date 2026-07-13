@@ -126,7 +126,7 @@ A single static sprite is just one animation with one frame. `loadSprite` (`src/
 - **frames** — numbered buttons switch frames within the selected animation. **+ frame** (blank), **dup**, **del**.
 - **size (w × h) → resize** — reshape every frame across all animations (content preserved top-left), keeping the sprite uniform.
 - **preview** — plays **every animation at once** at its own fps. The **hd** checkbox toggles between the raw art and the EPX-upscaled version the game actually renders, at the same on-screen size.
-- **export** copies the sprite JSON to the clipboard; **import** loads whatever is in the textarea (the older single-animation `{ palette, frames, fps }` shape is accepted too).
+- **load file / save** open a `.json` sprite from disk and download the current one — the easiest way to round-trip `content/sprites/*.json`. **export / import** are the clipboard/textarea equivalents (the older single-animation `{ palette, frames, fps }` shape is accepted too).
 
 ### Getting your work into the game
 
@@ -139,6 +139,36 @@ A single static sprite is just one animation with one frame. `loadSprite` (`src/
    export const GOBLIN_IDLE = goblin.frame('idle', 0);          // a single frame
    ```
 3. **Custom colors** — palette characters added in the editor travel *in the file* (`palette`), so they just work. Put a color in `PAL` (`src/game/content/palette.ts`) only if you want it shared across sprites.
+
+---
+
+## Sprite-sheet slicer (PNG)
+
+Source: `tools/sheet-slicer.html` + `tools/src/sheet-slicer.ts`.
+
+The text-grid format is great for small hand-drawn sprites, but for **full-colour art** — a sheet drawn elsewhere (an illustration tool, an image model, a marketplace asset) — use a PNG **sprite sheet** instead. The slicer turns a sheet into a **descriptor** the game loads with `loadSheet` (`src/engine/gfx/spritesheet.ts`).
+
+### Slicing a sheet
+
+1. **load png** — pick your sheet. It's shown with a numbered grid overlay.
+2. Set the **grid**: `frame w/h`, plus `margin` (border) and `spacing` (gap between cells) if the frames aren't flush. The overlay renumbers frames left→right, top→bottom.
+3. Set **texel** — how many source pixels equal one logical pixel. This is what sizes the sprite on screen: a 32-px-wide frame with `texel: 2` draws 16 logical px wide (matching the text-grid sprites, whose logical size is their grid width). Lower `texel` = bigger on screen.
+4. Add **animations** — each gets a name, a comma-separated **frame list** (the numbers on the overlay), and an fps. The preview plays every animation live.
+5. **export descriptor** copies the JSON.
+
+### Using a sheet in the game
+
+Save the PNG under `src/game/content/sprites/` (e.g. `knight.png`) and the descriptor next to it (`knight.sheet.json`). Then swap the player's art in `main.ts`, before `game.start()`:
+
+```ts
+import knightPng from './content/sprites/knight.png';        // Vite gives a URL (inlined in the single-file build)
+import knightSheet from './content/sprites/knight.sheet.json';
+import { loadKnightSheet } from './content/sprites';
+// ...
+await loadKnightSheet(knightPng, knightSheet as SheetDescriptor);
+```
+
+`loadKnightSheet` decodes the image, slices it, and swaps `KNIGHT_ANIMS` / `KNIGHT_IDLE_SPRITE` (ES-module live bindings, so the player and title screen pick it up). For any other actor, call `loadSheet(image, descriptor)` and use the returned `frame()` / `animSet()` exactly like a text-grid sprite. The animation names the game expects for the player are `idle`, `run`, and `air`.
 
 ---
 

@@ -1,4 +1,4 @@
-import { loadSprite, withFacing, type SpriteFile } from '@engine/index';
+import { loadSprite, loadSheet, loadImage, withFacing, type SpriteFile, type SheetDescriptor } from '@engine/index';
 import { PAL } from './palette';
 import knightJson from './sprites/knight.json';
 import slimeJson from './sprites/slime.json';
@@ -28,8 +28,26 @@ const load = (file: unknown) => loadSprite(file as SpriteFile, PAL);
 /* ---------------- knight ---------------- */
 
 const knight = load(knightJson);
-export const KNIGHT_ANIMS = withFacing(knight.animSet());
-export const KNIGHT_IDLE_SPRITE = knight.frame('idle', 0);
+// `let` (not const) so a PNG sheet can replace the text-grid art at boot;
+// ES module live bindings mean importers pick up the swap automatically.
+export let KNIGHT_ANIMS = withFacing(knight.animSet());
+export let KNIGHT_IDLE_SPRITE = knight.frame('idle', 0);
+
+/**
+ * Swap the knight to a PNG sprite sheet (see tools/sheet-slicer.html and
+ * docs/design-tools.md). Call from main.ts boot with the sheet image URL
+ * (a Vite `import x from './knight.png'`) and its exported descriptor:
+ *
+ *   await loadKnightSheet(knightPngUrl, knightSheetDescriptor);
+ *
+ * The idle animation's first frame becomes the title/menu portrait.
+ */
+export async function loadKnightSheet(imageUrl: string, desc: SheetDescriptor): Promise<void> {
+  const img = await loadImage(imageUrl);
+  const sheet = loadSheet(img, desc);
+  KNIGHT_ANIMS = withFacing(sheet.animSet());
+  KNIGHT_IDLE_SPRITE = sheet.frame('idle', 0);
+}
 
 /* ---------------- enemies ---------------- */
 
