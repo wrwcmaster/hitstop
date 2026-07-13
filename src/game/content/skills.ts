@@ -67,5 +67,40 @@ defineSkill<SkillCtx>('fireball', {
   },
 });
 
+/**
+ * NOVA — the skill tree's capstone: a ring of force around the knight.
+ * Unlocked via the MAGIC branch, cast with V.
+ */
+defineSkill<SkillCtx>('nova', {
+  name: 'NOVA',
+  desc: 'A ring of force blasts everything nearby.',
+  cooldown: 4,
+  cost: 2,
+  cast({ game, player }) {
+    const strike = game.combat.strike({
+      damage: 3,
+      targets: 'enemy',
+      attacker: player,
+      strength: 0.9,
+      knockback: 320,
+      popY: -160,
+      colors: [COLORS.blue, COLORS.white, COLORS.gold],
+    });
+    strike.apply({ x: player.cx - 45, y: player.cy - 35, w: 90, h: 70 });
+
+    // The blast itself: two expanding rings of particles + a flash.
+    game.feel.hitstop(0.06);
+    game.feel.shake(0.5);
+    game.feel.flash(0.25, COLORS.blue);
+    game.feel.sfx.play('nova');
+    game.feel.burst(player.cx, player.cy, 26, {
+      color: [COLORS.blue, COLORS.white], speed: 220, life: 0.35, drag: 3.5,
+    });
+    game.feel.burst(player.cx, player.cy, 14, {
+      color: [COLORS.gold, COLORS.white], speed: 120, life: 0.45, drag: 3,
+    });
+  },
+});
+
 /** Importing this module registers the skill catalog. */
 export function registerSkills(): void {}

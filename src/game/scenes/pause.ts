@@ -11,6 +11,7 @@ import type { Player } from '../actors/player';
 import type { ItemCtx } from '../content/items';
 import { COLORS } from '../content/palette';
 import { saveSettings } from '../settings';
+import { SkillTreeScene } from './skilltree';
 
 /**
  * The system menu: an overlay scene (the frozen world stays visible
@@ -33,6 +34,14 @@ export class PauseScene implements Scene {
       [
         { label: 'RESUME', onSelect: () => this.close() },
         { label: 'INVENTORY', onSelect: () => this.openInventory() },
+        {
+          label: 'SKILL TREE',
+          hint: () => (this.player.progression.skillPoints > 0 ? `${this.player.progression.skillPoints} SP!` : ''),
+          onSelect: () => {
+            this.game.sfx.play('menuSelect');
+            this.game.scenes.push(new SkillTreeScene(this.game, this.player));
+          },
+        },
         {
           label: 'OPTIONS',
           onSelect: () => {

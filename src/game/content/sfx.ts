@@ -68,4 +68,19 @@ export function registerSounds(sfx: Sfx): void {
     s.hiss(0.08, 0.14);
     s.tone(260, 60, 0.12, 'sine', 0.14);
   });
+  sfx.define('nova', (s) => {
+    s.hiss(0.25, 0.2);
+    s.tone(180, 900, 0.18, 'sawtooth', 0.12);
+    s.toneAt(60, 900, 200, 0.3, 'triangle', 0.12);
+  });
+  sfx.define('levelup', (s) => {
+    s.tone(523, 523, 0.09, 'square', 0.09);
+    s.toneAt(90, 659, 659, 0.09, 'square', 0.09);
+    s.toneAt(180, 784, 784, 0.09, 'square', 0.09);
+    s.toneAt(270, 1047, 1047, 0.22, 'square', 0.1);
+  });
+  sfx.define('unlock', (s) => {
+    s.tone(440, 880, 0.12, 'triangle', 0.12);
+    s.toneAt(110, 660, 1320, 0.16, 'triangle', 0.1);
+  });
 }

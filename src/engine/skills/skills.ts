@@ -48,7 +48,11 @@ export class SkillBook<Ctx = unknown> {
   known: string[] = [];
   private cooldowns = new Map<string, number>();
 
-  constructor(private pool: ResourcePool) {}
+  constructor(
+    private pool: ResourcePool,
+    /** Live cooldown multiplier (skill-tree haste effects). Default 1. */
+    private cooldownScale?: () => number,
+  ) {}
 
   learn(id: string): void {
     skillDef(id); // validate
@@ -75,7 +79,7 @@ export class SkillBook<Ctx = unknown> {
     const def = skillDef<Ctx>(id);
     if (def.cast(ctx) === false) return false;
     this.pool.spend(def.cost ?? 0);
-    this.cooldowns.set(id, def.cooldown);
+    this.cooldowns.set(id, def.cooldown * (this.cooldownScale?.() ?? 1));
     return true;
   }
 

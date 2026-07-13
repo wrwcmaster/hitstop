@@ -143,6 +143,7 @@ export class PlayScene implements Scene {
       const pts = info.target.def.score * mult;
       this.score += pts;
       game.feel.text(info.target.cx, info.target.y - 8, pts, COLORS.gold);
+      this.player?.gainXp(info.target.def.xp ?? Math.round(info.target.def.score / 20));
       this.rollDrops(info.target);
       // A Devourer that swallowed the weapon coughs it back up.
       const stolen = info.target.state.stolenItem;
@@ -160,6 +161,16 @@ export class PlayScene implements Scene {
       this.combo = 0;
       this.comboT = 0;
     });
+    game.events.on('waveClear', () => {
+      // SECOND WIND (skill tree): every cleared wave knits a wound.
+      const p = this.player;
+      if (p && p.hp > 0 && p.tree.has('v3') && p.hp < p.maxHp) {
+        p.heal(1);
+        game.feel.text(p.cx, p.y - 10, '+1 HP', COLORS.red);
+        game.feel.sfx.play('heal');
+      }
+    });
+    game.events.on('levelUp', () => this.autosave());
     game.events.on('playerDied', () => {
       this.phase = 'over';
       this.overT = 1.4;
@@ -560,8 +571,17 @@ export class PlayScene implements Scene {
       // Purse.
       g.drawImage(ICON_COIN, 6, 23);
       drawText(g, String(p.gold), 14, 24, COLORS.gold);
+      // Level + XP bar (+ a nudge when skill points are waiting).
+      drawText(g, `LV ${p.progression.level}`, 6, 33, COLORS.white);
+      g.fillStyle = '#07070d';
+      g.fillRect(28, 34, 32, 3);
+      g.fillStyle = COLORS.gold;
+      g.fillRect(28, 34, Math.round(32 * p.progression.fraction), 3);
+      if (p.progression.skillPoints > 0 && Math.floor(p.animT * 2) % 2 === 0) {
+        drawText(g, `${p.progression.skillPoints} SP - ESC`, 64, 33, COLORS.gold);
+      }
       // Active buffs/debuffs: chip + remaining-time sliver.
-      let by = 33;
+      let by = 42;
       for (const s of p.statuses.list()) {
         g.fillStyle = s.def.color;
         g.fillRect(6, by, 4, 4);

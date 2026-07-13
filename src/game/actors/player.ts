@@ -21,7 +21,10 @@ import {
   Equipment,
   SkillBook,
   Statuses,
+  Progression,
+  SkillTree,
 } from '@engine/index';
+import type { TreeCtx } from '../content/skilltree';
 import { KNIGHT_ANIMS } from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { weaponSpecOf, type WeaponSpec } from '../content/items';
@@ -73,12 +76,24 @@ export class Player extends Actor {
   equipment = new Equipment(this.stats);
   statuses = new Statuses(this);
   gold = 0;
-  skills = new SkillBook<SkillCtx>({
-    canAfford: (cost) => this.mp >= cost,
-    spend: (cost) => {
-      this.mp -= cost;
+
+  /** XP curve: 40 XP for level 1→2, +25 per level after. */
+  progression = new Progression(
+    (level) => 40 + (level - 1) * 25,
+    1,
+    (level) => this.onLevelUp(level),
+  );
+  tree = new SkillTree<TreeCtx>({ stats: this.stats, syncStats: () => this.syncStats() });
+  skills = new SkillBook<SkillCtx>(
+    {
+      canAfford: (cost) => this.mp >= cost,
+      spend: (cost) => {
+        this.mp -= cost;
+      },
     },
-  });
+    // ARCANE FLOW (skill tree): halved cooldowns.
+    () => (this.tree.has('m2') ? 0.5 : 1),
+  );
   mp = PLAYER_TUNING.maxMp;
 
   get maxMp(): number {
@@ -140,6 +155,27 @@ export class Player extends Actor {
 
   restoreMp(n: number): void {
     this.mp = Math.min(this.maxMp, this.mp + n);
+  }
+
+  /** Award XP with a floater; level-ups fire onLevelUp. */
+  gainXp(n: number): void {
+    if (n <= 0 || this.hp <= 0) return;
+    this.feel.text(this.cx, this.y - 14, `+${n} XP`, COLORS.steel);
+    this.progression.addXp(n);
+  }
+
+  /** The ding: full restore + fanfare. New points nudge you to the tree. */
+  private onLevelUp(level: number): void {
+    this.hp = this.maxHp;
+    this.mp = this.maxMp;
+    this.feel.text(this.cx, this.y - 22, 'LEVEL UP!', COLORS.gold, 2);
+    this.feel.sfx.play('levelup');
+    this.feel.flash(0.25, COLORS.gold);
+    this.feel.slowmo(0.35, 0.45);
+    this.feel.burst(this.cx, this.cy, 24, {
+      color: [COLORS.gold, COLORS.white], speed: 130, life: 0.6, grav: -80, drag: 2.5,
+    });
+    this.game.events.emit('levelUp', { level });
   }
 
   /** The attack spec of whatever's in the weapon slot (fists if empty). */
@@ -231,6 +267,9 @@ export class Player extends Actor {
     if (this.input.consumePress('skill')) {
       this.skills.cast('fireball', { game: this.game, player: this });
     }
+    if (this.input.consumePress('skill2')) {
+      this.skills.cast('nova', { game: this.game, player: this });
+    }
   }
 
   beginAttack(): void {
@@ -239,9 +278,11 @@ export class Player extends Actor {
     const heavy = this.attackIndex === 2;
     this.attackDur = heavy ? 0.3 : 0.2;
     this.vx += this.facing * (heavy ? 150 : 45);
-    // Damage/feel come from the equipped weapon; flat bonus from stats.
+    // Damage/feel come from the equipped weapon; flat bonus from stats;
+    // EXECUTIONER (skill tree) boosts the finisher.
+    const executioner = heavy && this.tree.has('w3') ? 2 : 0;
     this.strike = this.game.combat.strike({
-      damage: (heavy ? w.heavyDamage : w.lightDamage) + Math.round(this.stats.get('attack')),
+      damage: (heavy ? w.heavyDamage : w.lightDamage) + Math.round(this.stats.get('attack')) + executioner,
       targets: 'enemy',
       attacker: this,
       strength: heavy ? w.heavyStrength : w.lightStrength,
