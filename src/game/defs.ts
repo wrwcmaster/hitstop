@@ -111,6 +111,10 @@ export interface GameEvents extends Record<string, unknown> {
  * controls UI for button rebinding). */
 export type ActionGame = Game<Action, GameEvents> & { pad?: GamepadInput<Action> };
 
+/** Build version, injected from package.json at build time (see vite configs). */
+declare const __APP_VERSION__: string;
+export const VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0';
+
 export const VIEW_W = 480;
 export const VIEW_H = 270;
 /** Device pixels per logical pixel: 1920×1080 backing store — native

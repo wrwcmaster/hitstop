@@ -17,7 +17,7 @@ import {
   rand,
   clamp,
 } from '@engine/index';
-import type { ActionGame, Action } from '../defs';
+import { VERSION, type ActionGame, type Action } from '../defs';
 import { Player } from '../actors/player';
 import { Monster, monsters } from '../actors/monster';
 import { Npc, npcs } from '../actors/npc';
@@ -688,6 +688,8 @@ export class PlayScene implements Scene {
     drawText(g, 'Move: Arrows / WASD - Jump: Space', gm.width / 2, 208, COLORS.steelDark, 1, 'center');
     drawText(g, 'Attack: Z - Dash: X - Skill: C - Menu: Esc', gm.width / 2, 220, COLORS.steelDark, 1, 'center');
     drawText(g, 'Z or Enter to select', gm.width / 2, 238, COLORS.gold, 1, 'center');
+    // Small build version, tucked in the corner.
+    drawText(g, `v${VERSION}`, gm.width - 6, gm.height - 10, COLORS.steelDark, 1, 'right');
   }
 
   private renderOver(g: CanvasRenderingContext2D): void {
