@@ -21,9 +21,9 @@ export const BRANCH_NAMES = ['WARRIOR', 'VITALITY', 'MAGIC'];
 
 /** Grid for the tree UI: TREE_GRID[branch][tier] = node id. */
 export const TREE_GRID: string[][] = [
-  ['w1', 'w2', 'w3'],
-  ['v1', 'v2', 'v3'],
-  ['m1', 'm2', 'm3'],
+  ['w1', 'w2', 'w3', 'w4'],
+  ['v1', 'v2', 'v3', 'v4'],
+  ['m1', 'm2', 'm3', 'm4'],
 ];
 
 /* ---- WARRIOR ---- */
@@ -49,6 +49,13 @@ defineTreeNode<TreeCtx>('w3', {
   // Checked by name in Player.beginAttack.
 });
 
+defineTreeNode<TreeCtx>('w4', {
+  name: 'DASH STRIKE',
+  desc: 'DASHING THROUGH ENEMIES CUTS THEM',
+  cost: 3, branch: 0, tier: 3, requires: ['w3'],
+  // Checked by name in Player.beginDash.
+});
+
 /* ---- VITALITY ---- */
 
 defineTreeNode<TreeCtx>('v1', {
@@ -70,6 +77,13 @@ defineTreeNode<TreeCtx>('v3', {
   desc: 'HEAL 1 HP ON EVERY WAVE CLEAR',
   cost: 2, branch: 1, tier: 2, requires: ['v2'],
   // Checked by name in the PlayScene's waveClear handler.
+});
+
+defineTreeNode<TreeCtx>('v4', {
+  name: 'SKY DANCER',
+  desc: 'DOUBLE JUMP: PRESS JUMP AGAIN IN THE AIR',
+  cost: 3, branch: 1, tier: 3, requires: ['v3'],
+  // Checked by name in the Player's landing logic (airJumps refresh).
 });
 
 /* ---- MAGIC ---- */
@@ -95,6 +109,13 @@ defineTreeNode<TreeCtx>('m3', {
   onUnlock({ player }) {
     player.skills.learn('nova');
   },
+});
+
+defineTreeNode<TreeCtx>('m4', {
+  name: 'PYRE',
+  desc: 'FIREBALLS EXPLODE WHERE THEY DIE',
+  cost: 3, branch: 2, tier: 3, requires: ['m3'],
+  // Checked by name in the fireball's onExpire.
 });
 
 /** Importing this module registers the tree. */

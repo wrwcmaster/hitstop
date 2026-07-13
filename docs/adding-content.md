@@ -286,9 +286,9 @@ The built-ins show the three tiers, all resolving through Strikes/Projectiles so
 In `src/game/content/skilltree.ts`. Nodes are stat mods (auto-applied and save-restored) and/or an `onUnlock` hook, arranged on a branch/tier grid the UI reads:
 
 ```ts
-defineTreeNode<TreeCtx>('w4', {
+defineTreeNode<TreeCtx>('w5', {
   name: 'BLOODLUST', desc: 'KILLS RESTORE 1 MP',
-  cost: 2, branch: 0, tier: 3, requires: ['w3'],
+  cost: 3, branch: 0, tier: 4, requires: ['w4'],
   // stat effects: mods: { add: { attack: 1 } }
   // mechanics: check tree.has('w4') where the mechanic lives,
   // or flip something here in onUnlock (runs again on save load)

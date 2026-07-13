@@ -38,8 +38,12 @@ export const PLAYER_TUNING = {
   runAccel: 1400,
   groundFriction: 0.0001,
   airFriction: 0.1,
-  jumpSpeed: 350,
+  // 400 px/s ≈ 53px of rise (v²/2g): enough to reach the 48-50px arena
+  // platforms with a little margin. (At the POC's 350 they were 41px —
+  // decoratively unreachable.)
+  jumpSpeed: 400,
   jumpCutSpeed: 130, // vy clamp when jump is released early
+  doubleJumpSpeed: 370, // SKY DANCER's air jump
   coyoteTime: 0.1,
   jumpBufferTime: 0.12,
   attackBufferTime: 0.16,
@@ -118,6 +122,11 @@ export class Player extends Actor {
   swallowedBy: Monster | null = null;
   escapeN = 0;
   escapeNeed = 7;
+
+  /** Air jumps left (SKY DANCER grants 1; refreshed on landing). */
+  private airJumps = 0;
+  /** DASH STRIKE (skill tree): the active dash's damage payload. */
+  private dashStrike: Strike | null = null;
 
   fsm: FSM<Player>;
 
@@ -311,16 +320,27 @@ export class Player extends Actor {
     this.feel.burst(this.cx, this.y + this.h - 2, 6, {
       color: [COLORS.steel, COLORS.white], speed: 50, life: 0.3, drag: 4,
     });
+    // DASH STRIKE (skill tree): the dash itself becomes a blade.
+    this.dashStrike = this.tree.has('w4')
+      ? this.game.combat.strike({
+          damage: 1 + Math.round(this.stats.get('attack')),
+          targets: 'enemy',
+          attacker: this,
+          strength: 0.5,
+          colors: [COLORS.steel, COLORS.white],
+        })
+      : null;
   }
 
   dashUpdate(): string | void {
     this.vx = this.facing * PLAYER_TUNING.dashSpeed;
     this.vy = 0;
+    this.dashStrike?.apply(this);
     if (Math.floor(this.fsm.t * 60) % 2 === 0) {
       this.feel.particles.spawn({
         x: this.cx - this.facing * 4, y: this.y + this.h - 2,
         vx: -this.facing * 20, vy: -10, life: 0.3, size: 3,
-        color: COLORS.steel, drag: 4,
+        color: this.dashStrike ? COLORS.white : COLORS.steel, drag: 4,
       });
     }
     if (this.fsm.t >= PLAYER_TUNING.dashTime) {
@@ -435,6 +455,17 @@ export class Player extends Actor {
           color: COLORS.navyLight, speed: 40, life: 0.25,
           angle: Math.PI / 2, spread: 1.5, drag: 3,
         });
+      } else if (this.jumpBuf.active && this.airJumps > 0 && !this.fsm.is('dead', 'attack')) {
+        // SKY DANCER (skill tree): kick off the air itself.
+        this.jumpBuf.consume();
+        this.airJumps--;
+        this.vy = -T.doubleJumpSpeed;
+        this.squash = 1.3;
+        this.feel.sfx.play('doublejump');
+        this.feel.burst(this.cx, this.y + this.h, 8, {
+          color: [COLORS.white, COLORS.steel], speed: 55, life: 0.3,
+          angle: Math.PI / 2, spread: 2.8, drag: 4,
+        });
       }
       // Variable jump height: releasing jump early cuts the ascent.
       if (!this.fsm.is('dead') && !this.input.held('jump') && this.vy < -T.jumpCutSpeed) {
@@ -446,6 +477,7 @@ export class Player extends Actor {
 
     if (this.onGround) {
       this.coyote.set();
+      this.airJumps = this.tree.has('v4') ? 1 : 0;
       if (!this.wasGround && fallSpeed > 240) {
         // Landing feedback scales with impact speed.
         this.squash = 0.6;

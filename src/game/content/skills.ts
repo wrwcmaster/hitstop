@@ -47,6 +47,24 @@ defineSkill<SkillCtx>('fireball', {
           g.fillRect(Math.round(p.x - 1), Math.round(p.y - 1), 3, 3);
         },
         onExpire(p) {
+          // PYRE (skill tree): the bolt goes out with a bang.
+          if (player.tree.has('m4')) {
+            const blast = game.combat.strike({
+              damage: 2,
+              targets: 'enemy',
+              attacker: player,
+              strength: 0.8,
+              colors: [COLORS.gold, COLORS.red, COLORS.white],
+            });
+            blast.apply({ x: p.x - 26, y: p.y - 22, w: 52, h: 44 });
+            game.feel.shake(0.3);
+            game.feel.flash(0.12, COLORS.gold);
+            game.feel.sfx.play('nova');
+            game.feel.burst(p.x, p.y, 20, {
+              color: [COLORS.gold, COLORS.red, COLORS.white], speed: 150, life: 0.4, grav: 150, drag: 2.5,
+            });
+            return;
+          }
           game.feel.burst(p.x, p.y, 8, {
             color: [COLORS.gold, COLORS.red], speed: 90, life: 0.3, drag: 3,
           });

@@ -79,6 +79,10 @@ export function registerSounds(sfx: Sfx): void {
     s.toneAt(180, 784, 784, 0.09, 'square', 0.09);
     s.toneAt(270, 1047, 1047, 0.22, 'square', 0.1);
   });
+  sfx.define('doublejump', (s) => {
+    s.tone(300, 700, 0.1, 'square', 0.07);
+    s.hiss(0.04, 0.05);
+  });
   sfx.define('unlock', (s) => {
     s.tone(440, 880, 0.12, 'triangle', 0.12);
     s.toneAt(110, 660, 1320, 0.16, 'triangle', 0.1);
