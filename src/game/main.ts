@@ -1,5 +1,5 @@
 import { Game, GamepadInput, validateRoom } from '@engine/index';
-import { KEYMAP, GAMEPAD, VIEW_W, VIEW_H, ZOOM, type Action, type GameEvents } from './defs';
+import { KEYMAP, GAMEPAD, VIEW_W, VIEW_H, ZOOM, WORLD_ZOOM, type Action, type GameEvents } from './defs';
 import { registerSounds } from './content/sfx';
 import { registerSongs } from './content/music';
 import { registerEnemies } from './actors/enemies';
@@ -29,6 +29,10 @@ const game = new Game<Action, GameEvents>({
   zoom: ZOOM,
   keymap: KEYMAP,
 });
+// The world renders 2x larger than the UI (Hollow Knight-ish character
+// scale); camera scroll snaps to device pixels under both zooms.
+game.camera.setZoom(WORLD_ZOOM);
+game.camera.snap = 1 / (ZOOM * WORLD_ZOOM);
 
 registerSounds(game.sfx);
 registerSongs();
