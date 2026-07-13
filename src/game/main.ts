@@ -1,5 +1,5 @@
-import { Game, validateRoom } from '@engine/index';
-import { KEYMAP, VIEW_W, VIEW_H, type Action, type GameEvents } from './defs';
+import { Game, GamepadInput, validateRoom } from '@engine/index';
+import { KEYMAP, GAMEPAD, VIEW_W, VIEW_H, type Action, type GameEvents } from './defs';
 import { registerSounds } from './content/sfx';
 import { registerSongs } from './content/music';
 import { registerEnemies } from './actors/enemies';
@@ -60,6 +60,10 @@ canvas.addEventListener('pointerdown', () => {
   game.input.notifyAnyPress();
 });
 
+// Gamepad: polled every frame, feeding the same action system.
+export const gamepad = new GamepadInput<Action>(game.input, GAMEPAD);
+game.onFrame(() => gamepad.poll());
+
 // The level editor test-plays via localStorage: it writes the room JSON
 // and opens the game with ?room=local, which replaces the whole world
 // with that single room.
@@ -84,6 +88,8 @@ game.start();
 declare global {
   interface Window {
     hitstop: typeof game;
+    hitstopPad: typeof gamepad;
   }
 }
 window.hitstop = game;
+window.hitstopPad = gamepad;

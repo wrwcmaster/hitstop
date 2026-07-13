@@ -17,7 +17,7 @@ npm run build:single # compile everything into hitstop.html (one file, no server
 
 No setup at all? Open **[`hitstop.html`](hitstop.html)** — the whole game compiled into a single self-contained file (committed for convenience; regenerate with `npm run build:single` after changes).
 
-In-game: arrows/WASD move, Space jumps, `Z`/`J` attack, `X`/`K` dash, `C`/`L` cast fireball, `Esc` opens the system menu (inventory, volume, restart), `` ` `` (backquote) toggles the debug overlay (hurtboxes, entity counts, live time scale).
+In-game: arrows/WASD move, Space jumps, `Z`/`J` attack, `X`/`K` dash, `C`/`L` fireball, `V` nova, `E`/`F` talk to NPCs, `Esc` opens the system menu (inventory, skill tree, options — including **key rebinding** under OPTIONS → CONTROLS), `` ` `` (backquote) toggles the debug overlay. **Gamepads work out of the box** (standard layout: A jump, X attack, B dash, Y interact, LB/RB skills, Start menu).
 
 `demo.html` is the original single-file proof of concept — zero dependencies, open it directly in a browser. Everything else in this repo is that POC grown into a real architecture.
 

@@ -16,15 +16,61 @@ export class Input<A extends string = string> {
   private released_ = new Set<A>();
   private keymap: Record<string, A | A[]>;
   private anyPressListeners: (() => void)[] = [];
+  private captureFn: ((code: string) => void) | null = null;
 
   /** A key may map to several actions (ArrowUp = jump in-game AND up in menus). */
   constructor(keymap: Record<string, A | A[]>) {
-    this.keymap = keymap;
+    this.keymap = { ...keymap };
   }
 
   private actionsFor(code: string): A[] {
     const a = this.keymap[code];
     return a === undefined ? [] : Array.isArray(a) ? a : [a];
+  }
+
+  /* ---- rebinding (key config UIs) ---- */
+
+  /** Snapshot of the current bindings (for settings persistence). */
+  getKeymap(): Record<string, A[]> {
+    const out: Record<string, A[]> = {};
+    for (const code of Object.keys(this.keymap)) out[code] = this.actionsFor(code);
+    return out;
+  }
+
+  /** Replace all bindings (restoring saved settings / defaults). */
+  setKeymap(map: Record<string, A | A[]>): void {
+    this.keymap = { ...map };
+  }
+
+  /** Key codes currently bound to an action. */
+  codesFor(action: A): string[] {
+    return Object.keys(this.keymap).filter((c) => this.actionsFor(c).includes(action));
+  }
+
+  /**
+   * Rebind: `code` becomes the ONLY key for `action` (plus any listed
+   * aliases, e.g. jump also acting as menu-up). The code's previous
+   * bindings are dropped; other keys lose this action.
+   */
+  rebind(action: A, code: string, aliases: A[] = []): void {
+    for (const c of Object.keys(this.keymap)) {
+      const rest = this.actionsFor(c).filter((a) => a !== action);
+      if (rest.length) this.keymap[c] = rest;
+      else delete this.keymap[c];
+    }
+    this.keymap[code] = [action, ...aliases];
+  }
+
+  /**
+   * Capture the next keydown as a raw code (rebind UIs) instead of
+   * processing it as an action. The callback receives e.code.
+   */
+  captureNextKey(fn: (code: string) => void): void {
+    this.captureFn = fn;
+  }
+
+  cancelCapture(): void {
+    this.captureFn = null;
   }
 
   /** Is the action currently down? */
@@ -89,6 +135,14 @@ export class Input<A extends string = string> {
   /** Listen to keyboard events on `target` using the keymap. */
   attachKeyboard(target: GlobalEventHandlers = window): void {
     target.addEventListener('keydown', (e: KeyboardEvent) => {
+      // A rebind UI is listening: hand it the raw code instead.
+      if (this.captureFn) {
+        e.preventDefault();
+        const fn = this.captureFn;
+        this.captureFn = null;
+        fn(e.code);
+        return;
+      }
       const actions = this.actionsFor(e.code);
       if (actions.length) {
         e.preventDefault();

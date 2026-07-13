@@ -46,6 +46,13 @@ export class Game<A extends string = string, E extends Record<string, unknown> =
   /** Game-defined events + engine combat events. */
   readonly events = new EventBus<E & CombatEvents>();
 
+  private frameHooks: ((realDt: number) => void)[] = [];
+
+  /** Run `fn` every rendered frame (real time) — gamepad polling, debug HUDs. */
+  onFrame(fn: (realDt: number) => void): void {
+    this.frameHooks.push(fn);
+  }
+
   get width(): number {
     return this.screen.width;
   }
@@ -76,6 +83,7 @@ export class Game<A extends string = string, E extends Record<string, unknown> =
         this.feel.renderScreen(this.ctx, this.width, this.height);
       },
       frame: (realDt) => {
+        for (const fn of this.frameHooks) fn(realDt);
         this.feel.frame(realDt);
         this.scenes.frame(realDt);
       },
