@@ -40,16 +40,27 @@
     <h1>hitstop sheet slicer</h1>
     <button id="btnLoad">load png</button>
     <button id="btnExport">export descriptor</button>
+    <span style="margin-left:8px">zoom</span>
+    <button id="btnZoomOut" title="zoom out">&minus;</button>
+    <span id="zoomLbl">3×</span>
+    <button id="btnZoomIn" title="zoom in">+</button>
     <input type="file" id="fileInput" accept=".png,image/png,image/*" style="display:none">
     <span id="status"></span>
   </header>
   <main>
     <div id="side">
-      <h2>grid</h2>
-      <label>frame w <input id="fw" type="number" min="1" value="32">
-             h <input id="fh" type="number" min="1" value="48"></label>
-      <label>margin <input id="margin" type="number" min="0" value="0">
-             spacing <input id="spacing" type="number" min="0" value="0"></label>
+      <h2>frames</h2>
+      <div id="modeBtns" style="margin-bottom:6px"></div>
+      <div id="gridControls">
+        <label>frame w <input id="fw" type="number" min="1" value="32">
+               h <input id="fh" type="number" min="1" value="48"></label>
+        <label>margin <input id="margin" type="number" min="0" value="0">
+               spacing <input id="spacing" type="number" min="0" value="0"></label>
+      </div>
+      <div id="rectControls" style="display:none">
+        <p class="hint">drag on the sheet to add a frame &middot; right-click a frame to remove it</p>
+        <div id="rectList"></div>
+      </div>
       <label>texel <input id="texel" type="number" min="1" value="4">
         <span class="hint">src px per logical px</span></label>
       <h2>animations</h2>
