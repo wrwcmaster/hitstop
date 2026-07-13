@@ -40,6 +40,7 @@
     <h1>hitstop sheet slicer</h1>
     <button id="btnLoad">load png</button>
     <button id="btnExport">export descriptor</button>
+    <button id="btnExportSprite" title="convert the sliced frames to a text-grid sprite JSON (loadSprite / sprite editor)">to sprite json</button>
     <span style="margin-left:8px">zoom</span>
     <button id="btnZoomOut" title="zoom out">&minus;</button>
     <span id="zoomLbl">3×</span>
@@ -60,13 +61,16 @@
       <div id="rectControls" style="display:none">
         <label>new frame w <input id="rw" type="number" min="1" value="32">
                h <input id="rh" type="number" min="1" value="48"></label>
-        <p class="hint">tap a blank spot to drop a frame that size, or drag any
-          rectangle &middot; right-click a frame to remove it &middot; edit x/y/w/h below</p>
+        <p class="hint">tap a blank spot to drop a frame that size, or drag a
+          rectangle for a custom one &middot; drag a frame to move it &middot;
+          right-click to remove &middot; edit x/y/w/h below</p>
         <button id="btnAddRect" style="margin-bottom:6px">+ frame</button>
         <div id="rectList"></div>
       </div>
       <label>texel <input id="texel" type="number" min="1" value="4">
         <span class="hint">src px per logical px</span></label>
+      <label>max colors <input id="maxColors" type="number" min="2" max="70" value="24">
+        <span class="hint">palette size for “to sprite json”</span></label>
       <h2>animations</h2>
       <div id="anims"></div>
       <button id="btnAddAnim">+ anim</button>
