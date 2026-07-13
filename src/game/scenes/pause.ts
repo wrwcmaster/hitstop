@@ -87,6 +87,11 @@ export class PauseScene implements Scene {
         volumeRow('MUSIC', 'music'),
         volumeRow('SFX', 'sfx'),
         {
+          label: () => `FULLSCREEN: ${isFullscreen() ? 'ON' : 'OFF'}`,
+          onSelect: () => this.toggleFullscreen(),
+          onAdjust: () => this.toggleFullscreen(),
+        },
+        {
           label: 'CONTROLS',
           onSelect: () => {
             this.page = 'controls';
@@ -135,6 +140,15 @@ export class PauseScene implements Scene {
 
   private toggleDevice(): void {
     this.device = this.device === 'keyboard' ? 'gamepad' : 'keyboard';
+    this.game.sfx.play('menuMove');
+  }
+
+  /** Flip fullscreen. Triggered from a key/button press, so the browser's
+   * user-activation requirement is satisfied. iOS iPhone lacks the API —
+   * the toggle just no-ops there. */
+  private toggleFullscreen(): void {
+    if (isFullscreen()) exitFs();
+    else requestFs();
     this.game.sfx.play('menuMove');
   }
 
@@ -297,7 +311,7 @@ export class PauseScene implements Scene {
       drawText(g, 'Esc: close', W / 2, y + bh - 9, COLORS.steelDark, 1, 'center');
     } else if (this.page === 'options') {
       const bw = 170;
-      const bh = 112;
+      const bh = 126;
       const x = (W - bw) / 2;
       const y = (H - bh) / 2;
       drawPanel(g, x, y, bw, bh);
@@ -355,3 +369,30 @@ const MENU_ACTIONS = {
   left: 'left' as Action,
   right: 'right' as Action,
 };
+
+/* ---- Fullscreen API, with the old WebKit spelling for Safari ---- */
+
+interface FsDocument extends Document {
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => void;
+}
+interface FsElement extends HTMLElement {
+  webkitRequestFullscreen?: () => void;
+}
+
+function isFullscreen(): boolean {
+  const d = document as FsDocument;
+  return !!(d.fullscreenElement || d.webkitFullscreenElement);
+}
+
+function requestFs(): void {
+  const el = document.documentElement as FsElement;
+  (el.requestFullscreen?.() as Promise<void> | undefined)?.catch(() => {});
+  if (!el.requestFullscreen) el.webkitRequestFullscreen?.();
+}
+
+function exitFs(): void {
+  const d = document as FsDocument;
+  (d.exitFullscreen?.() as Promise<void> | undefined)?.catch(() => {});
+  if (!d.exitFullscreen) d.webkitExitFullscreen?.();
+}

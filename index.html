@@ -6,9 +6,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <title>hitstop — game feel is the foundation</title>
   <style>
-    html, body { margin: 0; height: 100%; background: #07070d; overflow: hidden; }
+    /* touch-action: none disables double-tap-to-zoom and pinch-zoom, so a
+       double tap does nothing special (the game handles taps itself). */
+    html, body { margin: 0; height: 100%; background: #07070d; overflow: hidden; touch-action: none; }
     body { display: flex; align-items: center; justify-content: center; }
-    canvas { image-rendering: pixelated; image-rendering: crisp-edges; background: #07070d; }
+    canvas { image-rendering: pixelated; image-rendering: crisp-edges; background: #07070d; touch-action: none; }
     #tc { position: fixed; inset: 0; pointer-events: none; font-family: monospace; }
     .btn {
       position: absolute; width: 56px; height: 56px; border-radius: 12px;
