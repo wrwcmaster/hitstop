@@ -727,9 +727,12 @@ export class PlayScene implements Scene {
     g.fillStyle = 'rgba(7,7,13,0.55)';
     g.fillRect(0, 0, gm.width, gm.height);
     g.save();
-    g.translate(gm.width / 2 - 18, 108);
-    g.scale(3, 3);
-    g.drawImage(KNIGHT_IDLE_SPRITE, 0, 0, KNIGHT_IDLE_SPRITE.width / TEXEL, KNIGHT_IDLE_SPRITE.height / TEXEL);
+    const kw = KNIGHT_IDLE_SPRITE.width / TEXEL;
+    const kh = KNIGHT_IDLE_SPRITE.height / TEXEL;
+    const ks = 2.5;
+    g.translate(gm.width / 2 - (kw * ks) / 2, 150 - kh * ks);
+    g.scale(ks, ks);
+    g.drawImage(KNIGHT_IDLE_SPRITE, 0, 0, kw, kh);
     g.restore();
     drawText(g, 'HITSTOP', gm.width / 2, 48, COLORS.white, 4, 'center');
     drawText(g, 'Game feel is the foundation', gm.width / 2, 80, COLORS.steel, 1, 'center');
