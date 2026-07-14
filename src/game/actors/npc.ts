@@ -119,7 +119,7 @@ export class Npc extends Actor {
       return b != null ? prettyButton(b) : 'Y';
     }
     if (typeof window !== 'undefined' && !window.matchMedia('(pointer: fine)').matches) {
-      return 'USE';
+      return 'TALK';
     }
     const code = this.game.input.codesFor('interact')[0];
     return code ? prettyCode(code) : 'E';
