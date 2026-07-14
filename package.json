@@ -1,6 +1,6 @@
 {
   "name": "hitstop",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A 2D action game engine where game feel is a first-class primitive.",
   "type": "module",
   "scripts": {
