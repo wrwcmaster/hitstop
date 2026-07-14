@@ -699,22 +699,7 @@ export class Player extends Actor {
     let hx = 1.75;
     let hy = -4.5;
     
-    // Blade tilt angle: defaults to a 30-degree rest tilt
-    let dx = 0.866;
-    let dy = -0.5;
-
-    if (this.fsm.is('attack')) {
-      // Rotate the sword along with the swing arc
-      const prog = Math.min(1, this.fsm.t / this.attackDur);
-      const flipV = this.attackIndex === 1 ? -1 : 1;
-      const sweep = (-1.3 + 2.6 * Math.min(1, prog * 1.7)) * flipV;
-      dx = Math.cos(sweep);
-      dy = Math.sin(sweep);
-      
-      // Pivot from the chest/shoulder center during attack
-      hx = 0;
-      hy = -8.0;
-    } else if (animName === 'run') {
+    if (animName === 'run') {
       if (frameIdx === 0) {
         hx = 2.25;
         hy = -5.25;
@@ -731,6 +716,19 @@ export class Player extends Actor {
     } else {
       // idle sway
       hy += Math.sin(animT * 4.5) * 0.2;
+    }
+
+    // Blade tilt angle: defaults to a 30-degree rest tilt
+    let dx = 0.866;
+    let dy = -0.5;
+
+    if (this.fsm.is('attack')) {
+      // Rotate the sword along with the swing arc
+      const prog = Math.min(1, this.fsm.t / this.attackDur);
+      const flipV = this.attackIndex === 1 ? -1 : 1;
+      const sweep = (-1.3 + 2.6 * Math.min(1, prog * 1.7)) * flipV;
+      dx = Math.cos(sweep);
+      dy = Math.sin(sweep);
     }
 
     const q = (v: number) => Math.round(v * TEXEL) / TEXEL;
@@ -859,8 +857,8 @@ export class Player extends Actor {
 
     // Define two layers: shadow outline and solid white core
     const layers = [
-      { color: color1, thickness: heavy ? 5 : 3.5 },
-      { color: COLORS.white, thickness: heavy ? 2.5 : 1.5 }
+      { color: color1, thickness: heavy ? 5 : 3.5, alpha: 0.4 },
+      { color: COLORS.white, thickness: heavy ? 2.5 : 1.5, alpha: 0.8 }
     ];
 
     const N = 24;
@@ -868,6 +866,7 @@ export class Player extends Actor {
     g.save();
     for (const layer of layers) {
       g.fillStyle = layer.color;
+      g.globalAlpha = layer.alpha;
       g.beginPath();
 
       const outerPoints: [number, number][] = [];
