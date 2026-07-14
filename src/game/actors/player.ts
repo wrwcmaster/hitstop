@@ -548,10 +548,15 @@ export class Player extends Actor {
     // contactInset shrinks the touch box for round-sprited monsters.
     if (!this.fsm.is('dead', 'dash') && this.invulnT <= 0) {
       for (const e of this.world.actors('enemy')) {
-        if (e instanceof Monster && !e.def.noContactDamage &&
-            overlaps(this, expand(e.hurtbox, -(e.def.contactInset ?? 0)))) {
-          this.hurt(e);
-          break;
+        if (e instanceof Monster && !e.def.noContactDamage) {
+          // If it's a Slime King and swallow is ready, skip contact damage so swallow can trigger.
+          if (e.type === 'slime-king' && (e.state.swallowCd as number ?? 0) <= 0) {
+            continue;
+          }
+          if (overlaps(this, expand(e.hurtbox, -(e.def.contactInset ?? 0)))) {
+            this.hurt(e);
+            break;
+          }
         }
       }
     }
