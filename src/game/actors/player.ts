@@ -713,7 +713,7 @@ export class Player extends Actor {
       
       // Pivot from the chest/shoulder center during attack
       hx = 0;
-      hy = -4.5;
+      hy = -8.0;
     } else if (animName === 'run') {
       if (frameIdx === 0) {
         hx = 2.25;
@@ -747,7 +747,7 @@ export class Player extends Actor {
     // 1. Render Grip/Handle (leather wrap) extending backwards
     const gripLen = 5;
     for (let k = 1; k <= gripLen; k++) {
-      const gx = hx - f * k * dx * stepSize;
+      const gx = hx - k * dx * stepSize;
       const gy = hy - k * dy * stepSize;
       g.fillStyle = '#302426'; // dark brown leather
       g.fillRect(q(gx), q(gy), stepSize, stepSize);
@@ -755,7 +755,7 @@ export class Player extends Actor {
     }
 
     // Pommel at the very end of grip
-    const px_end = hx - f * (gripLen + 1) * dx * stepSize;
+    const px_end = hx - (gripLen + 1) * dx * stepSize;
     const py_end = hy - (gripLen + 1) * dy * stepSize;
     g.fillStyle = w.hilt;
     g.fillRect(q(px_end), q(py_end), stepSize, stepSize);
@@ -771,7 +771,7 @@ export class Player extends Actor {
       // Taper the crossguard thickness
       const thick = Math.max(1, 3 - Math.floor(Math.abs(k) / 3));
       for (let t = -Math.floor(thick / 2); t < Math.ceil(thick / 2); t++) {
-        const gxx = gx + t * f * dx * stepSize;
+        const gxx = gx + t * dx * stepSize;
         const gyy = gy + t * dy * stepSize;
         g.fillRect(q(gxx), q(gyy), stepSize, stepSize);
       }
@@ -783,7 +783,7 @@ export class Player extends Actor {
 
     for (let i = 1; i <= fineLen; i++) {
       // Center of the blade at this segment
-      const cx = hx + f * i * dx * stepSize;
+      const cx = hx + i * dx * stepSize;
       const cy = hy + i * dy * stepSize;
 
       // Calculate width with tapering near the tip
@@ -875,8 +875,11 @@ export class Player extends Actor {
         const x = cx + Math.cos(theta) * r;
         const y = my + Math.sin(theta) * r;
         
-        // Taper: thickness scales with t (thinner at tail, full at head)
-        const radius = (layer.thickness * t) / 2;
+        // Taper: thickness is a crescent shape peaking at t = 0.8 and tapering at both ends
+        const thicknessProfile = t < 0.8
+          ? Math.sin((t / 0.8) * (Math.PI / 2))
+          : Math.cos(((t - 0.8) / 0.2) * (Math.PI / 2));
+        const radius = (layer.thickness * thicknessProfile) / 2;
         g.globalAlpha = t * layer.alphaMult;
         
         g.beginPath();
