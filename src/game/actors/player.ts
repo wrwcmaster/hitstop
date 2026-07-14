@@ -644,7 +644,7 @@ export class Player extends Actor {
 
   render(g: CanvasRenderingContext2D): void {
     // Inside a Devourer: the beast draws the bulge, not us.
-    if (this.fsm.is('swallowed')) return;
+    if (this.fsm.is('swallowed') && this.swallowedBy?.type === 'devourer') return;
     // I-frame blink (god mode holds i-frames but shouldn't strobe).
     if (this.invulnT > 0 && !this.godMode && !this.fsm.is('dead') && Math.floor(this.invulnT * 20) % 2) return;
 
