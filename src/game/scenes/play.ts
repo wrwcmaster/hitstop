@@ -23,6 +23,7 @@ import { Monster, monsters } from '../actors/monster';
 import { Npc, npcs } from '../actors/npc';
 import { Pickup } from '../actors/pickup';
 import { PauseScene } from './pause';
+import { OptionsScene } from './options';
 import { Background } from './background';
 import { COLORS } from '../content/palette';
 import { ROOMS, START_ROOM } from '../content/rooms';
@@ -127,6 +128,13 @@ export class PlayScene implements Scene {
           label: 'CONTINUE',
           disabled: () => !saveStore.exists(),
           onSelect: () => this.startRun(saveStore.load()),
+        },
+        {
+          label: 'OPTIONS',
+          onSelect: () => {
+            this.game.sfx.play('menuSelect');
+            this.game.scenes.push(new OptionsScene(this.game));
+          },
         },
       ],
       { up: 'up', down: 'down', confirm: 'confirm' },
