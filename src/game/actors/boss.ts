@@ -256,6 +256,7 @@ defineMonster('slime-king', {
     m.state.victim = false;
     m.state.biteT = 0;
     m.state.swallowCd = 0;
+    m.layer = 0; // default layer
   },
   update(m, dt) {
     const fsm = m.state.fsm as FSM<Monster>;
@@ -272,6 +273,7 @@ defineMonster('slime-king', {
         if (player.swallowedBy === (m as any)) {
           m.state.victim = true;
           m.state.biteT = 1.0;
+          m.layer = 2; // draw above player
           m.vx = 0;
           m.vy = 0;
         }
@@ -280,10 +282,12 @@ defineMonster('slime-king', {
 
     // Digesting active check
     if (m.state.victim) {
+      m.layer = 2; // ensure drawn above player (layer 1)
       const held = player && player.swallowedBy === (m as any) && player.hp > 0;
       if (!held || !player) {
         m.state.victim = false;
         m.state.swallowCd = 4.0; // cooldown after escape
+        m.layer = 0; // restore default layer
         return;
       }
       m.vx = 0;
@@ -322,11 +326,18 @@ defineMonster('slime-king', {
         ? tintOf(img, COLORS.red, 0.3)
         : tintOf(img, COLORS.gold, 0.18);
     g.save();
+    if (digesting) {
+      g.globalAlpha = 0.7; // translucent body so player is visible inside
+    }
     g.translate(Math.round(m.x * 4) / 4, Math.round(m.y * 4) / 4);
     g.scale(SCALE_X * pulse, SCALE_Y * (bulge ? 1.12 : 1));
     g.drawImage(base, 0, 0, base.width / TEXEL, base.height / TEXEL);
     g.restore();
     // The crown.
+    g.save();
+    if (digesting) {
+      g.globalAlpha = 0.75;
+    }
     g.fillStyle = COLORS.gold;
     const cx = Math.round(m.cx);
     const crownBob = bulge ? Math.sin(m.animT * 6) * 1.5 : 0;
@@ -334,6 +345,7 @@ defineMonster('slime-king', {
     g.fillRect(cx - 7, Math.round(m.y) - 7 + crownBob, 3, 3);
     g.fillRect(cx - 1, Math.round(m.y) - 8 + crownBob, 3, 4);
     g.fillRect(cx + 4, Math.round(m.y) - 7 + crownBob, 3, 3);
+    g.restore();
   },
 });
 

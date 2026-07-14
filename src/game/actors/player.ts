@@ -233,6 +233,7 @@ export class Player extends Actor {
     
     this.statuses.apply('devoured');
     this.fsm.set('swallowed');
+    this.layer = 1; // render behind the boss
     this.feel.hitstop(0.12);
     this.feel.shake(0.6);
     this.feel.flash(0.3, COLORS.purple);
@@ -269,6 +270,7 @@ export class Player extends Actor {
     const m = this.swallowedBy;
     this.swallowedBy = null;
     this.statuses.remove('devoured');
+    this.layer = 10; // restore to player layer
     if (burst && m && !m.dead) {
       const dir = (m.facing * -1) as 1 | -1;
       this.vx = dir * 190;
