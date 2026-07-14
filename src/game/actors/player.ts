@@ -26,7 +26,7 @@ import {
   SkillTree,
 } from '@engine/index';
 import type { TreeCtx } from '../content/skilltree';
-import { KNIGHT_ANIMS } from '../content/sprites';
+import { KNIGHT_ANIMS, TEXEL } from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { weaponSpecOf, type WeaponSpec } from '../content/items';
 import type { SkillCtx } from '../content/skills';
@@ -700,7 +700,6 @@ export class Player extends Actor {
     let hy = -4.5;
     
     if (animName === 'run') {
-      // 4-frame run cycle: swing arms back & forth
       if (frameIdx === 0) {
         hx = 2.25;
         hy = -5.25;
@@ -721,47 +720,102 @@ export class Player extends Actor {
 
     hx *= f;
 
-    // Render Grip/Handle: extending backwards and down from hand
-    g.fillStyle = '#302426'; // dark brown leather grip
-    g.fillRect(hx - f * 1, hy + 1, 1, 1);
-    
-    // Render Pommel: gold/hilt colored end of grip
+    const q = (v: number) => Math.round(v * TEXEL) / TEXEL;
+    const stepSize = 1 / TEXEL;
+
+    // Blade tilt angle (30 degrees)
+    const dx = 0.866;
+    const dy = -0.5;
+
+    // Perpendicular vector for blade width
+    const px = -dy * f; // 0.5 * f
+    const py = dx;     // 0.866
+
+    // 1. Render Grip/Handle (leather wrap) extending backwards
+    const gripLen = 5;
+    for (let k = 1; k <= gripLen; k++) {
+      const gx = hx - f * k * dx * stepSize;
+      const gy = hy - k * dy * stepSize;
+      g.fillStyle = '#302426'; // dark brown leather
+      g.fillRect(q(gx), q(gy), stepSize, stepSize);
+      g.fillRect(q(gx + px * stepSize), q(gy + py * stepSize), stepSize, stepSize);
+    }
+
+    // Pommel at the very end of grip
+    const px_end = hx - f * (gripLen + 1) * dx * stepSize;
+    const py_end = hy - (gripLen + 1) * dy * stepSize;
     g.fillStyle = w.hilt;
-    g.fillRect(hx - f * 2, hy + 2, 1, 1);
+    g.fillRect(q(px_end), q(py_end), stepSize, stepSize);
+    g.fillRect(q(px_end + px * stepSize), q(py_end + py * stepSize), stepSize, stepSize);
 
-    // Render Angled Crossguard: perpendicular to the blade's 30deg tilt
+    // 2. Render Angled Crossguard (perpendicular to blade direction)
+    const guardHalfLen = w.bladeW === 1 ? 5 : 8;
     g.fillStyle = w.hilt;
-    g.fillRect(hx, hy, 1, 1); // center
-    g.fillRect(hx - f * 1, hy - 1, 1, 1); // wing 1
-    g.fillRect(hx + f * 1, hy + 1, 1, 1); // wing 2
-
-    // Render Blade: steps forward and up from the hand
-    for (let i = 1; i <= w.bladeLen; i++) {
-      const bx = hx + f * i;
-      const by = hy - Math.round(i * 0.6);
-
-      if (w.bladeW >= 2) {
-        // Draw the core of the blade
-        g.fillStyle = w.blade;
-        g.fillRect(bx, by, 1, 1);
-        
-        // Draw a gleaming white edge highlight on the leading edge
-        g.fillStyle = COLORS.white;
-        g.fillRect(bx + f * 1, by, 1, 1);
-      } else {
-        // 1px blade
-        g.fillStyle = w.blade;
-        g.fillRect(bx, by, 1, 1);
+    for (let k = -guardHalfLen; k <= guardHalfLen; k++) {
+      // Position along crossguard line
+      const gx = hx + k * px * stepSize;
+      const gy = hy + k * py * stepSize;
+      // Taper the crossguard thickness
+      const thick = Math.max(1, 3 - Math.floor(Math.abs(k) / 3));
+      for (let t = -Math.floor(thick / 2); t < Math.ceil(thick / 2); t++) {
+        const gxx = gx + t * f * dx * stepSize;
+        const gyy = gy + t * dy * stepSize;
+        g.fillRect(q(gxx), q(gyy), stepSize, stepSize);
       }
     }
 
-    // Render bright tip at the end of the blade
-    g.fillStyle = COLORS.white;
-    const tx = hx + f * w.bladeLen;
-    const ty = hy - Math.round(w.bladeLen * 0.6);
-    g.fillRect(tx, ty, 1, 1);
-    if (w.bladeW >= 2) {
-      g.fillRect(tx + f * 1, ty, 1, 1);
+    // 3. Render Blade (steps forward/up from hand)
+    const fineLen = w.bladeLen * TEXEL;
+    const fineW = w.bladeW === 1 ? 3 : 6;
+
+    for (let i = 1; i <= fineLen; i++) {
+      // Center of the blade at this segment
+      const cx = hx + f * i * dx * stepSize;
+      const cy = hy + i * dy * stepSize;
+
+      // Calculate width with tapering near the tip
+      let currentW = fineW;
+      if (i >= fineLen - 3) {
+        currentW = Math.max(1, fineW - (i - (fineLen - 3)) * 2);
+      }
+
+      const halfW = (currentW - 1) / 2;
+      const startJ = -Math.ceil(halfW);
+      const endJ = Math.floor(halfW);
+
+      for (let j = startJ; j <= endJ; j++) {
+        const bx = cx + j * px * stepSize;
+        const by = cy + j * py * stepSize;
+
+        // Determine coloring based on weapon type and relative column
+        let col = w.blade;
+        if (fineW === 6) {
+          // Great Sword details
+          if (j === -3) {
+            col = COLORS.outline; // dark silhouette back-edge
+          } else if (j === -2) {
+            col = w.blade; // gold body
+          } else if (j === -1 || j === 0) {
+            col = COLORS.steelDark; // fuller groove
+          } else if (j === 1) {
+            col = w.blade; // gold body
+          } else if (j === 2 || i >= fineLen - 1) {
+            col = COLORS.white; // gleaming leading edge & tip
+          }
+        } else {
+          // Light Sword (Rusty Sword) details
+          if (j === -1) {
+            col = w.blade; // steel body
+          } else if (j === 0) {
+            col = COLORS.steelDark; // central core
+          } else if (j === 1 || i >= fineLen - 1) {
+            col = COLORS.white; // gleaming leading edge & tip
+          }
+        }
+
+        g.fillStyle = col;
+        g.fillRect(q(bx), q(by), stepSize, stepSize);
+      }
     }
   }
 
