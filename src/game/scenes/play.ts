@@ -205,6 +205,7 @@ export class PlayScene implements Scene {
         save.best = this.best;
         saveStore.save(save);
       }
+      this.updateMusic();
     });
 
     game.input.onAnyPress(() => {
@@ -324,6 +325,14 @@ export class PlayScene implements Scene {
 
   /** Boss rooms play the boss theme while the boss lives; otherwise the room's track. */
   private updateMusic(): void {
+    if (this.phase === 'title') {
+      this.game.music.play('title');
+      return;
+    }
+    if (this.phase === 'over') {
+      this.game.music.play('gameover');
+      return;
+    }
     // Just-spawned entities are still in the world's spawn queue, so also
     // consult the room def when deciding if a boss is (about to be) alive.
     const bossAlive =
