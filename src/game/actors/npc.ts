@@ -11,6 +11,7 @@ import {
 import { MERCHANT, blit } from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { ShopScene } from '../scenes/shop';
+import { SpawnerScene } from '../scenes/spawner';
 import { prettyCode, prettyButton, type ActionGame, type Action } from '../defs';
 import { Player } from './player';
 
@@ -79,6 +80,11 @@ export class Npc extends Actor {
   }
 
   private talk(): void {
+    if (this.type === 'spawner') {
+      const p = this.world.first(Player);
+      if (p) this.game.scenes.push(new SpawnerScene(this.game, p, this.collision));
+      return;
+    }
     this.game.scenes.push(
       new DialogueScene<Action>(this.game, this.def.greet, {
         confirm: 'confirm',
@@ -133,6 +139,12 @@ defineNpc('merchant', {
   sprite: MERCHANT,
   greet: 'merchant-greet',
   shop: 'merchant',
+});
+
+defineNpc('spawner', {
+  name: 'SPAWNER',
+  sprite: MERCHANT,
+  greet: '',
 });
 
 /** Importing this module registers the NPCs. */
