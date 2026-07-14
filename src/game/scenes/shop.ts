@@ -86,6 +86,8 @@ export class ShopScene implements Scene {
       return;
     }
     this.menu.update(input);
+    const t = input.consumeTap();
+    if (t) this.menu.tapAt(t.x, t.y);
   }
 
   render(g: CanvasRenderingContext2D): void {

@@ -66,6 +66,8 @@ export interface MenuActions<A extends string> {
  */
 export class Menu<A extends string = string> {
   index = 0;
+  /** Geometry of the last render(), for pointer/touch hit-testing. */
+  private layout: { x: number; y: number; lh: number; s: number; width?: number } | null = null;
 
   constructor(
     public entries: MenuEntry[],
@@ -98,6 +100,29 @@ export class Menu<A extends string = string> {
     if (this.actions.right && input.consumePress(this.actions.right)) sel.onAdjust?.(1);
   }
 
+  /**
+   * Activate the entry under a logical-space point (touch/click). Returns
+   * true if a live entry was hit — selecting it and firing its onSelect,
+   * so a tap picks a menu item directly with no on-screen arrows.
+   */
+  tapAt(px: number, py: number): boolean {
+    const L = this.layout;
+    if (!L) return false;
+    for (let i = 0; i < this.entries.length; i++) {
+      const e = this.entries[i];
+      if (this.isDisabled(e)) continue;
+      const rowY = L.y + i * L.lh;
+      const label = typeof e.label === 'function' ? e.label() : e.label;
+      const right = L.x + Math.max(L.width ?? 0, textWidth(label, L.s)) + 8;
+      if (px >= L.x - 10 && px <= right && py >= rowY - 2 && py <= rowY + L.lh - 2) {
+        this.index = i;
+        e.onSelect?.();
+        return true;
+      }
+    }
+    return false;
+  }
+
   render(
     g: CanvasRenderingContext2D,
     x: number,
@@ -106,6 +131,7 @@ export class Menu<A extends string = string> {
   ): void {
     const lh = opts.lineHeight ?? 12;
     const s = opts.scale ?? 1;
+    this.layout = { x, y, lh, s, width: opts.width };
     this.entries.forEach((e, i) => {
       const label = typeof e.label === 'function' ? e.label() : e.label;
       const hint = typeof e.hint === 'function' ? e.hint() : e.hint;

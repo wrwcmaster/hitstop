@@ -17,6 +17,8 @@ export class Input<A extends string = string> {
   private keymap: Record<string, A | A[]>;
   private anyPressListeners: (() => void)[] = [];
   private captureFn: ((code: string) => void) | null = null;
+  /** Latest tap in logical (screen-space) coords, for menu hit-testing. */
+  private tap_: { x: number; y: number } | null = null;
 
   /** A key may map to several actions (ArrowUp = jump in-game AND up in menus). */
   constructor(keymap: Record<string, A | A[]>) {
@@ -126,10 +128,23 @@ export class Input<A extends string = string> {
     for (const fn of this.anyPressListeners) fn();
   }
 
+  /** Record a tap at logical (screen) coords — see consumeTap / Menu.tapAt. */
+  notifyTap(x: number, y: number): void {
+    this.tap_ = { x, y };
+  }
+
+  /** Consume this step's tap position (once), for menu/pointer hit-testing. */
+  consumeTap(): { x: number; y: number } | null {
+    const t = this.tap_;
+    this.tap_ = null;
+    return t;
+  }
+
   /** Clear edge flags. Called by the Game after each fixed update. */
   endStep(): void {
     this.pressed_.clear();
     this.released_.clear();
+    this.tap_ = null; // a tap is live for exactly one step, like a press edge
   }
 
   /** Listen to keyboard events on `target` using the keymap. */
