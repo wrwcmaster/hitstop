@@ -7,6 +7,7 @@ import {
   moveAndCollide,
   frameAt,
   whiteOf,
+  tintOf,
   friction,
   clamp,
   overlaps,
@@ -203,27 +204,33 @@ export class Player extends Actor {
     return weaponSpecOf(this.equipment.get('weapon'));
   }
 
-  /* ---------------- swallowed (the Devourer) ---------------- */
+  /* ---------------- swallowed (the Devourer / Slime King) ---------------- */
 
-  /** A monster gulps the player down — and takes the weapon with it. */
+  /** A monster gulps the player down — and takes the weapon with it only if it's a Devourer. */
   swallowBy(m: Monster): void {
     if (this.fsm.is('dead', 'swallowed') || this.invulnT > 0) return;
     this.swallowedBy = m;
     this.escapeN = 0;
-    // Everything you're wearing goes down with you and rides inside the
-    // beast until it dies — kill THIS one to get your gear back. (Snapshot
-    // the slots first: unequip mutates the map we're iterating.)
-    const taken: string[] = [];
-    for (const [slot, id] of this.equipment.slots()) {
-      this.equipment.unequip(slot);
-      this.inventory.remove(id, this.inventory.count(id)); // GONE from the bag too
-      taken.push(id);
+    
+    if (m.type === 'devourer') {
+      // Everything you're wearing goes down with you and rides inside the
+      // beast until it dies — kill THIS one to get your gear back. (Snapshot
+      // the slots first: unequip mutates the map we're iterating.)
+      const taken: string[] = [];
+      for (const [slot, id] of this.equipment.slots()) {
+        this.equipment.unequip(slot);
+        this.inventory.remove(id, this.inventory.count(id)); // GONE from the bag too
+        taken.push(id);
+      }
+      if (taken.length) {
+        this.syncStats();
+        m.state.stolenItems = taken;
+        this.feel.text(this.cx, this.y - 16, taken.length > 1 ? 'GEAR SWALLOWED!' : 'WEAPON SWALLOWED!', COLORS.red);
+      }
+    } else {
+      this.feel.text(this.cx, this.y - 16, 'SWALLOWED!', COLORS.red);
     }
-    if (taken.length) {
-      this.syncStats();
-      m.state.stolenItems = taken;
-      this.feel.text(this.cx, this.y - 16, taken.length > 1 ? 'GEAR SWALLOWED!' : 'WEAPON SWALLOWED!', COLORS.red);
-    }
+    
     this.statuses.apply('devoured');
     this.fsm.set('swallowed');
     this.feel.hitstop(0.12);
@@ -666,10 +673,23 @@ export class Player extends Actor {
     const sx = baseSx * pose.sx;
     const sy = baseSy * pose.sy;
     g.save();
-    g.translate(q(cx + pose.ox), q(by + pose.oy));
+    
+    let finalImg = img;
+    if (this.fsm.is('swallowed')) {
+      g.globalAlpha = 0.55; // translucent inside the jelly/gut
+      // Pain shiver translation
+      const shiverX = Math.sin(this.animT * 50) * 0.8;
+      const shiverY = Math.cos(this.animT * 50) * 0.8;
+      g.translate(q(cx + pose.ox + shiverX), q(by + pose.oy + shiverY));
+      // Tint the player red for acid pain/damage!
+      finalImg = tintOf(img, COLORS.red, 0.5);
+    } else {
+      g.translate(q(cx + pose.ox), q(by + pose.oy));
+    }
+    
     g.scale(sx, sy);
     if (pose.shear) g.transform(1, 0, pose.shear, 1, 0, 0);
-    g.drawImage(img, -dw / 2, -dh, dw, dh);
+    g.drawImage(finalImg, -dw / 2, -dh, dw, dh);
     // Gear rides the body transform so it leans/squashes with the knight.
     // During an attack the slash arc IS the weapon, so the held one hides.
     if (this.flashT <= 0) {
@@ -677,6 +697,7 @@ export class Player extends Actor {
       this.renderWeapon(g, dw, dh, anim, this.animT);
     }
     g.restore();
+    g.globalAlpha = 1;
 
     if (this.fsm.is('attack')) this.renderSlash(g, cx, by - dh * 0.45);
   }

@@ -253,9 +253,53 @@ defineMonster('slime-king', {
   init(m) {
     m.state.fsm = makeFsm(m);
     m.state.wasEnraged = false;
+    m.state.victim = false;
+    m.state.biteT = 0;
+    m.state.swallowCd = 0;
   },
   update(m, dt) {
     const fsm = m.state.fsm as FSM<Monster>;
+    m.state.swallowCd = Math.max(0, (m.state.swallowCd as number ?? 0) - dt);
+    
+    const player = m.player as Player | undefined;
+
+    // Slime King swallow player check
+    if (player && player.hp > 0 && player.swallowedBy === null && (m.state.swallowCd as number) <= 0) {
+      const inset = m.def.contactInset ?? 0;
+      if (player.x < m.x + m.w - inset && player.x + player.w > m.x + inset &&
+          player.y < m.y + m.h - inset && player.y + player.h > m.y + inset) {
+        player.swallowBy(m);
+        if (player.swallowedBy === (m as any)) {
+          m.state.victim = true;
+          m.state.biteT = 1.0;
+          m.vx = 0;
+          m.vy = 0;
+        }
+      }
+    }
+
+    // Digesting active check
+    if (m.state.victim) {
+      const held = player && player.swallowedBy === (m as any) && player.hp > 0;
+      if (!held || !player) {
+        m.state.victim = false;
+        m.state.swallowCd = 4.0; // cooldown after escape
+        return;
+      }
+      m.vx = 0;
+      m.vy = 0;
+      m.state.biteT = (m.state.biteT as number) - dt;
+      if ((m.state.biteT as number) <= 0) {
+        m.state.biteT = 1.0; // tick every 1.0s
+        m.game.combat.hit(player, {
+          damage: 1, targets: 'player', attacker: m,
+          strength: 0.35, knockback: 0, popY: 0,
+          colors: [COLORS.green, COLORS.white],
+        });
+      }
+      return; // Freeze main FSM updates during digest
+    }
+
     // Enrage transition: one-time announcement.
     if (enraged(m) && !(m.state.wasEnraged as boolean)) {
       m.state.wasEnraged = true;
@@ -269,6 +313,9 @@ defineMonster('slime-king', {
   },
   draw(g, m) {
     const img = m.onGround ? SLIME1 : SLIME2;
+    const digesting = m.state.victim as boolean;
+    const bulge = digesting;
+    const pulse = bulge ? 1 + Math.sin(m.animT * 6) * 0.08 : 1;
     const base = m.flashT > 0
       ? whiteOf(img)
       : (m.state.wasEnraged as boolean)
@@ -276,16 +323,17 @@ defineMonster('slime-king', {
         : tintOf(img, COLORS.gold, 0.18);
     g.save();
     g.translate(Math.round(m.x * 4) / 4, Math.round(m.y * 4) / 4);
-    g.scale(SCALE_X, SCALE_Y);
+    g.scale(SCALE_X * pulse, SCALE_Y * (bulge ? 1.12 : 1));
     g.drawImage(base, 0, 0, base.width / TEXEL, base.height / TEXEL);
     g.restore();
     // The crown.
     g.fillStyle = COLORS.gold;
     const cx = Math.round(m.cx);
-    g.fillRect(cx - 7, Math.round(m.y) - 4, 14, 3);
-    g.fillRect(cx - 7, Math.round(m.y) - 7, 3, 3);
-    g.fillRect(cx - 1, Math.round(m.y) - 8, 3, 4);
-    g.fillRect(cx + 4, Math.round(m.y) - 7, 3, 3);
+    const crownBob = bulge ? Math.sin(m.animT * 6) * 1.5 : 0;
+    g.fillRect(cx - 7, Math.round(m.y) - 4 + crownBob, 14, 3);
+    g.fillRect(cx - 7, Math.round(m.y) - 7 + crownBob, 3, 3);
+    g.fillRect(cx - 1, Math.round(m.y) - 8 + crownBob, 3, 4);
+    g.fillRect(cx + 4, Math.round(m.y) - 7 + crownBob, 3, 3);
   },
 });
 

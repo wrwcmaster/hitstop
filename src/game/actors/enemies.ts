@@ -1,4 +1,4 @@
-import { rand, sign, tintOf } from '@engine/index';
+import { rand, sign, tintOf, itemDef } from '@engine/index';
 import { defineMonster, Monster } from './monster';
 import { SLIME1, SLIME2, BAT1, BAT2, TEXEL, blit } from '../content/sprites';
 import { COLORS } from '../content/palette';
@@ -205,16 +205,32 @@ defineMonster('devourer', {
     }
 
     // The gulp: any overlap while it's hungry (a laden one is satiated).
-    if (!laden && (m.state.digestCd as number) <= 0 && player.swallowedBy === null &&
+    if (!laden && (m.state.digestCd as number) <= 0 &&
         player.x < m.x + m.w && player.x + player.w > m.x &&
         player.y < m.y + m.h && player.y + player.h > m.y) {
-      player.swallowBy(m);
-      // (cast: swallowBy may have just set this, which defeats TS narrowing)
-      if ((player.swallowedBy as Monster | null) === m) {
-        m.state.victim = true;
-        m.state.biteT = 1.2;
-        m.state.mode = 'creep';
+      const weaponId = player.equipment.get('weapon');
+      if (weaponId) {
+        // Swallow weapon only!
+        player.equipment.unequip('weapon');
+        player.inventory.remove(weaponId, player.inventory.count(weaponId));
+        player.syncStats();
+        
+        m.state.stolenItems = [weaponId];
+        m.state.digestCd = 3;
         m.vx = 0;
+        
+        m.game.feel.hitstop(0.08);
+        m.game.feel.flash(0.2, COLORS.purple);
+        m.game.feel.sfx.play('gulp');
+        m.game.feel.text(player.cx, player.y - 16, 'WEAPON SWALLOWED!', COLORS.red);
+      } else {
+        // If already disarmed, touch deals normal contact damage!
+        m.game.combat.hit(player, {
+          damage: 1, targets: 'player', attacker: m,
+          strength: 0.5, knockback: m.facing * 120, popY: -100,
+          colors: [COLORS.purple, COLORS.white],
+        });
+        m.state.digestCd = 1.5; // brief breather before next contact hit
       }
     }
   },
@@ -222,7 +238,7 @@ defineMonster('devourer', {
     const img = m.onGround ? SLIME1 : SLIME2;
     const digesting = m.state.victim as boolean;
     const laden = ladenDevourer(m);
-    // Bulging while it holds something (a live victim or swallowed gear).
+    // Bulging while it holds something (swallowed gear).
     const bulge = digesting || laden;
     const pulse = bulge ? 1 + Math.sin(m.animT * 6) * 0.08 : 1;
     // Laden with loot reads gold-tinged; an empty hunter stays deep purple.
@@ -236,15 +252,22 @@ defineMonster('devourer', {
     g.scale((26 / 12) * pulse, (16 / 7) * (bulge ? 1.12 : 1));
     g.drawImage(base, -6, -7, base.width / TEXEL, base.height / TEXEL);
     g.restore();
-    if (digesting) {
-      // A hint of knight inside.
-      g.fillStyle = COLORS.steel;
-      g.fillRect(Math.round(m.cx) - 2, Math.round(m.cy) - 3, 4, 5);
-    } else if (laden) {
-      // A glint of swallowed gear, bobbing in the gut.
-      g.fillStyle = COLORS.gold;
-      const bob = Math.round(Math.sin(m.animT * 5));
-      g.fillRect(Math.round(m.cx) - 1, Math.round(m.cy) - 1 + bob, 3, 3);
+    if (laden) {
+      // Draw the actual weapon floating and swaying inside the slimy body
+      const stolen = m.state.stolenItems as string[] | undefined;
+      const itemId = stolen?.[0];
+      if (itemId) {
+        const def = itemDef(itemId);
+        const icon = def?.icon;
+        if (icon) {
+          g.save();
+          g.globalAlpha = 0.75;
+          g.translate(Math.round(m.cx), Math.round(m.cy) + Math.sin(m.animT * 4) * 2);
+          g.rotate(Math.sin(m.animT * 2) * 0.25);
+          g.drawImage(icon, -icon.width / TEXEL / 2, -icon.height / TEXEL / 2, icon.width / TEXEL, icon.height / TEXEL);
+          g.restore();
+        }
+      }
     }
   },
 });
