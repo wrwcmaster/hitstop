@@ -66,6 +66,7 @@ bind('bR', 'right');
 bind('bJ', 'jump', 'up');
 bind('bA', 'attack', 'confirm');
 bind('bD', 'dash', 'down');
+bind('bM', 'menu'); // Esc: opens the system menu (and closes it — pause consumes 'menu')
 
 // Taps on the canvas count as "any key" (start/restart on mobile).
 canvas.addEventListener('pointerdown', () => {
