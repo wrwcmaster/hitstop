@@ -49,7 +49,9 @@
  },
  "entities": [],
  "props": {
-  "waves": "default"
+  "waves": "default",
+  "waveGoal": 5,
+  "gateKey": "gate-key"
  },
  "triggers": [
   {
@@ -73,7 +75,8 @@
    "props": {
     "room": "cavern",
     "x": 28,
-    "y": 200
+    "y": 200,
+    "key": "gate-key"
    }
   }
  ]

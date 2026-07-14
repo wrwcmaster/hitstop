@@ -77,6 +77,7 @@ export const ICON_ORB = icons.frame('orb');
 export const ICON_CHARM = icons.frame('charm');
 export const ICON_COIN = icons.frame('coin');
 export const ICON_HASTE = icons.frame('haste');
+export const ICON_KEY = icons.frame('key');
 
 /* ---------------- NPCs ---------------- */
 

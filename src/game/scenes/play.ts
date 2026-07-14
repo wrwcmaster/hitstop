@@ -34,6 +34,7 @@ import {
   MANA_PIP,
   MANA_PIP_EMPTY,
   ICON_COIN,
+  ICON_KEY,
   KNIGHT_IDLE_SPRITE,
   TEXEL,
   blit,
@@ -105,6 +106,12 @@ export class PlayScene implements Scene {
   private spawnT = 0;
   private clearT = 0;
   private clearShown = false;
+  /** Set once the gauntlet's gate key has been dropped this room visit. */
+  private gateKeyDropped = false;
+  /** A keyed door in the current room, for the floating gate marker. */
+  private gateMarker: { x: number; y: number; keyId: string } | null = null;
+  /** Free-running clock for idle UI wobble (the gate marker). */
+  private uiT = 0;
 
   private titleMenu: Menu<Action>;
 
@@ -267,6 +274,16 @@ export class PlayScene implements Scene {
     this.spawnT = 0;
     this.clearT = 0;
     this.wave = 0;
+    this.gateKeyDropped = false;
+
+    // A keyed door → show a floating gate marker, lit once its key is held.
+    this.gateMarker = null;
+    for (const t of this.room.triggers ?? []) {
+      if (t.event === 'door' && typeof t.props?.key === 'string') {
+        this.gateMarker = { x: t.x + t.w / 2, y: t.y, keyId: t.props.key };
+        break;
+      }
+    }
 
     // Snap the camera so the new room doesn't smear in; with no player
     // yet (title screen), aim at the spawn point.
@@ -380,6 +397,15 @@ export class PlayScene implements Scene {
     if (def.event === 'talk' && typeof def.props?.conversation === 'string') {
       this.openConversation(def.props.conversation);
     } else if (def.event === 'door' && typeof def.props?.room === 'string') {
+      const keyId = def.props.key as string | undefined;
+      if (keyId && this.player && !this.player.inventory.has(keyId)) {
+        // Locked: no key yet. Nudge the player back toward the fight.
+        this.banner = 'THE GATE IS LOCKED';
+        this.bannerT = 1.2;
+        this.game.feel.text(this.player.cx, this.player.y - 8, 'LOCKED', COLORS.red);
+        this.game.sfx.play('denied');
+        return;
+      }
       this.transition = {
         t: 0,
         roomId: def.props.room,
@@ -459,9 +485,27 @@ export class PlayScene implements Scene {
       this.clearT += dt;
       if (this.clearT >= 1.2) {
         this.clearT = 0;
-        this.nextWave();
+        const goal = this.room.props?.waveGoal as number | undefined;
+        if (goal && this.wave >= goal) this.dropGateKey();
+        else this.nextWave();
       }
     }
+  }
+
+  /** Cleared the gauntlet: drop the gate key (once) and stop the waves. */
+  private dropGateKey(): void {
+    if (this.gateKeyDropped) return;
+    this.gateKeyDropped = true;
+    const keyId = this.room.props?.gateKey as string | undefined;
+    const p = this.player;
+    if (!keyId || !p) return;
+    if (!p.inventory.has(keyId)) {
+      this.game.world.spawn(new Pickup(keyId, this.game, this.tilemap, p.cx, p.cy - 8));
+    }
+    this.banner = 'THE GATE KEY DROPS';
+    this.bannerT = 2;
+    this.game.feel.sfx.play('levelup');
+    this.game.feel.flash(0.15, COLORS.gold);
   }
 
   /** Scan down the tile column at x for the top of the first solid tile. */
@@ -478,6 +522,7 @@ export class PlayScene implements Scene {
 
   update(dt: number): void {
     const g = this.game;
+    this.uiT += dt;
 
     if (this.phase === 'title') {
       this.titleMenu.update(g.input);
@@ -539,6 +584,7 @@ export class PlayScene implements Scene {
     this.tilemap.render(ctx, g.camera.x, g.camera.y, g.camera.viewW, g.camera.viewH);
     this.renderSpawnMarkers(ctx);
     g.world.render(ctx);
+    this.renderGateMarker(ctx);
     g.feel.renderWorld(ctx);
     this.debug.renderWorld(ctx);
     g.camera.end(ctx);
@@ -622,6 +668,20 @@ export class PlayScene implements Scene {
       g.strokeRect(-r, -r, r * 2, r * 2);
       g.restore();
     }
+  }
+
+  /** Floating key over a locked gate: dim until its key is held, then lit
+   * with a little sparkle so "the gate now opens" reads at a glance. */
+  private renderGateMarker(g: CanvasRenderingContext2D): void {
+    const m = this.gateMarker;
+    if (!m || !this.player || this.phase !== 'play') return;
+    const has = this.player.inventory.has(m.keyId);
+    const iw = ICON_KEY.width / TEXEL;
+    const ih = ICON_KEY.height / TEXEL;
+    const bob = Math.sin(this.uiT * 3) * 1.5;
+    g.globalAlpha = has ? 1 : 0.4;
+    blit(g, ICON_KEY, m.x - iw / 2, m.y - ih - 8 + bob);
+    g.globalAlpha = 1;
   }
 
   private renderHUD(g: CanvasRenderingContext2D): void {
