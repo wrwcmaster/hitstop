@@ -233,7 +233,6 @@ export class Player extends Actor {
     
     this.statuses.apply('devoured');
     this.fsm.set('swallowed');
-    this.layer = 1; // render behind the boss
     this.feel.hitstop(0.12);
     this.feel.shake(0.6);
     this.feel.flash(0.3, COLORS.purple);
@@ -270,7 +269,6 @@ export class Player extends Actor {
     const m = this.swallowedBy;
     this.swallowedBy = null;
     this.statuses.remove('devoured');
-    this.layer = 10; // restore to player layer
     if (burst && m && !m.dead) {
       const dir = (m.facing * -1) as 1 | -1;
       this.vx = dir * 190;
@@ -682,14 +680,15 @@ export class Player extends Actor {
     g.save();
     
     let finalImg = img;
-    if (this.fsm.is('swallowed')) {
-      g.globalAlpha = 0.55; // translucent inside the jelly/gut
+    const isSwallowed = this.fsm.is('swallowed');
+    if (isSwallowed) {
+      g.globalAlpha = 0.9; // keep player highly visible
       // Pain shiver translation
       const shiverX = Math.sin(this.animT * 50) * 0.8;
       const shiverY = Math.cos(this.animT * 50) * 0.8;
       g.translate(q(cx + pose.ox + shiverX), q(by + pose.oy + shiverY));
       // Tint the player red for acid pain/damage!
-      finalImg = tintOf(img, COLORS.red, 0.5);
+      finalImg = tintOf(img, COLORS.red, 0.55);
     } else {
       g.translate(q(cx + pose.ox), q(by + pose.oy));
     }
@@ -697,6 +696,18 @@ export class Player extends Actor {
     g.scale(sx, sy);
     if (pose.shear) g.transform(1, 0, pose.shear, 1, 0, 0);
     g.drawImage(finalImg, -dw / 2, -dh, dw, dh);
+    
+    // Draw the green gel overlay on top of the player sprite if swallowed by Slime King!
+    if (isSwallowed && this.swallowedBy && this.swallowedBy.type === 'slime-king') {
+      g.save();
+      g.globalAlpha = 0.45;
+      g.fillStyle = COLORS.green;
+      g.beginPath();
+      g.arc(0, -dh / 2, Math.max(dw, dh) * 0.65, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+    }
+    
     // Gear rides the body transform so it leans/squashes with the knight.
     // During an attack the slash arc IS the weapon, so the held one hides.
     if (this.flashT <= 0) {
