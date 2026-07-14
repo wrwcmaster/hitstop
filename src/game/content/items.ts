@@ -8,6 +8,7 @@ import {
   ICON_CHARM,
   ICON_COIN,
   ICON_HASTE,
+  ICON_KEY,
 } from './sprites';
 import type { ActionGame } from '../defs';
 import type { Player } from '../actors/player';
@@ -140,6 +141,13 @@ defineItem<ItemCtx>('haste-draught', {
     player.statuses.apply('haste');
     game.feel.sfx.play('heal');
   },
+});
+
+defineItem<ItemCtx>('gate-key', {
+  name: 'GATE KEY',
+  desc: 'Unlocks the arena gate.',
+  icon: ICON_KEY,
+  kind: 'key',
 });
 
 /** Importing this module registers the item catalog. */
