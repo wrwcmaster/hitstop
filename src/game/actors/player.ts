@@ -674,7 +674,7 @@ export class Player extends Actor {
     // During an attack the slash arc IS the weapon, so the held one hides.
     if (this.flashT <= 0) {
       if (this.equipment.get('charm')) this.renderCharm(g, dh);
-      if (!this.fsm.is('attack')) this.renderWeapon(g, dw, dh);
+      if (!this.fsm.is('attack')) this.renderWeapon(g, dw, dh, anim, this.animT);
     }
     g.restore();
 
@@ -682,25 +682,87 @@ export class Player extends Actor {
   }
 
   /** The equipped weapon, held at rest in the hand (body-local coords). */
-  private renderWeapon(g: CanvasRenderingContext2D, dw: number, dh: number): void {
+  private renderWeapon(g: CanvasRenderingContext2D, dw: number, dh: number, animName: string, animT: number): void {
     const w = this.weapon;
     if (!w.bladeLen) return; // bare hands
     const f = this.facing;
-    const hx = f * Math.round(dw * 0.3); // hand, in front of the body
-    const hy = -Math.round(dh * 0.42);
-    // Crossguard at the grip.
-    g.fillStyle = w.hilt;
-    g.fillRect(hx - 1, hy, 3, 1);
-    // Blade steps forward and up from the hand — a resting sword.
-    g.fillStyle = w.blade;
-    for (let i = 1; i <= w.bladeLen; i++) {
-      const bx = hx + f * i - (f < 0 ? w.bladeW - 1 : 0);
-      const by = hy - Math.round(i * 0.6);
-      g.fillRect(bx, by, w.bladeW, 1);
+
+    // Calculate current frame index for the animation
+    const animObj = KNIGHT_ANIMS.right[animName];
+    const frameIdx = animObj
+      ? (animObj.loop === false
+        ? Math.min(Math.floor(animT * animObj.fps), animObj.frames.length - 1)
+        : Math.floor(animT * animObj.fps) % animObj.frames.length)
+      : 0;
+
+    // Hand offsets in logical pixels (feet-centered):
+    let hx = 1.75;
+    let hy = -4.5;
+    
+    if (animName === 'run') {
+      // 4-frame run cycle: swing arms back & forth
+      if (frameIdx === 0) {
+        hx = 2.25;
+        hy = -5.25;
+      } else if (frameIdx === 2) {
+        hx = 1.25;
+        hy = -5.25;
+      } else {
+        hx = 1.75;
+        hy = -4.5;
+      }
+    } else if (animName === 'air') {
+      hx = 1.5;
+      hy = -5.0;
+    } else {
+      // idle sway
+      hy += Math.sin(animT * 4.5) * 0.2;
     }
-    // Bright tip.
+
+    hx *= f;
+
+    // Render Grip/Handle: extending backwards and down from hand
+    g.fillStyle = '#302426'; // dark brown leather grip
+    g.fillRect(hx - f * 1, hy + 1, 1, 1);
+    
+    // Render Pommel: gold/hilt colored end of grip
+    g.fillStyle = w.hilt;
+    g.fillRect(hx - f * 2, hy + 2, 1, 1);
+
+    // Render Angled Crossguard: perpendicular to the blade's 30deg tilt
+    g.fillStyle = w.hilt;
+    g.fillRect(hx, hy, 1, 1); // center
+    g.fillRect(hx - f * 1, hy - 1, 1, 1); // wing 1
+    g.fillRect(hx + f * 1, hy + 1, 1, 1); // wing 2
+
+    // Render Blade: steps forward and up from the hand
+    for (let i = 1; i <= w.bladeLen; i++) {
+      const bx = hx + f * i;
+      const by = hy - Math.round(i * 0.6);
+
+      if (w.bladeW >= 2) {
+        // Draw the core of the blade
+        g.fillStyle = w.blade;
+        g.fillRect(bx, by, 1, 1);
+        
+        // Draw a gleaming white edge highlight on the leading edge
+        g.fillStyle = COLORS.white;
+        g.fillRect(bx + f * 1, by, 1, 1);
+      } else {
+        // 1px blade
+        g.fillStyle = w.blade;
+        g.fillRect(bx, by, 1, 1);
+      }
+    }
+
+    // Render bright tip at the end of the blade
     g.fillStyle = COLORS.white;
-    g.fillRect(hx + f * w.bladeLen - (f < 0 ? 1 : 0), hy - Math.round(w.bladeLen * 0.6), 1, 1);
+    const tx = hx + f * w.bladeLen;
+    const ty = hy - Math.round(w.bladeLen * 0.6);
+    g.fillRect(tx, ty, 1, 1);
+    if (w.bladeW >= 2) {
+      g.fillRect(tx + f * 1, ty, 1, 1);
+    }
   }
 
   /** A small charm glint on the chest when a charm is worn. */
