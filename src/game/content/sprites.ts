@@ -35,9 +35,10 @@ const unarmoredKnightJson = {
   ...knightJson,
   palette: {
     ...(knightJson as any).palette,
-    "0": "#3f7299", // light blue armor -> dark blue fabric tunic
-    "2": "#302426", // silver details -> dark outline/leather details
-    "3": "#5a433f", // royal red cape/plume -> brown traveler cloak
+    "0": "#86594c", // light blue armor -> warm chestnut brown leather
+    "2": "#c69e8b", // silver details -> light tan/beige accents
+    "3": "#5a535b", // royal red cape/plume -> weathered charcoal grey cloak
+    "5": "#323c39", // dark blue fabric undergarment -> dark forest green fabric
   }
 };
 const knightUnarmored = load(unarmoredKnightJson as any);
