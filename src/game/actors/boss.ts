@@ -266,8 +266,16 @@ defineMonster('slime-king', {
     // Slime King swallow player check
     if (player && player.hp > 0 && player.swallowedBy === null && (m.state.swallowCd as number) <= 0) {
       const inset = m.def.contactInset ?? 0;
-      if (player.x < m.x + m.w - inset && player.x + player.w > m.x + inset &&
-          player.y < m.y + m.h - inset && player.y + player.h > m.y + inset) {
+      const overlapsX = player.x < m.x + m.w - inset && player.x + player.w > m.x + inset;
+      const overlapsY = player.y < m.y + m.h - inset && player.y + player.h > m.y + inset;
+      
+      const dist = Math.hypot(player.cx - m.cx, player.cy - m.cy);
+      if (dist < 80) {
+        console.log("[SlimeKing Swallow Check] dist:", dist, "invulnT:", player.invulnT, "swallowCd:", m.state.swallowCd, "overlapsX:", overlapsX, "overlapsY:", overlapsY);
+      }
+
+      if (overlapsX && overlapsY) {
+        console.log("[SlimeKing Swallow Check] Gulping player!");
         player.swallowBy(m);
         if (player.swallowedBy === (m as any)) {
           m.state.victim = true;

@@ -208,6 +208,7 @@ export class Player extends Actor {
 
   /** A monster gulps the player down — and takes the weapon with it only if it's a Devourer. */
   swallowBy(m: Monster): void {
+    console.log("[Player swallowBy] called by:", m.type, "current FSM state:", this.fsm.state, "invulnT:", this.invulnT);
     if (this.fsm.is('dead', 'swallowed') || this.invulnT > 0) return;
     this.swallowedBy = m;
     this.escapeN = 0;
@@ -551,6 +552,9 @@ export class Player extends Actor {
         if (e instanceof Monster && !e.def.noContactDamage) {
           // If it's a Slime King and swallow is ready, skip contact damage so swallow can trigger.
           if (e.type === 'slime-king' && (e.state.swallowCd as number ?? 0) <= 0) {
+            if (overlaps(this, expand(e.hurtbox, -(e.def.contactInset ?? 0)))) {
+              console.log("[Player Contact] Overlapping Slime King, skipping contact damage for swallow");
+            }
             continue;
           }
           if (overlaps(this, expand(e.hurtbox, -(e.def.contactInset ?? 0)))) {
