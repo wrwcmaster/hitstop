@@ -68,10 +68,16 @@ bind('bA', 'attack', 'confirm');
 bind('bD', 'dash', 'down');
 bind('bM', 'menu'); // Esc: opens the system menu (and closes it — pause consumes 'menu')
 
-// Taps on the canvas count as "any key" (start/restart on mobile).
-canvas.addEventListener('pointerdown', () => {
+// Taps on the canvas count as "any key" (start/restart on mobile) and, in
+// logical screen coords, let menus be tapped directly (no on-screen arrows).
+canvas.addEventListener('pointerdown', (e) => {
   game.sfx.unlock();
   game.input.notifyAnyPress();
+  const r = canvas.getBoundingClientRect();
+  game.input.notifyTap(
+    ((e.clientX - r.left) / r.width) * VIEW_W,
+    ((e.clientY - r.top) / r.height) * VIEW_H,
+  );
 });
 
 // Belt-and-suspenders against mobile zoom: iOS Safari ignores

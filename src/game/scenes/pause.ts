@@ -292,6 +292,10 @@ export class PauseScene implements Scene {
       : this.page === 'options' ? this.optionsMenu
       : this.controlsMenu;
     menu.update(input);
+    const t = input.consumeTap();
+    // Rebinding needs a real key/pad button, so leave the controls rows
+    // to those devices; every other page is tap-to-select.
+    if (t && this.page !== 'controls') menu.tapAt(t.x, t.y);
   }
 
   render(g: CanvasRenderingContext2D): void {

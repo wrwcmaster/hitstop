@@ -473,6 +473,8 @@ export class PlayScene implements Scene {
 
     if (this.phase === 'title') {
       this.titleMenu.update(g.input);
+      const t = g.input.consumeTap();
+      if (t) this.titleMenu.tapAt(t.x, t.y);
       return;
     }
 
