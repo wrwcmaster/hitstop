@@ -7,6 +7,7 @@ import {
   moveAndCollide,
   frameAt,
   whiteOf,
+  tintOf,
   friction,
   clamp,
   overlaps,
@@ -203,27 +204,34 @@ export class Player extends Actor {
     return weaponSpecOf(this.equipment.get('weapon'));
   }
 
-  /* ---------------- swallowed (the Devourer) ---------------- */
+  /* ---------------- swallowed (the Devourer / Slime King) ---------------- */
 
-  /** A monster gulps the player down — and takes the weapon with it. */
+  /** A monster gulps the player down — and takes the weapon with it only if it's a Devourer. */
   swallowBy(m: Monster): void {
+    console.log("[Player swallowBy] called by:", m.type, "current FSM state:", this.fsm.state, "invulnT:", this.invulnT);
     if (this.fsm.is('dead', 'swallowed') || this.invulnT > 0) return;
     this.swallowedBy = m;
     this.escapeN = 0;
-    // Everything you're wearing goes down with you and rides inside the
-    // beast until it dies — kill THIS one to get your gear back. (Snapshot
-    // the slots first: unequip mutates the map we're iterating.)
-    const taken: string[] = [];
-    for (const [slot, id] of this.equipment.slots()) {
-      this.equipment.unequip(slot);
-      this.inventory.remove(id, this.inventory.count(id)); // GONE from the bag too
-      taken.push(id);
+    
+    if (m.type === 'devourer') {
+      // Everything you're wearing goes down with you and rides inside the
+      // beast until it dies — kill THIS one to get your gear back. (Snapshot
+      // the slots first: unequip mutates the map we're iterating.)
+      const taken: string[] = [];
+      for (const [slot, id] of this.equipment.slots()) {
+        this.equipment.unequip(slot);
+        this.inventory.remove(id, this.inventory.count(id)); // GONE from the bag too
+        taken.push(id);
+      }
+      if (taken.length) {
+        this.syncStats();
+        m.state.stolenItems = taken;
+        this.feel.text(this.cx, this.y - 16, taken.length > 1 ? 'GEAR SWALLOWED!' : 'WEAPON SWALLOWED!', COLORS.red);
+      }
+    } else {
+      this.feel.text(this.cx, this.y - 16, 'SWALLOWED!', COLORS.red);
     }
-    if (taken.length) {
-      this.syncStats();
-      m.state.stolenItems = taken;
-      this.feel.text(this.cx, this.y - 16, taken.length > 1 ? 'GEAR SWALLOWED!' : 'WEAPON SWALLOWED!', COLORS.red);
-    }
+    
     this.statuses.apply('devoured');
     this.fsm.set('swallowed');
     this.feel.hitstop(0.12);
@@ -541,10 +549,18 @@ export class Player extends Actor {
     // contactInset shrinks the touch box for round-sprited monsters.
     if (!this.fsm.is('dead', 'dash') && this.invulnT <= 0) {
       for (const e of this.world.actors('enemy')) {
-        if (e instanceof Monster && !e.def.noContactDamage &&
-            overlaps(this, expand(e.hurtbox, -(e.def.contactInset ?? 0)))) {
-          this.hurt(e);
-          break;
+        if (e instanceof Monster && !e.def.noContactDamage) {
+          // If it's a Slime King and swallow is ready, skip contact damage so swallow can trigger.
+          if (e.type === 'slime-king' && (e.state.swallowCd as number ?? 0) <= 0) {
+            if (overlaps(this, expand(e.hurtbox, -(e.def.contactInset ?? 0)))) {
+              console.log("[Player Contact] Overlapping Slime King, skipping contact damage for swallow");
+            }
+            continue;
+          }
+          if (overlaps(this, expand(e.hurtbox, -(e.def.contactInset ?? 0)))) {
+            this.hurt(e);
+            break;
+          }
         }
       }
     }
@@ -627,8 +643,6 @@ export class Player extends Actor {
   }
 
   render(g: CanvasRenderingContext2D): void {
-    // Inside a Devourer: the beast draws the bulge, not us.
-    if (this.fsm.is('swallowed')) return;
     // I-frame blink (god mode holds i-frames but shouldn't strobe).
     if (this.invulnT > 0 && !this.godMode && !this.fsm.is('dead') && Math.floor(this.invulnT * 20) % 2) return;
 
@@ -666,10 +680,36 @@ export class Player extends Actor {
     const sx = baseSx * pose.sx;
     const sy = baseSy * pose.sy;
     g.save();
-    g.translate(q(cx + pose.ox), q(by + pose.oy));
+    
+    let finalImg = img;
+    const isSwallowed = this.fsm.is('swallowed');
+    if (isSwallowed) {
+      g.globalAlpha = 0.9; // keep player highly visible
+      // Pain shiver translation
+      const shiverX = Math.sin(this.animT * 50) * 0.8;
+      const shiverY = Math.cos(this.animT * 50) * 0.8;
+      g.translate(q(cx + pose.ox + shiverX), q(by + pose.oy + shiverY));
+      // Tint the player red for acid pain/damage!
+      finalImg = tintOf(img, COLORS.red, 0.55);
+    } else {
+      g.translate(q(cx + pose.ox), q(by + pose.oy));
+    }
+    
     g.scale(sx, sy);
     if (pose.shear) g.transform(1, 0, pose.shear, 1, 0, 0);
-    g.drawImage(img, -dw / 2, -dh, dw, dh);
+    g.drawImage(finalImg, -dw / 2, -dh, dw, dh);
+    
+    // Draw the green gel overlay on top of the player sprite if swallowed by Slime King!
+    if (isSwallowed && this.swallowedBy && this.swallowedBy.type === 'slime-king') {
+      g.save();
+      g.globalAlpha = 0.45;
+      g.fillStyle = COLORS.green;
+      g.beginPath();
+      g.arc(0, -dh / 2, Math.max(dw, dh) * 0.65, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+    }
+    
     // Gear rides the body transform so it leans/squashes with the knight.
     // During an attack the slash arc IS the weapon, so the held one hides.
     if (this.flashT <= 0) {
@@ -677,6 +717,7 @@ export class Player extends Actor {
       this.renderWeapon(g, dw, dh, anim, this.animT);
     }
     g.restore();
+    g.globalAlpha = 1;
 
     if (this.fsm.is('attack')) this.renderSlash(g, cx, by - dh * 0.45);
   }

@@ -137,6 +137,10 @@ export class PlayScene implements Scene {
           onSelect: () => this.startRun(saveStore.load()),
         },
         {
+          label: 'TEST ROOM',
+          onSelect: () => this.startTestRoom(),
+        },
+        {
           label: 'OPTIONS',
           onSelect: () => {
             this.game.sfx.play('menuSelect');
@@ -245,6 +249,25 @@ export class PlayScene implements Scene {
     this.victoryT = 0;
     this.phase = 'play';
     this.setRoom(save?.roomId ?? this.startRoomId());
+    this.game.sfx.play('menuSelect');
+  }
+
+  private startTestRoom(): void {
+    const g = this.game;
+    g.world.clear();
+    g.feel.reset();
+    this.player = new Player(g, this.tilemap, 0, 0); // positioned by setRoom
+    this.player.gold = 999; // Give plenty of gold for testing!
+    g.world.spawn(this.player);
+
+    this.flags.clear();
+    this.firedTriggers = {};
+    this.score = 0;
+    this.combo = 0;
+    this.comboT = 0;
+    this.victoryT = 0;
+    this.phase = 'play';
+    this.setRoom('test_room');
     this.game.sfx.play('menuSelect');
   }
 
