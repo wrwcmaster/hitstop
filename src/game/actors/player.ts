@@ -853,39 +853,61 @@ export class Player extends Actor {
 
     const w = this.weapon;
     const color1 = w.colors[0] ?? COLORS.steel;
-    const color2 = w.colors[1] ?? COLORS.white;
 
     const q = (v: number) => Math.round(v * TEXEL) / TEXEL;
     const stepSize = 1 / TEXEL;
 
-    // Layered, tapered, fading arc segments
-    const N = 24;
+    // Define two layers: shadow outline and solid white core
     const layers = [
-      { color: color1, thickness: heavy ? 5 : 3.5, alphaMult: 0.6 },
-      { color: color2, thickness: heavy ? 3 : 2.0, alphaMult: 0.8 },
-      { color: COLORS.white, thickness: heavy ? 1.2 : 0.8, alphaMult: 1.0 }
+      { color: color1, thickness: heavy ? 5 : 3.5 },
+      { color: COLORS.white, thickness: heavy ? 2.5 : 1.5 }
     ];
+
+    const N = 24;
 
     g.save();
     for (const layer of layers) {
       g.fillStyle = layer.color;
+      g.beginPath();
+
+      const outerPoints: [number, number][] = [];
+      const innerPoints: [number, number][] = [];
+
       for (let s = 0; s <= N; s++) {
         const t = s / N;
         const theta = a0 + (a - a0) * t;
-        const x = cx + Math.cos(theta) * r;
-        const y = my + Math.sin(theta) * r;
-        
-        // Taper: thickness is a crescent shape peaking at t = 0.8 and tapering at both ends
+
+        // Crescent thickness profile peaking at 0.8
         const thicknessProfile = t < 0.8
           ? Math.sin((t / 0.8) * (Math.PI / 2))
           : Math.cos(((t - 0.8) / 0.2) * (Math.PI / 2));
-        const radius = (layer.thickness * thicknessProfile) / 2;
-        g.globalAlpha = t * layer.alphaMult;
-        
-        g.beginPath();
-        g.arc(q(x), q(y), radius, 0, Math.PI * 2);
-        g.fill();
+
+        const thick = layer.thickness * thicknessProfile;
+        const cosT = Math.cos(theta);
+        const sinT = Math.sin(theta);
+
+        outerPoints.push([
+          q(cx + cosT * (r + thick / 2)),
+          q(my + sinT * (r + thick / 2))
+        ]);
+
+        innerPoints.push([
+          q(cx + cosT * (r - thick / 2)),
+          q(my + sinT * (r - thick / 2))
+        ]);
       }
+
+      // Connect outer points going forward
+      g.moveTo(outerPoints[0][0], outerPoints[0][1]);
+      for (let s = 1; s <= N; s++) {
+        g.lineTo(outerPoints[s][0], outerPoints[s][1]);
+      }
+      // Connect inner points going backward
+      for (let s = N; s >= 0; s--) {
+        g.lineTo(innerPoints[s][0], innerPoints[s][1]);
+      }
+      g.closePath();
+      g.fill();
     }
     g.restore();
 
