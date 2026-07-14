@@ -28,10 +28,24 @@ const load = (file: unknown) => loadSprite(file as SpriteFile, PAL);
 /* ---------------- knight ---------------- */
 
 const knight = load(knightJson);
-// `let` (not const) so a PNG sheet can replace the text-grid art at boot;
-// ES module live bindings mean importers pick up the swap automatically.
-export let KNIGHT_ANIMS = withFacing(knight.animSet());
-export let KNIGHT_IDLE_SPRITE = knight.frame('idle', 0);
+export const KNIGHT_ARMORED_ANIMS = withFacing(knight.animSet());
+
+// Create the unarmored knight json by swapping palette colors
+const unarmoredKnightJson = {
+  ...knightJson,
+  palette: {
+    ...(knightJson as any).palette,
+    "0": "#3f7299", // light blue armor -> dark blue fabric tunic
+    "2": "#302426", // silver details -> dark outline/leather details
+    "3": "#5a433f", // royal red cape/plume -> brown traveler cloak
+  }
+};
+const knightUnarmored = load(unarmoredKnightJson as any);
+export const KNIGHT_UNARMORED_ANIMS = withFacing(knightUnarmored.animSet());
+
+// We keep these exported variables for backward compatibility and live bindings
+export let KNIGHT_ANIMS = KNIGHT_UNARMORED_ANIMS; // default to unarmored at start
+export let KNIGHT_IDLE_SPRITE = knightUnarmored.frame('idle', 0); // default to unarmored first frame
 
 /**
  * Swap the knight to a PNG sprite sheet (see tools/sheet-slicer.html and

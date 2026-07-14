@@ -85,7 +85,11 @@ export class PauseScene implements Scene {
             : def.kind === 'consumable' ? 'USE' : '',
         onSelect: () => {
           if (def.kind === 'equipment') {
-            if (!p.equipment.isEquipped(s.id)) {
+            if (p.equipment.isEquipped(s.id)) {
+              p.equipment.unequip(def.slot!);
+              p.syncStats();
+              this.game.sfx.play('menuClose');
+            } else {
               p.equipment.equip(s.id);
               p.syncStats();
               this.game.sfx.play('equip');

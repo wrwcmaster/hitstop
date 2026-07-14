@@ -150,5 +150,14 @@ defineItem<ItemCtx>('gate-key', {
   kind: 'key',
 });
 
+defineItem<ItemCtx>('steel-armor', {
+  name: 'STEEL ARMOR',
+  desc: 'Heavy plate mail that guards against blows.',
+  icon: ICON_CHARM,
+  kind: 'equipment',
+  slot: 'armor',
+  mods: { add: { maxHp: 3 } },
+});
+
 /** Importing this module registers the item catalog. */
 export function registerItems(): void {}

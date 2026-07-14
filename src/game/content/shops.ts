@@ -15,6 +15,7 @@ shops.register('merchant', {
     { item: 'haste-draught', price: 20 },
     { item: 'iron-charm', price: 40 },
     { item: 'great-sword', price: 60 },
+    { item: 'steel-armor', price: 80 },
   ],
 });
 

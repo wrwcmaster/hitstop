@@ -27,7 +27,7 @@ import {
   SkillTree,
 } from '@engine/index';
 import type { TreeCtx } from '../content/skilltree';
-import { KNIGHT_ANIMS, TEXEL } from '../content/sprites';
+import { KNIGHT_ARMORED_ANIMS, KNIGHT_UNARMORED_ANIMS, TEXEL } from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { weaponSpecOf, type WeaponSpec } from '../content/items';
 import type { SkillCtx } from '../content/skills';
@@ -84,6 +84,10 @@ export class Player extends Actor {
   });
   inventory = new Inventory();
   equipment = new Equipment(this.stats);
+  get animSet() {
+    const hasArmor = this.equipment.get('armor') !== null;
+    return hasArmor ? KNIGHT_ARMORED_ANIMS : KNIGHT_UNARMORED_ANIMS;
+  }
   statuses = new Statuses(this);
   gold = 0;
 
@@ -648,7 +652,7 @@ export class Player extends Actor {
 
     let anim = 'air';
     if (this.onGround) anim = Math.abs(this.vx) > 8 ? 'run' : 'idle';
-    const set = this.facing === 1 ? KNIGHT_ANIMS.right : KNIGHT_ANIMS.left;
+    const set = this.facing === 1 ? this.animSet.right : this.animSet.left;
     let img = frameAt(set, anim, this.animT);
     if (this.flashT > 0) img = whiteOf(img);
 
@@ -729,7 +733,7 @@ export class Player extends Actor {
     const f = this.facing;
 
     // Calculate current frame index for the animation
-    const animObj = KNIGHT_ANIMS.right[animName];
+    const animObj = this.animSet.right[animName];
     const frameIdx = animObj
       ? (animObj.loop === false
         ? Math.min(Math.floor(animT * animObj.fps), animObj.frames.length - 1)
