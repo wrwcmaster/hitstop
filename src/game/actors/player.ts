@@ -674,7 +674,7 @@ export class Player extends Actor {
     // During an attack the slash arc IS the weapon, so the held one hides.
     if (this.flashT <= 0) {
       if (this.equipment.get('charm')) this.renderCharm(g, dh);
-      if (!this.fsm.is('attack')) this.renderWeapon(g, dw, dh, anim, this.animT);
+      this.renderWeapon(g, dw, dh, anim, this.animT);
     }
     g.restore();
 
@@ -699,7 +699,22 @@ export class Player extends Actor {
     let hx = 1.75;
     let hy = -4.5;
     
-    if (animName === 'run') {
+    // Blade tilt angle: defaults to a 30-degree rest tilt
+    let dx = 0.866;
+    let dy = -0.5;
+
+    if (this.fsm.is('attack')) {
+      // Rotate the sword along with the swing arc
+      const prog = Math.min(1, this.fsm.t / this.attackDur);
+      const flipV = this.attackIndex === 1 ? -1 : 1;
+      const sweep = (-1.3 + 2.6 * Math.min(1, prog * 1.7)) * flipV;
+      dx = Math.cos(sweep);
+      dy = Math.sin(sweep);
+      
+      // Pivot from the chest/shoulder center during attack
+      hx = 0;
+      hy = -4.5;
+    } else if (animName === 'run') {
       if (frameIdx === 0) {
         hx = 2.25;
         hy = -5.25;
@@ -718,18 +733,16 @@ export class Player extends Actor {
       hy += Math.sin(animT * 4.5) * 0.2;
     }
 
-    hx *= f;
-
     const q = (v: number) => Math.round(v * TEXEL) / TEXEL;
     const stepSize = 1 / TEXEL;
 
-    // Blade tilt angle (30 degrees)
-    const dx = 0.866;
-    const dy = -0.5;
-
     // Perpendicular vector for blade width
-    const px = -dy * f; // 0.5 * f
-    const py = dx;     // 0.866
+    const px = -dy * f;
+    const py = dx; // dx is positive before facing factor
+
+    // Apply facing direction to X components
+    hx *= f;
+    dx *= f;
 
     // 1. Render Grip/Handle (leather wrap) extending backwards
     const gripLen = 5;
@@ -837,20 +850,53 @@ export class Player extends Actor {
     const sweep = (-1.3 + 2.6 * Math.min(1, prog * 1.7)) * flipV;
     const a = this.facing === 1 ? sweep : Math.PI - sweep;
     const a0 = this.facing === 1 ? -1.3 * flipV : Math.PI + 1.3 * flipV;
-    g.strokeStyle = prog < 0.45 ? COLORS.white : COLORS.steel;
-    g.lineWidth = heavy ? 3 : 2;
-    g.beginPath();
-    g.arc(cx, my, r, Math.min(a0, a), Math.max(a0, a));
-    g.stroke();
-    if (heavy) {
-      g.strokeStyle = COLORS.gold;
-      g.lineWidth = 1;
-      g.beginPath();
-      g.arc(cx, my, r + 3, Math.min(a0, a), Math.max(a0, a));
-      g.stroke();
+
+    const w = this.weapon;
+    const color1 = w.colors[0] ?? COLORS.steel;
+    const color2 = w.colors[1] ?? COLORS.white;
+
+    const q = (v: number) => Math.round(v * TEXEL) / TEXEL;
+    const stepSize = 1 / TEXEL;
+
+    // Layered, tapered, fading arc segments
+    const N = 24;
+    const layers = [
+      { color: color1, thickness: heavy ? 5 : 3.5, alphaMult: 0.6 },
+      { color: color2, thickness: heavy ? 3 : 2.0, alphaMult: 0.8 },
+      { color: COLORS.white, thickness: heavy ? 1.2 : 0.8, alphaMult: 1.0 }
+    ];
+
+    g.save();
+    for (const layer of layers) {
+      g.fillStyle = layer.color;
+      for (let s = 0; s <= N; s++) {
+        const t = s / N;
+        const theta = a0 + (a - a0) * t;
+        const x = cx + Math.cos(theta) * r;
+        const y = my + Math.sin(theta) * r;
+        
+        // Taper: thickness scales with t (thinner at tail, full at head)
+        const radius = (layer.thickness * t) / 2;
+        g.globalAlpha = t * layer.alphaMult;
+        
+        g.beginPath();
+        g.arc(q(x), q(y), radius, 0, Math.PI * 2);
+        g.fill();
+      }
     }
+    g.restore();
+
+    // Render HD Gleaming Star Flare at the leading tip
+    const tx = cx + Math.cos(a) * r;
+    const ty = my + Math.sin(a) * r;
+    
     g.fillStyle = COLORS.white;
-    g.fillRect(Math.round(cx + Math.cos(a) * r) - 1, Math.round(my + Math.sin(a) * r) - 1, 3, 3);
+    // Central core
+    g.fillRect(q(tx - stepSize), q(ty - stepSize), stepSize * 2, stepSize * 2);
+    // Horizontal flare
+    g.fillRect(q(tx - stepSize * 3), q(ty - stepSize * 0.5), stepSize * 6, stepSize);
+    // Vertical flare
+    g.fillRect(q(tx - stepSize * 0.5), q(ty - stepSize * 3), stepSize, stepSize * 6);
   }
 }
 
