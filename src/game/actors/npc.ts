@@ -11,7 +11,7 @@ import {
 import { MERCHANT, blit } from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { ShopScene } from '../scenes/shop';
-import type { ActionGame, Action } from '../defs';
+import { prettyCode, prettyButton, type ActionGame, type Action } from '../defs';
 import { Player } from './player';
 
 /**
@@ -104,10 +104,25 @@ export class Npc extends Actor {
   render(g: CanvasRenderingContext2D): void {
     blit(g, this.def.sprite, this.x - 1, this.y);
     if (this.playerNear()) {
-      // Floating interact prompt.
+      // Floating interact prompt, labelled for whatever the player is using.
       const bob = Math.sin(this.animT * 4) * 1.5;
-      drawText(g, 'E', this.cx, this.y - 10 + bob, COLORS.gold, 1, 'center');
+      drawText(g, this.promptLabel(), this.cx, this.y - 10 + bob, COLORS.gold, 1, 'center');
     }
+  }
+
+  /** What to press to interact, for the current device: a gamepad button
+   * if one's connected, the on-screen button on touch, else the key. */
+  private promptLabel(): string {
+    const pad = this.game.pad;
+    if (pad?.connected) {
+      const b = pad.buttonsFor('interact')[0];
+      return b != null ? prettyButton(b) : 'Y';
+    }
+    if (typeof window !== 'undefined' && !window.matchMedia('(pointer: fine)').matches) {
+      return 'TALK';
+    }
+    const code = this.game.input.codesFor('interact')[0];
+    return code ? prettyCode(code) : 'E';
   }
 }
 
