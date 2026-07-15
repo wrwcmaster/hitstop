@@ -670,6 +670,29 @@ export class PlayScene implements Scene {
         this.game.world.spawn(new Monster('devourer', this.game, this.tilemap, p.cx + 34, p.cy - 24));
         say('DEVOURER', COLORS.purple);
         break;
+      case 'Digit9': {
+        const hasHelmet = p.equipment.get('helmet') !== null;
+        const hasArmor = p.equipment.get('armor') !== null;
+        if (!hasHelmet && !hasArmor) {
+          p.inventory.add('iron-helmet');
+          p.equipment.equip('iron-helmet');
+          say('EQUIP: HELMET');
+        } else if (hasHelmet && !hasArmor) {
+          p.equipment.unequip('helmet');
+          p.inventory.add('steel-armor');
+          p.equipment.equip('steel-armor');
+          say('EQUIP: ARMOR');
+        } else if (!hasHelmet && hasArmor) {
+          p.inventory.add('iron-helmet');
+          p.equipment.equip('iron-helmet');
+          say('EQUIP: HELMET & ARMOR');
+        } else {
+          p.equipment.unequip('helmet');
+          p.equipment.unequip('armor');
+          say('UNEQUIP ALL');
+        }
+        break;
+      }
       default:
         return;
     }
@@ -679,7 +702,7 @@ export class PlayScene implements Scene {
   private renderCheatLegend(g: CanvasRenderingContext2D): void {
     const x = this.game.width - 4;
     drawText(g, 'CHEATS', x, 22, COLORS.gold, 1, 'right');
-    const items = ['1 gold', '2 xp', '3 skill', '4 heal', '5 god', '6 gear', '7 kill', '8 devourer'];
+    const items = ['1 gold', '2 xp', '3 skill', '4 heal', '5 god', '6 gear', '7 kill', '8 devourer', '9 equip'];
     items.forEach((t, i) => drawText(g, t, x, 32 + i * 8, '#38b764', 1, 'right'));
   }
 

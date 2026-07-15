@@ -7,17 +7,8 @@ import merchantJson from './sprites/merchant.json';
 import iconsJson from './sprites/icons.json';
 import hudJson from './sprites/hud.json';
 
-/**
- * Pixel art lives in per-sprite JSON files under `sprites/`, authored and
- * previewed in tools/sprite-editor.html and loaded here. Each file is a
- * palette + named animations of 1x text grids; `loadSprite` EPX-upscales
- * them TWICE to 4x texel density (iterated Scale2x) and bakes each frame.
- * This module just wires the loaded sprites to the names the game uses.
- */
 export const TEXEL = 4;
 
-/** Draw a TEXEL-density sprite at its logical (world) size, quantized to
- * the art's texel grid so motion steps are texel-fine, not world-pixel. */
 export function blit(g: CanvasRenderingContext2D, img: HTMLCanvasElement, x: number, y: number): void {
   const q = (v: number) => Math.round(v * TEXEL) / TEXEL;
   g.drawImage(img, q(x), q(y), img.width / TEXEL, img.height / TEXEL);
@@ -27,7 +18,32 @@ const load = (file: unknown) => loadSprite(file as SpriteFile, PAL);
 
 /* ---------------- knight ---------------- */
 
-/** Programmatically splits head/helmet and body indices so they can be colored independently. */
+export interface EquipmentAnchor {
+  x: number;
+  y: number;
+  angle?: number;
+}
+
+// Visual debug flag for positioning anchors
+export const DEBUG_ANCHORS = false;
+
+// Default offsets since layers are pre-aligned (0, 0)
+const DEFAULT_ANCHOR = { x: 0, y: 0, angle: 0 };
+
+export const HEAD_ANCHORS: Record<string, EquipmentAnchor[]> = {
+  idle: [DEFAULT_ANCHOR],
+  run: [DEFAULT_ANCHOR, DEFAULT_ANCHOR, DEFAULT_ANCHOR, DEFAULT_ANCHOR],
+  air: [DEFAULT_ANCHOR],
+  attack: [DEFAULT_ANCHOR, DEFAULT_ANCHOR, DEFAULT_ANCHOR, DEFAULT_ANCHOR]
+};
+
+export const CHEST_ANCHORS: Record<string, EquipmentAnchor[]> = {
+  idle: [DEFAULT_ANCHOR],
+  run: [DEFAULT_ANCHOR, DEFAULT_ANCHOR, DEFAULT_ANCHOR, DEFAULT_ANCHOR],
+  air: [DEFAULT_ANCHOR],
+  attack: [DEFAULT_ANCHOR, DEFAULT_ANCHOR, DEFAULT_ANCHOR, DEFAULT_ANCHOR]
+};
+
 function patchKnightJson(json: any) {
   const copy = JSON.parse(JSON.stringify(json));
   for (const animName of Object.keys(copy.anims)) {
@@ -35,7 +51,6 @@ function patchKnightJson(json: any) {
     for (let f = 0; f < anim.frames.length; f++) {
       const frame = anim.frames[f];
       
-      // Find the first row containing '3' (the plume) to determine vertical offset
       let startPlume = 0;
       for (let y = 0; y < frame.length; y++) {
         if (frame[y].includes('3')) {
@@ -44,8 +59,6 @@ function patchKnightJson(json: any) {
         }
       }
       
-      // The precise boundary of the helmet dome, front visor, side neck, and back cowl.
-      // These are hardcoded column bounds [minX, maxX][] relative to `y - startPlume`.
       const helmetMask: Record<number, [number, number][]> = {
         7: [[16, 25]],
         8: [[16, 25]],
@@ -80,20 +93,23 @@ function patchKnightJson(json: any) {
         
         for (let x = 0; x < row.length; x++) {
           let c = row[x];
-          // Plume is any '3' in the upper half of the sprite
-          if (c === '3' && relY <= 18) {
+          if (c === '3' && relY <= 9) {
             c = 'p';
           } 
-          // Helmet is '0', '2', or '5' within the precise mask
-          else if ((c === '0' || c === '2' || c === '5') && helmetMask[relY]) {
+          else if (helmetMask[relY]) {
             const ranges = helmetMask[relY];
+            let inHelmet = false;
             for (const [minX, maxX] of ranges) {
               if (x >= minX && x <= maxX) {
-                if (c === '0') c = 'h';
-                else if (c === '2') c = 'v';
-                else if (c === '5') c = 's';
+                inHelmet = true;
                 break;
               }
+            }
+            if (inHelmet) {
+              if (c === '0') c = 'h';
+              else if (c === '2') c = 'v';
+              else if (c === '5') c = 's';
+              else if (c === '1') c = 'o'; // helmet outline
             }
           }
           newRow += c;
@@ -113,51 +129,39 @@ delete (patchedKnightJson.palette as any)["2"];
 delete (patchedKnightJson.palette as any)["3"];
 delete (patchedKnightJson.palette as any)["5"];
 
-// 1. Armored Body + Helmet
-const fullKnight = loadSprite(patchedKnightJson, {
+// Base Player (Unarmored tunic, clean cap/hood, skin, weapon)
+const baseKnight = loadSprite(patchedKnightJson, {
   ...PAL,
-  "0": "#6bcaea", "2": "#bcd1ce", "3": "#bf5749", "5": "#3f7299", // body
-  "h": "#6bcaea", "v": "#bcd1ce", "p": "#bf5749", "s": "#3f7299" // head (matching steel armor)
+  "0": "#86594c", "2": "#c69e8b", "3": "#5a535b", "5": "#323c39", // brown tunic/leather
+  "h": null, "v": null, "p": null, "s": null, "o": null          // hide helmet
 });
-export const KNIGHT_ARMORED_WITH_HELMET_ANIMS = withFacing(fullKnight.animSet());
+export const KNIGHT_UNARMORED_NO_HELMET_ANIMS = withFacing(baseKnight.animSet());
 
-// 2. Armored Body + No Helmet (weathered cap & cloak hood)
-const armoredNoHelmet = loadSprite(patchedKnightJson, {
-  ...PAL,
-  "0": "#6bcaea", "2": "#bcd1ce", "3": "#bf5749", "5": "#3f7299", // body
-  "h": "#86594c", "v": "#c69e8b", "p": "#5a535b", "s": "#323c39" // head (no steel helmet)
+// Helmet Layer (Steel helmet only, transparent body)
+const helmetKnight = loadSprite(patchedKnightJson, {
+  ".": null,
+  "0": null, "2": null, "3": null, "5": null, "1": null, "4": null, // hide body
+  "h": "#6bcaea", "v": "#bcd1ce", "p": "#bf5749", "s": "#3f7299", "o": "#131014" // steel helmet
 });
-export const KNIGHT_ARMORED_NO_HELMET_ANIMS = withFacing(armoredNoHelmet.animSet());
+export const HELMET_ANIMS = withFacing(helmetKnight.animSet());
 
-// 3. Unarmored Body + Helmet
-const unarmoredWithHelmet = loadSprite(patchedKnightJson, {
-  ...PAL,
-  "0": "#86594c", "2": "#c69e8b", "3": "#5a535b", "5": "#323c39", // body
-  "h": "#6bcaea", "v": "#bcd1ce", "p": "#bf5749", "s": "#3f7299" // head (matching steel helmet)
+// Armor Layer (Steel body armor only, transparent head)
+const armorKnight = loadSprite(patchedKnightJson, {
+  ".": null,
+  "0": "#6bcaea", "2": "#bcd1ce", "3": null, "5": "#3f7299", "1": "#131014", // steel armor
+  "4": null,                                                                // hide skin
+  "h": null, "v": null, "p": null, "s": null, "o": null                     // hide helmet
 });
-export const KNIGHT_UNARMORED_WITH_HELMET_ANIMS = withFacing(unarmoredWithHelmet.animSet());
+export const ARMOR_ANIMS = withFacing(armorKnight.animSet());
 
-// 4. Unarmored Body + No Helmet (Default starting look)
-const unarmoredNoHelmetSheet = loadSprite(patchedKnightJson, {
-  ...PAL,
-  "0": "#86594c", "2": "#c69e8b", "3": "#5a535b", "5": "#323c39", // body
-  "h": "#86594c", "v": "#c69e8b", "p": "#5a535b", "s": "#323c39" // head (no steel helmet)
-});
-export const KNIGHT_UNARMORED_NO_HELMET_ANIMS = withFacing(unarmoredNoHelmetSheet.animSet());
+// Backward-compatible alias exports for rest of codebase
+export const KNIGHT_ARMORED_WITH_HELMET_ANIMS = KNIGHT_UNARMORED_NO_HELMET_ANIMS;
+export const KNIGHT_ARMORED_NO_HELMET_ANIMS = KNIGHT_UNARMORED_NO_HELMET_ANIMS;
+export const KNIGHT_UNARMORED_WITH_HELMET_ANIMS = KNIGHT_UNARMORED_NO_HELMET_ANIMS;
 
-// We keep these exported variables for backward compatibility and live bindings
-export let KNIGHT_ANIMS = KNIGHT_UNARMORED_NO_HELMET_ANIMS; // default to unarmored at start
-export let KNIGHT_IDLE_SPRITE = unarmoredNoHelmetSheet.frame('idle', 0); // default to unarmored first frame
+export let KNIGHT_ANIMS = KNIGHT_UNARMORED_NO_HELMET_ANIMS;
+export let KNIGHT_IDLE_SPRITE = baseKnight.frame('idle', 0);
 
-/**
- * Swap the knight to a PNG sprite sheet (see tools/sheet-slicer.html and
- * docs/design-tools.md). Call from main.ts boot with the sheet image URL
- * (a Vite `import x from './knight.png'`) and its exported descriptor:
- *
- *   await loadKnightSheet(knightPngUrl, knightSheetDescriptor);
- *
- * The idle animation's first frame becomes the title/menu portrait.
- */
 export async function loadKnightSheet(imageUrl: string, desc: SheetDescriptor): Promise<void> {
   const img = await loadImage(imageUrl);
   const sheet = loadSheet(img, desc);
