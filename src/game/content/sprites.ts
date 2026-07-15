@@ -34,14 +34,28 @@ function patchKnightJson(json: any) {
     const anim = copy.anims[animName];
     for (let f = 0; f < anim.frames.length; f++) {
       const frame = anim.frames[f];
+      
+      // Find the first row containing '3' (the plume) to determine vertical offset
+      let startPlume = 0;
+      for (let y = 0; y < frame.length; y++) {
+        if (frame[y].includes('3')) {
+          startPlume = y;
+          break;
+        }
+      }
+      
+      const plumeEnd = startPlume + 6;
+      const helmetStart = startPlume + 7;
+      const helmetEnd = startPlume + 14;
+
       for (let y = 0; y < frame.length; y++) {
         let row = frame[y];
-        // Plume area (rows 0 to 6)
-        if (y >= 0 && y <= 6) {
+        // Plume area
+        if (y >= startPlume && y <= plumeEnd) {
           row = row.replace(/3/g, 'p');
         }
-        // Helmet/Visor area (rows 7 to 14, columns 12 to end)
-        if (y >= 7 && y <= 14) {
+        // Helmet/Visor area (columns 12 to end of row)
+        if (y >= helmetStart && y <= helmetEnd) {
           const prefix = row.slice(0, 12);
           const helmetPart = row.slice(12);
           const patchedHelmet = helmetPart
