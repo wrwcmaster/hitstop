@@ -1,6 +1,8 @@
 import { loadSprite, loadSheet, loadImage, withFacing, type SpriteFile, type SheetDescriptor } from '@engine/index';
 import { PAL } from './palette';
 import knightJson from './sprites/knight.json';
+import ironHelmetJson from './sprites/equipment/iron-helmet.json';
+import steelArmorJson from './sprites/equipment/steel-armor.json';
 import slimeJson from './sprites/slime.json';
 import batJson from './sprites/bat.json';
 import merchantJson from './sprites/merchant.json';
@@ -44,114 +46,16 @@ export const CHEST_ANCHORS: Record<string, EquipmentAnchor[]> = {
   attack: [DEFAULT_ANCHOR, DEFAULT_ANCHOR, DEFAULT_ANCHOR, DEFAULT_ANCHOR]
 };
 
-function patchKnightJson(json: any) {
-  const copy = JSON.parse(JSON.stringify(json));
-  for (const animName of Object.keys(copy.anims)) {
-    const anim = copy.anims[animName];
-    for (let f = 0; f < anim.frames.length; f++) {
-      const frame = anim.frames[f];
-      
-      let startPlume = 0;
-      for (let y = 0; y < frame.length; y++) {
-        if (frame[y].includes('3')) {
-          startPlume = y;
-          break;
-        }
-      }
-      
-      const helmetMask: Record<number, [number, number][]> = {
-        7: [[16, 25]],
-        8: [[16, 25]],
-        9: [[14, 27]],
-        10: [[12, 25], [28, 30]],
-        11: [[12, 25], [28, 30]],
-        12: [[11, 23], [26, 31]],
-        13: [[10, 33]],
-        14: [[10, 33]],
-        15: [[9, 21]],
-        16: [[9, 15]],
-        17: [[9, 15]],
-        18: [[9, 13], [16, 28]],
-        19: [[9, 12], [14, 28]],
-        20: [[9, 11], [13, 15]],
-        21: [[9, 11], [13, 15]],
-        22: [[9, 11], [13, 15]],
-        23: [[9, 12], [14, 15], [19, 19]],
-        24: [[9, 15], [21, 21]],
-        25: [[10, 15], [19, 21]],
-        26: [[10, 15], [19, 21]],
-        27: [[10, 15], [19, 21]],
-        28: [[11, 15]],
-        29: [[13, 16]],
-        30: [[13, 16]]
-      };
-
-      for (let y = 0; y < frame.length; y++) {
-        let row = frame[y];
-        let newRow = '';
-        const relY = y - startPlume;
-        
-        for (let x = 0; x < row.length; x++) {
-          let c = row[x];
-          if (c === '3' && relY <= 9) {
-            c = 'p';
-          } 
-          else if (helmetMask[relY]) {
-            const ranges = helmetMask[relY];
-            let inHelmet = false;
-            for (const [minX, maxX] of ranges) {
-              if (x >= minX && x <= maxX) {
-                inHelmet = true;
-                break;
-              }
-            }
-            if (inHelmet) {
-              if (c === '0') c = 'h';
-              else if (c === '2') c = 'v';
-              else if (c === '5') c = 's';
-              else if (c === '1') c = 'o'; // helmet outline
-            }
-          }
-          newRow += c;
-        }
-        frame[y] = newRow;
-      }
-    }
-  }
-  return copy;
-}
-
-const patchedKnightJson = patchKnightJson(knightJson);
-
-// Delete base palette keys from patchedKnightJson so they do not overwrite base configurations in loadSprite
-delete (patchedKnightJson.palette as any)["0"];
-delete (patchedKnightJson.palette as any)["2"];
-delete (patchedKnightJson.palette as any)["3"];
-delete (patchedKnightJson.palette as any)["5"];
-
 // Base Player (Unarmored tunic, clean cap/hood, skin, weapon)
-const baseKnight = loadSprite(patchedKnightJson, {
-  ...PAL,
-  "0": "#86594c", "2": "#c69e8b", "3": "#5a535b", "5": "#323c39", // brown tunic/leather
-  "h": "#86594c", "v": "#c69e8b", "p": "#5a535b", "s": "#323c39", "o": "#131014" // leather cap and hair
-});
+const baseKnight = load(knightJson);
 export const KNIGHT_UNARMORED_NO_HELMET_ANIMS = withFacing(baseKnight.animSet());
 
 // Helmet Layer (Steel helmet only, transparent body)
-const helmetKnight = loadSprite(patchedKnightJson, {
-  ".": null,
-  "0": null, "2": null, "3": null, "5": null, "1": null, "4": null, // hide body
-  "h": "#6bcaea", "v": "#bcd1ce", "p": "#bf5749", "s": "#3f7299", "o": "#131014" // steel helmet
-});
+const helmetKnight = load(ironHelmetJson);
 export const HELMET_ANIMS = withFacing(helmetKnight.animSet());
 
 // Armor Layer (Steel body armor only, transparent head)
-const armorKnight = loadSprite(patchedKnightJson, {
-  ".": null,
-  "0": "#6bcaea", "2": "#bcd1ce", "3": null, "5": "#3f7299", "1": "#131014", // steel armor
-  "4": null,                                                                // hide skin
-  "h": null, "v": null, "p": null, "s": null, "o": null                     // hide helmet
-});
+const armorKnight = load(steelArmorJson);
 export const ARMOR_ANIMS = withFacing(armorKnight.animSet());
 
 // Backward-compatible alias exports for rest of codebase
