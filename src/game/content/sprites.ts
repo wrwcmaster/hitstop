@@ -44,27 +44,61 @@ function patchKnightJson(json: any) {
         }
       }
       
-      const plumeEnd = startPlume + 6;
-      const helmetStart = startPlume + 7;
-      const helmetEnd = startPlume + 14;
+      // The precise boundary of the helmet dome, front visor, side neck, and back cowl.
+      // These are hardcoded column bounds [minX, maxX][] relative to `y - startPlume`.
+      const helmetMask: Record<number, [number, number][]> = {
+        7: [[16, 25]],
+        8: [[16, 25]],
+        9: [[14, 27]],
+        10: [[12, 25]],
+        11: [[12, 25]],
+        12: [[11, 23]],
+        13: [[10, 25]],
+        14: [[10, 25]],
+        15: [[9, 21]],
+        16: [[9, 15]],
+        17: [[9, 15]],
+        18: [[9, 13]],
+        19: [[9, 12], [14, 16]],
+        20: [[9, 11], [13, 15]],
+        21: [[9, 11], [13, 15]],
+        22: [[9, 11], [13, 15]],
+        23: [[9, 12], [14, 15], [19, 19]],
+        24: [[9, 15], [21, 21]],
+        25: [[10, 15], [19, 21]],
+        26: [[10, 15], [19, 21]],
+        27: [[10, 15], [19, 21]],
+        28: [[11, 15]],
+        29: [[13, 16]],
+        30: [[13, 16]]
+      };
 
       for (let y = 0; y < frame.length; y++) {
         let row = frame[y];
-        // Plume area
-        if (y >= startPlume && y <= plumeEnd) {
-          row = row.replace(/3/g, 'p');
+        let newRow = '';
+        const relY = y - startPlume;
+        
+        for (let x = 0; x < row.length; x++) {
+          let c = row[x];
+          // Plume is any '3' in the upper half of the sprite
+          if (c === '3' && relY <= 18) {
+            c = 'p';
+          } 
+          // Helmet is '0', '2', or '5' within the precise mask
+          else if ((c === '0' || c === '2' || c === '5') && helmetMask[relY]) {
+            const ranges = helmetMask[relY];
+            for (const [minX, maxX] of ranges) {
+              if (x >= minX && x <= maxX) {
+                if (c === '0') c = 'h';
+                else if (c === '2') c = 'v';
+                else if (c === '5') c = 's';
+                break;
+              }
+            }
+          }
+          newRow += c;
         }
-        // Helmet/Visor area (columns 12 to end of row)
-        if (y >= helmetStart && y <= helmetEnd) {
-          const prefix = row.slice(0, 12);
-          const helmetPart = row.slice(12);
-          const patchedHelmet = helmetPart
-            .replace(/0/g, 'h') // helmet plate -> h
-            .replace(/2/g, 'v') // helmet visor details -> v
-            .replace(/3/g, 'p'); // plume on head -> p
-          row = prefix + patchedHelmet;
-        }
-        frame[y] = row;
+        frame[y] = newRow;
       }
     }
   }
@@ -83,7 +117,7 @@ delete (patchedKnightJson.palette as any)["5"];
 const fullKnight = loadSprite(patchedKnightJson, {
   ...PAL,
   "0": "#6bcaea", "2": "#bcd1ce", "3": "#bf5749", "5": "#3f7299", // body
-  "h": "#6bcaea", "v": "#bcd1ce", "p": "#bf5749", // head (matching steel armor)
+  "h": "#6bcaea", "v": "#bcd1ce", "p": "#bf5749", "s": "#3f7299" // head (matching steel armor)
 });
 export const KNIGHT_ARMORED_WITH_HELMET_ANIMS = withFacing(fullKnight.animSet());
 
@@ -91,7 +125,7 @@ export const KNIGHT_ARMORED_WITH_HELMET_ANIMS = withFacing(fullKnight.animSet())
 const armoredNoHelmet = loadSprite(patchedKnightJson, {
   ...PAL,
   "0": "#6bcaea", "2": "#bcd1ce", "3": "#bf5749", "5": "#3f7299", // body
-  "h": "#86594c", "v": "#c69e8b", "p": "#5a535b", // head (no steel helmet)
+  "h": "#86594c", "v": "#c69e8b", "p": "#5a535b", "s": "#323c39" // head (no steel helmet)
 });
 export const KNIGHT_ARMORED_NO_HELMET_ANIMS = withFacing(armoredNoHelmet.animSet());
 
@@ -99,7 +133,7 @@ export const KNIGHT_ARMORED_NO_HELMET_ANIMS = withFacing(armoredNoHelmet.animSet
 const unarmoredWithHelmet = loadSprite(patchedKnightJson, {
   ...PAL,
   "0": "#86594c", "2": "#c69e8b", "3": "#5a535b", "5": "#323c39", // body
-  "h": "#6bcaea", "v": "#bcd1ce", "p": "#bf5749", // head (matching steel helmet)
+  "h": "#6bcaea", "v": "#bcd1ce", "p": "#bf5749", "s": "#3f7299" // head (matching steel helmet)
 });
 export const KNIGHT_UNARMORED_WITH_HELMET_ANIMS = withFacing(unarmoredWithHelmet.animSet());
 
@@ -107,7 +141,7 @@ export const KNIGHT_UNARMORED_WITH_HELMET_ANIMS = withFacing(unarmoredWithHelmet
 const unarmoredNoHelmetSheet = loadSprite(patchedKnightJson, {
   ...PAL,
   "0": "#86594c", "2": "#c69e8b", "3": "#5a535b", "5": "#323c39", // body
-  "h": "#86594c", "v": "#c69e8b", "p": "#5a535b", // head (no steel helmet)
+  "h": "#86594c", "v": "#c69e8b", "p": "#5a535b", "s": "#323c39" // head (no steel helmet)
 });
 export const KNIGHT_UNARMORED_NO_HELMET_ANIMS = withFacing(unarmoredNoHelmetSheet.animSet());
 
