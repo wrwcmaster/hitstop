@@ -36,20 +36,19 @@ function patchKnightJson(json: any) {
       const frame = anim.frames[f];
       for (let y = 0; y < frame.length; y++) {
         let row = frame[y];
-        // Plume area (rows 1 to 6)
-        if (y >= 1 && y <= 6) {
+        // Plume area (rows 0 to 6)
+        if (y >= 0 && y <= 6) {
           row = row.replace(/3/g, 'p');
         }
-        // Helmet/Visor area (rows 7 to 14, columns 10 to 27)
+        // Helmet/Visor area (rows 7 to 14, columns 12 to end)
         if (y >= 7 && y <= 14) {
-          const prefix = row.slice(0, 10);
-          const helmetPart = row.slice(10, 27);
-          const suffix = row.slice(27);
+          const prefix = row.slice(0, 12);
+          const helmetPart = row.slice(12);
           const patchedHelmet = helmetPart
             .replace(/0/g, 'h') // helmet plate -> h
             .replace(/2/g, 'v') // helmet visor details -> v
             .replace(/3/g, 'p'); // plume on head -> p
-          row = prefix + patchedHelmet + suffix;
+          row = prefix + patchedHelmet;
         }
         frame[y] = row;
       }
@@ -59,6 +58,12 @@ function patchKnightJson(json: any) {
 }
 
 const patchedKnightJson = patchKnightJson(knightJson);
+
+// Delete base palette keys from patchedKnightJson so they do not overwrite base configurations in loadSprite
+delete (patchedKnightJson.palette as any)["0"];
+delete (patchedKnightJson.palette as any)["2"];
+delete (patchedKnightJson.palette as any)["3"];
+delete (patchedKnightJson.palette as any)["5"];
 
 // 1. Armored Body + Helmet
 const fullKnight = loadSprite(patchedKnightJson, {
@@ -85,16 +90,16 @@ const unarmoredWithHelmet = loadSprite(patchedKnightJson, {
 export const KNIGHT_UNARMORED_WITH_HELMET_ANIMS = withFacing(unarmoredWithHelmet.animSet());
 
 // 4. Unarmored Body + No Helmet (Default starting look)
-const unarmoredNoHelmet = loadSprite(patchedKnightJson, {
+const unarmoredNoHelmetSheet = loadSprite(patchedKnightJson, {
   ...PAL,
   "0": "#86594c", "2": "#c69e8b", "3": "#5a535b", "5": "#323c39", // body
   "h": "#86594c", "v": "#c69e8b", "p": "#5a535b", // head (no steel helmet)
 });
-export const KNIGHT_UNARMORED_NO_HELMET_ANIMS = withFacing(unarmoredNoHelmet.animSet());
+export const KNIGHT_UNARMORED_NO_HELMET_ANIMS = withFacing(unarmoredNoHelmetSheet.animSet());
 
 // We keep these exported variables for backward compatibility and live bindings
 export let KNIGHT_ANIMS = KNIGHT_UNARMORED_NO_HELMET_ANIMS; // default to unarmored at start
-export let KNIGHT_IDLE_SPRITE = unarmoredNoHelmet.frame('idle', 0); // default to unarmored first frame
+export let KNIGHT_IDLE_SPRITE = unarmoredNoHelmetSheet.frame('idle', 0); // default to unarmored first frame
 
 /**
  * Swap the knight to a PNG sprite sheet (see tools/sheet-slicer.html and
