@@ -653,7 +653,7 @@ export class PlayScene implements Scene {
       case 'Digit4': p.hp = p.maxHp; p.mp = p.maxMp; feel.flash(0.12, COLORS.white); say('FULL HEAL', COLORS.red); break;
       case 'Digit5': p.godMode = !p.godMode; say(p.godMode ? 'GOD ON' : 'GOD OFF'); break;
       case 'Digit6':
-        for (const id of ['great-sword', 'iron-charm', 'potion', 'potion', 'haste-draught']) p.inventory.add(id);
+        for (const id of ['great-sword', 'iron-helmet', 'potion', 'potion', 'haste-draught']) p.inventory.add(id);
         say('GEAR GRANTED');
         break;
       case 'Digit7':

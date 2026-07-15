@@ -27,7 +27,13 @@ import {
   SkillTree,
 } from '@engine/index';
 import type { TreeCtx } from '../content/skilltree';
-import { KNIGHT_ARMORED_ANIMS, KNIGHT_UNARMORED_ANIMS, TEXEL } from '../content/sprites';
+import {
+  KNIGHT_ARMORED_WITH_HELMET_ANIMS,
+  KNIGHT_ARMORED_NO_HELMET_ANIMS,
+  KNIGHT_UNARMORED_WITH_HELMET_ANIMS,
+  KNIGHT_UNARMORED_NO_HELMET_ANIMS,
+  TEXEL,
+} from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { weaponSpecOf, type WeaponSpec } from '../content/items';
 import type { SkillCtx } from '../content/skills';
@@ -86,7 +92,12 @@ export class Player extends Actor {
   equipment = new Equipment(this.stats);
   get animSet() {
     const hasArmor = this.equipment.get('armor') !== null;
-    return hasArmor ? KNIGHT_ARMORED_ANIMS : KNIGHT_UNARMORED_ANIMS;
+    const hasHelmet = this.equipment.get('helmet') !== null;
+    
+    if (hasArmor && hasHelmet) return KNIGHT_ARMORED_WITH_HELMET_ANIMS;
+    if (hasArmor && !hasHelmet) return KNIGHT_ARMORED_NO_HELMET_ANIMS;
+    if (!hasArmor && hasHelmet) return KNIGHT_UNARMORED_WITH_HELMET_ANIMS;
+    return KNIGHT_UNARMORED_NO_HELMET_ANIMS;
   }
   statuses = new Statuses(this);
   gold = 0;

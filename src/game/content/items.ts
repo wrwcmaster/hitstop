@@ -81,12 +81,12 @@ defineItem<ItemCtx>('great-sword', {
   },
 });
 
-defineItem<ItemCtx>('iron-charm', {
-  name: 'IRON CHARM',
-  desc: 'Two more hearts of stubbornness.',
+defineItem<ItemCtx>('iron-helmet', {
+  name: 'IRON HELMET',
+  desc: 'Protects the skull from heavy blows.',
   icon: ICON_CHARM,
   kind: 'equipment',
-  slot: 'charm',
+  slot: 'helmet',
   mods: { add: { maxHp: 2 } },
 });
 
