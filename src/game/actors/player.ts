@@ -27,7 +27,18 @@ import {
   SkillTree,
 } from '@engine/index';
 import type { TreeCtx } from '../content/skilltree';
-import { KNIGHT_ANIMS, TEXEL } from '../content/sprites';
+import {
+  KNIGHT_ARMORED_WITH_HELMET_ANIMS,
+  KNIGHT_ARMORED_NO_HELMET_ANIMS,
+  KNIGHT_UNARMORED_WITH_HELMET_ANIMS,
+  KNIGHT_UNARMORED_NO_HELMET_ANIMS,
+  HELMET_ANIMS,
+  ARMOR_ANIMS,
+  HEAD_ANCHORS,
+  CHEST_ANCHORS,
+  DEBUG_ANCHORS,
+  TEXEL,
+} from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { weaponSpecOf, type WeaponSpec } from '../content/items';
 import type { SkillCtx } from '../content/skills';
@@ -84,6 +95,15 @@ export class Player extends Actor {
   });
   inventory = new Inventory();
   equipment = new Equipment(this.stats);
+  get animSet() {
+    const hasArmor = this.equipment.get('armor') !== null;
+    const hasHelmet = this.equipment.get('helmet') !== null;
+    
+    if (hasArmor && hasHelmet) return KNIGHT_ARMORED_WITH_HELMET_ANIMS;
+    if (hasArmor && !hasHelmet) return KNIGHT_ARMORED_NO_HELMET_ANIMS;
+    if (!hasArmor && hasHelmet) return KNIGHT_UNARMORED_WITH_HELMET_ANIMS;
+    return KNIGHT_UNARMORED_NO_HELMET_ANIMS;
+  }
   statuses = new Statuses(this);
   gold = 0;
 
@@ -648,7 +668,7 @@ export class Player extends Actor {
 
     let anim = 'air';
     if (this.onGround) anim = Math.abs(this.vx) > 8 ? 'run' : 'idle';
-    const set = this.facing === 1 ? KNIGHT_ANIMS.right : KNIGHT_ANIMS.left;
+    const set = this.facing === 1 ? this.animSet.right : this.animSet.left;
     let img = frameAt(set, anim, this.animT);
     if (this.flashT > 0) img = whiteOf(img);
 
@@ -699,6 +719,59 @@ export class Player extends Actor {
     if (pose.shear) g.transform(1, 0, pose.shear, 1, 0, 0);
     g.drawImage(finalImg, -dw / 2, -dh, dw, dh);
     
+    // Draw armor and helmet layers dynamically using frame anchors
+    if (this.flashT <= 0 && !isSwallowed) {
+      const f = this.facing;
+      
+      const animObj = this.animSet.right[anim];
+      const frameIdx = animObj
+        ? (animObj.loop === false
+          ? Math.min(Math.floor(this.animT * animObj.fps), animObj.frames.length - 1)
+          : Math.floor(this.animT * animObj.fps) % animObj.frames.length)
+        : 0;
+
+      // 1. Armor Layer
+      const hasArmor = this.equipment.get('armor') !== null;
+      if (hasArmor) {
+        const armorSet = f === 1 ? ARMOR_ANIMS.right : ARMOR_ANIMS.left;
+        const armorImg = frameAt(armorSet, anim, this.animT);
+        const chestAnchor = (CHEST_ANCHORS[anim] && CHEST_ANCHORS[anim][frameIdx]) || { x: 0, y: 0, angle: 0 };
+        
+        g.save();
+        g.translate(chestAnchor.x * f, chestAnchor.y);
+        if (chestAnchor.angle) g.rotate(chestAnchor.angle * f);
+        g.drawImage(armorImg, -dw / 2, -dh, dw, dh);
+        g.restore();
+      }
+
+      // 2. Helmet Layer
+      const hasHelmet = this.equipment.get('helmet') !== null;
+      if (hasHelmet) {
+        const helmetSet = f === 1 ? HELMET_ANIMS.right : HELMET_ANIMS.left;
+        const helmetImg = frameAt(helmetSet, anim, this.animT);
+        const headAnchor = (HEAD_ANCHORS[anim] && HEAD_ANCHORS[anim][frameIdx]) || { x: 0, y: 0, angle: 0 };
+        
+        g.save();
+        g.translate(headAnchor.x * f, headAnchor.y);
+        if (headAnchor.angle) g.rotate(headAnchor.angle * f);
+        g.drawImage(helmetImg, -dw / 2, -dh, dw, dh);
+        g.restore();
+      }
+
+      // 3. Visual Debug Guides (Red/Blue crosshairs)
+      if (DEBUG_ANCHORS) {
+        g.save();
+        const headAnchor = (HEAD_ANCHORS[anim] && HEAD_ANCHORS[anim][frameIdx]) || { x: 0, y: 0, angle: 0 };
+        g.fillStyle = '#ff0000';
+        g.fillRect(headAnchor.x * f - 1, headAnchor.y - 1, 2, 2);
+        
+        const chestAnchor = (CHEST_ANCHORS[anim] && CHEST_ANCHORS[anim][frameIdx]) || { x: 0, y: 0, angle: 0 };
+        g.fillStyle = '#0000ff';
+        g.fillRect(chestAnchor.x * f - 1, chestAnchor.y - 1, 2, 2);
+        g.restore();
+      }
+    }
+    
     // Draw the green gel overlay on top of the player sprite if swallowed by Slime King!
     if (isSwallowed && this.swallowedBy && this.swallowedBy.type === 'slime-king') {
       g.save();
@@ -729,7 +802,7 @@ export class Player extends Actor {
     const f = this.facing;
 
     // Calculate current frame index for the animation
-    const animObj = KNIGHT_ANIMS.right[animName];
+    const animObj = this.animSet.right[animName];
     const frameIdx = animObj
       ? (animObj.loop === false
         ? Math.min(Math.floor(animT * animObj.fps), animObj.frames.length - 1)

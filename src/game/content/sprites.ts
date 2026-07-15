@@ -1,23 +1,16 @@
 import { loadSprite, loadSheet, loadImage, withFacing, type SpriteFile, type SheetDescriptor } from '@engine/index';
 import { PAL } from './palette';
 import knightJson from './sprites/knight.json';
+import ironHelmetJson from './sprites/equipment/iron-helmet.json';
+import steelArmorJson from './sprites/equipment/steel-armor.json';
 import slimeJson from './sprites/slime.json';
 import batJson from './sprites/bat.json';
 import merchantJson from './sprites/merchant.json';
 import iconsJson from './sprites/icons.json';
 import hudJson from './sprites/hud.json';
 
-/**
- * Pixel art lives in per-sprite JSON files under `sprites/`, authored and
- * previewed in tools/sprite-editor.html and loaded here. Each file is a
- * palette + named animations of 1x text grids; `loadSprite` EPX-upscales
- * them TWICE to 4x texel density (iterated Scale2x) and bakes each frame.
- * This module just wires the loaded sprites to the names the game uses.
- */
 export const TEXEL = 4;
 
-/** Draw a TEXEL-density sprite at its logical (world) size, quantized to
- * the art's texel grid so motion steps are texel-fine, not world-pixel. */
 export function blit(g: CanvasRenderingContext2D, img: HTMLCanvasElement, x: number, y: number): void {
   const q = (v: number) => Math.round(v * TEXEL) / TEXEL;
   g.drawImage(img, q(x), q(y), img.width / TEXEL, img.height / TEXEL);
@@ -27,21 +20,52 @@ const load = (file: unknown) => loadSprite(file as SpriteFile, PAL);
 
 /* ---------------- knight ---------------- */
 
-const knight = load(knightJson);
-// `let` (not const) so a PNG sheet can replace the text-grid art at boot;
-// ES module live bindings mean importers pick up the swap automatically.
-export let KNIGHT_ANIMS = withFacing(knight.animSet());
-export let KNIGHT_IDLE_SPRITE = knight.frame('idle', 0);
+export interface EquipmentAnchor {
+  x: number;
+  y: number;
+  angle?: number;
+}
 
-/**
- * Swap the knight to a PNG sprite sheet (see tools/sheet-slicer.html and
- * docs/design-tools.md). Call from main.ts boot with the sheet image URL
- * (a Vite `import x from './knight.png'`) and its exported descriptor:
- *
- *   await loadKnightSheet(knightPngUrl, knightSheetDescriptor);
- *
- * The idle animation's first frame becomes the title/menu portrait.
- */
+// Visual debug flag for positioning anchors
+export const DEBUG_ANCHORS = false;
+
+// Default offsets since layers are pre-aligned (0, 0)
+const DEFAULT_ANCHOR = { x: 0, y: 0, angle: 0 };
+
+export const HEAD_ANCHORS: Record<string, EquipmentAnchor[]> = {
+  idle: [DEFAULT_ANCHOR],
+  run: [DEFAULT_ANCHOR, DEFAULT_ANCHOR, DEFAULT_ANCHOR, DEFAULT_ANCHOR],
+  air: [DEFAULT_ANCHOR],
+  attack: [DEFAULT_ANCHOR, DEFAULT_ANCHOR, DEFAULT_ANCHOR, DEFAULT_ANCHOR]
+};
+
+export const CHEST_ANCHORS: Record<string, EquipmentAnchor[]> = {
+  idle: [DEFAULT_ANCHOR],
+  run: [DEFAULT_ANCHOR, DEFAULT_ANCHOR, DEFAULT_ANCHOR, DEFAULT_ANCHOR],
+  air: [DEFAULT_ANCHOR],
+  attack: [DEFAULT_ANCHOR, DEFAULT_ANCHOR, DEFAULT_ANCHOR, DEFAULT_ANCHOR]
+};
+
+// Base Player (Unarmored tunic, clean cap/hood, skin, weapon)
+const baseKnight = load(knightJson);
+export const KNIGHT_UNARMORED_NO_HELMET_ANIMS = withFacing(baseKnight.animSet());
+
+// Helmet Layer (Steel helmet only, transparent body)
+const helmetKnight = load(ironHelmetJson);
+export const HELMET_ANIMS = withFacing(helmetKnight.animSet());
+
+// Armor Layer (Steel body armor only, transparent head)
+const armorKnight = load(steelArmorJson);
+export const ARMOR_ANIMS = withFacing(armorKnight.animSet());
+
+// Backward-compatible alias exports for rest of codebase
+export const KNIGHT_ARMORED_WITH_HELMET_ANIMS = KNIGHT_UNARMORED_NO_HELMET_ANIMS;
+export const KNIGHT_ARMORED_NO_HELMET_ANIMS = KNIGHT_UNARMORED_NO_HELMET_ANIMS;
+export const KNIGHT_UNARMORED_WITH_HELMET_ANIMS = KNIGHT_UNARMORED_NO_HELMET_ANIMS;
+
+export let KNIGHT_ANIMS = KNIGHT_UNARMORED_NO_HELMET_ANIMS;
+export let KNIGHT_IDLE_SPRITE = baseKnight.frame('idle', 0);
+
 export async function loadKnightSheet(imageUrl: string, desc: SheetDescriptor): Promise<void> {
   const img = await loadImage(imageUrl);
   const sheet = loadSheet(img, desc);

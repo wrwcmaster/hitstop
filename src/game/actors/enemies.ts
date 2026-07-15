@@ -76,7 +76,7 @@ defineMonster('brute', {
     { id: 'potion', chance: 0.45 },
     { id: 'mana-orb', chance: 0.3 },
     { id: 'great-sword', chance: 0.35 }, // skipped by PlayScene once owned
-    { id: 'iron-charm', chance: 0.2 },   // same
+    { id: 'iron-helmet', chance: 0.2 },   // same
   ],
   init(m) {
     m.state.hopT = 1.2;

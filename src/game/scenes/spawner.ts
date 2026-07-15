@@ -80,7 +80,8 @@ export class SpawnerScene implements Scene {
     this.menu = new Menu<Action>([
       { label: 'RUSTY SWORD', onSelect: () => this.spawnItem('rusty-sword') },
       { label: 'GREAT SWORD', onSelect: () => this.spawnItem('great-sword') },
-      { label: 'IRON CHARM', onSelect: () => this.spawnItem('iron-charm') },
+      { label: 'IRON HELMET', onSelect: () => this.spawnItem('iron-helmet') },
+      { label: 'STEEL ARMOR', onSelect: () => this.spawnItem('steel-armor') },
       { label: 'POTION', onSelect: () => this.spawnItem('potion') },
       { label: 'HASTE DRAUGHT', onSelect: () => this.spawnItem('haste-draught') },
       { label: 'BACK', onSelect: () => this.showMainMenu() },

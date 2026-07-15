@@ -81,12 +81,12 @@ defineItem<ItemCtx>('great-sword', {
   },
 });
 
-defineItem<ItemCtx>('iron-charm', {
-  name: 'IRON CHARM',
-  desc: 'Two more hearts of stubbornness.',
+defineItem<ItemCtx>('iron-helmet', {
+  name: 'IRON HELMET',
+  desc: 'Protects the skull from heavy blows.',
   icon: ICON_CHARM,
   kind: 'equipment',
-  slot: 'charm',
+  slot: 'helmet',
   mods: { add: { maxHp: 2 } },
 });
 
@@ -148,6 +148,15 @@ defineItem<ItemCtx>('gate-key', {
   desc: 'Unlocks the arena gate.',
   icon: ICON_KEY,
   kind: 'key',
+});
+
+defineItem<ItemCtx>('steel-armor', {
+  name: 'STEEL ARMOR',
+  desc: 'Heavy plate mail that guards against blows.',
+  icon: ICON_CHARM,
+  kind: 'equipment',
+  slot: 'armor',
+  mods: { add: { maxHp: 3 } },
 });
 
 /** Importing this module registers the item catalog. */
