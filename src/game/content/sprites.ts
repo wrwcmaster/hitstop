@@ -133,7 +133,7 @@ delete (patchedKnightJson.palette as any)["5"];
 const baseKnight = loadSprite(patchedKnightJson, {
   ...PAL,
   "0": "#86594c", "2": "#c69e8b", "3": "#5a535b", "5": "#323c39", // brown tunic/leather
-  "h": null, "v": null, "p": null, "s": null, "o": null          // hide helmet
+  "h": "#86594c", "v": "#c69e8b", "p": "#5a535b", "s": "#323c39", "o": "#131014" // leather cap and hair
 });
 export const KNIGHT_UNARMORED_NO_HELMET_ANIMS = withFacing(baseKnight.animSet());
 
