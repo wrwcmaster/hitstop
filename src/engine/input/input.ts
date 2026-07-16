@@ -118,9 +118,14 @@ export class Input<A extends string = string> {
     }
   }
 
-  /** Fires on any press from any device — audio unlock, "press any key". */
-  onAnyPress(fn: () => void): void {
+  /** Fires on any press from any device — audio unlock, "press any key".
+   * Returns an unsubscribe, so scene-lifetime listeners can be released. */
+  onAnyPress(fn: () => void): () => void {
     this.anyPressListeners.push(fn);
+    return () => {
+      const i = this.anyPressListeners.indexOf(fn);
+      if (i >= 0) this.anyPressListeners.splice(i, 1);
+    };
   }
 
   /** Report a non-action press (canvas tap, unmapped key) to onAnyPress. */

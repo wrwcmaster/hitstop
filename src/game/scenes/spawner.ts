@@ -3,6 +3,8 @@ import {
   Menu,
   drawPanel,
   drawText,
+  items,
+  itemDef,
   type CollisionSource,
 } from '@engine/index';
 import { COLORS } from '../content/palette';
@@ -10,9 +12,12 @@ import type { ActionGame, Action } from '../defs';
 import type { Player } from '../actors/player';
 import { Monster } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
+import { placeablesIn, type Placeable } from '../content/placeables';
 
 /**
- * A dev/test panel overlay for spawning items, enemies, and bosses in the test room.
+ * A dev/test panel overlay for spawning items, enemies, and bosses in the
+ * test room. Menus are built from the placeables and item registries, so
+ * new content shows up here automatically.
  */
 export class SpawnerScene implements Scene {
   private menu!: Menu<Action>;
@@ -58,46 +63,46 @@ export class SpawnerScene implements Scene {
 
   private showMonstersMenu(): void {
     this.subMenu = 'monsters';
-    this.menu = new Menu<Action>([
-      { label: 'SLIME', onSelect: () => this.spawnMonster('slime') },
-      { label: 'BAT', onSelect: () => this.spawnMonster('bat') },
-      { label: 'BRUTE', onSelect: () => this.spawnMonster('brute') },
-      { label: 'DEVOURER', onSelect: () => this.spawnMonster('devourer') },
-      { label: 'BACK', onSelect: () => this.showMainMenu() },
-    ], { up: 'up', down: 'down', confirm: 'confirm' });
+    this.menu = this.placeableMenu(placeablesIn('enemy'));
   }
 
   private showBossesMenu(): void {
     this.subMenu = 'bosses';
-    this.menu = new Menu<Action>([
-      { label: 'SLIME KING', onSelect: () => this.spawnMonster('slime-king') },
+    this.menu = this.placeableMenu(placeablesIn('boss'));
+  }
+
+  /** One menu entry per placeable of a category, plus BACK. */
+  private placeableMenu(list: [string, Placeable][]): Menu<Action> {
+    return new Menu<Action>([
+      ...list.map(([id, p]) => ({
+        label: p.label,
+        onSelect: () => this.spawnPlaceable(id, p),
+      })),
       { label: 'BACK', onSelect: () => this.showMainMenu() },
     ], { up: 'up', down: 'down', confirm: 'confirm' });
   }
 
   private showItemsMenu(): void {
     this.subMenu = 'items';
+    // Every non-instant item is spawnable (instants like coins are dull here).
+    const spawnable = items.ids().filter((id) => itemDef(id).kind !== 'instant');
     this.menu = new Menu<Action>([
-      { label: 'RUSTY SWORD', onSelect: () => this.spawnItem('rusty-sword') },
-      { label: 'GREAT SWORD', onSelect: () => this.spawnItem('great-sword') },
-      { label: 'IRON HELMET', onSelect: () => this.spawnItem('iron-helmet') },
-      { label: 'STEEL ARMOR', onSelect: () => this.spawnItem('steel-armor') },
-      { label: 'POTION', onSelect: () => this.spawnItem('potion') },
-      { label: 'HASTE DRAUGHT', onSelect: () => this.spawnItem('haste-draught') },
+      ...spawnable.map((id) => ({
+        label: itemDef(id).name,
+        onSelect: () => this.spawnItem(id),
+      })),
       { label: 'BACK', onSelect: () => this.showMainMenu() },
     ], { up: 'up', down: 'down', confirm: 'confirm' });
   }
 
-  private spawnMonster(type: string): void {
-    const p = this.player;
-    // Spawn 32px in front of player
-    const sx = p.cx + p.facing * 32;
-    const sy = p.y;
-    
-    const m = this.game.world.spawn(new Monster(type, this.game, this.tilemap, sx, sy));
-    this.game.feel.burst(m.cx, m.cy, 12, { color: m.def.colors, speed: 70, life: 0.35, drag: 3 });
+  private spawnPlaceable(id: string, p: Placeable): void {
+    const player = this.player;
+    // Drop it 32px in front of the player, feet on the player's ground line.
+    const e = { type: id, x: player.cx + player.facing * 32 - p.w / 2, y: player.y + player.h - p.h };
+    p.spawn({ game: this.game, tilemap: this.tilemap, flags: new Set() }, e);
+    this.game.feel.burst(e.x + p.w / 2, e.y + p.h / 2, 12, { color: p.colors, speed: 70, life: 0.35, drag: 3 });
     this.game.sfx.play('buy');
-    
+
     if (this.subMenu === 'monsters') this.showMonstersMenu();
     else if (this.subMenu === 'bosses') this.showBossesMenu();
   }

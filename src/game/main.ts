@@ -11,6 +11,7 @@ import { registerSkillTree } from './content/skilltree';
 import { registerStatuses } from './content/statuses';
 import { registerConversations } from './content/conversations';
 import { registerShops } from './content/shops';
+import { registerPlaceables } from './content/placeables';
 import { loadSettings } from './settings';
 import './content/tiles';
 import { PlayScene } from './scenes/play';
@@ -45,6 +46,7 @@ registerSkillTree();
 registerStatuses();
 registerConversations();
 registerShops();
+registerPlaceables(); // bridges monsters + NPCs; must come after them
 
 // Gamepad: polled every frame, feeding the same action system. Attached to
 // the game so the controls UI can rebind its buttons. Created before

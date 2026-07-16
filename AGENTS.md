@@ -44,6 +44,12 @@ npm run build:single   # everything → hitstop.html (also copies it to the repo
    `main.ts` and a gamepad binding in `defs.ts`, and on-screen key
    prompts must be device-aware (see `Npc.promptLabel`), never a
    hardcoded "E".
+7. **Registering a duplicate id throws.** Content ids are global per
+   registry; pick a fresh id, or use `registry.replace()` only for a
+   deliberate override.
+8. **Listeners follow scene lifetime.** A scene that subscribes (event
+   bus, input, `window`) keeps the unsubscribe/disposer and releases it
+   in `exit()` — see PlayScene's `disposers` for the pattern.
 
 ## Architecture map
 
@@ -85,7 +91,12 @@ Details and code samples: `docs/adding-content.md`. The short version —
   `content/sprites/icons.json`). Weapons carry their attack spec in
   `props.weapon`; the swing reads it, player code never changes.
 - **Monster**: `defineMonster` in `actors/enemies.ts` (sprite, stats,
-  drops, optional FSM for bosses in `actors/boss.ts`).
+  drops, optional FSM for bosses in `actors/boss.ts`). Monsters and NPCs
+  are bridged into the placeables catalog automatically.
+- **Placeable** (anything else a room can contain — chest, checkpoint,
+  destructible): `definePlaceable` in `content/placeables.ts`. One entry
+  drives the game spawn, the level-editor palette, and the test spawner;
+  read per-instance config from `RoomEntity.props`.
 - **Room**: author in the level editor → JSON in `content/rooms/` →
   register in `rooms/index.ts`. Doors are `door` triggers; a locked door
   adds `props.key: '<item id>'`. Waves via `props.waves: '<table id>'`

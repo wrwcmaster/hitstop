@@ -1,7 +1,8 @@
 import { tiles, buildTilemap, validateRoom, type RoomDef } from '@engine/index';
 import '@game/content/tiles';
 import '@game/actors/enemies';
-import { monsters } from '@game/actors/monster';
+import '@game/actors/boss';
+import { placeables, registerPlaceables } from '@game/content/placeables';
 import arenaJson from '@game/content/rooms/arena.json';
 
 /**
@@ -9,13 +10,15 @@ import arenaJson from '@game/content/rooms/arena.json';
  *
  * Everything it knows comes from the same registries the game uses:
  * the tile palette is whatever content registered in `tiles`, the entity
- * palette is whatever registered in `monsters`. Register a new tile or
- * monster and it shows up here with zero editor changes.
+ * palette is the `placeables` catalog (monsters, bosses, NPCs, and any
+ * future placeable kind). Register new content and it shows up here with
+ * zero editor changes.
  *
  * Rooms are edited in the RoomDef JSON format (see engine/level/room.ts).
  * "Test play" writes the room to localStorage and opens the game with
  * ?room=local for an instant edit → play loop.
  */
+registerPlaceables();
 
 const ZOOM = 3;
 
@@ -116,15 +119,15 @@ function buildTilePalette(): void {
 function buildEntityPalette(): void {
   const host = $('entities');
   host.innerHTML = '';
-  for (const id of monsters.ids()) {
-    const def = monsters.get(id);
+  for (const [id, def] of placeables.entries()) {
     const row = document.createElement('div');
     row.className = 'swatch';
     const chip = document.createElement('span');
     chip.className = 'chip';
     chip.style.background = def.colors[0];
     const b = document.createElement('button');
-    b.textContent = `${id} (hp ${def.hp})`;
+    b.textContent = `${id}${def.hint ? ` (${def.hint})` : ''}`;
+    b.title = `${def.label} — ${def.category}`;
     b.className = mode === 'entity' && entityType === id ? 'active' : '';
     b.onclick = () => {
       mode = 'entity';
@@ -165,7 +168,7 @@ function applyPaint(e: MouseEvent): void {
       );
       if (idx >= 0) room.entities.splice(idx, 1);
     } else if (!painting) {
-      const def = monsters.get(entityType);
+      const def = placeables.get(entityType);
       room.entities.push({
         type: entityType,
         x: Math.round(x - def.w / 2),
@@ -278,7 +281,7 @@ function redraw(): void {
 
   // Entities.
   for (const en of room.entities) {
-    const def = monsters.has(en.type) ? monsters.get(en.type) : null;
+    const def = placeables.has(en.type) ? placeables.get(en.type) : null;
     ctx.fillStyle = def ? def.colors[0] : '#b13e53';
     ctx.globalAlpha = 0.85;
     ctx.fillRect(en.x, en.y, def?.w ?? 10, def?.h ?? 10);
