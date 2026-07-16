@@ -1,4 +1,4 @@
-import { sprite, epx, type Palette, type SpriteFile } from '@engine/index';
+import { resolveSpriteGeometry, sprite, epx, type Palette, type SpriteFile } from '@engine/index';
 import { PAL } from '@game/content/palette';
 
 /**
@@ -43,6 +43,19 @@ const anim = () => file.anims[animName];
 const cur = () => anim().frames[frameIdx];
 const W = () => cur()[0].length;
 const H = () => cur().length;
+
+function gridSize(rows: string[]): { w: number; h: number } {
+  return {
+    w: Math.max(1, ...rows.map((row) => row.length)),
+    h: Math.max(1, rows.length),
+  };
+}
+
+function geometryOf(spriteFile: SpriteFile, rows: string[]) {
+  const grid = gridSize(rows);
+  const density = spriteFile.hd === false ? 4 : 1;
+  return resolveSpriteGeometry(spriteFile, grid.w / density, grid.h / density);
+}
 
 /* ---------------- dom ---------------- */
 
@@ -385,54 +398,75 @@ function renderPreview(): void {
   const hd = ($('hd') as HTMLInputElement).checked;
   const p = pal();
   const t = performance.now() / 1000;
-  const names = Object.keys(file.anims);
 
-  const rowHeights = names.map((n) => (file.anims[n].frames[0]?.length ?? 1) * 4 + 16);
-  let maxW = 40;
-  for (const n of names) maxW = Math.max(maxW, (file.anims[n].frames[0]?.[0]?.length ?? 1) * 4);
-  preview.width = maxW + 16;
-  preview.height = rowHeights.reduce((a, b) => a + b, 0) + 8;
+  const a = anim();
+  if (!a || !a.frames.length) {
+    requestAnimationFrame(renderPreview);
+    return;
+  }
+
+  const idx = Math.floor(t * (a.fps || 1)) % a.frames.length;
+  const rows = a.frames[idx] ?? [];
+
+  const { w, h, hitbox } = geometryOf(file, rows);
+
+  const displayW = w * 8; // scaled by ZOOM (4) * WORLD_ZOOM (2) = 8
+  const displayH = h * 8;
+
+  preview.width = displayW + 16;
+  preview.height = displayH + 24;
 
   pctx.imageSmoothingEnabled = false;
   pctx.fillStyle = '#0a0c1c';
   pctx.fillRect(0, 0, preview.width, preview.height);
 
-  let y = 6;
-  names.forEach((name, i) => {
-    const a = file.anims[name];
-    const idx = a.frames.length ? Math.floor(t * (a.fps || 1)) % a.frames.length : 0;
-    const rows = a.frames[idx] ?? [];
-    pctx.fillStyle = name === animName ? '#ffcd75' : '#94b0c2';
-    pctx.font = '11px monospace';
-    pctx.fillText(`${name}  ${a.fps}fps`, 6, y + 9);
+  // Draw active animation text label
+  pctx.fillStyle = '#ffcd75';
+  pctx.font = '11px monospace';
+  pctx.fillText(`${animName}  ${a.fps}fps`, 8, 16);
 
-    const scale = hd ? 1 : 4;
+  const isHighRes = file.hd === false;
+  const drawRows = (isHighRes || !hd) ? rows : epx(epx(rows));
+  const img = sprite(drawRows, p);
 
-    // Draw reference sprite in preview background if enabled
-    const showRef = ($('showRef') as HTMLInputElement)?.checked ?? true;
-    if (refFile && showRef) {
-      const refAnim = refFile.anims[name] ?? Object.values(refFile.anims)[0];
-      if (refAnim) {
-        const refIdx = refAnim.frames.length ? Math.floor(t * (refAnim.fps || 1)) % refAnim.frames.length : 0;
-        const refRows = refAnim.frames[refIdx] ?? [];
-        const refImg = sprite(hd ? epx(epx(refRows)) : refRows, refFile.palette ?? PAL);
-        pctx.save();
-        pctx.translate(8, y + 14);
-        pctx.scale(scale, scale);
-        pctx.globalAlpha = 0.45;
-        pctx.drawImage(refImg, 0, 0);
-        pctx.restore();
-      }
+  const x = 8;
+  const y = 20;
+
+  // Draw reference sprite behind current frame if enabled
+  const showRef = ($('showRef') as HTMLInputElement)?.checked ?? true;
+  if (refFile && showRef) {
+    const refAnim = refFile.anims[animName] ?? Object.values(refFile.anims)[0];
+    if (refAnim) {
+      const refIdx = refAnim.frames.length ? Math.floor(t * (refAnim.fps || 1)) % refAnim.frames.length : 0;
+      const refRows = refAnim.frames[refIdx] ?? [];
+
+      const refGeometry = geometryOf(refFile, refRows);
+      const refIsHighRes = refFile.hd === false;
+      const refDrawRows = (refIsHighRes || !hd) ? refRows : epx(epx(refRows));
+      const refImg = sprite(refDrawRows, refFile.palette ?? PAL);
+
+      pctx.save();
+      pctx.globalAlpha = 0.3;
+      pctx.drawImage(refImg, x, y, refGeometry.w * 8, refGeometry.h * 8);
+      pctx.restore();
     }
+  }
 
-    const img = sprite(hd ? epx(epx(rows)) : rows, p);
+  // Draw active sprite frame
+  pctx.drawImage(img, x, y, w * 8, h * 8);
+
+  // Draw hitbox border (if enabled)
+  if (($('showHitbox') as HTMLInputElement).checked) {
     pctx.save();
-    pctx.translate(8, y + 14);
-    pctx.scale(scale, scale);
-    pctx.drawImage(img, 0, 0);
+    pctx.strokeStyle = 'rgba(255, 68, 68, 0.85)';
+    pctx.lineWidth = 1;
+    const hx = x + hitbox.x * 8;
+    const hy = y + hitbox.y * 8;
+    const hw = hitbox.w * 8;
+    const hh = hitbox.h * 8;
+    pctx.strokeRect(hx + 0.5, hy + 0.5, hw - 1, hh - 1);
     pctx.restore();
-    y += rowHeights[i];
-  });
+  }
   requestAnimationFrame(renderPreview);
 }
 
@@ -442,6 +476,14 @@ function syncIO(): void {
   ($('io') as HTMLTextAreaElement).value = JSON.stringify(file, null, 2);
   ($('w') as HTMLInputElement).value = String(W());
   ($('h') as HTMLInputElement).value = String(H());
+
+  const geometry = geometryOf(file, cur());
+  ($('physW') as HTMLInputElement).value = String(geometry.w);
+  ($('physH') as HTMLInputElement).value = String(geometry.h);
+  ($('boxX') as HTMLInputElement).value = String(geometry.hitbox.x);
+  ($('boxY') as HTMLInputElement).value = String(geometry.hitbox.y);
+  ($('boxW') as HTMLInputElement).value = String(geometry.hitbox.w);
+  ($('boxH') as HTMLInputElement).value = String(geometry.hitbox.h);
 }
 
 $('btnExport').onclick = () => {
@@ -539,7 +581,9 @@ function normalize(raw: unknown): SpriteFile {
   if (r && typeof r === 'object' && r.anims) {
     const f = r as unknown as SpriteFile;
     if (!f.anims || !Object.keys(f.anims).length) throw new Error('no animations');
-    return { hd: f.hd ?? true, palette: f.palette ?? { ...PAL }, anims: f.anims };
+    const normalized = { ...f, hd: f.hd ?? true, palette: f.palette ?? { ...PAL } };
+    geometryOf(normalized, Object.values(normalized.anims)[0].frames[0] ?? []);
+    return normalized;
   }
   if (r && Array.isArray(r.frames)) {
     return {
@@ -715,6 +759,54 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+($('hd') as HTMLInputElement).onchange = (e) => {
+  file.hd = (e.target as HTMLInputElement).checked;
+  syncIO();
+};
+
+// Physical size inputs → write to file.w / file.h
+function onPhysChange(): void {
+  const pw = ($('physW') as HTMLInputElement).valueAsNumber;
+  const ph = ($('physH') as HTMLInputElement).valueAsNumber;
+  if (!(pw > 0) || !(ph > 0)) {
+    flash('physical size must be positive');
+    syncIO();
+    return;
+  }
+  saveHistory();
+  file.w = pw;
+  file.h = ph;
+  syncIO();
+}
+($('physW') as HTMLInputElement).onchange = onPhysChange;
+($('physH') as HTMLInputElement).onchange = onPhysChange;
+
+// Hitbox inputs → write to file.hitbox
+function onHitboxChange(): void {
+  const bx = ($('boxX') as HTMLInputElement).valueAsNumber;
+  const by = ($('boxY') as HTMLInputElement).valueAsNumber;
+  const bw = ($('boxW') as HTMLInputElement).valueAsNumber;
+  const bh = ($('boxH') as HTMLInputElement).valueAsNumber;
+  if (!Number.isFinite(bx) || !Number.isFinite(by) || !(bw > 0) || !(bh > 0)) {
+    flash('hitbox needs finite x/y and positive w/h');
+    syncIO();
+    return;
+  }
+  const { w, h } = geometryOf(file, cur());
+  saveHistory();
+  // Only store hitbox if it differs from the full physical size at origin
+  if (bx === 0 && by === 0 && bw === w && bh === h) {
+    delete file.hitbox;
+  } else {
+    file.hitbox = { x: bx, y: by, w: bw, h: bh };
+  }
+  syncIO();
+}
+($('boxX') as HTMLInputElement).onchange = onHitboxChange;
+($('boxY') as HTMLInputElement).onchange = onHitboxChange;
+($('boxW') as HTMLInputElement).onchange = onHitboxChange;
+($('boxH') as HTMLInputElement).onchange = onHitboxChange;
+
 /* ---------------- boot ---------------- */
 
 function refreshUI(): void {
@@ -723,6 +815,9 @@ function refreshUI(): void {
   buildFrames();
   redraw();
   syncIO();
+
+  const hdCheckbox = $('hd') as HTMLInputElement;
+  if (hdCheckbox) hdCheckbox.checked = file.hd ?? true;
 }
 
 refreshUI();

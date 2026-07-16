@@ -79,8 +79,8 @@ export function registerPlaceables(): void {
       label: def.name,
       category: 'npc',
       colors: ['#94b0c2'],
-      w: def.sprite.width - 2,
-      h: def.sprite.height,
+      w: def.sprite.hitbox.w,
+      h: def.sprite.hitbox.h,
       spawn: ({ game, tilemap }, e) => {
         game.world.spawn(new Npc(id, game, tilemap, e.x, e.y));
       },

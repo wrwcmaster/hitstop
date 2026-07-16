@@ -21,28 +21,29 @@ const load = (file: unknown) => loadSprite(file as SpriteFile, PAL);
 // The bare (unarmored) knight. Visible equipment composites on top as
 // layers — see content/gear-visuals.ts — so there's exactly one body
 // sprite regardless of loadout.
-// `let` (not const) so a PNG sheet can replace the text-grid art at boot;
-// ES module live bindings mean importers pick up the swap automatically.
-const baseKnight = load(knightJson);
+// Live bindings let a PNG sheet replace both the art and its geometry at
+// boot; consumers should not retain a snapshot of this object.
+export let baseKnight = load(knightJson);
 export let KNIGHT_ANIMS = withFacing(baseKnight.animSet());
 export let KNIGHT_IDLE_SPRITE = baseKnight.frame('idle', 0);
 
 export async function loadKnightSheet(imageUrl: string, desc: SheetDescriptor): Promise<void> {
   const img = await loadImage(imageUrl);
   const sheet = loadSheet(img, desc);
+  baseKnight = sheet;
   KNIGHT_ANIMS = withFacing(sheet.animSet());
   KNIGHT_IDLE_SPRITE = sheet.frame('idle', 0);
 }
 
 /* ---------------- enemies ---------------- */
 
-const slime = load(slimeJson);
-export const SLIME1 = slime.frame('idle', 0);
-export const SLIME2 = slime.frame('idle', 1);
+export const slimeSprite = load(slimeJson);
+export const SLIME1 = slimeSprite.frame('idle', 0);
+export const SLIME2 = slimeSprite.frame('idle', 1);
 
-const bat = load(batJson);
-export const BAT1 = bat.frame('fly', 0);
-export const BAT2 = bat.frame('fly', 1);
+export const batSprite = load(batJson);
+export const BAT1 = batSprite.frame('fly', 0);
+export const BAT2 = batSprite.frame('fly', 1);
 
 /* ---------------- HUD ---------------- */
 
@@ -66,4 +67,5 @@ export const ICON_KEY = icons.frame('key');
 
 /* ---------------- NPCs ---------------- */
 
-export const MERCHANT = load(merchantJson).frame('idle');
+export const merchantSprite = load(merchantJson);
+export const MERCHANT = merchantSprite.frame('idle');

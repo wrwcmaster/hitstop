@@ -1,6 +1,6 @@
 import { offscreen } from './canvas';
 import type { AnimSet } from './animation';
-import type { LoadedSprite } from './spritefile';
+import { resolveSpriteGeometry, type LoadedSprite, type SpriteGeometry } from './spritefile';
 
 /**
  * PNG sprite-sheet support: slice a loaded image into animation frames.
@@ -31,7 +31,7 @@ export interface SheetAnimData {
   loop?: boolean;
 }
 
-export interface SheetDescriptor {
+export interface SheetDescriptor extends SpriteGeometry {
   /** Source image filename — tooling/metadata only; runtime takes the image directly. */
   image?: string;
   /** Uniform grid cell size (px). Ignored for frames covered by `rects`. */
@@ -84,9 +84,16 @@ export function loadSheet(image: CanvasImageSource, desc: SheetDescriptor): Load
     return cv;
   };
 
+  const texel = desc.texel ?? 4;
+  if (!Number.isFinite(texel) || texel <= 0) throw new Error('sprite sheet: texel must be positive');
+  const firstFrame = Object.values(desc.anims)[0]?.frames[0] ?? 0;
+  const naturalRect = rectFor(firstFrame);
+  const geometry = resolveSpriteGeometry(desc, naturalRect.w / texel, naturalRect.h / texel);
+
   const framesOf = (name: string): HTMLCanvasElement[] => (desc.anims[name]?.frames ?? []).map(bake);
 
   return {
+    ...geometry,
     frame: (name, i = 0) => framesOf(name)[i],
     frames: framesOf,
     names: () => Object.keys(desc.anims),
