@@ -385,54 +385,75 @@ function renderPreview(): void {
   const hd = ($('hd') as HTMLInputElement).checked;
   const p = pal();
   const t = performance.now() / 1000;
-  const names = Object.keys(file.anims);
 
-  const rowHeights = names.map((n) => (file.anims[n].frames[0]?.length ?? 1) * 4 + 16);
-  let maxW = 40;
-  for (const n of names) maxW = Math.max(maxW, (file.anims[n].frames[0]?.[0]?.length ?? 1) * 4);
-  preview.width = maxW + 16;
-  preview.height = rowHeights.reduce((a, b) => a + b, 0) + 8;
+  const a = anim();
+  if (!a || !a.frames.length) {
+    requestAnimationFrame(renderPreview);
+    return;
+  }
+
+  const idx = Math.floor(t * (a.fps || 1)) % a.frames.length;
+  const rows = a.frames[idx] ?? [];
+
+  // Set preview canvas size dynamically to fit the current animation exactly
+  const cellH = rows.length;
+  const cellW = Math.max(...rows.map(r => r.length));
+  
+  const isHighRes = file.hd === false;
+  
+  // Align with actual game scale (uses WORLD_ZOOM = 2 camera scale in-game)
+  const WORLD_ZOOM = 2;
+  const scale = (isHighRes ? 1 : (hd ? 1 : 4)) * WORLD_ZOOM;
+  const drawRows = (isHighRes || !hd) ? rows : epx(epx(rows));
+  
+  const displayW = (isHighRes ? cellW : cellW * 4) * WORLD_ZOOM;
+  const displayH = (isHighRes ? cellH : cellH * 4) * WORLD_ZOOM;
+  
+  preview.width = displayW + 16;
+  preview.height = displayH + 24;
 
   pctx.imageSmoothingEnabled = false;
   pctx.fillStyle = '#0a0c1c';
   pctx.fillRect(0, 0, preview.width, preview.height);
 
-  let y = 6;
-  names.forEach((name, i) => {
-    const a = file.anims[name];
-    const idx = a.frames.length ? Math.floor(t * (a.fps || 1)) % a.frames.length : 0;
-    const rows = a.frames[idx] ?? [];
-    pctx.fillStyle = name === animName ? '#ffcd75' : '#94b0c2';
-    pctx.font = '11px monospace';
-    pctx.fillText(`${name}  ${a.fps}fps`, 6, y + 9);
+  // Draw active animation text label
+  pctx.fillStyle = '#ffcd75';
+  pctx.font = '11px monospace';
+  pctx.fillText(`${animName}  ${a.fps}fps`, 8, 16);
 
-    const scale = hd ? 1 : 4;
+  const img = sprite(drawRows, p);
 
-    // Draw reference sprite in preview background if enabled
-    const showRef = ($('showRef') as HTMLInputElement)?.checked ?? true;
-    if (refFile && showRef) {
-      const refAnim = refFile.anims[name] ?? Object.values(refFile.anims)[0];
-      if (refAnim) {
-        const refIdx = refAnim.frames.length ? Math.floor(t * (refAnim.fps || 1)) % refAnim.frames.length : 0;
-        const refRows = refAnim.frames[refIdx] ?? [];
-        const refImg = sprite(hd ? epx(epx(refRows)) : refRows, refFile.palette ?? PAL);
-        pctx.save();
-        pctx.translate(8, y + 14);
-        pctx.scale(scale, scale);
-        pctx.globalAlpha = 0.45;
-        pctx.drawImage(refImg, 0, 0);
-        pctx.restore();
-      }
+  const x = 8;
+  const y = 20;
+
+  // Draw reference sprite behind current frame if enabled
+  const showRef = ($('showRef') as HTMLInputElement)?.checked ?? true;
+  if (refFile && showRef) {
+    const refAnim = refFile.anims[animName] ?? Object.values(refFile.anims)[0];
+    if (refAnim) {
+      const refIdx = refAnim.frames.length ? Math.floor(t * (refAnim.fps || 1)) % refAnim.frames.length : 0;
+      const refRows = refAnim.frames[refIdx] ?? [];
+      
+      const refIsHighRes = refFile.hd === false;
+      const refScale = (refIsHighRes ? 1 : (hd ? 1 : 4)) * WORLD_ZOOM;
+      const refDrawRows = (refIsHighRes || !hd) ? refRows : epx(epx(refRows));
+      
+      const refImg = sprite(refDrawRows, refFile.palette ?? PAL);
+      pctx.save();
+      pctx.translate(x, y);
+      pctx.scale(refScale, refScale);
+      pctx.globalAlpha = 0.45;
+      pctx.drawImage(refImg, 0, 0);
+      pctx.restore();
     }
+  }
 
-    const img = sprite(hd ? epx(epx(rows)) : rows, p);
-    pctx.save();
-    pctx.translate(8, y + 14);
-    pctx.scale(scale, scale);
-    pctx.drawImage(img, 0, 0);
-    pctx.restore();
-    y += rowHeights[i];
-  });
+  pctx.save();
+  pctx.translate(x, y);
+  pctx.scale(scale, scale);
+  pctx.drawImage(img, 0, 0);
+  pctx.restore();
+
   requestAnimationFrame(renderPreview);
 }
 
@@ -715,6 +736,11 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+($('hd') as HTMLInputElement).onchange = (e) => {
+  file.hd = (e.target as HTMLInputElement).checked;
+  syncIO();
+};
+
 /* ---------------- boot ---------------- */
 
 function refreshUI(): void {
@@ -723,6 +749,9 @@ function refreshUI(): void {
   buildFrames();
   redraw();
   syncIO();
+  
+  const hdCheckbox = $('hd') as HTMLInputElement;
+  if (hdCheckbox) hdCheckbox.checked = file.hd ?? true;
 }
 
 refreshUI();
