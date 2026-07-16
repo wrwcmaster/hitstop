@@ -412,7 +412,7 @@ function renderPreview(): void {
 
   const displayW = w * 8; // scaled by ZOOM (4) * WORLD_ZOOM (2) = 8
   const displayH = h * 8;
-  
+
   preview.width = displayW + 16;
   preview.height = displayH + 24;
 
@@ -439,7 +439,7 @@ function renderPreview(): void {
     if (refAnim) {
       const refIdx = refAnim.frames.length ? Math.floor(t * (refAnim.fps || 1)) % refAnim.frames.length : 0;
       const refRows = refAnim.frames[refIdx] ?? [];
-      
+
       const refGeometry = geometryOf(refFile, refRows);
       const refIsHighRes = refFile.hd === false;
       const refDrawRows = (refIsHighRes || !hd) ? refRows : epx(epx(refRows));
@@ -815,7 +815,7 @@ function refreshUI(): void {
   buildFrames();
   redraw();
   syncIO();
-  
+
   const hdCheckbox = $('hd') as HTMLInputElement;
   if (hdCheckbox) hdCheckbox.checked = file.hd ?? true;
 }

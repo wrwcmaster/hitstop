@@ -100,17 +100,17 @@
         <input type="checkbox" id="onionSkin"> onion skin (previous frame)
       </label>
     </div>
-    
+
     <div id="center">
       <canvas id="grid"></canvas>
     </div>
-    
+
     <div id="side-right">
       <h2>preview <label style="display:inline"><input type="checkbox" id="hd" checked> hd</label></h2>
       <div style="display:flex; justify-content:center; margin-bottom:10px;">
         <canvas id="preview" width="200" height="80"></canvas>
       </div>
-      
+
       <h2>animations</h2>
       <div id="anims" style="margin-bottom:6px"></div>
       <div style="display:flex; gap:4px; margin-bottom:6px">
@@ -119,7 +119,7 @@
         <button id="btnDelAnim" style="flex:1">del</button>
       </div>
       <label style="display:block; margin-bottom:10px">fps <input id="fps" type="number" min="1" max="30" value="8" style="width:70px"></label>
-      
+
       <h2>frames <span id="frameOf" class="hint"></span></h2>
       <div id="frames" style="margin-bottom:6px; display:flex; flex-wrap:wrap; gap:4px"></div>
       <div style="display:flex; gap:4px; margin-bottom:10px">
@@ -127,7 +127,7 @@
         <button id="btnDupFrame" style="flex:1">dup</button>
         <button id="btnDelFrame" style="flex:1">del</button>
       </div>
-      
+
       <h2>size</h2>
       <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px">
         <label style="margin:0">w <input id="w" type="number" min="1" max="64" value="12" style="width:50px"></label>
@@ -152,7 +152,7 @@
           <label style="margin:0">h <input id="boxH" type="number" min="0.25" step="0.25" style="width:50px"></label>
         </div>
       </div>
-      
+
       <h2>transform</h2>
       <div style="display:flex; gap:4px; margin-bottom:10px">
         <button id="btnNudgeLeft" title="Nudge left" style="flex:1">◀</button>
@@ -160,7 +160,7 @@
         <button id="btnNudgeDown" title="Nudge down" style="flex:1">▼</button>
         <button id="btnNudgeRight" title="Nudge right" style="flex:1">▶</button>
       </div>
-      
+
       <h2>sprite json</h2>
       <textarea id="io" spellcheck="false" style="height:100px; margin-bottom:6px;"></textarea>
       <p class="hint" style="margin:0">
