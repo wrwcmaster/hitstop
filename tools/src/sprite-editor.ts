@@ -23,6 +23,12 @@ let frameIdx = 0;
 let currentChar = firstPaintChar();
 let painting = false;
 let erasing = false;
+let currentTool: 'draw' | 'fill' = 'draw';
+let refFile: SpriteFile | null = null;
+let currentFileName = 'new sprite.json';
+const undoStack: string[] = [];
+const redoStack: string[] = [];
+const MAX_HISTORY = 100;
 
 function emptyFrame(w: number, h: number): string[] {
   return Array.from({ length: h }, () => '.'.repeat(w));
@@ -59,7 +65,9 @@ function flash(msg: string): void {
 function buildPalette(): void {
   const host = $('palette');
   host.innerHTML = '';
-  for (const [ch, color] of Object.entries(pal())) {
+  // Always ensure transparent/erase is at the top of the palette list
+  const entries: [string, string | null][] = [['.', null], ...Object.entries(pal()).filter(([ch]) => ch !== '.')];
+  for (const [ch, color] of entries) {
     const row = document.createElement('div');
     row.className = 'swatch';
     const chip = document.createElement('span');
@@ -79,6 +87,7 @@ function buildPalette(): void {
 }
 
 $('btnAddColor').onclick = () => {
+  saveHistory();
   const ch = ($('newChar') as HTMLInputElement).value || '?';
   const color = ($('newColor') as HTMLInputElement).value;
   (file.palette ??= {})[ch] = color;
@@ -114,6 +123,7 @@ $('btnAddAnim').onclick = () => {
     flash('already exists');
     return;
   }
+  saveHistory();
   file.anims[name] = { fps: 8, frames: [emptyFrame(W(), H())] };
   animName = name;
   frameIdx = 0;
@@ -126,6 +136,7 @@ $('btnRenameAnim').onclick = () => {
     flash('already exists');
     return;
   }
+  saveHistory();
   // Rebuild in order, swapping the key so button order is stable.
   const next: SpriteFile['anims'] = {};
   for (const [k, v] of Object.entries(file.anims)) next[k === animName ? name : k] = v;
@@ -139,6 +150,7 @@ $('btnDelAnim').onclick = () => {
     flash('need at least one');
     return;
   }
+  saveHistory();
   delete file.anims[animName];
   animName = Object.keys(file.anims)[0];
   frameIdx = 0;
@@ -157,19 +169,44 @@ function setPixel(x: number, y: number, ch: string): void {
   f[y] = f[y].slice(0, x) + ch + f[y].slice(x + 1);
 }
 
+function floodFill(startX: number, startY: number, fillChar: string): void {
+  const f = cur();
+  const targetChar = f[startY]?.[startX];
+  if (targetChar === undefined || targetChar === fillChar) return;
+  
+  const w = W();
+  const h = H();
+  const queue: [number, number][] = [[startX, startY]];
+  const visited = new Set<string>();
+  
+  while (queue.length > 0) {
+    const [x, y] = queue.shift()!;
+    const key = `${x},${y}`;
+    if (visited.has(key)) continue;
+    visited.add(key);
+    
+    if (f[y]?.[x] === targetChar) {
+      setPixel(x, y, fillChar);
+      
+      if (x > 0) queue.push([x - 1, y]);
+      if (x < w - 1) queue.push([x + 1, y]);
+      if (y > 0) queue.push([x, y - 1]);
+      if (y < h - 1) queue.push([x, y + 1]);
+    }
+  }
+}
+
 grid.addEventListener('contextmenu', (e) => e.preventDefault());
 grid.addEventListener('mousedown', (e) => {
+  saveHistory();
   erasing = e.button === 2;
   painting = true;
   paint(e);
 });
 grid.addEventListener('mousemove', (e) => {
-  if (painting) paint(e);
+  if (painting && currentTool !== 'fill') paint(e); // Don't drag-fill for bucket
 });
 window.addEventListener('mouseup', () => {
-  // Only re-serialize after an actual paint stroke — otherwise clicking a
-  // button (e.g. Import) would clobber whatever's in the textarea before
-  // its handler could read it.
   if (painting) {
     painting = false;
     syncIO();
@@ -180,7 +217,11 @@ function paint(e: MouseEvent): void {
   const r = grid.getBoundingClientRect();
   const x = Math.floor((e.clientX - r.left) / CELL);
   const y = Math.floor((e.clientY - r.top) / CELL);
-  setPixel(x, y, erasing ? '.' : currentChar);
+  if (currentTool === 'fill') {
+    floodFill(x, y, erasing ? '.' : currentChar);
+  } else {
+    setPixel(x, y, erasing ? '.' : currentChar);
+  }
   redraw();
 }
 
@@ -204,6 +245,7 @@ function buildFrames(): void {
 }
 
 $('btnAddFrame').onclick = () => {
+  saveHistory();
   anim().frames.push(emptyFrame(W(), H()));
   frameIdx = anim().frames.length - 1;
   buildFrames();
@@ -211,6 +253,7 @@ $('btnAddFrame').onclick = () => {
   syncIO();
 };
 $('btnDupFrame').onclick = () => {
+  saveHistory();
   anim().frames.splice(frameIdx + 1, 0, [...cur()]);
   frameIdx++;
   buildFrames();
@@ -219,6 +262,7 @@ $('btnDupFrame').onclick = () => {
 };
 $('btnDelFrame').onclick = () => {
   if (anim().frames.length <= 1) return;
+  saveHistory();
   anim().frames.splice(frameIdx, 1);
   frameIdx = Math.min(frameIdx, anim().frames.length - 1);
   buildFrames();
@@ -230,6 +274,7 @@ $('btnResize').onclick = () => {
   const w = Number(($('w') as HTMLInputElement).value);
   const h = Number(($('h') as HTMLInputElement).value);
   if (!(w >= 1 && h >= 1 && w <= 64 && h <= 64)) return;
+  saveHistory();
   // Resize every frame of every animation so the sprite stays uniform.
   for (const a of Object.values(file.anims)) {
     a.frames = a.frames.map((f) => {
@@ -242,16 +287,76 @@ $('btnResize').onclick = () => {
   syncIO();
 };
 
-/* ---------------- rendering ---------------- */
-
 function redraw(): void {
   grid.width = W() * CELL;
   grid.height = H() * CELL;
   gctx.imageSmoothingEnabled = false;
+
+  // 1. Draw base background (gaps/borders)
+  gctx.fillStyle = '#080a18';
+  gctx.fillRect(0, 0, grid.width, grid.height);
+
+  // 2. Draw inset checkerboard for all cells
+  const inset = 3;
   for (let y = 0; y < H(); y++) {
     for (let x = 0; x < W(); x++) {
       gctx.fillStyle = (x + y) % 2 ? '#141830' : '#0f1226';
-      gctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+      gctx.fillRect(x * CELL + inset, y * CELL + inset, CELL - inset * 2, CELL - inset * 2);
+      
+      gctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+      gctx.strokeRect(x * CELL + inset + 0.5, y * CELL + inset + 0.5, CELL - inset * 2 - 1, CELL - inset * 2 - 1);
+    }
+  }
+
+  // 3. Draw reference sprite if enabled
+  const showRef = ($('showRef') as HTMLInputElement)?.checked ?? true;
+  if (refFile && showRef) {
+    const refAnim = refFile.anims[animName] ?? Object.values(refFile.anims)[0];
+    if (refAnim) {
+      const refFrame = refAnim.frames[frameIdx % refAnim.frames.length];
+      if (refFrame) {
+        gctx.save();
+        gctx.globalAlpha = 0.3;
+        for (let y = 0; y < H(); y++) {
+          for (let x = 0; x < W(); x++) {
+            const char = refFrame[y]?.[x];
+            if (char) {
+              const color = (refFile.palette ?? {})[char] ?? PAL[char];
+              if (color) {
+                gctx.fillStyle = color;
+                gctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+              }
+            }
+          }
+        }
+        gctx.restore();
+      }
+    }
+  }
+
+  // 4. Draw onion skin if enabled
+  const onion = ($('onionSkin') as HTMLInputElement)?.checked ?? false;
+  if (onion && frameIdx > 0) {
+    const prevFrame = anim().frames[frameIdx - 1];
+    if (prevFrame) {
+      gctx.save();
+      gctx.globalAlpha = 0.2;
+      for (let y = 0; y < H(); y++) {
+        for (let x = 0; x < W(); x++) {
+          const color = pal()[prevFrame[y]?.[x]];
+          if (color) {
+            gctx.fillStyle = color;
+            gctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+          }
+        }
+      }
+      gctx.restore();
+    }
+  }
+
+  // 5. Draw current frame solid pixels
+  for (let y = 0; y < H(); y++) {
+    for (let x = 0; x < W(); x++) {
       const color = pal()[cur()[y][x]];
       if (color) {
         gctx.fillStyle = color;
@@ -259,7 +364,9 @@ function redraw(): void {
       }
     }
   }
-  gctx.strokeStyle = 'rgba(148,176,194,0.15)';
+
+  // 6. Grid lines
+  gctx.strokeStyle = 'rgba(148,176,194,0.1)';
   for (let x = 0; x <= W(); x++) {
     gctx.beginPath();
     gctx.moveTo(x * CELL + 0.5, 0);
@@ -274,12 +381,6 @@ function redraw(): void {
   }
 }
 
-/**
- * Every animation, playing at once. Raw art is drawn at 4x; the "hd"
- * toggle instead EPX-upscales twice (the game's 4x texel density) and
- * draws at 1x — the same on-screen size, so you see the smoothing the
- * game applies. The selected animation is highlighted.
- */
 function renderPreview(): void {
   const hd = ($('hd') as HTMLInputElement).checked;
   const p = pal();
@@ -304,8 +405,27 @@ function renderPreview(): void {
     pctx.fillStyle = name === animName ? '#ffcd75' : '#94b0c2';
     pctx.font = '11px monospace';
     pctx.fillText(`${name}  ${a.fps}fps`, 6, y + 9);
-    const img = sprite(hd ? epx(epx(rows)) : rows, p);
+
     const scale = hd ? 1 : 4;
+
+    // Draw reference sprite in preview background if enabled
+    const showRef = ($('showRef') as HTMLInputElement)?.checked ?? true;
+    if (refFile && showRef) {
+      const refAnim = refFile.anims[name] ?? Object.values(refFile.anims)[0];
+      if (refAnim) {
+        const refIdx = refAnim.frames.length ? Math.floor(t * (refAnim.fps || 1)) % refAnim.frames.length : 0;
+        const refRows = refAnim.frames[refIdx] ?? [];
+        const refImg = sprite(hd ? epx(epx(refRows)) : refRows, refFile.palette ?? PAL);
+        pctx.save();
+        pctx.translate(8, y + 14);
+        pctx.scale(scale, scale);
+        pctx.globalAlpha = 0.45;
+        pctx.drawImage(refImg, 0, 0);
+        pctx.restore();
+      }
+    }
+
+    const img = sprite(hd ? epx(epx(rows)) : rows, p);
     pctx.save();
     pctx.translate(8, y + 14);
     pctx.scale(scale, scale);
@@ -343,8 +463,13 @@ $('btnLoad').onclick = () => ($('fileInput') as HTMLInputElement).click();
       animName = Object.keys(file.anims)[0];
       frameIdx = 0;
       currentChar = firstPaintChar();
+      currentFileName = f.name;
+      undoStack.length = 0;
+      redoStack.length = 0;
+      updateUndoRedoButtons();
       refreshUI();
       flash(`loaded ${f.name}`);
+      ($('selectSprite') as HTMLSelectElement).value = ''; // clear dropdown
     } catch (err) {
       flash(`load failed: ${(err as Error).message}`);
     }
@@ -353,13 +478,41 @@ $('btnLoad').onclick = () => ($('fileInput') as HTMLInputElement).click();
   input.value = ''; // allow re-loading the same file
 };
 
+$('selectSprite').onchange = (e) => {
+  const val = (e.target as HTMLSelectElement).value;
+  if (!val) return;
+  fetch('/src/game/content/sprites/' + val)
+    .then(r => {
+      if (!r.ok) throw new Error(`HTTP error! status: ${r.status}`);
+      return r.json();
+    })
+    .then(json => {
+      file = normalize(json);
+      animName = Object.keys(file.anims)[0];
+      frameIdx = 0;
+      currentChar = firstPaintChar();
+      
+      const parts = val.split('/');
+      currentFileName = parts[parts.length - 1];
+      
+      undoStack.length = 0;
+      redoStack.length = 0;
+      updateUndoRedoButtons();
+      refreshUI();
+      flash(`loaded ${val}`);
+    })
+    .catch(err => {
+      flash(`load failed: ${err.message}`);
+    });
+};
+
 // Save the current sprite as a downloadable .json.
 $('btnSave').onclick = () => {
   syncIO();
   const blob = new Blob([($('io') as HTMLTextAreaElement).value], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `${animName || 'sprite'}.json`;
+  a.download = currentFileName;
   a.click();
   URL.revokeObjectURL(a.href);
   flash('saved');
@@ -368,6 +521,7 @@ $('btnSave').onclick = () => {
 $('btnImport').onclick = () => {
   try {
     const raw = JSON.parse(($('io') as HTMLTextAreaElement).value);
+    saveHistory();
     file = normalize(raw);
     animName = Object.keys(file.anims)[0];
     frameIdx = 0;
@@ -396,6 +550,170 @@ function normalize(raw: unknown): SpriteFile {
   }
   throw new Error('unrecognized sprite json');
 }
+
+/* ---------------- tools & reference & nudge ---------------- */
+
+$('btnToolDraw').onclick = () => {
+  currentTool = 'draw';
+  $('btnToolDraw').classList.add('active');
+  $('btnToolFill').classList.remove('active');
+};
+$('btnToolFill').onclick = () => {
+  currentTool = 'fill';
+  $('btnToolFill').classList.add('active');
+  $('btnToolDraw').classList.remove('active');
+};
+
+$('btnLoadRef').onclick = () => ($('refFileInput') as HTMLInputElement).click();
+($('refFileInput') as HTMLInputElement).onchange = (e) => {
+  const input = e.target as HTMLInputElement;
+  const f = input.files?.[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      refFile = normalize(JSON.parse(String(reader.result)));
+      redraw();
+      flash(`loaded reference: ${f.name}`);
+      ($('selectRefSprite') as HTMLSelectElement).value = ''; // clear dropdown
+    } catch (err) {
+      flash(`reference load failed: ${(err as Error).message}`);
+    }
+  };
+  reader.readAsText(f);
+  input.value = '';
+};
+
+$('selectRefSprite').onchange = (e) => {
+  const val = (e.target as HTMLSelectElement).value;
+  if (!val) {
+    refFile = null;
+    redraw();
+    return;
+  }
+  fetch('/src/game/content/sprites/' + val)
+    .then(r => {
+      if (!r.ok) throw new Error(`HTTP error! status: ${r.status}`);
+      return r.json();
+    })
+    .then(json => {
+      refFile = normalize(json);
+      redraw();
+      flash(`loaded reference: ${val}`);
+    })
+    .catch(err => {
+      flash(`reference load failed: ${err.message}`);
+    });
+};
+
+($('showRef') as HTMLInputElement).onchange = () => redraw();
+($('onionSkin') as HTMLInputElement).onchange = () => redraw();
+
+$('btnNudgeLeft').onclick = () => nudge(-1, 0);
+$('btnNudgeRight').onclick = () => nudge(1, 0);
+$('btnNudgeUp').onclick = () => nudge(0, -1);
+$('btnNudgeDown').onclick = () => nudge(0, 1);
+
+function nudge(dx: number, dy: number): void {
+  saveHistory();
+  const w = W();
+  const h = H();
+  const f = cur();
+  const next: string[] = [];
+  
+  for (let y = 0; y < h; y++) {
+    const srcY = (y - dy + h) % h;
+    let row = '';
+    for (let x = 0; x < w; x++) {
+      const srcX = (x - dx + w) % w;
+      row += f[srcY][srcX];
+    }
+    next.push(row);
+  }
+  
+  anim().frames[frameIdx] = next;
+  redraw();
+  syncIO();
+}
+
+/* ---------------- history (undo / redo) ---------------- */
+
+function saveHistory(): void {
+  const stateStr = JSON.stringify(file);
+  if (undoStack.length > 0 && undoStack[undoStack.length - 1] === stateStr) {
+    return;
+  }
+  undoStack.push(stateStr);
+  if (undoStack.length > MAX_HISTORY) {
+    undoStack.shift();
+  }
+  redoStack.length = 0; // Clear redo stack on new action
+  updateUndoRedoButtons();
+}
+
+function undo(): void {
+  if (undoStack.length === 0) return;
+  const currentStr = JSON.stringify(file);
+  redoStack.push(currentStr);
+  
+  const prevStateStr = undoStack.pop()!;
+  file = normalize(JSON.parse(prevStateStr));
+  
+  if (!file.anims[animName]) {
+    animName = Object.keys(file.anims)[0];
+  }
+  const maxIdx = file.anims[animName].frames.length - 1;
+  frameIdx = Math.min(frameIdx, maxIdx);
+  
+  refreshUI();
+  updateUndoRedoButtons();
+  flash('undo');
+}
+
+function redo(): void {
+  if (redoStack.length === 0) return;
+  const currentStr = JSON.stringify(file);
+  undoStack.push(currentStr);
+  
+  const nextStateStr = redoStack.pop()!;
+  file = normalize(JSON.parse(nextStateStr));
+  
+  if (!file.anims[animName]) {
+    animName = Object.keys(file.anims)[0];
+  }
+  const maxIdx = file.anims[animName].frames.length - 1;
+  frameIdx = Math.min(frameIdx, maxIdx);
+  
+  refreshUI();
+  updateUndoRedoButtons();
+  flash('redo');
+}
+
+function updateUndoRedoButtons(): void {
+  const btnUndo = $('btnUndo') as HTMLButtonElement;
+  const btnRedo = $('btnRedo') as HTMLButtonElement;
+  if (btnUndo) btnUndo.disabled = undoStack.length === 0;
+  if (btnRedo) btnRedo.disabled = redoStack.length === 0;
+}
+
+$('btnUndo').onclick = () => undo();
+$('btnRedo').onclick = () => redo();
+
+window.addEventListener('keydown', (e) => {
+  const key = e.key.toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && key === 'z') {
+    e.preventDefault();
+    if (e.shiftKey) {
+      redo();
+    } else {
+      undo();
+    }
+  }
+  if ((e.ctrlKey || e.metaKey) && key === 'y') {
+    e.preventDefault();
+    redo();
+  }
+});
 
 /* ---------------- boot ---------------- */
 

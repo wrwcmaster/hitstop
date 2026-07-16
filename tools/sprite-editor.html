@@ -42,8 +42,21 @@
 <body>
   <header>
     <h1>hitstop sprite editor</h1>
-    <button id="btnLoad" title="Open a .json sprite file">load file</button>
+    <select id="selectSprite" style="background:#1f2a57; color:#f4f4f4; border:1px solid #33447f; border-radius:4px; padding:4px;">
+      <option value="">-- load existing sprite --</option>
+      <option value="knight.json">knight</option>
+      <option value="slime.json">slime</option>
+      <option value="bat.json">bat</option>
+      <option value="merchant.json">merchant</option>
+      <option value="hud.json">hud</option>
+      <option value="icons.json">icons</option>
+      <option value="equipment/iron-helmet.json">iron helmet</option>
+      <option value="equipment/steel-armor.json">steel armor</option>
+    </select>
+    <button id="btnLoad" title="Open a .json sprite file">load local file...</button>
     <button id="btnSave" title="Download the current sprite as .json">save</button>
+    <button id="btnUndo" title="Undo (Ctrl+Z)" disabled>undo</button>
+    <button id="btnRedo" title="Redo (Ctrl+Y)" disabled>redo</button>
     <button id="btnExport" title="Copy JSON to clipboard">export</button>
     <button id="btnImport" title="Import JSON from the textarea">import</button>
     <input type="file" id="fileInput" accept=".json,application/json" style="display:none">
@@ -58,6 +71,30 @@
         <input type="text" id="newChar" maxlength="1" placeholder="ch" style="width:34px">
         <button id="btnAddColor">add</button>
       </div>
+      <h2>tools</h2>
+      <div style="display:flex; gap:6px; margin-bottom:6px">
+        <button id="btnToolDraw" class="active">pencil</button>
+        <button id="btnToolFill">fill</button>
+      </div>
+      <h2>reference</h2>
+      <div style="display:flex; flex-direction:column; gap:4px">
+        <select id="selectRefSprite" style="background:#1f2a57; color:#f4f4f4; border:1px solid #33447f; border-radius:4px; padding:4px;">
+          <option value="">-- select reference --</option>
+          <option value="knight.json">knight</option>
+          <option value="slime.json">slime</option>
+          <option value="bat.json">bat</option>
+          <option value="merchant.json">merchant</option>
+          <option value="hud.json">hud</option>
+          <option value="icons.json">icons</option>
+          <option value="equipment/iron-helmet.json">iron helmet</option>
+          <option value="equipment/steel-armor.json">steel armor</option>
+        </select>
+        <button id="btnLoadRef">load local ref...</button>
+      </div>
+      <input type="file" id="refFileInput" accept=".json,application/json" style="display:none">
+      <label style="display:block; margin-top:6px">
+        <input type="checkbox" id="showRef" checked> show reference (30% opacity)
+      </label>
       <h2>animations</h2>
       <div id="anims"></div>
       <button id="btnAddAnim">+ anim</button>
@@ -68,11 +105,21 @@
       <label>w <input id="w" type="number" min="1" max="64" value="12">
              h <input id="h" type="number" min="1" max="64" value="14"></label>
       <button id="btnResize">resize</button>
+      <h2>transform</h2>
+      <div style="display:flex; gap:4px; margin-bottom:6px">
+        <button id="btnNudgeLeft" title="Nudge left">◀</button>
+        <button id="btnNudgeUp" title="Nudge up">▲</button>
+        <button id="btnNudgeDown" title="Nudge down">▼</button>
+        <button id="btnNudgeRight" title="Nudge right">▶</button>
+      </div>
       <h2>frames <span id="frameOf" class="hint"></span></h2>
       <div id="frames"></div>
       <button id="btnAddFrame">+ frame</button>
       <button id="btnDupFrame">dup</button>
       <button id="btnDelFrame">del</button>
+      <label style="display:block; margin-top:6px">
+        <input type="checkbox" id="onionSkin"> onion skin (previous frame)
+      </label>
       <h2>preview <label style="display:inline"><input type="checkbox" id="hd" checked> hd</label></h2>
       <canvas id="preview" width="200" height="80"></canvas>
       <h2>sprite json</h2>
