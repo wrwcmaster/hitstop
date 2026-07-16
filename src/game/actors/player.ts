@@ -27,18 +27,8 @@ import {
   SkillTree,
 } from '@engine/index';
 import type { TreeCtx } from '../content/skilltree';
-import {
-  KNIGHT_ARMORED_WITH_HELMET_ANIMS,
-  KNIGHT_ARMORED_NO_HELMET_ANIMS,
-  KNIGHT_UNARMORED_WITH_HELMET_ANIMS,
-  KNIGHT_UNARMORED_NO_HELMET_ANIMS,
-  HELMET_ANIMS,
-  ARMOR_ANIMS,
-  HEAD_ANCHORS,
-  CHEST_ANCHORS,
-  DEBUG_ANCHORS,
-  TEXEL,
-} from '../content/sprites';
+import { KNIGHT_ANIMS, TEXEL } from '../content/sprites';
+import { gearLayers, DEBUG_ANCHORS } from '../content/gear-visuals';
 import { COLORS } from '../content/palette';
 import { weaponSpecOf, type WeaponSpec } from '../content/items';
 import type { SkillCtx } from '../content/skills';
@@ -95,14 +85,11 @@ export class Player extends Actor {
   });
   inventory = new Inventory();
   equipment = new Equipment(this.stats);
+  /** The body sprite set. Visible gear draws as layers on top (see
+   * content/gear-visuals.ts), so the body never needs per-loadout art.
+   * Live read so a PNG-sheet swap (loadKnightSheet) takes effect. */
   get animSet() {
-    const hasArmor = this.equipment.get('armor') !== null;
-    const hasHelmet = this.equipment.get('helmet') !== null;
-    
-    if (hasArmor && hasHelmet) return KNIGHT_ARMORED_WITH_HELMET_ANIMS;
-    if (hasArmor && !hasHelmet) return KNIGHT_ARMORED_NO_HELMET_ANIMS;
-    if (!hasArmor && hasHelmet) return KNIGHT_UNARMORED_WITH_HELMET_ANIMS;
-    return KNIGHT_UNARMORED_NO_HELMET_ANIMS;
+    return KNIGHT_ANIMS;
   }
   statuses = new Statuses(this);
   gold = 0;
@@ -719,10 +706,12 @@ export class Player extends Actor {
     if (pose.shear) g.transform(1, 0, pose.shear, 1, 0, 0);
     g.drawImage(finalImg, -dw / 2, -dh, dw, dh);
     
-    // Draw armor and helmet layers dynamically using frame anchors
+    // Visible gear draws as registered layers over the body (armor under
+    // helmet, etc). Any equipped slot with a visual in the gear-visuals
+    // registry composites here — new gear slots need no player changes.
     if (this.flashT <= 0 && !isSwallowed) {
       const f = this.facing;
-      
+
       const animObj = this.animSet.right[anim];
       const frameIdx = animObj
         ? (animObj.loop === false
@@ -730,44 +719,20 @@ export class Player extends Actor {
           : Math.floor(this.animT * animObj.fps) % animObj.frames.length)
         : 0;
 
-      // 1. Armor Layer
-      const hasArmor = this.equipment.get('armor') !== null;
-      if (hasArmor) {
-        const armorSet = f === 1 ? ARMOR_ANIMS.right : ARMOR_ANIMS.left;
-        const armorImg = frameAt(armorSet, anim, this.animT);
-        const chestAnchor = (CHEST_ANCHORS[anim] && CHEST_ANCHORS[anim][frameIdx]) || { x: 0, y: 0, angle: 0 };
-        
-        g.save();
-        g.translate(chestAnchor.x * f, chestAnchor.y);
-        if (chestAnchor.angle) g.rotate(chestAnchor.angle * f);
-        g.drawImage(armorImg, -dw / 2, -dh, dw, dh);
-        g.restore();
-      }
+      for (const [slot, visual] of gearLayers()) {
+        if (this.equipment.get(slot) === null) continue;
+        const layerSet = f === 1 ? visual.anims.right : visual.anims.left;
+        const layerImg = frameAt(layerSet, anim, this.animT);
+        const anchor = visual.anchors?.[anim]?.[frameIdx] ?? { x: 0, y: 0, angle: 0 };
 
-      // 2. Helmet Layer
-      const hasHelmet = this.equipment.get('helmet') !== null;
-      if (hasHelmet) {
-        const helmetSet = f === 1 ? HELMET_ANIMS.right : HELMET_ANIMS.left;
-        const helmetImg = frameAt(helmetSet, anim, this.animT);
-        const headAnchor = (HEAD_ANCHORS[anim] && HEAD_ANCHORS[anim][frameIdx]) || { x: 0, y: 0, angle: 0 };
-        
         g.save();
-        g.translate(headAnchor.x * f, headAnchor.y);
-        if (headAnchor.angle) g.rotate(headAnchor.angle * f);
-        g.drawImage(helmetImg, -dw / 2, -dh, dw, dh);
-        g.restore();
-      }
-
-      // 3. Visual Debug Guides (Red/Blue crosshairs)
-      if (DEBUG_ANCHORS) {
-        g.save();
-        const headAnchor = (HEAD_ANCHORS[anim] && HEAD_ANCHORS[anim][frameIdx]) || { x: 0, y: 0, angle: 0 };
-        g.fillStyle = '#ff0000';
-        g.fillRect(headAnchor.x * f - 1, headAnchor.y - 1, 2, 2);
-        
-        const chestAnchor = (CHEST_ANCHORS[anim] && CHEST_ANCHORS[anim][frameIdx]) || { x: 0, y: 0, angle: 0 };
-        g.fillStyle = '#0000ff';
-        g.fillRect(chestAnchor.x * f - 1, chestAnchor.y - 1, 2, 2);
+        g.translate(anchor.x * f, anchor.y);
+        if (anchor.angle) g.rotate(anchor.angle * f);
+        g.drawImage(layerImg, -dw / 2, -dh, dw, dh);
+        if (DEBUG_ANCHORS) {
+          g.fillStyle = '#ff0000';
+          g.fillRect(-1, -1, 2, 2);
+        }
         g.restore();
       }
     }

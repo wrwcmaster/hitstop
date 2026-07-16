@@ -107,9 +107,20 @@ The second wave of systems keeps the same shape — registries of data + small h
 - **System menu** (`scenes/pause.ts`) composes the engine `Menu` widget; inventory/equip/volume/restart are menu entries with callbacks.
 - **Minimap** bakes the tilemap once and draws live entity markers each frame.
 
+## The play scene and its modules
+
+`scenes/play.ts` owns the run/room lifecycle, score, and event wiring — and delegates everything else to focused modules under `scenes/play/`, each seeing the scene only through the narrow `PlayHost` seam (`play/host.ts`: live reads of game/player/tilemap/room + banner/goToRoom/openConversation):
+
+- **`play/waves.ts` — WaveDirector**: runs a room's wave combat from a **wave table** (`content/waves.ts`, a registry — `props.waves: "<table id>"` names the recipe; rooms can run different gauntlets). Also handles `waveGoal`/`gateKey`: clearing the goal wave drops the key and stops the waves.
+- **`play/trigger-actions.ts`**: what each trigger `event` means — `talk` and `door` (with key locking) ship; `defineTriggerAction('chest', ...)` makes a new trigger type available to every room with no scene changes.
+- **`play/hud.ts` — Hud**: all in-game screen-space drawing (vitals, purse, level, statuses, minimap, boss bar, combo, banners) plus the world-space gate marker. Pure rendering; state stays in the scene.
+- **`play/screens.ts`**: the title screen (menu + render) and the game-over overlay.
+- **`play/cheats.ts`**: debug cheats as a data table — the key handler and the on-screen legend both walk it, so a new cheat is one entry.
+
 ## The world layer (rooms / boss / saves)
 
 - **Rooms & doors**: the world is a `ROOMS` registry of RoomDefs connected by `door` triggers (`props.room` + spawn point). `PlayScene.setRoom` rebuilds tilemap/minimap/triggers behind a fade, `World.retain` keeps only the player, and waves run only in rooms with `props.waves`. The level editor's trigger mode places doors.
+- **Gear visuals**: visible equipment is a **layer registry** (`content/gear-visuals.ts`) keyed by slot — a sprite sheet on the knight's frame grid plus optional per-frame anchors, composited in `order` (armor under helmet). The player render walks the registry, so a new visible slot (boots, cape, shield) is a JSON sheet + one `defineGearVisual` call.
 - **Bosses**: a boss is a monster with `boss: true` and an engine `FSM` driving telegraphed attack states (see the Slime King in `actors/boss.ts`); every attack resolves through Strikes/Projectiles so feedback is uniform. The `bossDefeated` flag keeps him dead across saves. Contact damage on the player also routes through `Combat.hit` — `Player.onHurt` adds the player-specific channels (i-frames, red flash, combo reset) on top of the standard bundle, whatever the damage source.
 - **Saves**: `JsonStore` (versioned localStorage) + `save.ts`. Checkpoints at every room entrance and boss defeat; death → last checkpoint at full HP; title screen offers CONTINUE. Fired one-shot triggers persist so intro dialogue doesn't replay.
 
@@ -117,7 +128,7 @@ The second wave of systems keeps the same shape — registries of data + small h
 
 The seams are already in place for:
 
-- **Ability gating**: doors are triggers, so a locked door is a trigger handler that checks a flag/item before starting the transition.
+- **Ability gating**: shipped for items — a door trigger with `props.key` stays locked until the player holds that item (the arena's gate key). Flag- or ability-gated doors are the same registered `door` action with one more check.
 - **A world map screen**: `ROOMS` + door graph is the data; a paused overlay scene rendering visited rooms (flags) is the UI.
 - **Fog-of-war minimap**: `Minimap.bake` is the single place that reads tiles; an explored mask slots in there.
 - **NPCs**: an `Actor` with a `talk` interaction — the dialogue system and conversation registry are already in place.
