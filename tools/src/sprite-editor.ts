@@ -277,15 +277,23 @@ function redraw(): void {
   grid.height = H() * CELL;
   gctx.imageSmoothingEnabled = false;
 
-  // Draw background checkerboard
+  // 1. Draw base background (gaps/borders)
+  gctx.fillStyle = '#080a18';
+  gctx.fillRect(0, 0, grid.width, grid.height);
+
+  // 2. Draw inset checkerboard for all cells
+  const inset = 3;
   for (let y = 0; y < H(); y++) {
     for (let x = 0; x < W(); x++) {
       gctx.fillStyle = (x + y) % 2 ? '#141830' : '#0f1226';
-      gctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+      gctx.fillRect(x * CELL + inset, y * CELL + inset, CELL - inset * 2, CELL - inset * 2);
+      
+      gctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+      gctx.strokeRect(x * CELL + inset + 0.5, y * CELL + inset + 0.5, CELL - inset * 2 - 1, CELL - inset * 2 - 1);
     }
   }
 
-  // Draw reference sprite if enabled
+  // 3. Draw reference sprite if enabled
   const showRef = ($('showRef') as HTMLInputElement)?.checked ?? true;
   if (refFile && showRef) {
     const refAnim = refFile.anims[animName] ?? Object.values(refFile.anims)[0];
@@ -311,7 +319,7 @@ function redraw(): void {
     }
   }
 
-  // Draw onion skin if enabled
+  // 4. Draw onion skin if enabled
   const onion = ($('onionSkin') as HTMLInputElement)?.checked ?? false;
   if (onion && frameIdx > 0) {
     const prevFrame = anim().frames[frameIdx - 1];
@@ -331,7 +339,7 @@ function redraw(): void {
     }
   }
 
-  // Draw current frame pixels
+  // 5. Draw current frame solid pixels
   for (let y = 0; y < H(); y++) {
     for (let x = 0; x < W(); x++) {
       const color = pal()[cur()[y][x]];
@@ -342,8 +350,8 @@ function redraw(): void {
     }
   }
 
-  // Grid lines
-  gctx.strokeStyle = 'rgba(148,176,194,0.15)';
+  // 6. Grid lines
+  gctx.strokeStyle = 'rgba(148,176,194,0.1)';
   for (let x = 0; x <= W(); x++) {
     gctx.beginPath();
     gctx.moveTo(x * CELL + 0.5, 0);
