@@ -89,9 +89,12 @@ Details and code samples: `docs/adding-content.md`. The short version —
 
 - **Item**: `defineItem` in `content/items.ts` (+ icon in
   `content/sprites/icons.json`; authored weapons derive theirs with
-  `weaponIcon(...)`). Weapons carry their attack spec in
-  `props.weapon`, including a `visual` id from `content/weapon-visuals.ts`;
-  the swing reads both registries and player code never changes.
+  `weaponIcon(...)`). Weapon items occupy the `weapon` slot; their combat
+  definition lives in the separate weapon registry.
+- **Weapon type / weapon**: `defineWeaponType` + `defineWeapon` in
+  `content/weapons.ts`. Types own combo timing, per-swing hitboxes, lunges,
+  trails, and feel strength; weapons select a type, visual, base damage,
+  and colors. Player only executes the resolved attack definition.
 - **Weapon visual**: `defineWeaponVisual` in `content/weapon-visuals.ts`.
   Use `proceduralBlade(...)` for compact generated art or
   `spriteWeapon(...)` for a frame-aligned JSON sheet; sprite weapons

@@ -11,10 +11,11 @@ import { COLORS, PAL } from './palette';
 import { TEXEL } from './sprites';
 import greatSwordJson from './sprites/equipment/great-sword.json';
 import rustySwordJson from './sprites/equipment/rusty-sword.json';
+import type { WeaponAttackDef } from './weapons';
 
 export interface WeaponAttackPose {
-  index: number;
   progress: number;
+  def: WeaponAttackDef;
 }
 
 /** Body-local context for the held weapon. */
@@ -33,7 +34,6 @@ export interface WeaponTrailCtx {
   x: number;
   y: number;
   facing: 1 | -1;
-  reach: number;
   colors: string[];
   attack: WeaponAttackPose;
 }
@@ -41,6 +41,8 @@ export interface WeaponTrailCtx {
 export interface WeaponVisual {
   /** Normalized 8x8-logical-pixel item/pickup icon. */
   icon?: HTMLCanvasElement;
+  /** Authored animation names, exposed for weapon-definition validation. */
+  animations?: readonly string[];
   drawHeld(g: CanvasRenderingContext2D, ctx: HeldWeaponCtx): void;
   drawTrail?(g: CanvasRenderingContext2D, ctx: WeaponTrailCtx): void;
 }
@@ -84,12 +86,13 @@ export function spriteWeapon(config: SpriteWeaponConfig): WeaponVisual {
   if (!iconFrame) throw new Error('sprite weapon needs at least one frame');
   return {
     icon: normalizedIcon(iconFrame),
+    animations: Object.keys(config.anims.right),
     drawHeld(g, ctx) {
       const set = ctx.facing === 1 ? config.anims.right : config.anims.left;
-      const attackAnim = ctx.attack ? set.attack : undefined;
-      const anim = attackAnim ? 'attack' : ctx.anim;
+      const attackAnim = ctx.attack ? set[ctx.attack.def.animation] : undefined;
+      const anim = attackAnim ? ctx.attack!.def.animation : ctx.anim;
       const frame = attackAnim
-        ? Math.min(Math.floor(ctx.attack!.progress * attackAnim.frames.length), attackAnim.frames.length - 1)
+        ? attackFrame(ctx.attack!, attackAnim.frames.length)
         : ctx.frame;
       const image = attackAnim ? attackAnim.frames[frame] : frameAt(set, anim, ctx.animT);
       const anchor = config.anchors?.[anim]?.[frame] ?? { x: 0, y: 0, angle: 0 };
@@ -179,8 +182,9 @@ export function proceduralBlade(config: ProceduralBladeConfig): WeaponVisual {
       let dx = 0.866;
       let dy = -0.5;
       if (ctx.attack) {
-        const flipV = ctx.attack.index === 1 ? -1 : 1;
-        const sweep = (-1.3 + 2.6 * Math.min(1, ctx.attack.progress * 1.7)) * flipV;
+        const trail = ctx.attack.def.trail;
+        const sweepT = Math.min(1, ctx.attack.progress / ctx.attack.def.active[1]);
+        const sweep = trail.startAngle + (trail.endAngle - trail.startAngle) * sweepT;
         dx = Math.cos(sweep);
         dy = Math.sin(sweep);
       }
@@ -247,17 +251,17 @@ export function proceduralBlade(config: ProceduralBladeConfig): WeaponVisual {
 
 function drawSlashTrail(g: CanvasRenderingContext2D, ctx: WeaponTrailCtx): void {
   const { attack } = ctx;
-  const heavy = attack.index === 2;
-  const radius = (heavy ? 17 : 13) + Math.max(0, Math.round(ctx.reach / 2));
-  const flipV = attack.index === 1 ? -1 : 1;
-  const sweep = (-1.3 + 2.6 * Math.min(1, attack.progress * 1.7)) * flipV;
+  const trail = attack.def.trail;
+  const radius = trail.radius;
+  const sweepT = Math.min(1, attack.progress / attack.def.active[1]);
+  const sweep = trail.startAngle + (trail.endAngle - trail.startAngle) * sweepT;
   const angle = ctx.facing === 1 ? sweep : Math.PI - sweep;
-  const start = ctx.facing === 1 ? -1.3 * flipV : Math.PI + 1.3 * flipV;
+  const start = ctx.facing === 1 ? trail.startAngle : Math.PI - trail.startAngle;
   const q = (value: number) => Math.round(value * TEXEL) / TEXEL;
   const step = 1 / TEXEL;
   const layers = [
-    { color: ctx.colors[0] ?? COLORS.steel, thickness: heavy ? 5 : 3.5, alpha: 0.4 },
-    { color: COLORS.white, thickness: heavy ? 2.5 : 1.5, alpha: 0.8 },
+    { color: ctx.colors[0] ?? COLORS.steel, thickness: trail.thickness, alpha: 0.4 },
+    { color: COLORS.white, thickness: trail.thickness * 0.45, alpha: 0.8 },
   ];
   const segments = 24;
 
@@ -294,6 +298,11 @@ function drawSlashTrail(g: CanvasRenderingContext2D, ctx: WeaponTrailCtx): void 
   g.fillRect(q(tipX - step), q(tipY - step), step * 2, step * 2);
   g.fillRect(q(tipX - step * 3), q(tipY - step * 0.5), step * 6, step);
   g.fillRect(q(tipX - step * 0.5), q(tipY - step * 3), step, step * 6);
+}
+
+function attackFrame(attack: WeaponAttackPose, frameCount: number): number {
+  const forward = Math.min(Math.floor(attack.progress * frameCount), frameCount - 1);
+  return attack.def.frameDirection === 1 ? forward : frameCount - 1 - forward;
 }
 
 defineWeaponVisual('unarmed', {

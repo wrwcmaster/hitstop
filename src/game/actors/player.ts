@@ -30,7 +30,12 @@ import type { TreeCtx } from '../content/skilltree';
 import { KNIGHT_ANIMS, baseKnight } from '../content/sprites';
 import { gearLayers, DEBUG_ANCHORS } from '../content/gear-visuals';
 import { COLORS } from '../content/palette';
-import { weaponSpecOf, type WeaponSpec } from '../content/items';
+import {
+  weaponDefOf,
+  weaponTypeOf,
+  type WeaponAttackDef,
+  type WeaponDef,
+} from '../content/weapons';
 import { drawHeldWeapon, drawWeaponTrail } from '../content/weapon-visuals';
 import { DEFAULT_SKILL_LOADOUT, type SkillCtx } from '../content/skills';
 import { Monster } from './monster';
@@ -56,9 +61,6 @@ export const PLAYER_TUNING = {
   dashTime: 0.16,
   dashCooldown: 0.45,
   dashInvuln: 0.2,
-  attackLunge: 45,
-  heavyAttackLunge: 150,
-  comboWindow: 0.28,
   castTime: 0.2, // brief commit while a spell leaves the hand
   castRecoil: 40, // backward brace when a spell fires
   hurtInvuln: 1.1,
@@ -69,7 +71,7 @@ export const PLAYER_TUNING = {
 /**
  * The player knight: an FSM over move/attack/dash/dead, with the classic
  * feel kit — coyote time, jump buffering, jump cut, attack buffering,
- * squash & stretch, dash i-frames, 3-hit combo with a heavy finisher.
+ * squash & stretch, dash i-frames, and definition-driven weapon combos.
  */
 export class Player extends Actor {
   team = 'player' as const;
@@ -122,7 +124,8 @@ export class Player extends Actor {
   private jumpBuf = new Buffer(PLAYER_TUNING.jumpBufferTime);
   private atkBuf = new Buffer(PLAYER_TUNING.attackBufferTime);
   private coyote = new Buffer(PLAYER_TUNING.coyoteTime);
-  private comboWin = new Buffer(PLAYER_TUNING.comboWindow);
+  private comboT = 0;
+  private comboWeaponId = 'unarmed';
 
   /** Vertical squash factor for landing/jumping (1 = normal). */
   squash = 1;
@@ -130,6 +133,7 @@ export class Player extends Actor {
   private dashCd = 0;
   private attackIndex = 0;
   private attackDur = 0;
+  private attackDef: WeaponAttackDef | null = null;
   private strike: Strike | null = null;
   /** Active spell + its animation window (the `cast` state). */
   private pendingSkill: string | null = null;
@@ -212,9 +216,9 @@ export class Player extends Actor {
     this.game.events.emit('levelUp', { level });
   }
 
-  /** The attack spec of whatever's in the weapon slot (fists if empty). */
-  get weapon(): WeaponSpec {
-    return weaponSpecOf(this.equipment.get('weapon'));
+  /** The registered weapon in the equipment slot (fists if empty). */
+  get weapon(): WeaponDef {
+    return weaponDefOf(this.equipment.get('weapon'));
   }
 
   /* ---------------- definition-owned swallow interactions ---------------- */
@@ -322,36 +326,44 @@ export class Player extends Actor {
 
   beginAttack(): void {
     const w = this.weapon;
-    this.attackIndex = this.comboWin.consume() ? (this.attackIndex + 1) % 3 : 0;
-    const heavy = this.attackIndex === 2;
-    this.attackDur = heavy ? 0.3 : 0.2;
+    const type = weaponTypeOf(w);
+    const continues = this.comboT > 0 && this.comboWeaponId === w.id;
+    this.attackIndex = continues ? (this.attackIndex + 1) % type.attacks.length : 0;
+    this.comboT = 0;
+    this.attackDef = type.attacks[this.attackIndex];
+    this.attackDur = this.attackDef.duration;
     // The lunge follows intent: full step when holding toward the target,
     // a nudge when neutral, NONE when holding away — so you can poke a
     // dangerous boss without being carried into his contact damage.
     const held = this.input.axis('left', 'right');
-    const base = heavy ? PLAYER_TUNING.heavyAttackLunge : PLAYER_TUNING.attackLunge;
-    const lunge = held === this.facing ? base : held === 0 ? base * 0.25 : 0;
+    const base = this.attackDef.lunge;
+    const lunge = held === this.facing ? base : held === 0 ? base * 0.05 : 0;
     this.vx += this.facing * lunge;
     // Damage/feel come from the equipped weapon; flat bonus from stats;
     // EXECUTIONER (skill tree) boosts the finisher.
-    const executioner = heavy && this.capabilities.has('heavyFinisherBonus') ? 2 : 0;
+    const executioner = this.attackDef.finisher && this.capabilities.has('heavyFinisherBonus') ? 2 : 0;
     this.strike = this.game.combat.strike({
-      damage: (heavy ? w.heavyDamage : w.lightDamage) + Math.round(this.stats.get('attack')) + executioner,
+      damage: Math.round(w.baseDamage * this.attackDef.damageScale)
+        + Math.round(this.stats.get('attack'))
+        + executioner,
       targets: 'enemy',
       attacker: this,
-      strength: heavy ? w.heavyStrength : w.lightStrength,
-      colors: w.colors,
+      strength: this.attackDef.strength,
+      colors: [...w.colors],
     });
     this.feel.sfx.play('slash');
   }
 
   attackUpdate(dt: number): string | void {
-    this.vx *= friction(0.002, dt);
+    const attack = this.attackDef;
+    if (!attack) return 'move';
+    this.vx *= friction(attack.movementKeep, dt);
     const prog = this.fsm.t / this.attackDur;
-    // Active frames: 10%..60% of the swing.
-    if (prog > 0.1 && prog < 0.6) this.strike?.apply(this.attackBox());
+    if (prog > attack.active[0] && prog < attack.active[1]) this.strike?.apply(this.attackBox());
     if (prog >= 1) {
-      this.comboWin.set(); // chain window for the next combo hit
+      const weapon = this.weapon;
+      this.comboT = weaponTypeOf(weapon).comboWindow;
+      this.comboWeaponId = weapon.id;
       return 'move';
     }
   }
@@ -398,15 +410,15 @@ export class Player extends Actor {
 
   /** Active attack hitbox in world space (only valid during attack state). */
   attackBox(): Rect {
-    const heavy = this.attackIndex === 2;
-    const reach = this.weapon.reach;
-    const w = (heavy ? 26 : 20) + reach;
-    const h = (heavy ? 20 : 16) + Math.max(0, reach / 2);
+    const hitbox = this.attackDef?.hitbox;
+    if (!hitbox) return { x: this.x, y: this.y, w: 0, h: 0 };
     return {
-      x: this.facing === 1 ? this.x + this.w - 2 : this.x - w + 2,
-      y: this.y + this.h / 2 - h / 2,
-      w,
-      h,
+      x: this.facing === 1
+        ? this.x + this.w + hitbox.forward
+        : this.x - hitbox.forward - hitbox.w,
+      y: this.y + this.h / 2 - hitbox.h / 2 + hitbox.y,
+      w: hitbox.w,
+      h: hitbox.h,
     };
   }
 
@@ -438,6 +450,7 @@ export class Player extends Actor {
     this.invulnT = PLAYER_TUNING.hurtInvuln;
     this.feel.sfx.play('hurt');
     this.feel.flash(0.35, COLORS.red);
+    this.comboT = 0;
     this.game.events.emit('playerHurt', { hp: this.hp });
     if (this.hp > 0 && !this.fsm.is('dead', 'swallowed')) this.fsm.set('move');
   }
@@ -477,7 +490,7 @@ export class Player extends Actor {
     this.jumpBuf.update(dt);
     this.atkBuf.update(dt);
     this.coyote.update(dt);
-    this.comboWin.update(dt);
+    this.comboT = Math.max(0, this.comboT - dt);
     this.dashCd = Math.max(0, this.dashCd - dt);
     this.skills.update(dt);
     this.statuses.update(dt);
@@ -594,27 +607,25 @@ export class Player extends Actor {
 
     if (this.fsm.is('attack')) {
       const prog = clamp(this.fsm.t / this.attackDur, 0, 1);
-      const heavy = this.attackIndex === 2;
-      const upper = this.attackIndex === 1;
-      const mag = heavy ? 1.4 : 1;
+      const attack = this.attackDef;
+      if (!attack) return { shear: 0, ox: 0, oy: 0, sx: 1, sy: 1 };
+      const mag = attack.bodyWeight;
       let shear: number;
       let ox: number;
-      if (prog < 0.28) {
-        const w = prog / 0.28; // wind up: coil back
+      if (prog < attack.active[0]) {
+        const w = prog / attack.active[0]; // wind up: coil back
         shear = f * 0.22 * mag * w;
         ox = -f * 2 * mag * w;
-      } else if (prog < 0.55) {
-        const s = (prog - 0.28) / 0.27; // strike: whip through
+      } else if (prog < attack.active[1]) {
+        const s = (prog - attack.active[0]) / (attack.active[1] - attack.active[0]);
         shear = (f * 0.22 - f * 0.52 * s) * mag;
         ox = (-f * 2 + f * 5 * s) * mag;
       } else {
-        const r = (prog - 0.55) / 0.45; // recover: settle to neutral
+        const r = (prog - attack.active[1]) / (1 - attack.active[1]);
         shear = -f * 0.3 * mag * (1 - r);
         ox = f * 3 * mag * (1 - r);
       }
-      let oy = 0;
-      if (heavy) oy -= 3 * Math.sin(prog * Math.PI); // a committed hop
-      if (upper) oy -= 2 * Math.sin(prog * Math.PI); // the uppercut rises
+      const oy = -attack.lift * Math.sin(prog * Math.PI);
       return { shear, ox, oy, sx: 1, sy: 1 };
     }
 
@@ -736,7 +747,10 @@ export class Player extends Actor {
         bodyW: dw,
         bodyH: dh,
         attack: this.fsm.is('attack')
-          ? { index: this.attackIndex, progress: Math.min(1, this.fsm.t / this.attackDur) }
+          ? {
+              progress: Math.min(1, this.fsm.t / this.attackDur),
+              def: this.attackDef!,
+            }
           : undefined,
       });
     }
@@ -749,9 +763,11 @@ export class Player extends Actor {
         x: cx,
         y: by - dh * 0.45,
         facing: this.facing,
-        reach: weapon.reach,
-        colors: weapon.colors,
-        attack: { index: this.attackIndex, progress: Math.min(1, this.fsm.t / this.attackDur) },
+        colors: [...weapon.colors],
+        attack: {
+          progress: Math.min(1, this.fsm.t / this.attackDur),
+          def: this.attackDef!,
+        },
       });
     }
   }
