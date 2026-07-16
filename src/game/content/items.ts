@@ -1,8 +1,6 @@
-import { defineItem, itemDef } from '@engine/index';
+import { defineItem } from '@engine/index';
 import { COLORS } from './palette';
 import {
-  ICON_SWORD,
-  ICON_GREATSWORD,
   ICON_POTION,
   ICON_ORB,
   ICON_CHARM,
@@ -12,6 +10,7 @@ import {
 } from './sprites';
 import type { ActionGame } from '../defs';
 import type { Player } from '../actors/player';
+import { weaponIcon } from './weapon-visuals';
 
 /** Context handed to item use/onPickup hooks. */
 export interface ItemCtx {
@@ -19,87 +18,21 @@ export interface ItemCtx {
   player: Player;
 }
 
-/**
- * The item catalog. Weapons are equipment whose `props.weapon` carries an
- * attack spec the player's swing reads — so weapon variety needs no
- * player-code changes.
- */
-export interface WeaponSpec {
-  lightDamage: number;
-  heavyDamage: number;
-  lightStrength: number;
-  heavyStrength: number;
-  /** Extra hitbox size in px over bare fists. */
-  reach: number;
-  /** Slash/impact particle colors. */
-  colors: string[];
-  /** Held-weapon look (drawn in hand). blade length 0 = bare hands. */
-  bladeLen: number;
-  bladeW: number;
-  blade: string;
-  hilt: string;
-}
-
-function parseWeaponSpec(value: unknown, path: string): WeaponSpec {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`${path}: expected a weapon object`);
-  }
-  const spec = value as Record<string, unknown>;
-  const numbers = ['lightDamage', 'heavyDamage', 'lightStrength', 'heavyStrength', 'reach', 'bladeLen', 'bladeW'] as const;
-  for (const key of numbers) {
-    if (typeof spec[key] !== 'number' || !Number.isFinite(spec[key])) {
-      throw new Error(`${path}.${key}: expected a finite number`);
-    }
-  }
-  for (const key of ['blade', 'hilt'] as const) {
-    if (typeof spec[key] !== 'string') throw new Error(`${path}.${key}: expected a color string`);
-  }
-  if (!Array.isArray(spec.colors) || spec.colors.length === 0 || spec.colors.some((color) => typeof color !== 'string')) {
-    throw new Error(`${path}.colors: expected a non-empty string array`);
-  }
-  return spec as unknown as WeaponSpec;
-}
-
-function weaponProps(itemId: string, spec: WeaponSpec): { weapon: WeaponSpec } {
-  return { weapon: parseWeaponSpec(spec, `item "${itemId}".props.weapon`) };
-}
-
-export function weaponSpecOf(itemId: string | null): WeaponSpec {
-  const fallback: WeaponSpec = {
-    lightDamage: 1, heavyDamage: 1, lightStrength: 0.3, heavyStrength: 0.5,
-    reach: -6, colors: [COLORS.white],
-    bladeLen: 0, bladeW: 1, blade: COLORS.steel, hilt: COLORS.gold, // fists: nothing drawn
-  };
-  if (!itemId) return fallback;
-  const value = itemDef(itemId).props?.weapon;
-  return value === undefined ? fallback : parseWeaponSpec(value, `item "${itemId}".props.weapon`);
-}
-
 defineItem<ItemCtx>('rusty-sword', {
   name: 'RUSTY SWORD',
   desc: 'A knight starts somewhere.',
-  icon: ICON_SWORD,
+  icon: weaponIcon('rusty-sword'),
   kind: 'equipment',
   slot: 'weapon',
-  props: weaponProps('rusty-sword', {
-    lightDamage: 1, heavyDamage: 2, lightStrength: 0.45, heavyStrength: 0.8,
-    reach: 0, colors: [COLORS.white, COLORS.gold],
-    bladeLen: 7, bladeW: 1, blade: COLORS.steel, hilt: COLORS.gold,
-  }),
 });
 
 defineItem<ItemCtx>('great-sword', {
   name: 'GREAT SWORD',
   desc: 'Slow heart, heavy hands.',
-  icon: ICON_GREATSWORD,
+  icon: weaponIcon('great-sword'),
   kind: 'equipment',
   slot: 'weapon',
   mods: { add: { attack: 1 } },
-  props: weaponProps('great-sword', {
-    lightDamage: 2, heavyDamage: 4, lightStrength: 0.6, heavyStrength: 1.0,
-    reach: 5, colors: [COLORS.gold, COLORS.white, COLORS.red],
-    bladeLen: 12, bladeW: 2, blade: COLORS.gold, hilt: COLORS.red,
-  }),
 });
 
 defineItem<ItemCtx>('iron-helmet', {

@@ -128,25 +128,47 @@ Drop it from monsters by adding to their `drops` table, place it in a room, or g
 
 ## A new weapon
 
-A weapon is an equipment item whose `props.weapon` carries the attack spec the player's swing reads:
+A weapon separates combat data from appearance. First register its visual:
 
 ```ts
+defineWeaponVisual('dagger', proceduralBlade({
+  bladeLen: 5,
+  bladeW: 1,
+  blade: COLORS.steel,
+  hilt: COLORS.gold,
+}));
+```
+
+Define a weapon type when its swing rhythm is new. Types can be shared by
+several items (for example, rusty and iron swords):
+
+```ts
+defineWeaponType('dagger', {
+  comboWindow: 0.2,
+  attacks: [{
+    animation: 'attack', frameDirection: 1,
+    duration: 0.14, active: [0.12, 0.55],
+    damageScale: 1, strength: 0.3, lunge: 55,
+    hitbox: { forward: -2, y: 0, w: 16, h: 12 },
+    trail: { startAngle: -1.1, endAngle: 1.1, radius: 11, thickness: 2.5 },
+    bodyWeight: 0.8, lift: 0, movementKeep: 0.003,
+  }],
+});
+
+defineWeapon('dagger', {
+  type: 'dagger', visual: 'dagger', baseDamage: 1,
+  colors: [COLORS.white],
+});
+
 defineItem<ItemCtx>('dagger', {
   name: 'DAGGER', desc: 'Fast and mean.',
-  icon: ICON_DAGGER, kind: 'equipment', slot: 'weapon',
-  props: {
-    weapon: {
-      lightDamage: 1, heavyDamage: 2,
-      lightStrength: 0.3, heavyStrength: 0.6,   // feel scale per hit
-      reach: -4,                                 // hitbox size delta
-      colors: [COLORS.white],
-      bladeLen: 5, bladeW: 1, blade: COLORS.steel, hilt: COLORS.gold,
-    } satisfies WeaponSpec,
-  },
+  icon: weaponIcon('dagger'), kind: 'equipment', slot: 'weapon',
 });
 ```
 
-No player-code changes: damage, feel strength, reach, slash colors all flow from the equipped item. Stat bonuses (`mods: { add: { attack: 1 } }`) stack on top.
+No player-code changes: combo length, timing, damage windows, range, lunge, feel strength, body motion, slash colors, held art, and attack trail flow from the registries. Stat bonuses (`mods: { add: { attack: 1 } }`) stack on top. `unarmed` is registered through the same path rather than handled as a fallback special case.
+
+For authored art, create a transparent weapon-only JSON sheet with `idle`/`run`/`air` frames aligned to the knight's world origin (optionally add `attack` frames), load it with `loadSprite` + `withFacing`, and register `spriteWeapon({ anims, origin?, anchors? })`. A sheet may be larger than the knight frame so long blades and attack arcs are not clipped. `spriteWeapon` also trims and fits the idle frame into the standard item-icon footprint, so the item can use `weaponIcon(visualId)` instead of duplicating art in `icons.json`. The built-in swords follow this route in `content/sprites/equipment/`; `scripts/generate-weapon-sheets.mjs` is their reproducible source. The sprite editor can refine the sheets, while the origin and anchors provide alignment corrections without adding weapon logic to Player.
 
 ## A new skill / spell
 

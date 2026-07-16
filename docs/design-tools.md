@@ -126,7 +126,7 @@ A single static sprite is just one animation with one frame. `loadSprite` (`src/
 - **frames** — numbered buttons switch frames within the selected animation. **+ frame** (blank), **dup**, **del**.
 - **size (w × h) → resize** — reshape every frame across all animations (content preserved top-left), keeping the sprite uniform.
 - **preview** — plays **every animation at once** at its own fps. The **hd** checkbox toggles between the raw art and the EPX-upscaled version the game actually renders, at the same on-screen size.
-- **load file / save** open a `.json` sprite from disk and download the current one — the easiest way to round-trip `content/sprites/*.json`. **export / import** are the clipboard/textarea equivalents (the older single-animation `{ palette, frames, fps }` shape is accepted too).
+- **existing sprite** is populated recursively from every `.json` file under `content/sprites/`, including nested equipment sheets; the reference selector uses the same catalog. **load file / save** can open any other `.json` sprite from disk and download the current one. **export / import** are the clipboard/textarea equivalents (the older single-animation `{ palette, frames, fps }` shape is accepted too).
 
 ### Getting your work into the game
 
@@ -186,4 +186,4 @@ await loadKnightSheet(knightPng, knightSheet as SheetDescriptor);
 
 ## Why the tools never drift
 
-Neither tool hardcodes content. The level editor's palettes are `tiles.ids()` / `monsters.ids()`; the sprite editor seeds from `PAL`. Register a new tile or monster (see [`adding-content.md`](adding-content.md)) and it appears in the editor on the next reload — no editor edits, ever. That's the same registry-driven design the engine itself uses (see [`architecture.md`](architecture.md)).
+Neither tool hardcodes content. The level editor's palettes are `tiles.ids()` / `monsters.ids()`; the sprite editor seeds from `PAL` and discovers `content/sprites/**/*.json` at build time. Register a new tile or monster, or add a sprite JSON file (see [`adding-content.md`](adding-content.md)), and it appears in the editor on the next reload — no editor edits, ever. That's the same data-driven design the engine itself uses (see [`architecture.md`](architecture.md)).

@@ -27,10 +27,16 @@ import {
   SkillTree,
 } from '@engine/index';
 import type { TreeCtx } from '../content/skilltree';
-import { KNIGHT_ANIMS, TEXEL, baseKnight } from '../content/sprites';
+import { KNIGHT_ANIMS, baseKnight } from '../content/sprites';
 import { gearLayers, DEBUG_ANCHORS } from '../content/gear-visuals';
 import { COLORS } from '../content/palette';
-import { weaponSpecOf, type WeaponSpec } from '../content/items';
+import {
+  weaponDefOf,
+  weaponTypeOf,
+  type WeaponAttackDef,
+  type WeaponDef,
+} from '../content/weapons';
+import { drawHeldWeapon, drawWeaponTrail } from '../content/weapon-visuals';
 import { DEFAULT_SKILL_LOADOUT, type SkillCtx } from '../content/skills';
 import { Monster } from './monster';
 import { PlayerCapabilities } from './player-capabilities';
@@ -55,9 +61,6 @@ export const PLAYER_TUNING = {
   dashTime: 0.16,
   dashCooldown: 0.45,
   dashInvuln: 0.2,
-  attackLunge: 45,
-  heavyAttackLunge: 150,
-  comboWindow: 0.28,
   castTime: 0.2, // brief commit while a spell leaves the hand
   castRecoil: 40, // backward brace when a spell fires
   hurtInvuln: 1.1,
@@ -68,7 +71,7 @@ export const PLAYER_TUNING = {
 /**
  * The player knight: an FSM over move/attack/dash/dead, with the classic
  * feel kit — coyote time, jump buffering, jump cut, attack buffering,
- * squash & stretch, dash i-frames, 3-hit combo with a heavy finisher.
+ * squash & stretch, dash i-frames, and definition-driven weapon combos.
  */
 export class Player extends Actor {
   team = 'player' as const;
@@ -121,7 +124,8 @@ export class Player extends Actor {
   private jumpBuf = new Buffer(PLAYER_TUNING.jumpBufferTime);
   private atkBuf = new Buffer(PLAYER_TUNING.attackBufferTime);
   private coyote = new Buffer(PLAYER_TUNING.coyoteTime);
-  private comboWin = new Buffer(PLAYER_TUNING.comboWindow);
+  private comboT = 0;
+  private comboWeaponId = 'unarmed';
 
   /** Vertical squash factor for landing/jumping (1 = normal). */
   squash = 1;
@@ -129,6 +133,7 @@ export class Player extends Actor {
   private dashCd = 0;
   private attackIndex = 0;
   private attackDur = 0;
+  private attackDef: WeaponAttackDef | null = null;
   private strike: Strike | null = null;
   /** Active spell + its animation window (the `cast` state). */
   private pendingSkill: string | null = null;
@@ -211,9 +216,9 @@ export class Player extends Actor {
     this.game.events.emit('levelUp', { level });
   }
 
-  /** The attack spec of whatever's in the weapon slot (fists if empty). */
-  get weapon(): WeaponSpec {
-    return weaponSpecOf(this.equipment.get('weapon'));
+  /** The registered weapon in the equipment slot (fists if empty). */
+  get weapon(): WeaponDef {
+    return weaponDefOf(this.equipment.get('weapon'));
   }
 
   /* ---------------- definition-owned swallow interactions ---------------- */
@@ -321,36 +326,44 @@ export class Player extends Actor {
 
   beginAttack(): void {
     const w = this.weapon;
-    this.attackIndex = this.comboWin.consume() ? (this.attackIndex + 1) % 3 : 0;
-    const heavy = this.attackIndex === 2;
-    this.attackDur = heavy ? 0.3 : 0.2;
+    const type = weaponTypeOf(w);
+    const continues = this.comboT > 0 && this.comboWeaponId === w.id;
+    this.attackIndex = continues ? (this.attackIndex + 1) % type.attacks.length : 0;
+    this.comboT = 0;
+    this.attackDef = type.attacks[this.attackIndex];
+    this.attackDur = this.attackDef.duration;
     // The lunge follows intent: full step when holding toward the target,
     // a nudge when neutral, NONE when holding away — so you can poke a
     // dangerous boss without being carried into his contact damage.
     const held = this.input.axis('left', 'right');
-    const base = heavy ? PLAYER_TUNING.heavyAttackLunge : PLAYER_TUNING.attackLunge;
-    const lunge = held === this.facing ? base : held === 0 ? base * 0.25 : 0;
+    const base = this.attackDef.lunge;
+    const lunge = held === this.facing ? base : held === 0 ? base * 0.05 : 0;
     this.vx += this.facing * lunge;
     // Damage/feel come from the equipped weapon; flat bonus from stats;
     // EXECUTIONER (skill tree) boosts the finisher.
-    const executioner = heavy && this.capabilities.has('heavyFinisherBonus') ? 2 : 0;
+    const executioner = this.attackDef.finisher && this.capabilities.has('heavyFinisherBonus') ? 2 : 0;
     this.strike = this.game.combat.strike({
-      damage: (heavy ? w.heavyDamage : w.lightDamage) + Math.round(this.stats.get('attack')) + executioner,
+      damage: Math.round(w.baseDamage * this.attackDef.damageScale)
+        + Math.round(this.stats.get('attack'))
+        + executioner,
       targets: 'enemy',
       attacker: this,
-      strength: heavy ? w.heavyStrength : w.lightStrength,
-      colors: w.colors,
+      strength: this.attackDef.strength,
+      colors: [...w.colors],
     });
     this.feel.sfx.play('slash');
   }
 
   attackUpdate(dt: number): string | void {
-    this.vx *= friction(0.002, dt);
+    const attack = this.attackDef;
+    if (!attack) return 'move';
+    this.vx *= friction(attack.movementKeep, dt);
     const prog = this.fsm.t / this.attackDur;
-    // Active frames: 10%..60% of the swing.
-    if (prog > 0.1 && prog < 0.6) this.strike?.apply(this.attackBox());
+    if (prog > attack.active[0] && prog < attack.active[1]) this.strike?.apply(this.attackBox());
     if (prog >= 1) {
-      this.comboWin.set(); // chain window for the next combo hit
+      const weapon = this.weapon;
+      this.comboT = weaponTypeOf(weapon).comboWindow;
+      this.comboWeaponId = weapon.id;
       return 'move';
     }
   }
@@ -397,15 +410,15 @@ export class Player extends Actor {
 
   /** Active attack hitbox in world space (only valid during attack state). */
   attackBox(): Rect {
-    const heavy = this.attackIndex === 2;
-    const reach = this.weapon.reach;
-    const w = (heavy ? 26 : 20) + reach;
-    const h = (heavy ? 20 : 16) + Math.max(0, reach / 2);
+    const hitbox = this.attackDef?.hitbox;
+    if (!hitbox) return { x: this.x, y: this.y, w: 0, h: 0 };
     return {
-      x: this.facing === 1 ? this.x + this.w - 2 : this.x - w + 2,
-      y: this.y + this.h / 2 - h / 2,
-      w,
-      h,
+      x: this.facing === 1
+        ? this.x + this.w + hitbox.forward
+        : this.x - hitbox.forward - hitbox.w,
+      y: this.y + this.h / 2 - hitbox.h / 2 + hitbox.y,
+      w: hitbox.w,
+      h: hitbox.h,
     };
   }
 
@@ -437,6 +450,7 @@ export class Player extends Actor {
     this.invulnT = PLAYER_TUNING.hurtInvuln;
     this.feel.sfx.play('hurt');
     this.feel.flash(0.35, COLORS.red);
+    this.comboT = 0;
     this.game.events.emit('playerHurt', { hp: this.hp });
     if (this.hp > 0 && !this.fsm.is('dead', 'swallowed')) this.fsm.set('move');
   }
@@ -476,7 +490,7 @@ export class Player extends Actor {
     this.jumpBuf.update(dt);
     this.atkBuf.update(dt);
     this.coyote.update(dt);
-    this.comboWin.update(dt);
+    this.comboT = Math.max(0, this.comboT - dt);
     this.dashCd = Math.max(0, this.dashCd - dt);
     this.skills.update(dt);
     this.statuses.update(dt);
@@ -593,27 +607,25 @@ export class Player extends Actor {
 
     if (this.fsm.is('attack')) {
       const prog = clamp(this.fsm.t / this.attackDur, 0, 1);
-      const heavy = this.attackIndex === 2;
-      const upper = this.attackIndex === 1;
-      const mag = heavy ? 1.4 : 1;
+      const attack = this.attackDef;
+      if (!attack) return { shear: 0, ox: 0, oy: 0, sx: 1, sy: 1 };
+      const mag = attack.bodyWeight;
       let shear: number;
       let ox: number;
-      if (prog < 0.28) {
-        const w = prog / 0.28; // wind up: coil back
+      if (prog < attack.active[0]) {
+        const w = prog / attack.active[0]; // wind up: coil back
         shear = f * 0.22 * mag * w;
         ox = -f * 2 * mag * w;
-      } else if (prog < 0.55) {
-        const s = (prog - 0.28) / 0.27; // strike: whip through
+      } else if (prog < attack.active[1]) {
+        const s = (prog - attack.active[0]) / (attack.active[1] - attack.active[0]);
         shear = (f * 0.22 - f * 0.52 * s) * mag;
         ox = (-f * 2 + f * 5 * s) * mag;
       } else {
-        const r = (prog - 0.55) / 0.45; // recover: settle to neutral
+        const r = (prog - attack.active[1]) / (1 - attack.active[1]);
         shear = -f * 0.3 * mag * (1 - r);
         ox = f * 3 * mag * (1 - r);
       }
-      let oy = 0;
-      if (heavy) oy -= 3 * Math.sin(prog * Math.PI); // a committed hop
-      if (upper) oy -= 2 * Math.sin(prog * Math.PI); // the uppercut rises
+      const oy = -attack.lift * Math.sin(prog * Math.PI);
       return { shear, ox, oy, sx: 1, sy: 1 };
     }
 
@@ -687,19 +699,19 @@ export class Player extends Actor {
     g.scale(sx, sy);
     if (pose.shear) g.transform(1, 0, pose.shear, 1, 0, 0);
     g.drawImage(finalImg, -dw / 2, -dh, dw, dh);
+
+    const animObj = this.animSet.right[anim];
+    const frameIdx = animObj
+      ? (animObj.loop === false
+        ? Math.min(Math.floor(this.animT * animObj.fps), animObj.frames.length - 1)
+        : Math.floor(this.animT * animObj.fps) % animObj.frames.length)
+      : 0;
     
     // Visible gear draws as registered layers over the body (armor under
     // helmet, etc). Any equipped slot with a visual in the gear-visuals
     // registry composites here — new gear slots need no player changes.
     if (this.flashT <= 0 && !isSwallowed) {
       const f = this.facing;
-
-      const animObj = this.animSet.right[anim];
-      const frameIdx = animObj
-        ? (animObj.loop === false
-          ? Math.min(Math.floor(this.animT * animObj.fps), animObj.frames.length - 1)
-          : Math.floor(this.animT * animObj.fps) % animObj.frames.length)
-        : 0;
 
       for (const [slot, visual] of gearLayers()) {
         if (this.equipment.get(slot) === null) continue;
@@ -723,164 +735,40 @@ export class Player extends Actor {
       this.swallowedBy.def.swallow?.drawPlayerOverlay?.(g, this.swallowedBy, this, dw, dh);
     }
     
-    // Gear rides the body transform so it leans/squashes with the knight.
-    // During an attack the slash arc IS the weapon, so the held one hides.
+    // Equipment visuals ride the same body transform as the knight.
     if (this.flashT <= 0) {
       if (this.equipment.get('charm')) this.renderCharm(g, dh);
-      this.renderWeapon(g, dw, dh, anim, this.animT);
+      const weapon = this.weapon;
+      drawHeldWeapon(g, weapon.visual, {
+        facing: this.facing,
+        anim,
+        frame: frameIdx,
+        animT: this.animT,
+        bodyW: dw,
+        bodyH: dh,
+        attack: this.fsm.is('attack')
+          ? {
+              progress: Math.min(1, this.fsm.t / this.attackDur),
+              def: this.attackDef!,
+            }
+          : undefined,
+      });
     }
     g.restore();
     g.globalAlpha = 1;
 
-    if (this.fsm.is('attack')) this.renderSlash(g, cx, by - dh * 0.45);
-  }
-
-  /** The equipped weapon, held at rest in the hand (body-local coords). */
-  private renderWeapon(g: CanvasRenderingContext2D, dw: number, dh: number, animName: string, animT: number): void {
-    const w = this.weapon;
-    if (!w.bladeLen) return; // bare hands
-    const f = this.facing;
-
-    // Calculate current frame index for the animation
-    const animObj = this.animSet.right[animName];
-    const frameIdx = animObj
-      ? (animObj.loop === false
-        ? Math.min(Math.floor(animT * animObj.fps), animObj.frames.length - 1)
-        : Math.floor(animT * animObj.fps) % animObj.frames.length)
-      : 0;
-
-    // Hand offsets in logical pixels (feet-centered):
-    let hx = 1.75;
-    let hy = -4.5;
-    
-    if (animName === 'run') {
-      if (frameIdx === 0) {
-        hx = 2.25;
-        hy = -5.25;
-      } else if (frameIdx === 2) {
-        hx = 1.25;
-        hy = -5.25;
-      } else {
-        hx = 1.75;
-        hy = -4.5;
-      }
-    } else if (animName === 'air') {
-      hx = 1.5;
-      hy = -5.0;
-    } else {
-      // idle sway
-      hy += Math.sin(animT * 4.5) * 0.2;
-    }
-
-    // Blade tilt angle: defaults to a 30-degree rest tilt
-    let dx = 0.866;
-    let dy = -0.5;
-
     if (this.fsm.is('attack')) {
-      // Rotate the sword along with the swing arc
-      const prog = Math.min(1, this.fsm.t / this.attackDur);
-      const flipV = this.attackIndex === 1 ? -1 : 1;
-      const sweep = (-1.3 + 2.6 * Math.min(1, prog * 1.7)) * flipV;
-      dx = Math.cos(sweep);
-      dy = Math.sin(sweep);
-    }
-
-    const q = (v: number) => Math.round(v * TEXEL) / TEXEL;
-    const stepSize = 1 / TEXEL;
-
-    // Perpendicular vector for blade width
-    const px = -dy * f;
-    const py = dx; // dx is positive before facing factor
-
-    // Apply facing direction to X components
-    hx *= f;
-    dx *= f;
-
-    // 1. Render Grip/Handle (leather wrap) extending backwards
-    const gripLen = 5;
-    for (let k = 1; k <= gripLen; k++) {
-      const gx = hx - k * dx * stepSize;
-      const gy = hy - k * dy * stepSize;
-      g.fillStyle = '#302426'; // dark brown leather
-      g.fillRect(q(gx), q(gy), stepSize, stepSize);
-      g.fillRect(q(gx + px * stepSize), q(gy + py * stepSize), stepSize, stepSize);
-    }
-
-    // Pommel at the very end of grip
-    const px_end = hx - (gripLen + 1) * dx * stepSize;
-    const py_end = hy - (gripLen + 1) * dy * stepSize;
-    g.fillStyle = w.hilt;
-    g.fillRect(q(px_end), q(py_end), stepSize, stepSize);
-    g.fillRect(q(px_end + px * stepSize), q(py_end + py * stepSize), stepSize, stepSize);
-
-    // 2. Render Angled Crossguard (perpendicular to blade direction)
-    const guardHalfLen = w.bladeW === 1 ? 5 : 8;
-    g.fillStyle = w.hilt;
-    for (let k = -guardHalfLen; k <= guardHalfLen; k++) {
-      // Position along crossguard line
-      const gx = hx + k * px * stepSize;
-      const gy = hy + k * py * stepSize;
-      // Taper the crossguard thickness
-      const thick = Math.max(1, 3 - Math.floor(Math.abs(k) / 3));
-      for (let t = -Math.floor(thick / 2); t < Math.ceil(thick / 2); t++) {
-        const gxx = gx + t * dx * stepSize;
-        const gyy = gy + t * dy * stepSize;
-        g.fillRect(q(gxx), q(gyy), stepSize, stepSize);
-      }
-    }
-
-    // 3. Render Blade (steps forward/up from hand)
-    const fineLen = w.bladeLen * TEXEL;
-    const fineW = w.bladeW === 1 ? 3 : 6;
-
-    for (let i = 1; i <= fineLen; i++) {
-      // Center of the blade at this segment
-      const cx = hx + i * dx * stepSize;
-      const cy = hy + i * dy * stepSize;
-
-      // Calculate width with tapering near the tip
-      let currentW = fineW;
-      if (i >= fineLen - 3) {
-        currentW = Math.max(1, fineW - (i - (fineLen - 3)) * 2);
-      }
-
-      const halfW = (currentW - 1) / 2;
-      const startJ = -Math.ceil(halfW);
-      const endJ = Math.floor(halfW);
-
-      for (let j = startJ; j <= endJ; j++) {
-        const bx = cx + j * px * stepSize;
-        const by = cy + j * py * stepSize;
-
-        // Determine coloring based on weapon type and relative column
-        let col = w.blade;
-        if (fineW === 6) {
-          // Great Sword details
-          if (j === -3) {
-            col = COLORS.outline; // dark silhouette back-edge
-          } else if (j === -2) {
-            col = w.blade; // gold body
-          } else if (j === -1 || j === 0) {
-            col = COLORS.steelDark; // fuller groove
-          } else if (j === 1) {
-            col = w.blade; // gold body
-          } else if (j === 2 || i >= fineLen - 1) {
-            col = COLORS.white; // gleaming leading edge & tip
-          }
-        } else {
-          // Light Sword (Rusty Sword) details
-          if (j === -1) {
-            col = w.blade; // steel body
-          } else if (j === 0) {
-            col = COLORS.steelDark; // central core
-          } else if (j === 1 || i >= fineLen - 1) {
-            col = COLORS.white; // gleaming leading edge & tip
-          }
-        }
-
-        g.fillStyle = col;
-        g.fillRect(q(bx), q(by), stepSize, stepSize);
-      }
+      const weapon = this.weapon;
+      drawWeaponTrail(g, weapon.visual, {
+        x: cx,
+        y: by - dh * 0.45,
+        facing: this.facing,
+        colors: [...weapon.colors],
+        attack: {
+          progress: Math.min(1, this.fsm.t / this.attackDur),
+          def: this.attackDef!,
+        },
+      });
     }
   }
 
@@ -893,89 +781,6 @@ export class Player extends Actor {
     g.fillRect(0, cy, 1, 1);
   }
 
-  /** Sword arc: a sweeping stroke with a bright leading tip. */
-  private renderSlash(g: CanvasRenderingContext2D, cx: number, my: number): void {
-    const prog = Math.min(1, this.fsm.t / this.attackDur);
-    const heavy = this.attackIndex === 2;
-    const r = (heavy ? 17 : 13) + Math.max(0, Math.round(this.weapon.reach / 2));
-    const flipV = this.attackIndex === 1 ? -1 : 1;
-    const sweep = (-1.3 + 2.6 * Math.min(1, prog * 1.7)) * flipV;
-    const a = this.facing === 1 ? sweep : Math.PI - sweep;
-    const a0 = this.facing === 1 ? -1.3 * flipV : Math.PI + 1.3 * flipV;
-
-    const w = this.weapon;
-    const color1 = w.colors[0] ?? COLORS.steel;
-
-    const q = (v: number) => Math.round(v * TEXEL) / TEXEL;
-    const stepSize = 1 / TEXEL;
-
-    // Define two layers: shadow outline and solid white core
-    const layers = [
-      { color: color1, thickness: heavy ? 5 : 3.5, alpha: 0.4 },
-      { color: COLORS.white, thickness: heavy ? 2.5 : 1.5, alpha: 0.8 }
-    ];
-
-    const N = 24;
-
-    g.save();
-    for (const layer of layers) {
-      g.fillStyle = layer.color;
-      g.globalAlpha = layer.alpha;
-      g.beginPath();
-
-      const outerPoints: [number, number][] = [];
-      const innerPoints: [number, number][] = [];
-
-      for (let s = 0; s <= N; s++) {
-        const t = s / N;
-        const theta = a0 + (a - a0) * t;
-
-        // Crescent thickness profile peaking at 0.8
-        const thicknessProfile = t < 0.8
-          ? Math.sin((t / 0.8) * (Math.PI / 2))
-          : Math.cos(((t - 0.8) / 0.2) * (Math.PI / 2));
-
-        const thick = layer.thickness * thicknessProfile;
-        const cosT = Math.cos(theta);
-        const sinT = Math.sin(theta);
-
-        outerPoints.push([
-          q(cx + cosT * (r + thick / 2)),
-          q(my + sinT * (r + thick / 2))
-        ]);
-
-        innerPoints.push([
-          q(cx + cosT * (r - thick / 2)),
-          q(my + sinT * (r - thick / 2))
-        ]);
-      }
-
-      // Connect outer points going forward
-      g.moveTo(outerPoints[0][0], outerPoints[0][1]);
-      for (let s = 1; s <= N; s++) {
-        g.lineTo(outerPoints[s][0], outerPoints[s][1]);
-      }
-      // Connect inner points going backward
-      for (let s = N; s >= 0; s--) {
-        g.lineTo(innerPoints[s][0], innerPoints[s][1]);
-      }
-      g.closePath();
-      g.fill();
-    }
-    g.restore();
-
-    // Render HD Gleaming Star Flare at the leading tip
-    const tx = cx + Math.cos(a) * r;
-    const ty = my + Math.sin(a) * r;
-    
-    g.fillStyle = COLORS.white;
-    // Central core
-    g.fillRect(q(tx - stepSize), q(ty - stepSize), stepSize * 2, stepSize * 2);
-    // Horizontal flare
-    g.fillRect(q(tx - stepSize * 3), q(ty - stepSize * 0.5), stepSize * 6, stepSize);
-    // Vertical flare
-    g.fillRect(q(tx - stepSize * 0.5), q(ty - stepSize * 3), stepSize, stepSize * 6);
-  }
 }
 
 const PLAYER_STATES: Record<string, StateDef<Player>> = {
