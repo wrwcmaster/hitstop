@@ -27,7 +27,7 @@ import {
   SkillTree,
 } from '@engine/index';
 import type { TreeCtx } from '../content/skilltree';
-import { KNIGHT_ANIMS, TEXEL } from '../content/sprites';
+import { KNIGHT_ANIMS, TEXEL, baseKnight } from '../content/sprites';
 import { gearLayers, DEBUG_ANCHORS } from '../content/gear-visuals';
 import { COLORS } from '../content/palette';
 import { weaponSpecOf, type WeaponSpec } from '../content/items';
@@ -71,8 +71,8 @@ export const PLAYER_TUNING = {
  */
 export class Player extends Actor {
   team = 'player' as const;
-  w = 10;
-  h = 18;
+  w = baseKnight.hitbox.w;
+  h = baseKnight.hitbox.h;
   hp = PLAYER_TUNING.maxHp;
   maxHp = PLAYER_TUNING.maxHp;
 
@@ -659,13 +659,13 @@ export class Player extends Actor {
     let img = frameAt(set, anim, this.animT);
     if (this.flashT > 0) img = whiteOf(img);
 
-    const cx = this.cx;
-    const by = this.y + this.h;
-    // Fit the sprite to the hitbox, anchored at the feet, preserving the
-    // art's aspect ratio: its drawn height matches the collision height so
-    // the knight sits exactly on its 10x18 box rather than towering over it.
-    const dh = this.h;
-    const dw = (img.width / img.height) * dh;
+    // Entity coordinates describe the collision box. Sprite geometry maps
+    // its draw origin onto that box, allowing transparent overhangs without
+    // changing physics.
+    const cx = this.x - baseKnight.hitbox.x + baseKnight.w / 2;
+    const by = this.y - baseKnight.hitbox.y + baseKnight.h;
+    const dh = baseKnight.h;
+    const dw = baseKnight.w;
 
     const q = (v: number) => Math.round(v * 4) / 4;
     if (this.fsm.is('dead')) {

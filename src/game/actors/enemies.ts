@@ -1,6 +1,6 @@
 import { rand, sign, tintOf, itemDef } from '@engine/index';
 import { defineMonster, Monster } from './monster';
-import { SLIME1, SLIME2, BAT1, BAT2, TEXEL, blit } from '../content/sprites';
+import { SLIME1, SLIME2, BAT1, BAT2, TEXEL, blit, slimeSprite, batSprite } from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { Player } from './player';
 
@@ -11,7 +11,7 @@ import { Player } from './player';
  */
 
 defineMonster('slime', {
-  hp: 3, damage: 1, w: 12, h: 7, score: 100,
+  hp: 3, damage: 1, w: slimeSprite.hitbox.w, h: slimeSprite.hitbox.h, score: 100,
   colors: [COLORS.green, COLORS.greenDark, COLORS.greenLight],
   drops: [
     { id: 'coin', chance: 0.4 },
@@ -34,12 +34,12 @@ defineMonster('slime', {
     }
   },
   draw(g, m) {
-    blit(g, m.img(m.onGround ? SLIME1 : SLIME2), m.x, m.y);
+    blit(g, m.img(m.onGround ? SLIME1 : SLIME2), m.x - slimeSprite.hitbox.x, m.y - slimeSprite.hitbox.y);
   },
 });
 
 defineMonster('bat', {
-  hp: 2, damage: 1, w: 12, h: 6, score: 150, flies: true,
+  hp: 2, damage: 1, w: batSprite.hitbox.w, h: batSprite.hitbox.h, score: 150, flies: true,
   colors: [COLORS.purple, COLORS.purpleLight, COLORS.white],
   drops: [
     { id: 'coin', chance: 0.4 },
@@ -65,7 +65,7 @@ defineMonster('bat', {
   },
   draw(g, m) {
     const frame = Math.floor(m.animT * 8) % 2 ? BAT1 : BAT2;
-    blit(g, m.img(frame), m.x, m.y);
+    blit(g, m.img(frame), m.x - batSprite.hitbox.x, m.y - batSprite.hitbox.y);
   },
 });
 

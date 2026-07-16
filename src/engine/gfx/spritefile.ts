@@ -1,5 +1,6 @@
 import { sprite, epx, type Palette } from './sprite';
 import type { AnimSet } from './animation';
+import type { Rect } from '../math/rect';
 
 /**
  * The on-disk sprite format: one JSON file per sprite/character, holding a
@@ -18,7 +19,21 @@ export interface SpriteAnimData {
   loop?: boolean;
 }
 
-export interface SpriteFile {
+/** Draw size and collision bounds, both in logical game pixels. */
+export interface SpriteGeometry {
+  /** Physical drawn size in logical units. */
+  w?: number;
+  h?: number;
+  /** Optional collision hitbox definition (defaults to full physical size). */
+  hitbox?: {
+    x?: number;
+    y?: number;
+    w?: number;
+    h?: number;
+  };
+}
+
+export interface SpriteFile extends SpriteGeometry {
   /** Char → color overrides layered on the base palette. */
   palette?: Palette;
   /** EPX-upscale twice (4x) at load. Default true. */
@@ -27,6 +42,12 @@ export interface SpriteFile {
 }
 
 export interface LoadedSprite {
+  /** Physical drawn width in logical units. */
+  w: number;
+  /** Physical drawn height in logical units. */
+  h: number;
+  /** Collision hitbox relative to drawing origin. */
+  hitbox: Rect;
   /** One baked frame canvas of an animation (default frame 0). */
   frame(anim: string, i?: number): HTMLCanvasElement;
   /** All baked frames of an animation. */
@@ -37,6 +58,40 @@ export interface LoadedSprite {
   animSet(): AnimSet;
 }
 
+/** Resolve optional sprite metadata against the frame's natural draw size. */
+export function resolveSpriteGeometry(
+  geometry: SpriteGeometry,
+  naturalW: number,
+  naturalH: number,
+): Pick<LoadedSprite, 'w' | 'h' | 'hitbox'> {
+  const positive = (value: number | undefined, fallback: number, field: string): number => {
+    const resolved = value ?? fallback;
+    if (!Number.isFinite(resolved) || resolved <= 0) {
+      throw new Error(`sprite: ${field} must be a positive finite number`);
+    }
+    return resolved;
+  };
+  const finite = (value: number | undefined, fallback: number, field: string): number => {
+    const resolved = value ?? fallback;
+    if (!Number.isFinite(resolved)) throw new Error(`sprite: ${field} must be finite`);
+    return resolved;
+  };
+
+  const w = positive(geometry.w, naturalW, 'w');
+  const h = positive(geometry.h, naturalH, 'h');
+  const hb = geometry.hitbox ?? {};
+  return {
+    w,
+    h,
+    hitbox: {
+      x: finite(hb.x, 0, 'hitbox.x'),
+      y: finite(hb.y, 0, 'hitbox.y'),
+      w: positive(hb.w, w, 'hitbox.w'),
+      h: positive(hb.h, h, 'hitbox.h'),
+    },
+  };
+}
+
 /**
  * Bake a SpriteFile into canvases. Frames are baked lazily and cached, so
  * asking for the same frame twice is free.
@@ -45,6 +100,15 @@ export function loadSprite(file: SpriteFile, base: Palette = {}): LoadedSprite {
   const pal: Palette = { ...base, ...(file.palette ?? {}) };
   const bake = (rows: string[]): HTMLCanvasElement =>
     file.hd === false ? sprite(rows, pal) : sprite(epx(epx(rows)), pal);
+
+  // `hd: false` means the grid is already authored at the engine's 4x
+  // texel density, so its natural logical size is one quarter of the grid.
+  const firstAnim = Object.values(file.anims)[0];
+  const firstFrame = firstAnim?.frames[0] ?? [];
+  const cellH = firstFrame.length || 1;
+  const cellW = Math.max(1, ...firstFrame.map((row) => row.length));
+  const density = file.hd === false ? 4 : 1;
+  const geometry = resolveSpriteGeometry(file, cellW / density, cellH / density);
 
   const cache = new Map<string, HTMLCanvasElement[]>();
   const framesOf = (name: string): HTMLCanvasElement[] => {
@@ -57,6 +121,7 @@ export function loadSprite(file: SpriteFile, base: Palette = {}): LoadedSprite {
   };
 
   return {
+    ...geometry,
     frame: (name, i = 0) => framesOf(name)[i],
     frames: framesOf,
     names: () => Object.keys(file.anims),
