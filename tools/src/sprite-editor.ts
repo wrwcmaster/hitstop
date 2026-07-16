@@ -442,12 +442,34 @@ $('btnLoad').onclick = () => ($('fileInput') as HTMLInputElement).click();
       currentChar = firstPaintChar();
       refreshUI();
       flash(`loaded ${f.name}`);
+      ($('selectSprite') as HTMLSelectElement).value = ''; // clear dropdown
     } catch (err) {
       flash(`load failed: ${(err as Error).message}`);
     }
   };
   reader.readAsText(f);
   input.value = ''; // allow re-loading the same file
+};
+
+$('selectSprite').onchange = (e) => {
+  const val = (e.target as HTMLSelectElement).value;
+  if (!val) return;
+  fetch('/src/game/content/sprites/' + val)
+    .then(r => {
+      if (!r.ok) throw new Error(`HTTP error! status: ${r.status}`);
+      return r.json();
+    })
+    .then(json => {
+      file = normalize(json);
+      animName = Object.keys(file.anims)[0];
+      frameIdx = 0;
+      currentChar = firstPaintChar();
+      refreshUI();
+      flash(`loaded ${val}`);
+    })
+    .catch(err => {
+      flash(`load failed: ${err.message}`);
+    });
 };
 
 // Save the current sprite as a downloadable .json.
@@ -518,12 +540,35 @@ $('btnLoadRef').onclick = () => ($('refFileInput') as HTMLInputElement).click();
       refFile = normalize(JSON.parse(String(reader.result)));
       redraw();
       flash(`loaded reference: ${f.name}`);
+      ($('selectRefSprite') as HTMLSelectElement).value = ''; // clear dropdown
     } catch (err) {
       flash(`reference load failed: ${(err as Error).message}`);
     }
   };
   reader.readAsText(f);
   input.value = '';
+};
+
+$('selectRefSprite').onchange = (e) => {
+  const val = (e.target as HTMLSelectElement).value;
+  if (!val) {
+    refFile = null;
+    redraw();
+    return;
+  }
+  fetch('/src/game/content/sprites/' + val)
+    .then(r => {
+      if (!r.ok) throw new Error(`HTTP error! status: ${r.status}`);
+      return r.json();
+    })
+    .then(json => {
+      refFile = normalize(json);
+      redraw();
+      flash(`loaded reference: ${val}`);
+    })
+    .catch(err => {
+      flash(`reference load failed: ${err.message}`);
+    });
 };
 
 ($('showRef') as HTMLInputElement).onchange = () => redraw();
