@@ -7,8 +7,9 @@ import {
   DialogueScene,
   type ConversationChoice,
   type CollisionSource,
+  type LoadedSprite,
 } from '@engine/index';
-import { MERCHANT, blit } from '../content/sprites';
+import { blit, merchantSprite } from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { ShopScene } from '../scenes/shop';
 import { SpawnerScene } from '../scenes/spawner';
@@ -22,7 +23,9 @@ import { Player } from './player';
  */
 export interface NpcDef {
   name: string;
-  sprite: HTMLCanvasElement;
+  sprite: LoadedSprite;
+  /** Animation to render (default: idle). */
+  anim?: string;
   /** Conversation played on interact. */
   greet: string;
   /** Shop opened when a choice labeled with `shopChoice` is picked. */
@@ -52,8 +55,8 @@ export class Npc extends Actor {
   ) {
     super();
     this.def = npcs.get(type);
-    this.w = this.def.sprite.width - 2;
-    this.h = this.def.sprite.height;
+    this.w = this.def.sprite.hitbox.w;
+    this.h = this.def.sprite.hitbox.h;
     this.x = x;
     this.y = y;
     this.layer = 2;
@@ -108,7 +111,13 @@ export class Npc extends Actor {
   }
 
   render(g: CanvasRenderingContext2D): void {
-    blit(g, this.def.sprite, this.x - 1, this.y);
+    const sprite = this.def.sprite;
+    blit(
+      g,
+      sprite.frame(this.def.anim ?? 'idle'),
+      this.x - sprite.hitbox.x,
+      this.y - sprite.hitbox.y,
+    );
     if (this.playerNear()) {
       // Floating interact prompt, labelled for whatever the player is using.
       const bob = Math.sin(this.animT * 4) * 1.5;
@@ -136,14 +145,14 @@ export class Npc extends Actor {
 
 defineNpc('merchant', {
   name: 'MERCHANT',
-  sprite: MERCHANT,
+  sprite: merchantSprite,
   greet: 'merchant-greet',
   shop: 'merchant',
 });
 
 defineNpc('spawner', {
   name: 'SPAWNER',
-  sprite: MERCHANT,
+  sprite: merchantSprite,
   greet: '',
 });
 

@@ -22,7 +22,9 @@ export { sprite, epx, flipped, whiteOf, tintOf, type Palette, type SpriteData } 
 export { withFacing, frameAt, type Anim, type AnimSet, type FacingAnimSet } from './gfx/animation';
 export {
   loadSprite,
+  resolveSpriteGeometry,
   type SpriteFile,
+  type SpriteGeometry,
   type SpriteAnimData,
   type LoadedSprite,
 } from './gfx/spritefile';

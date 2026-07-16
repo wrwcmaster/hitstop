@@ -1,4 +1,4 @@
-import { sprite, epx, type Palette, type SpriteFile } from '@engine/index';
+import { resolveSpriteGeometry, sprite, epx, type Palette, type SpriteFile } from '@engine/index';
 import { PAL } from '@game/content/palette';
 
 /**
@@ -43,6 +43,19 @@ const anim = () => file.anims[animName];
 const cur = () => anim().frames[frameIdx];
 const W = () => cur()[0].length;
 const H = () => cur().length;
+
+function gridSize(rows: string[]): { w: number; h: number } {
+  return {
+    w: Math.max(1, ...rows.map((row) => row.length)),
+    h: Math.max(1, rows.length),
+  };
+}
+
+function geometryOf(spriteFile: SpriteFile, rows: string[]) {
+  const grid = gridSize(rows);
+  const density = spriteFile.hd === false ? 4 : 1;
+  return resolveSpriteGeometry(spriteFile, grid.w / density, grid.h / density);
+}
 
 /* ---------------- dom ---------------- */
 
@@ -395,19 +408,10 @@ function renderPreview(): void {
   const idx = Math.floor(t * (a.fps || 1)) % a.frames.length;
   const rows = a.frames[idx] ?? [];
 
-  // Set preview canvas size dynamically to fit the current animation exactly
-  const cellH = rows.length;
-  const cellW = Math.max(...rows.map(r => r.length));
-  
-  const isHighRes = file.hd === false;
-  
-  // Align with actual game scale (uses WORLD_ZOOM = 2 camera scale in-game)
-  const WORLD_ZOOM = 2;
-  const scale = (isHighRes ? 1 : (hd ? 1 : 4)) * WORLD_ZOOM;
-  const drawRows = (isHighRes || !hd) ? rows : epx(epx(rows));
-  
-  const displayW = (isHighRes ? cellW : cellW * 4) * WORLD_ZOOM;
-  const displayH = (isHighRes ? cellH : cellH * 4) * WORLD_ZOOM;
+  const { w, h, hitbox } = geometryOf(file, rows);
+
+  const displayW = w * 8; // scaled by ZOOM (4) * WORLD_ZOOM (2) = 8
+  const displayH = h * 8;
   
   preview.width = displayW + 16;
   preview.height = displayH + 24;
@@ -421,6 +425,8 @@ function renderPreview(): void {
   pctx.font = '11px monospace';
   pctx.fillText(`${animName}  ${a.fps}fps`, 8, 16);
 
+  const isHighRes = file.hd === false;
+  const drawRows = (isHighRes || !hd) ? rows : epx(epx(rows));
   const img = sprite(drawRows, p);
 
   const x = 8;
@@ -434,26 +440,33 @@ function renderPreview(): void {
       const refIdx = refAnim.frames.length ? Math.floor(t * (refAnim.fps || 1)) % refAnim.frames.length : 0;
       const refRows = refAnim.frames[refIdx] ?? [];
       
+      const refGeometry = geometryOf(refFile, refRows);
       const refIsHighRes = refFile.hd === false;
-      const refScale = (refIsHighRes ? 1 : (hd ? 1 : 4)) * WORLD_ZOOM;
       const refDrawRows = (refIsHighRes || !hd) ? refRows : epx(epx(refRows));
-      
       const refImg = sprite(refDrawRows, refFile.palette ?? PAL);
+
       pctx.save();
-      pctx.translate(x, y);
-      pctx.scale(refScale, refScale);
-      pctx.globalAlpha = 0.45;
-      pctx.drawImage(refImg, 0, 0);
+      pctx.globalAlpha = 0.3;
+      pctx.drawImage(refImg, x, y, refGeometry.w * 8, refGeometry.h * 8);
       pctx.restore();
     }
   }
 
-  pctx.save();
-  pctx.translate(x, y);
-  pctx.scale(scale, scale);
-  pctx.drawImage(img, 0, 0);
-  pctx.restore();
+  // Draw active sprite frame
+  pctx.drawImage(img, x, y, w * 8, h * 8);
 
+  // Draw hitbox border (if enabled)
+  if (($('showHitbox') as HTMLInputElement).checked) {
+    pctx.save();
+    pctx.strokeStyle = 'rgba(255, 68, 68, 0.85)';
+    pctx.lineWidth = 1;
+    const hx = x + hitbox.x * 8;
+    const hy = y + hitbox.y * 8;
+    const hw = hitbox.w * 8;
+    const hh = hitbox.h * 8;
+    pctx.strokeRect(hx + 0.5, hy + 0.5, hw - 1, hh - 1);
+    pctx.restore();
+  }
   requestAnimationFrame(renderPreview);
 }
 
@@ -463,6 +476,14 @@ function syncIO(): void {
   ($('io') as HTMLTextAreaElement).value = JSON.stringify(file, null, 2);
   ($('w') as HTMLInputElement).value = String(W());
   ($('h') as HTMLInputElement).value = String(H());
+
+  const geometry = geometryOf(file, cur());
+  ($('physW') as HTMLInputElement).value = String(geometry.w);
+  ($('physH') as HTMLInputElement).value = String(geometry.h);
+  ($('boxX') as HTMLInputElement).value = String(geometry.hitbox.x);
+  ($('boxY') as HTMLInputElement).value = String(geometry.hitbox.y);
+  ($('boxW') as HTMLInputElement).value = String(geometry.hitbox.w);
+  ($('boxH') as HTMLInputElement).value = String(geometry.hitbox.h);
 }
 
 $('btnExport').onclick = () => {
@@ -560,7 +581,9 @@ function normalize(raw: unknown): SpriteFile {
   if (r && typeof r === 'object' && r.anims) {
     const f = r as unknown as SpriteFile;
     if (!f.anims || !Object.keys(f.anims).length) throw new Error('no animations');
-    return { hd: f.hd ?? true, palette: f.palette ?? { ...PAL }, anims: f.anims };
+    const normalized = { ...f, hd: f.hd ?? true, palette: f.palette ?? { ...PAL } };
+    geometryOf(normalized, Object.values(normalized.anims)[0].frames[0] ?? []);
+    return normalized;
   }
   if (r && Array.isArray(r.frames)) {
     return {
@@ -740,6 +763,49 @@ window.addEventListener('keydown', (e) => {
   file.hd = (e.target as HTMLInputElement).checked;
   syncIO();
 };
+
+// Physical size inputs → write to file.w / file.h
+function onPhysChange(): void {
+  const pw = ($('physW') as HTMLInputElement).valueAsNumber;
+  const ph = ($('physH') as HTMLInputElement).valueAsNumber;
+  if (!(pw > 0) || !(ph > 0)) {
+    flash('physical size must be positive');
+    syncIO();
+    return;
+  }
+  saveHistory();
+  file.w = pw;
+  file.h = ph;
+  syncIO();
+}
+($('physW') as HTMLInputElement).onchange = onPhysChange;
+($('physH') as HTMLInputElement).onchange = onPhysChange;
+
+// Hitbox inputs → write to file.hitbox
+function onHitboxChange(): void {
+  const bx = ($('boxX') as HTMLInputElement).valueAsNumber;
+  const by = ($('boxY') as HTMLInputElement).valueAsNumber;
+  const bw = ($('boxW') as HTMLInputElement).valueAsNumber;
+  const bh = ($('boxH') as HTMLInputElement).valueAsNumber;
+  if (!Number.isFinite(bx) || !Number.isFinite(by) || !(bw > 0) || !(bh > 0)) {
+    flash('hitbox needs finite x/y and positive w/h');
+    syncIO();
+    return;
+  }
+  const { w, h } = geometryOf(file, cur());
+  saveHistory();
+  // Only store hitbox if it differs from the full physical size at origin
+  if (bx === 0 && by === 0 && bw === w && bh === h) {
+    delete file.hitbox;
+  } else {
+    file.hitbox = { x: bx, y: by, w: bw, h: bh };
+  }
+  syncIO();
+}
+($('boxX') as HTMLInputElement).onchange = onHitboxChange;
+($('boxY') as HTMLInputElement).onchange = onHitboxChange;
+($('boxW') as HTMLInputElement).onchange = onHitboxChange;
+($('boxH') as HTMLInputElement).onchange = onHitboxChange;
 
 /* ---------------- boot ---------------- */
 

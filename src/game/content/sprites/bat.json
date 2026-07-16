@@ -1,5 +1,7 @@
 {
   "hd": true,
+  "w": 12,
+  "h": 6,
   "anims": {
     "fly": {
       "fps": 6,

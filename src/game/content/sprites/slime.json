@@ -1,5 +1,7 @@
 {
   "hd": true,
+  "w": 12,
+  "h": 7,
   "anims": {
     "idle": {
       "fps": 3,
