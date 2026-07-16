@@ -10,9 +10,19 @@ export class Registry<T> {
   constructor(public readonly kind: string) {}
 
   register(id: string, def: T): T {
+    // A duplicate id is almost always a typo or a content collision —
+    // fail loudly at registration, where the fix is obvious, instead of
+    // silently shadowing a definition and failing later during play.
+    // Intentional overrides (hot reload, mods) use replace().
     if (this.items.has(id)) {
-      console.warn(`[registry:${this.kind}] overwriting existing id "${id}"`);
+      throw new Error(`[registry:${this.kind}] duplicate id "${id}" — use replace() to override deliberately`);
     }
+    this.items.set(id, def);
+    return def;
+  }
+
+  /** Deliberately override (or add) a definition. */
+  replace(id: string, def: T): T {
     this.items.set(id, def);
     return def;
   }

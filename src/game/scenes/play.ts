@@ -16,8 +16,8 @@ import {
 import { type ActionGame, type Action } from '../defs';
 import { Player } from '../actors/player';
 import { Monster, monsters } from '../actors/monster';
-import { Npc, npcs } from '../actors/npc';
 import { Pickup } from '../actors/pickup';
+import { placeables, type PlaceableCtx } from '../content/placeables';
 import { PauseScene } from './pause';
 import { OptionsScene } from './options';
 import { Background } from './background';
@@ -94,6 +94,8 @@ export class PlayScene implements Scene {
   private waves: WaveDirector;
   private hud: Hud;
   private title: TitleScreen;
+  /** Everything to unhook when the scene leaves the stack (see exit). */
+  private disposers: (() => void)[] = [];
 
   constructor(
     private game: ActionGame,
@@ -130,10 +132,15 @@ export class PlayScene implements Scene {
     this.best = saveStore.load()?.best ?? 0;
 
     // Debug cheats: only live while the debug overlay (backquote) is on.
-    window.addEventListener('keydown', (e) => this.onCheatKey(e));
+    const onCheat = (e: KeyboardEvent) => this.onCheatKey(e);
+    window.addEventListener('keydown', onCheat);
+    this.disposers.push(() => window.removeEventListener('keydown', onCheat));
 
-    /* ---- combat & flow reactions (events, not couplings) ---- */
-    game.events.on('hit', (info) => {
+    /* ---- combat & flow reactions (events, not couplings). Every
+       subscription's unsubscribe is kept, so a replaced scene doesn't
+       leave stale listeners behind (released in exit()). ---- */
+    const on = (off: () => void) => this.disposers.push(off);
+    on(game.events.on('hit', (info) => {
       if (info.target.team !== 'enemy') return; // the player being hit is not a combo
       this.combo++;
       this.comboT = 2;
@@ -141,8 +148,8 @@ export class PlayScene implements Scene {
         game.feel.sfx.play('combo');
         game.feel.text(this.player.cx, this.player.y - 10, `COMBO X${this.combo}`, COLORS.gold);
       }
-    });
-    game.events.on('kill', (info) => {
+    }));
+    on(game.events.on('kill', (info) => {
       if (!(info.target instanceof Monster)) return;
       const mult = 1 + Math.min(3, Math.floor(this.combo / 5));
       const pts = info.target.def.score * mult;
@@ -161,16 +168,16 @@ export class PlayScene implements Scene {
         game.feel.text(info.target.cx, info.target.y - 16, 'GEAR FREED!', COLORS.gold);
       }
       if (info.target.def.boss) this.onBossDefeated();
-    });
-    game.events.on('score', ({ points, x, y }) => {
+    }));
+    on(game.events.on('score', ({ points, x, y }) => {
       this.score += points;
       game.feel.text(x, y, points, COLORS.gold);
-    });
-    game.events.on('playerHurt', () => {
+    }));
+    on(game.events.on('playerHurt', () => {
       this.combo = 0;
       this.comboT = 0;
-    });
-    game.events.on('waveClear', () => {
+    }));
+    on(game.events.on('waveClear', () => {
       // SECOND WIND (skill tree): every cleared wave knits a wound.
       const p = this.player;
       if (p && p.hp > 0 && p.tree.has('v3') && p.hp < p.maxHp) {
@@ -178,9 +185,9 @@ export class PlayScene implements Scene {
         game.feel.text(p.cx, p.y - 10, '+1 HP', COLORS.red);
         game.feel.sfx.play('heal');
       }
-    });
-    game.events.on('levelUp', () => this.autosave());
-    game.events.on('playerDied', () => {
+    }));
+    on(game.events.on('levelUp', () => this.autosave()));
+    on(game.events.on('playerDied', () => {
       this.phase = 'over';
       this.overT = 1.4;
       this.best = Math.max(this.best, this.score);
@@ -191,11 +198,17 @@ export class PlayScene implements Scene {
         saveStore.save(save);
       }
       this.updateMusic();
-    });
+    }));
 
-    game.input.onAnyPress(() => {
+    on(game.input.onAnyPress(() => {
       if (this.phase === 'over' && this.overT <= 0) this.startRun(saveStore.load());
-    });
+    }));
+  }
+
+  /** Scene left the stack: release every listener this scene installed. */
+  exit(): void {
+    for (const d of this.disposers) d();
+    this.disposers.length = 0;
   }
 
   private startRoomId(): string {
@@ -303,15 +316,15 @@ export class PlayScene implements Scene {
     g.camera.x = clamp(aimX - g.camera.viewW / 2, 0, Math.max(0, this.tilemap.worldW - g.camera.viewW));
     g.camera.y = clamp(aimY - g.camera.viewH * 0.62, -30, Math.max(-30, this.tilemap.worldH - g.camera.viewH));
 
-    // Pre-placed monsters and NPCs; a defeated boss stays defeated.
+    // Pre-placed entities, spawned through the placeables catalog — the
+    // same one the level editor and test spawner use. Unknown types are
+    // skipped (a room can reference content that isn't registered yet).
+    const ctx: PlaceableCtx = { game: g, tilemap: this.tilemap, flags: this.flags };
     for (const e of this.room.entities) {
-      if (npcs.has(e.type)) {
-        this.game.world.spawn(new Npc(e.type, this.game, this.tilemap, e.x, e.y));
-        continue;
-      }
-      if (!monsters.has(e.type)) continue;
-      if (monsters.get(e.type).boss && this.flags.has('bossDefeated')) continue;
-      this.game.world.spawn(new Monster(e.type, this.game, this.tilemap, e.x, e.y));
+      if (!placeables.has(e.type)) continue;
+      const p = placeables.get(e.type);
+      if (p.shouldSpawn && !p.shouldSpawn(ctx, e)) continue;
+      p.spawn(ctx, e);
     }
 
     this.updateMusic();
