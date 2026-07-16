@@ -13,7 +13,7 @@
     header { padding: 8px 12px; background: #07070d; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
     header h1 { font-size: 14px; margin: 0 12px 0 0; color: #f4f4f4; }
     main { flex: 1; display: flex; min-height: 0; }
-    #side { width: 250px; padding: 10px; background: #101430; overflow-y: auto; flex-shrink: 0; }
+    #side-left, #side-right { width: 260px; padding: 10px; background: #101430; overflow-y: auto; flex-shrink: 0; }
     #center { flex: 1; overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 20px; background: #07070d; }
     canvas { image-rendering: pixelated; }
     #grid { cursor: crosshair; border: 1px solid #33447f; }
@@ -35,7 +35,7 @@
     textarea { width: 100%; height: 140px; background: #07070d; color: #94b0c2; border: 1px solid #33447f; font: 11px monospace; }
     .hint { color: #566c86; font-size: 11px; }
     #frames button { margin-right: 4px; }
-    #preview { border: 1px solid #33447f; background: #0a0c1c; }
+    #preview { border: 1px solid #33447f; background: #0a0c1c; max-width: 100%; height: auto; }
     #status { color: #38b764; margin-left: auto; }
   </style>
 </head>
@@ -63,7 +63,7 @@
     <span id="status"></span>
   </header>
   <main>
-    <div id="side">
+    <div id="side-left">
       <h2>palette</h2>
       <div id="palette"></div>
       <div class="swatch">
@@ -95,42 +95,61 @@
       <label style="display:block; margin-top:6px">
         <input type="checkbox" id="showRef" checked> show reference (30% opacity)
       </label>
-      <h2>animations</h2>
-      <div id="anims"></div>
-      <button id="btnAddAnim">+ anim</button>
-      <button id="btnRenameAnim">rename</button>
-      <button id="btnDelAnim">del</button>
-      <label>fps <input id="fps" type="number" min="1" max="30" value="8"></label>
-      <h2>size</h2>
-      <label>w <input id="w" type="number" min="1" max="64" value="12">
-             h <input id="h" type="number" min="1" max="64" value="14"></label>
-      <button id="btnResize">resize</button>
-      <h2>transform</h2>
-      <div style="display:flex; gap:4px; margin-bottom:6px">
-        <button id="btnNudgeLeft" title="Nudge left">◀</button>
-        <button id="btnNudgeUp" title="Nudge up">▲</button>
-        <button id="btnNudgeDown" title="Nudge down">▼</button>
-        <button id="btnNudgeRight" title="Nudge right">▶</button>
-      </div>
-      <h2>frames <span id="frameOf" class="hint"></span></h2>
-      <div id="frames"></div>
-      <button id="btnAddFrame">+ frame</button>
-      <button id="btnDupFrame">dup</button>
-      <button id="btnDelFrame">del</button>
+      <h2>onion skin</h2>
       <label style="display:block; margin-top:6px">
         <input type="checkbox" id="onionSkin"> onion skin (previous frame)
       </label>
+    </div>
+    
+    <div id="center">
+      <canvas id="grid"></canvas>
+    </div>
+    
+    <div id="side-right">
       <h2>preview <label style="display:inline"><input type="checkbox" id="hd" checked> hd</label></h2>
-      <canvas id="preview" width="200" height="80"></canvas>
+      <div style="display:flex; justify-content:center; margin-bottom:10px;">
+        <canvas id="preview" width="200" height="80"></canvas>
+      </div>
+      
+      <h2>animations</h2>
+      <div id="anims" style="margin-bottom:6px"></div>
+      <div style="display:flex; gap:4px; margin-bottom:6px">
+        <button id="btnAddAnim" style="flex:1">+ anim</button>
+        <button id="btnRenameAnim" style="flex:1">rename</button>
+        <button id="btnDelAnim" style="flex:1">del</button>
+      </div>
+      <label style="display:block; margin-bottom:10px">fps <input id="fps" type="number" min="1" max="30" value="8" style="width:70px"></label>
+      
+      <h2>frames <span id="frameOf" class="hint"></span></h2>
+      <div id="frames" style="margin-bottom:6px; display:flex; flex-wrap:wrap; gap:4px"></div>
+      <div style="display:flex; gap:4px; margin-bottom:10px">
+        <button id="btnAddFrame" style="flex:1">+ frame</button>
+        <button id="btnDupFrame" style="flex:1">dup</button>
+        <button id="btnDelFrame" style="flex:1">del</button>
+      </div>
+      
+      <h2>size</h2>
+      <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px">
+        <label style="margin:0">w <input id="w" type="number" min="1" max="64" value="12" style="width:50px"></label>
+        <label style="margin:0">h <input id="h" type="number" min="1" max="64" value="14" style="width:50px"></label>
+        <button id="btnResize">resize</button>
+      </div>
+      
+      <h2>transform</h2>
+      <div style="display:flex; gap:4px; margin-bottom:10px">
+        <button id="btnNudgeLeft" title="Nudge left" style="flex:1">◀</button>
+        <button id="btnNudgeUp" title="Nudge up" style="flex:1">▲</button>
+        <button id="btnNudgeDown" title="Nudge down" style="flex:1">▼</button>
+        <button id="btnNudgeRight" title="Nudge right" style="flex:1">▶</button>
+      </div>
+      
       <h2>sprite json</h2>
-      <textarea id="io" spellcheck="false"></textarea>
-      <p class="hint">
+      <textarea id="io" spellcheck="false" style="height:100px; margin-bottom:6px;"></textarea>
+      <p class="hint" style="margin:0">
         paint: left-drag &middot; erase: right-drag<br>
-        export/import the per-sprite file the game loads
-        (content/sprites/*.json) &mdash; every animation previews above
+        export/import JSON (content/sprites/*.json)
       </p>
     </div>
-    <div id="center"><canvas id="grid"></canvas></div>
   </main>
   <script type="module" src="/tools/src/sprite-editor.ts"></script>
 </body>
