@@ -25,6 +25,7 @@ let painting = false;
 let erasing = false;
 let currentTool: 'draw' | 'fill' = 'draw';
 let refFile: SpriteFile | null = null;
+let currentFileName = 'new sprite.json';
 const undoStack: string[] = [];
 const redoStack: string[] = [];
 const MAX_HISTORY = 100;
@@ -462,6 +463,7 @@ $('btnLoad').onclick = () => ($('fileInput') as HTMLInputElement).click();
       animName = Object.keys(file.anims)[0];
       frameIdx = 0;
       currentChar = firstPaintChar();
+      currentFileName = f.name;
       undoStack.length = 0;
       redoStack.length = 0;
       updateUndoRedoButtons();
@@ -489,6 +491,10 @@ $('selectSprite').onchange = (e) => {
       animName = Object.keys(file.anims)[0];
       frameIdx = 0;
       currentChar = firstPaintChar();
+      
+      const parts = val.split('/');
+      currentFileName = parts[parts.length - 1];
+      
       undoStack.length = 0;
       redoStack.length = 0;
       updateUndoRedoButtons();
@@ -506,7 +512,7 @@ $('btnSave').onclick = () => {
   const blob = new Blob([($('io') as HTMLTextAreaElement).value], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `${animName || 'sprite'}.json`;
+  a.download = currentFileName;
   a.click();
   URL.revokeObjectURL(a.href);
   flash('saved');
