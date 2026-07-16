@@ -128,7 +128,18 @@ Drop it from monsters by adding to their `drops` table, place it in a room, or g
 
 ## A new weapon
 
-A weapon is an equipment item whose `props.weapon` carries the attack spec the player's swing reads:
+A weapon separates combat data from appearance. First register its visual:
+
+```ts
+defineWeaponVisual('dagger', proceduralBlade({
+  bladeLen: 5,
+  bladeW: 1,
+  blade: COLORS.steel,
+  hilt: COLORS.gold,
+}));
+```
+
+Then reference that visual from the item attack spec:
 
 ```ts
 defineItem<ItemCtx>('dagger', {
@@ -140,13 +151,15 @@ defineItem<ItemCtx>('dagger', {
       lightStrength: 0.3, heavyStrength: 0.6,   // feel scale per hit
       reach: -4,                                 // hitbox size delta
       colors: [COLORS.white],
-      bladeLen: 5, bladeW: 1, blade: COLORS.steel, hilt: COLORS.gold,
+      visual: 'dagger',
     } satisfies WeaponSpec,
   },
 });
 ```
 
-No player-code changes: damage, feel strength, reach, slash colors all flow from the equipped item. Stat bonuses (`mods: { add: { attack: 1 } }`) stack on top.
+No player-code changes: damage, feel strength, reach, slash colors, held art, and attack trail all flow from the two definitions. Stat bonuses (`mods: { add: { attack: 1 } }`) stack on top.
+
+For authored art, create a transparent weapon-only JSON sheet with `idle`/`run`/`air` frames aligned to the knight's world origin (optionally add `attack` frames), load it with `loadSprite` + `withFacing`, and register `spriteWeapon({ anims, origin?, anchors? })`. A sheet may be larger than the knight frame so long blades and attack arcs are not clipped. The built-in swords follow this route in `content/sprites/equipment/`; `scripts/generate-weapon-sheets.mjs` is their reproducible source. The sprite editor can refine the sheets, while the origin and anchors provide alignment corrections without adding weapon logic to Player.
 
 ## A new skill / spell
 

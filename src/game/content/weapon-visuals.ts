@@ -1,0 +1,259 @@
+import {
+  Registry,
+  frameAt,
+  loadSprite,
+  withFacing,
+  type FacingAnimSet,
+  type SpriteFile,
+} from '@engine/index';
+import { COLORS, PAL } from './palette';
+import { TEXEL } from './sprites';
+import greatSwordJson from './sprites/equipment/great-sword.json';
+import rustySwordJson from './sprites/equipment/rusty-sword.json';
+
+export interface WeaponAttackPose {
+  index: number;
+  progress: number;
+}
+
+/** Body-local context for the held weapon. */
+export interface HeldWeaponCtx {
+  facing: 1 | -1;
+  anim: string;
+  frame: number;
+  animT: number;
+  bodyW: number;
+  bodyH: number;
+  attack?: WeaponAttackPose;
+}
+
+/** World-space context for the attack trail. */
+export interface WeaponTrailCtx {
+  x: number;
+  y: number;
+  facing: 1 | -1;
+  reach: number;
+  colors: string[];
+  attack: WeaponAttackPose;
+}
+
+export interface WeaponVisual {
+  drawHeld(g: CanvasRenderingContext2D, ctx: HeldWeaponCtx): void;
+  drawTrail?(g: CanvasRenderingContext2D, ctx: WeaponTrailCtx): void;
+}
+
+export const weaponVisuals = new Registry<WeaponVisual>('weaponVisual');
+
+export function defineWeaponVisual(id: string, visual: WeaponVisual): void {
+  weaponVisuals.register(id, visual);
+}
+
+export function drawHeldWeapon(g: CanvasRenderingContext2D, id: string | null, ctx: HeldWeaponCtx): void {
+  if (id) weaponVisuals.get(id).drawHeld(g, ctx);
+}
+
+export function drawWeaponTrail(g: CanvasRenderingContext2D, id: string | null, ctx: WeaponTrailCtx): void {
+  if (id) weaponVisuals.get(id).drawTrail?.(g, ctx);
+}
+
+export interface SpriteWeaponConfig {
+  /** Transparent weapon-only frames aligned to the knight's world origin. */
+  anims: FacingAnimSet;
+  /** Player origin measured in logical pixels from the sheet's top-left. */
+  origin?: { x: number; y: number };
+  /** Optional body-frame offsets for final art alignment. */
+  anchors?: Record<string, { x: number; y: number; angle?: number }[]>;
+  /** Set false when the authored frames already include an attack effect. */
+  trail?: boolean;
+}
+
+/** Build a visual from authored, animation-aligned sprite layers. */
+export function spriteWeapon(config: SpriteWeaponConfig): WeaponVisual {
+  return {
+    drawHeld(g, ctx) {
+      const set = ctx.facing === 1 ? config.anims.right : config.anims.left;
+      const attackAnim = ctx.attack ? set.attack : undefined;
+      const anim = attackAnim ? 'attack' : ctx.anim;
+      const frame = attackAnim
+        ? Math.min(Math.floor(ctx.attack!.progress * attackAnim.frames.length), attackAnim.frames.length - 1)
+        : ctx.frame;
+      const image = attackAnim ? attackAnim.frames[frame] : frameAt(set, anim, ctx.animT);
+      const anchor = config.anchors?.[anim]?.[frame] ?? { x: 0, y: 0, angle: 0 };
+      const drawW = image.width / TEXEL;
+      const drawH = image.height / TEXEL;
+      const origin = config.origin ?? { x: drawW / 2, y: drawH };
+      g.save();
+      g.translate(anchor.x * ctx.facing, anchor.y);
+      if (anchor.angle) g.rotate(anchor.angle * ctx.facing);
+      g.drawImage(image, -origin.x, -origin.y, drawW, drawH);
+      g.restore();
+    },
+    drawTrail: config.trail === false ? undefined : drawSlashTrail,
+  };
+}
+
+export interface ProceduralBladeConfig {
+  bladeLen: number;
+  bladeW: number;
+  blade: string;
+  hilt: string;
+}
+
+/** Build compact pixel art when a weapon does not need an authored sheet. */
+export function proceduralBlade(config: ProceduralBladeConfig): WeaponVisual {
+  return {
+    drawHeld(g, ctx) {
+      const f = ctx.facing;
+      let hx = 1.75;
+      let hy = -4.5;
+      if (ctx.anim === 'run') {
+        if (ctx.frame === 0) {
+          hx = 2.25;
+          hy = -5.25;
+        } else if (ctx.frame === 2) {
+          hx = 1.25;
+          hy = -5.25;
+        }
+      } else if (ctx.anim === 'air') {
+        hx = 1.5;
+        hy = -5;
+      } else {
+        hy += Math.sin(ctx.animT * 4.5) * 0.2;
+      }
+
+      let dx = 0.866;
+      let dy = -0.5;
+      if (ctx.attack) {
+        const flipV = ctx.attack.index === 1 ? -1 : 1;
+        const sweep = (-1.3 + 2.6 * Math.min(1, ctx.attack.progress * 1.7)) * flipV;
+        dx = Math.cos(sweep);
+        dy = Math.sin(sweep);
+      }
+
+      const q = (value: number) => Math.round(value * TEXEL) / TEXEL;
+      const step = 1 / TEXEL;
+      const px = -dy * f;
+      const py = dx;
+      hx *= f;
+      dx *= f;
+
+      const gripLen = 5;
+      for (let k = 1; k <= gripLen; k++) {
+        const x = hx - k * dx * step;
+        const y = hy - k * dy * step;
+        g.fillStyle = '#302426';
+        g.fillRect(q(x), q(y), step, step);
+        g.fillRect(q(x + px * step), q(y + py * step), step, step);
+      }
+
+      const pommelX = hx - (gripLen + 1) * dx * step;
+      const pommelY = hy - (gripLen + 1) * dy * step;
+      g.fillStyle = config.hilt;
+      g.fillRect(q(pommelX), q(pommelY), step, step);
+      g.fillRect(q(pommelX + px * step), q(pommelY + py * step), step, step);
+
+      const guardHalfLen = config.bladeW === 1 ? 5 : 8;
+      for (let k = -guardHalfLen; k <= guardHalfLen; k++) {
+        const x = hx + k * px * step;
+        const y = hy + k * py * step;
+        const thick = Math.max(1, 3 - Math.floor(Math.abs(k) / 3));
+        for (let t = -Math.floor(thick / 2); t < Math.ceil(thick / 2); t++) {
+          g.fillRect(q(x + t * dx * step), q(y + t * dy * step), step, step);
+        }
+      }
+
+      const fineLen = config.bladeLen * TEXEL;
+      const fineW = config.bladeW === 1 ? 3 : 6;
+      for (let i = 1; i <= fineLen; i++) {
+        const centerX = hx + i * dx * step;
+        const centerY = hy + i * dy * step;
+        const currentW = i >= fineLen - 3
+          ? Math.max(1, fineW - (i - (fineLen - 3)) * 2)
+          : fineW;
+        const halfW = (currentW - 1) / 2;
+        for (let j = -Math.ceil(halfW); j <= Math.floor(halfW); j++) {
+          let color = config.blade;
+          if (fineW === 6) {
+            if (j === -3) color = COLORS.outline;
+            else if (j === -1 || j === 0) color = COLORS.steelDark;
+            else if (j === 2 || i >= fineLen - 1) color = COLORS.white;
+          } else {
+            if (j === 0) color = COLORS.steelDark;
+            else if (j === 1 || i >= fineLen - 1) color = COLORS.white;
+          }
+          g.fillStyle = color;
+          g.fillRect(q(centerX + j * px * step), q(centerY + j * py * step), step, step);
+        }
+      }
+    },
+    drawTrail: drawSlashTrail,
+  };
+}
+
+function drawSlashTrail(g: CanvasRenderingContext2D, ctx: WeaponTrailCtx): void {
+  const { attack } = ctx;
+  const heavy = attack.index === 2;
+  const radius = (heavy ? 17 : 13) + Math.max(0, Math.round(ctx.reach / 2));
+  const flipV = attack.index === 1 ? -1 : 1;
+  const sweep = (-1.3 + 2.6 * Math.min(1, attack.progress * 1.7)) * flipV;
+  const angle = ctx.facing === 1 ? sweep : Math.PI - sweep;
+  const start = ctx.facing === 1 ? -1.3 * flipV : Math.PI + 1.3 * flipV;
+  const q = (value: number) => Math.round(value * TEXEL) / TEXEL;
+  const step = 1 / TEXEL;
+  const layers = [
+    { color: ctx.colors[0] ?? COLORS.steel, thickness: heavy ? 5 : 3.5, alpha: 0.4 },
+    { color: COLORS.white, thickness: heavy ? 2.5 : 1.5, alpha: 0.8 },
+  ];
+  const segments = 24;
+
+  g.save();
+  for (const layer of layers) {
+    const outer: [number, number][] = [];
+    const inner: [number, number][] = [];
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments;
+      const theta = start + (angle - start) * t;
+      const profile = t < 0.8
+        ? Math.sin((t / 0.8) * (Math.PI / 2))
+        : Math.cos(((t - 0.8) / 0.2) * (Math.PI / 2));
+      const thick = layer.thickness * profile;
+      const cos = Math.cos(theta);
+      const sin = Math.sin(theta);
+      outer.push([q(ctx.x + cos * (radius + thick / 2)), q(ctx.y + sin * (radius + thick / 2))]);
+      inner.push([q(ctx.x + cos * (radius - thick / 2)), q(ctx.y + sin * (radius - thick / 2))]);
+    }
+    g.fillStyle = layer.color;
+    g.globalAlpha = layer.alpha;
+    g.beginPath();
+    g.moveTo(outer[0][0], outer[0][1]);
+    for (let i = 1; i <= segments; i++) g.lineTo(outer[i][0], outer[i][1]);
+    for (let i = segments; i >= 0; i--) g.lineTo(inner[i][0], inner[i][1]);
+    g.closePath();
+    g.fill();
+  }
+  g.restore();
+
+  const tipX = ctx.x + Math.cos(angle) * radius;
+  const tipY = ctx.y + Math.sin(angle) * radius;
+  g.fillStyle = COLORS.white;
+  g.fillRect(q(tipX - step), q(tipY - step), step * 2, step * 2);
+  g.fillRect(q(tipX - step * 3), q(tipY - step * 0.5), step * 6, step);
+  g.fillRect(q(tipX - step * 0.5), q(tipY - step * 3), step, step * 6);
+}
+
+defineWeaponVisual('unarmed', {
+  drawHeld() {},
+  drawTrail: drawSlashTrail,
+});
+
+const load = (file: unknown) => loadSprite(file as SpriteFile, PAL);
+
+defineWeaponVisual('rusty-sword', spriteWeapon({
+  anims: withFacing(load(rustySwordJson).animSet()),
+  origin: { x: 16, y: 16 },
+}));
+
+defineWeaponVisual('great-sword', spriteWeapon({
+  anims: withFacing(load(greatSwordJson).animSet()),
+  origin: { x: 16, y: 16 },
+}));

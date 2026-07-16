@@ -89,7 +89,11 @@ Details and code samples: `docs/adding-content.md`. The short version —
 
 - **Item**: `defineItem` in `content/items.ts` (+ icon in
   `content/sprites/icons.json`). Weapons carry their attack spec in
-  `props.weapon`; the swing reads it, player code never changes.
+  `props.weapon`, including a `visual` id from `content/weapon-visuals.ts`;
+  the swing reads both registries and player code never changes.
+- **Weapon visual**: `defineWeaponVisual` in `content/weapon-visuals.ts`.
+  Use `proceduralBlade(...)` for compact generated art or
+  `spriteWeapon(...)` for a frame-aligned JSON sheet.
 - **Monster**: `defineMonster` in `actors/enemies.ts` (sprite, stats,
   drops, optional FSM for bosses in `actors/boss.ts`). Monsters and NPCs
   are bridged into the placeables catalog automatically.

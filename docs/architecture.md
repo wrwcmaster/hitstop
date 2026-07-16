@@ -100,7 +100,7 @@ The level editor imports the *game's* content modules; its tile palette is `tile
 
 The second wave of systems keeps the same shape — registries of data + small hooks, engine mechanics with no game knowledge:
 
-- **Weapons** are equipment items whose `props.weapon` carries a parsed attack spec (damage, feel strength, reach, colors and rendering fields). Invalid extensions fail with an item/property path instead of surfacing during a swing.
+- **Weapons** split mechanics from appearance. `props.weapon` carries parsed combat data plus a `visual` id; `content/weapon-visuals.ts` owns held rendering and trails. Visual entries may be compact procedural blades or authored, knight-frame-aligned sprite layers. Player only supplies pose context, so axes, bows, or ornate weapons add no Player branches.
 - **Consumables/instants** (`potion`, `mana-orb`, `coin`) are `use`/`onPickup` hooks with a game-provided context. The `Pickup` entity (game side) handles the drop → magnet → collect loop.
 - **Skills** cast via a `SkillBook` that gates on cooldown + resource. Input dispatch walks `DEFAULT_SKILL_LOADOUT`, so adding or moving a skill slot is a content-table change rather than a Player branch.
 - **Player capabilities** are semantic flags/modifiers granted by tree-node hooks. Mechanics ask for `dashStrike`, `airJumps`, or `skillCooldownScale`; they never ask whether node `w4`, `v4`, or `m2` is owned.
@@ -122,7 +122,7 @@ The second wave of systems keeps the same shape — registries of data + small h
 
 - **Rooms & doors**: the world is a `ROOMS` registry of RoomDefs connected by `door` triggers (`props.room` + spawn point). `PlayScene.setRoom` rebuilds tilemap/minimap/triggers behind a fade, `World.retain` keeps only the player, and waves run only in rooms with `props.waves`. The level editor's trigger mode places doors.
 - **Placeables**: everything a room can put in the world lives in one catalog (`content/placeables.ts`) — label/category/colors/footprint for the tools, plus `validateProps`/`shouldSpawn`/`spawn` over the full `RoomEntity`. Built-in monster/NPC placeables reject unsupported instance properties; custom definitions validate the keys they consume.
-- **Gear visuals**: visible equipment is a **layer registry** (`content/gear-visuals.ts`) keyed by slot — a sprite sheet on the knight's frame grid plus optional per-frame anchors, composited in `order` (armor under helmet). The player render walks the registry, so a new visible slot (boots, cape, shield) is a JSON sheet + one `defineGearVisual` call.
+- **Gear visuals**: armor-like equipment uses a layer registry (`content/gear-visuals.ts`) keyed by slot. Weapons use `weapon-visuals.ts`, a separate registry that owns both held art and attack trails while sharing the same optional frame-aligned sprite-sheet approach.
 - **Bosses**: a boss is a monster with `boss: true` and an engine `FSM` driving telegraphed attack states. Unusual touch behavior belongs to `MonsterDef.onPlayerContact`; held-player effects and overlays belong to its `swallow` strategy. Player only runs the generic contact/held lifecycle and contains no monster ids.
 - **Saves**: `JsonStore` (versioned localStorage) + `save.ts`. Checkpoints at every room entrance and boss defeat; death → last checkpoint at full HP; title screen offers CONTINUE. Fired one-shot triggers persist so intro dialogue doesn't replay.
 

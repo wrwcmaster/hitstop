@@ -11,8 +11,8 @@ import steelArmorJson from './sprites/equipment/steel-armor.json';
  * visible slot (boots, cape, shield...) is a JSON sheet and one
  * defineGearVisual call, with no player-code changes.
  *
- * Weapons and charms stay procedural (drawn in-hand / orbiting), so they
- * are not layers here.
+ * Weapons use their own visual registry because they also own swing pose
+ * and trails; see content/weapon-visuals.ts. Charms remain procedural.
  */
 export interface GearAnchor {
   x: number;

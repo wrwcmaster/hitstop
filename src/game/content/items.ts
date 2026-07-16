@@ -12,6 +12,7 @@ import {
 } from './sprites';
 import type { ActionGame } from '../defs';
 import type { Player } from '../actors/player';
+import { weaponVisuals } from './weapon-visuals';
 
 /** Context handed to item use/onPickup hooks. */
 export interface ItemCtx {
@@ -20,9 +21,8 @@ export interface ItemCtx {
 }
 
 /**
- * The item catalog. Weapons are equipment whose `props.weapon` carries an
- * attack spec the player's swing reads — so weapon variety needs no
- * player-code changes.
+ * The item catalog. Weapons carry combat data plus a registered visual id;
+ * Player consumes both seams without knowing which weapon is equipped.
  */
 export interface WeaponSpec {
   lightDamage: number;
@@ -33,11 +33,8 @@ export interface WeaponSpec {
   reach: number;
   /** Slash/impact particle colors. */
   colors: string[];
-  /** Held-weapon look (drawn in hand). blade length 0 = bare hands. */
-  bladeLen: number;
-  bladeW: number;
-  blade: string;
-  hilt: string;
+  /** Registered held/trail appearance. Null disables both. */
+  visual: string | null;
 }
 
 function parseWeaponSpec(value: unknown, path: string): WeaponSpec {
@@ -45,14 +42,14 @@ function parseWeaponSpec(value: unknown, path: string): WeaponSpec {
     throw new Error(`${path}: expected a weapon object`);
   }
   const spec = value as Record<string, unknown>;
-  const numbers = ['lightDamage', 'heavyDamage', 'lightStrength', 'heavyStrength', 'reach', 'bladeLen', 'bladeW'] as const;
+  const numbers = ['lightDamage', 'heavyDamage', 'lightStrength', 'heavyStrength', 'reach'] as const;
   for (const key of numbers) {
     if (typeof spec[key] !== 'number' || !Number.isFinite(spec[key])) {
       throw new Error(`${path}.${key}: expected a finite number`);
     }
   }
-  for (const key of ['blade', 'hilt'] as const) {
-    if (typeof spec[key] !== 'string') throw new Error(`${path}.${key}: expected a color string`);
+  if (spec.visual !== null && (typeof spec.visual !== 'string' || !weaponVisuals.has(spec.visual))) {
+    throw new Error(`${path}.visual: unknown weapon visual "${String(spec.visual)}"`);
   }
   if (!Array.isArray(spec.colors) || spec.colors.length === 0 || spec.colors.some((color) => typeof color !== 'string')) {
     throw new Error(`${path}.colors: expected a non-empty string array`);
@@ -68,7 +65,7 @@ export function weaponSpecOf(itemId: string | null): WeaponSpec {
   const fallback: WeaponSpec = {
     lightDamage: 1, heavyDamage: 1, lightStrength: 0.3, heavyStrength: 0.5,
     reach: -6, colors: [COLORS.white],
-    bladeLen: 0, bladeW: 1, blade: COLORS.steel, hilt: COLORS.gold, // fists: nothing drawn
+    visual: 'unarmed',
   };
   if (!itemId) return fallback;
   const value = itemDef(itemId).props?.weapon;
@@ -84,7 +81,7 @@ defineItem<ItemCtx>('rusty-sword', {
   props: weaponProps('rusty-sword', {
     lightDamage: 1, heavyDamage: 2, lightStrength: 0.45, heavyStrength: 0.8,
     reach: 0, colors: [COLORS.white, COLORS.gold],
-    bladeLen: 7, bladeW: 1, blade: COLORS.steel, hilt: COLORS.gold,
+    visual: 'rusty-sword',
   }),
 });
 
@@ -98,7 +95,7 @@ defineItem<ItemCtx>('great-sword', {
   props: weaponProps('great-sword', {
     lightDamage: 2, heavyDamage: 4, lightStrength: 0.6, heavyStrength: 1.0,
     reach: 5, colors: [COLORS.gold, COLORS.white, COLORS.red],
-    bladeLen: 12, bladeW: 2, blade: COLORS.gold, hilt: COLORS.red,
+    visual: 'great-sword',
   }),
 });
 
