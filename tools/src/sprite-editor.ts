@@ -61,7 +61,9 @@ function flash(msg: string): void {
 function buildPalette(): void {
   const host = $('palette');
   host.innerHTML = '';
-  for (const [ch, color] of Object.entries(pal())) {
+  // Always ensure transparent/erase is at the top of the palette list
+  const entries: [string, string | null][] = [['.', null], ...Object.entries(pal()).filter(([ch]) => ch !== '.')];
+  for (const [ch, color] of entries) {
     const row = document.createElement('div');
     row.className = 'swatch';
     const chip = document.createElement('span');
