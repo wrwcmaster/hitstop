@@ -53,4 +53,4 @@ A complete new enemy is ~20 lines of data + behavior (see `src/game/actors/enemi
 - [docs/adding-content.md](docs/adding-content.md) — cookbook: new enemies, tiles, rooms, sounds, skills
 - [docs/design-tools.md](docs/design-tools.md) — the level editor, sprite editor, and PNG sheet slicer: controls, formats, and shipping your work
 - [docs/game-dev-primer.md](docs/game-dev-primer.md) — game-dev concepts for software engineers, mapped to this codebase
-- [CLAUDE.md](CLAUDE.md) — contributor guide for AI agents: hard rules, content recipes, verification playbook, PR workflow
+- [AGENTS.md](AGENTS.md) — contributor guide for AI agents: hard rules, content recipes, verification playbook, PR workflow
