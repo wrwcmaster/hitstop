@@ -23,6 +23,8 @@ let frameIdx = 0;
 let currentChar = firstPaintChar();
 let painting = false;
 let erasing = false;
+let currentTool: 'draw' | 'fill' = 'draw';
+let refFile: SpriteFile | null = null;
 
 function emptyFrame(w: number, h: number): string[] {
   return Array.from({ length: h }, () => '.'.repeat(w));
@@ -157,6 +159,33 @@ function setPixel(x: number, y: number, ch: string): void {
   f[y] = f[y].slice(0, x) + ch + f[y].slice(x + 1);
 }
 
+function floodFill(startX: number, startY: number, fillChar: string): void {
+  const f = cur();
+  const targetChar = f[startY]?.[startX];
+  if (targetChar === undefined || targetChar === fillChar) return;
+  
+  const w = W();
+  const h = H();
+  const queue: [number, number][] = [[startX, startY]];
+  const visited = new Set<string>();
+  
+  while (queue.length > 0) {
+    const [x, y] = queue.shift()!;
+    const key = `${x},${y}`;
+    if (visited.has(key)) continue;
+    visited.add(key);
+    
+    if (f[y]?.[x] === targetChar) {
+      setPixel(x, y, fillChar);
+      
+      if (x > 0) queue.push([x - 1, y]);
+      if (x < w - 1) queue.push([x + 1, y]);
+      if (y > 0) queue.push([x, y - 1]);
+      if (y < h - 1) queue.push([x, y + 1]);
+    }
+  }
+}
+
 grid.addEventListener('contextmenu', (e) => e.preventDefault());
 grid.addEventListener('mousedown', (e) => {
   erasing = e.button === 2;
@@ -164,12 +193,9 @@ grid.addEventListener('mousedown', (e) => {
   paint(e);
 });
 grid.addEventListener('mousemove', (e) => {
-  if (painting) paint(e);
+  if (painting && currentTool !== 'fill') paint(e); // Don't drag-fill for bucket
 });
 window.addEventListener('mouseup', () => {
-  // Only re-serialize after an actual paint stroke — otherwise clicking a
-  // button (e.g. Import) would clobber whatever's in the textarea before
-  // its handler could read it.
   if (painting) {
     painting = false;
     syncIO();
@@ -180,7 +206,11 @@ function paint(e: MouseEvent): void {
   const r = grid.getBoundingClientRect();
   const x = Math.floor((e.clientX - r.left) / CELL);
   const y = Math.floor((e.clientY - r.top) / CELL);
-  setPixel(x, y, erasing ? '.' : currentChar);
+  if (currentTool === 'fill') {
+    floodFill(x, y, erasing ? '.' : currentChar);
+  } else {
+    setPixel(x, y, erasing ? '.' : currentChar);
+  }
   redraw();
 }
 
@@ -242,16 +272,68 @@ $('btnResize').onclick = () => {
   syncIO();
 };
 
-/* ---------------- rendering ---------------- */
-
 function redraw(): void {
   grid.width = W() * CELL;
   grid.height = H() * CELL;
   gctx.imageSmoothingEnabled = false;
+
+  // Draw background checkerboard
   for (let y = 0; y < H(); y++) {
     for (let x = 0; x < W(); x++) {
       gctx.fillStyle = (x + y) % 2 ? '#141830' : '#0f1226';
       gctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+    }
+  }
+
+  // Draw reference sprite if enabled
+  const showRef = ($('showRef') as HTMLInputElement)?.checked ?? true;
+  if (refFile && showRef) {
+    const refAnim = refFile.anims[animName] ?? Object.values(refFile.anims)[0];
+    if (refAnim) {
+      const refFrame = refAnim.frames[frameIdx % refAnim.frames.length];
+      if (refFrame) {
+        gctx.save();
+        gctx.globalAlpha = 0.3;
+        for (let y = 0; y < H(); y++) {
+          for (let x = 0; x < W(); x++) {
+            const char = refFrame[y]?.[x];
+            if (char) {
+              const color = (refFile.palette ?? {})[char] ?? PAL[char];
+              if (color) {
+                gctx.fillStyle = color;
+                gctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+              }
+            }
+          }
+        }
+        gctx.restore();
+      }
+    }
+  }
+
+  // Draw onion skin if enabled
+  const onion = ($('onionSkin') as HTMLInputElement)?.checked ?? false;
+  if (onion && frameIdx > 0) {
+    const prevFrame = anim().frames[frameIdx - 1];
+    if (prevFrame) {
+      gctx.save();
+      gctx.globalAlpha = 0.2;
+      for (let y = 0; y < H(); y++) {
+        for (let x = 0; x < W(); x++) {
+          const color = pal()[prevFrame[y]?.[x]];
+          if (color) {
+            gctx.fillStyle = color;
+            gctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+          }
+        }
+      }
+      gctx.restore();
+    }
+  }
+
+  // Draw current frame pixels
+  for (let y = 0; y < H(); y++) {
+    for (let x = 0; x < W(); x++) {
       const color = pal()[cur()[y][x]];
       if (color) {
         gctx.fillStyle = color;
@@ -259,6 +341,8 @@ function redraw(): void {
       }
     }
   }
+
+  // Grid lines
   gctx.strokeStyle = 'rgba(148,176,194,0.15)';
   for (let x = 0; x <= W(); x++) {
     gctx.beginPath();
@@ -274,12 +358,6 @@ function redraw(): void {
   }
 }
 
-/**
- * Every animation, playing at once. Raw art is drawn at 4x; the "hd"
- * toggle instead EPX-upscales twice (the game's 4x texel density) and
- * draws at 1x — the same on-screen size, so you see the smoothing the
- * game applies. The selected animation is highlighted.
- */
 function renderPreview(): void {
   const hd = ($('hd') as HTMLInputElement).checked;
   const p = pal();
@@ -304,8 +382,27 @@ function renderPreview(): void {
     pctx.fillStyle = name === animName ? '#ffcd75' : '#94b0c2';
     pctx.font = '11px monospace';
     pctx.fillText(`${name}  ${a.fps}fps`, 6, y + 9);
-    const img = sprite(hd ? epx(epx(rows)) : rows, p);
+
     const scale = hd ? 1 : 4;
+
+    // Draw reference sprite in preview background if enabled
+    const showRef = ($('showRef') as HTMLInputElement)?.checked ?? true;
+    if (refFile && showRef) {
+      const refAnim = refFile.anims[name] ?? Object.values(refFile.anims)[0];
+      if (refAnim) {
+        const refIdx = refAnim.frames.length ? Math.floor(t * (refAnim.fps || 1)) % refAnim.frames.length : 0;
+        const refRows = refAnim.frames[refIdx] ?? [];
+        const refImg = sprite(hd ? epx(epx(refRows)) : refRows, refFile.palette ?? PAL);
+        pctx.save();
+        pctx.translate(8, y + 14);
+        pctx.scale(scale, scale);
+        pctx.globalAlpha = 0.45;
+        pctx.drawImage(refImg, 0, 0);
+        pctx.restore();
+      }
+    }
+
+    const img = sprite(hd ? epx(epx(rows)) : rows, p);
     pctx.save();
     pctx.translate(8, y + 14);
     pctx.scale(scale, scale);
@@ -395,6 +492,67 @@ function normalize(raw: unknown): SpriteFile {
     };
   }
   throw new Error('unrecognized sprite json');
+}
+
+/* ---------------- tools & reference & nudge ---------------- */
+
+$('btnToolDraw').onclick = () => {
+  currentTool = 'draw';
+  $('btnToolDraw').classList.add('active');
+  $('btnToolFill').classList.remove('active');
+};
+$('btnToolFill').onclick = () => {
+  currentTool = 'fill';
+  $('btnToolFill').classList.add('active');
+  $('btnToolDraw').classList.remove('active');
+};
+
+$('btnLoadRef').onclick = () => ($('refFileInput') as HTMLInputElement).click();
+($('refFileInput') as HTMLInputElement).onchange = (e) => {
+  const input = e.target as HTMLInputElement;
+  const f = input.files?.[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      refFile = normalize(JSON.parse(String(reader.result)));
+      redraw();
+      flash(`loaded reference: ${f.name}`);
+    } catch (err) {
+      flash(`reference load failed: ${(err as Error).message}`);
+    }
+  };
+  reader.readAsText(f);
+  input.value = '';
+};
+
+($('showRef') as HTMLInputElement).onchange = () => redraw();
+($('onionSkin') as HTMLInputElement).onchange = () => redraw();
+
+$('btnNudgeLeft').onclick = () => nudge(-1, 0);
+$('btnNudgeRight').onclick = () => nudge(1, 0);
+$('btnNudgeUp').onclick = () => nudge(0, -1);
+$('btnNudgeDown').onclick = () => nudge(0, 1);
+
+function nudge(dx: number, dy: number): void {
+  const w = W();
+  const h = H();
+  const f = cur();
+  const next: string[] = [];
+  
+  for (let y = 0; y < h; y++) {
+    const srcY = (y - dy + h) % h;
+    let row = '';
+    for (let x = 0; x < w; x++) {
+      const srcX = (x - dx + w) % w;
+      row += f[srcY][srcX];
+    }
+    next.push(row);
+  }
+  
+  anim().frames[frameIdx] = next;
+  redraw();
+  syncIO();
 }
 
 /* ---------------- boot ---------------- */
