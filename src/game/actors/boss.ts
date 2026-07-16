@@ -238,6 +238,34 @@ defineMonster('slime-king', {
   // His sprite is a rounded blob: brushing the empty AABB corners
   // shouldn't hurt. Player attacks still test the full-size hurtbox.
   contactInset: 5,
+  onPlayerContact(m, player) {
+    if ((m.state.swallowCd as number ?? 0) > 0) return false;
+    player.swallowBy(m);
+    return true;
+  },
+  swallow: {
+    status: 'devoured',
+    colors: [COLORS.green, COLORS.white],
+    onEnter(m) {
+      m.state.victim = true;
+      m.state.biteT = 1.0;
+      m.vx = 0;
+      m.vy = 0;
+    },
+    onRelease(m) {
+      m.state.victim = false;
+      m.state.swallowCd = 4.0;
+    },
+    drawPlayerOverlay(g, _m, _player, w, h) {
+      g.save();
+      g.globalAlpha = 0.45;
+      g.fillStyle = COLORS.green;
+      g.beginPath();
+      g.arc(0, -h / 2, Math.max(w, h) * 0.65, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+    },
+  },
   score: 5000,
   mass: 6,
   boss: true,
@@ -263,32 +291,9 @@ defineMonster('slime-king', {
     
     const player = m.player as Player | undefined;
 
-    // Slime King swallow player check
-    if (player && player.hp > 0 && player.swallowedBy === null && (m.state.swallowCd as number) <= 0) {
-      const inset = m.def.contactInset ?? 0;
-      const overlapsX = player.x < m.x + m.w - inset && player.x + player.w > m.x + inset;
-      const overlapsY = player.y < m.y + m.h - inset && player.y + player.h > m.y + inset;
-      
-      const dist = Math.hypot(player.cx - m.cx, player.cy - m.cy);
-      if (dist < 80) {
-        console.log("[SlimeKing Swallow Check] dist:", dist, "invulnT:", player.invulnT, "swallowCd:", m.state.swallowCd, "overlapsX:", overlapsX, "overlapsY:", overlapsY);
-      }
-
-      if (overlapsX && overlapsY) {
-        console.log("[SlimeKing Swallow Check] Gulping player!");
-        player.swallowBy(m);
-        if (player.swallowedBy === (m as any)) {
-          m.state.victim = true;
-          m.state.biteT = 1.0;
-          m.vx = 0;
-          m.vy = 0;
-        }
-      }
-    }
-
     // Digesting active check
     if (m.state.victim) {
-      const held = player && player.swallowedBy === (m as any) && player.hp > 0;
+      const held = player && player.swallowedBy === m && player.hp > 0;
       if (!held || !player) {
         m.state.victim = false;
         m.state.swallowCd = 4.0; // cooldown after escape

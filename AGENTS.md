@@ -96,13 +96,15 @@ Details and code samples: `docs/adding-content.md`. The short version —
 - **Placeable** (anything else a room can contain — chest, checkpoint,
   destructible): `definePlaceable` in `content/placeables.ts`. One entry
   drives the game spawn, the level-editor palette, and the test spawner;
-  read per-instance config from `RoomEntity.props`.
+  read per-instance config from `RoomEntity.props` and validate it with
+  the entry's `validateProps`.
 - **Room**: author in the level editor → JSON in `content/rooms/` →
   register in `rooms/index.ts`. Doors are `door` triggers; a locked door
   adds `props.key: '<item id>'`. Waves via `props.waves: '<table id>'`
   (+ optional `waveGoal`/`gateKey`).
 - **Wave table**: `defineWaveTable` in `content/waves.ts`.
-- **Trigger type**: `defineTriggerAction` in `play/trigger-actions.ts`.
+- **Trigger type**: `defineTriggerAction` in `play/trigger-actions.ts`;
+  definitions own both `run` and their optional `validateProps`.
 - **Visible gear slot**: equipment JSON sheet on the knight's frame grid
   (transparent except the gear) + `defineGearVisual(slot, ...)` in
   `content/gear-visuals.ts`. No player-render changes.

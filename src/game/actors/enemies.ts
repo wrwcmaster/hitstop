@@ -143,6 +143,30 @@ defineMonster('devourer', {
     m.state.victim = false;
     m.state.biteT = 0;
   },
+  onPlayerContact(m, player) {
+    if (ladenDevourer(m) || (m.state.digestCd as number) > 0) return true;
+    const weaponId = player.equipment.get('weapon');
+    if (weaponId) {
+      player.equipment.unequip('weapon');
+      player.inventory.remove(weaponId, player.inventory.count(weaponId));
+      player.syncStats();
+      m.state.stolenItems = [weaponId];
+      m.state.digestCd = 3;
+      m.vx = 0;
+      m.game.feel.hitstop(0.08);
+      m.game.feel.flash(0.2, COLORS.purple);
+      m.game.feel.sfx.play('gulp');
+      m.game.feel.text(player.cx, player.y - 16, 'WEAPON SWALLOWED!', COLORS.red);
+    } else {
+      m.game.combat.hit(player, {
+        damage: 1, targets: 'player', attacker: m,
+        strength: 0.5, knockback: m.facing * 120, popY: -100,
+        colors: [COLORS.purple, COLORS.white],
+      });
+      m.state.digestCd = 1.5;
+    }
+    return true;
+  },
   update(m, dt) {
     const player = m.player as Player | undefined;
     m.state.digestCd = Math.max(0, (m.state.digestCd as number) - dt);
@@ -204,35 +228,6 @@ defineMonster('devourer', {
       }
     }
 
-    // The gulp: any overlap while it's hungry (a laden one is satiated).
-    if (!laden && (m.state.digestCd as number) <= 0 &&
-        player.x < m.x + m.w && player.x + player.w > m.x &&
-        player.y < m.y + m.h && player.y + player.h > m.y) {
-      const weaponId = player.equipment.get('weapon');
-      if (weaponId) {
-        // Swallow weapon only!
-        player.equipment.unequip('weapon');
-        player.inventory.remove(weaponId, player.inventory.count(weaponId));
-        player.syncStats();
-        
-        m.state.stolenItems = [weaponId];
-        m.state.digestCd = 3;
-        m.vx = 0;
-        
-        m.game.feel.hitstop(0.08);
-        m.game.feel.flash(0.2, COLORS.purple);
-        m.game.feel.sfx.play('gulp');
-        m.game.feel.text(player.cx, player.y - 16, 'WEAPON SWALLOWED!', COLORS.red);
-      } else {
-        // If already disarmed, touch deals normal contact damage!
-        m.game.combat.hit(player, {
-          damage: 1, targets: 'player', attacker: m,
-          strength: 0.5, knockback: m.facing * 120, popY: -100,
-          colors: [COLORS.purple, COLORS.white],
-        });
-        m.state.digestCd = 1.5; // brief breather before next contact hit
-      }
-    }
   },
   draw(g, m) {
     const img = m.onGround ? SLIME1 : SLIME2;

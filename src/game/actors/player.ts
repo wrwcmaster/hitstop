@@ -31,8 +31,9 @@ import { KNIGHT_ANIMS, TEXEL, baseKnight } from '../content/sprites';
 import { gearLayers, DEBUG_ANCHORS } from '../content/gear-visuals';
 import { COLORS } from '../content/palette';
 import { weaponSpecOf, type WeaponSpec } from '../content/items';
-import type { SkillCtx } from '../content/skills';
+import { DEFAULT_SKILL_LOADOUT, type SkillCtx } from '../content/skills';
 import { Monster } from './monster';
+import { PlayerCapabilities } from './player-capabilities';
 import type { ActionGame } from '../defs';
 
 /** Movement + combat tuning in one place. Tweak freely. */
@@ -101,6 +102,7 @@ export class Player extends Actor {
     (level) => this.onLevelUp(level),
   );
   tree = new SkillTree<TreeCtx>({ stats: this.stats, syncStats: () => this.syncStats() });
+  capabilities = new PlayerCapabilities();
   skills = new SkillBook<SkillCtx>(
     {
       canAfford: (cost) => this.mp >= cost,
@@ -108,8 +110,7 @@ export class Player extends Actor {
         this.mp -= cost;
       },
     },
-    // ARCANE FLOW (skill tree): halved cooldowns.
-    () => (this.tree.has('m2') ? 0.5 : 1),
+    () => this.capabilities.modifier('skillCooldownScale', 1),
   );
   mp = PLAYER_TUNING.maxMp;
 
@@ -137,10 +138,12 @@ export class Player extends Actor {
   /** Debug god mode (cheat): no damage, always topped up. */
   godMode = false;
 
-  /** Swallowed-by-a-Devourer state. */
+  /** Monster currently holding the player through its swallow strategy. */
   swallowedBy: Monster | null = null;
   escapeN = 0;
-  escapeNeed = 7;
+  get escapeNeed(): number {
+    return this.swallowedBy?.def.swallow?.escapeNeed ?? 7;
+  }
 
   /** Air jumps left (SKY DANCER grants 1; refreshed on landing). */
   private airJumps = 0;
@@ -163,7 +166,9 @@ export class Player extends Actor {
     this.inventory.add('rusty-sword');
     this.equipment.equip('rusty-sword');
     this.inventory.add('potion');
-    this.skills.learn('fireball');
+    for (const slot of DEFAULT_SKILL_LOADOUT) {
+      if (slot.startsKnown) this.skills.learn(slot.skillId);
+    }
     this.syncStats();
     this.hp = this.maxHp;
     this.mp = this.maxMp;
@@ -211,39 +216,21 @@ export class Player extends Actor {
     return weaponSpecOf(this.equipment.get('weapon'));
   }
 
-  /* ---------------- swallowed (the Devourer / Slime King) ---------------- */
+  /* ---------------- definition-owned swallow interactions ---------------- */
 
-  /** A monster gulps the player down — and takes the weapon with it only if it's a Devourer. */
+  /** Enter the generic held state; the monster definition owns its effects. */
   swallowBy(m: Monster): void {
-    console.log("[Player swallowBy] called by:", m.type, "current FSM state:", this.fsm.state, "invulnT:", this.invulnT);
-    if (this.fsm.is('dead', 'swallowed') || this.invulnT > 0) return;
+    const effect = m.def.swallow;
+    if (!effect || this.fsm.is('dead', 'swallowed') || this.invulnT > 0) return;
     this.swallowedBy = m;
     this.escapeN = 0;
-    
-    if (m.type === 'devourer') {
-      // Everything you're wearing goes down with you and rides inside the
-      // beast until it dies — kill THIS one to get your gear back. (Snapshot
-      // the slots first: unequip mutates the map we're iterating.)
-      const taken: string[] = [];
-      for (const [slot, id] of this.equipment.slots()) {
-        this.equipment.unequip(slot);
-        this.inventory.remove(id, this.inventory.count(id)); // GONE from the bag too
-        taken.push(id);
-      }
-      if (taken.length) {
-        this.syncStats();
-        m.state.stolenItems = taken;
-        this.feel.text(this.cx, this.y - 16, taken.length > 1 ? 'GEAR SWALLOWED!' : 'WEAPON SWALLOWED!', COLORS.red);
-      }
-    } else {
-      this.feel.text(this.cx, this.y - 16, 'SWALLOWED!', COLORS.red);
-    }
-    
-    this.statuses.apply('devoured');
+    this.feel.text(this.cx, this.y - 16, effect.message ?? 'SWALLOWED!', COLORS.red);
+    if (effect.status) this.statuses.apply(effect.status);
+    effect.onEnter?.(m, this);
     this.fsm.set('swallowed');
     this.feel.hitstop(0.12);
     this.feel.shake(0.6);
-    this.feel.flash(0.3, COLORS.purple);
+    this.feel.flash(0.3, effect.colors?.[0] ?? COLORS.purple);
     this.feel.sfx.play('gulp');
     this.game.events.emit('playerSwallowed', {});
   }
@@ -276,17 +263,17 @@ export class Player extends Actor {
   private releaseFromSwallow(burst: boolean): string {
     const m = this.swallowedBy;
     this.swallowedBy = null;
-    this.statuses.remove('devoured');
+    const effect = m?.def.swallow;
+    if (effect?.status) this.statuses.remove(effect.status);
     if (burst && m && !m.dead) {
       const dir = (m.facing * -1) as 1 | -1;
       this.vx = dir * 190;
       this.vy = -230;
       this.invulnT = 1.2;
-      m.state.digestCd = 4; // the beast needs a breather before the next gulp
-      m.state.victim = false;
-      this.feel.impact(this.cx, this.cy, { strength: 0.7, dir, colors: [COLORS.purple, COLORS.white] });
+      this.feel.impact(this.cx, this.cy, { strength: 0.7, dir, colors: effect?.colors ?? [COLORS.purple, COLORS.white] });
       this.feel.sfx.play('dash');
     }
+    if (m) effect?.onRelease?.(m, this, burst);
     return this.hp <= 0 ? 'dead' : 'move';
   }
 
@@ -305,20 +292,22 @@ export class Player extends Actor {
     if (this.atkBuf.consume()) return 'attack';
     if (this.input.consumePress('dash') && this.dashCd <= 0) return 'dash';
     // Shooting is a real action: enter `cast` so the body recoils.
-    if (this.input.consumePress('skill') && this.skills.ready('fireball')) {
-      this.pendingSkill = 'fireball';
-      return 'cast';
-    }
-    if (this.input.consumePress('skill2') && this.skills.ready('nova')) {
-      this.pendingSkill = 'nova';
-      return 'cast';
+    for (const slot of DEFAULT_SKILL_LOADOUT) {
+      if (this.input.consumePress(slot.action) && this.skills.ready(slot.skillId)) {
+        this.pendingSkill = slot.skillId;
+        return 'cast';
+      }
     }
   }
 
   /** Fire the queued spell and brace into a recoil for the cast window. */
   beginCast(): void {
-    const id = this.pendingSkill ?? 'fireball';
+    const id = this.pendingSkill;
     this.pendingSkill = null;
+    if (!id) {
+      this.castDur = 0.08;
+      return;
+    }
     this.castDur = PLAYER_TUNING.castTime;
     const fired = this.skills.cast(id, { game: this.game, player: this });
     if (fired) this.vx -= this.facing * PLAYER_TUNING.castRecoil;
@@ -344,7 +333,7 @@ export class Player extends Actor {
     this.vx += this.facing * lunge;
     // Damage/feel come from the equipped weapon; flat bonus from stats;
     // EXECUTIONER (skill tree) boosts the finisher.
-    const executioner = heavy && this.tree.has('w3') ? 2 : 0;
+    const executioner = heavy && this.capabilities.has('heavyFinisherBonus') ? 2 : 0;
     this.strike = this.game.combat.strike({
       damage: (heavy ? w.heavyDamage : w.lightDamage) + Math.round(this.stats.get('attack')) + executioner,
       targets: 'enemy',
@@ -376,7 +365,7 @@ export class Player extends Actor {
       color: [COLORS.steel, COLORS.white], speed: 50, life: 0.3, drag: 4,
     });
     // DASH STRIKE (skill tree): the dash itself becomes a blade.
-    this.dashStrike = this.tree.has('w4')
+    this.dashStrike = this.capabilities.has('dashStrike')
       ? this.game.combat.strike({
           damage: 1 + Math.round(this.stats.get('attack')),
           targets: 'enemy',
@@ -458,6 +447,7 @@ export class Player extends Actor {
   }
 
   private die(): void {
+    if (this.swallowedBy) this.releaseFromSwallow(false);
     this.invulnT = 99;
     this.vy = -220;
     this.feel.slowmo(0.9);
@@ -538,7 +528,7 @@ export class Player extends Actor {
 
     if (this.onGround) {
       this.coyote.set();
-      this.airJumps = this.tree.has('v4') ? 1 : 0;
+      this.airJumps = this.capabilities.modifier('airJumps', 0);
       if (!this.wasGround && fallSpeed > 240) {
         // Landing feedback scales with impact speed.
         this.squash = 0.6;
@@ -556,18 +546,10 @@ export class Player extends Actor {
     // contactInset shrinks the touch box for round-sprited monsters.
     if (!this.fsm.is('dead', 'dash') && this.invulnT <= 0) {
       for (const e of this.world.actors('enemy')) {
-        if (e instanceof Monster && !e.def.noContactDamage) {
-          // If it's a Slime King and swallow is ready, skip contact damage so swallow can trigger.
-          if (e.type === 'slime-king' && (e.state.swallowCd as number ?? 0) <= 0) {
-            if (overlaps(this, expand(e.hurtbox, -(e.def.contactInset ?? 0)))) {
-              console.log("[Player Contact] Overlapping Slime King, skipping contact damage for swallow");
-            }
-            continue;
-          }
-          if (overlaps(this, expand(e.hurtbox, -(e.def.contactInset ?? 0)))) {
-            this.hurt(e);
-            break;
-          }
+        if (e instanceof Monster && overlaps(this, expand(e.hurtbox, -(e.def.contactInset ?? 0)))) {
+          const handled = e.def.onPlayerContact?.(e, this) === true;
+          if (!handled && !e.def.noContactDamage) this.hurt(e);
+          break;
         }
       }
     }
@@ -737,15 +719,8 @@ export class Player extends Actor {
       }
     }
     
-    // Draw the green gel overlay on top of the player sprite if swallowed by Slime King!
-    if (isSwallowed && this.swallowedBy && this.swallowedBy.type === 'slime-king') {
-      g.save();
-      g.globalAlpha = 0.45;
-      g.fillStyle = COLORS.green;
-      g.beginPath();
-      g.arc(0, -dh / 2, Math.max(dw, dh) * 0.65, 0, Math.PI * 2);
-      g.fill();
-      g.restore();
+    if (isSwallowed && this.swallowedBy) {
+      this.swallowedBy.def.swallow?.drawPlayerOverlay?.(g, this.swallowedBy, this, dw, dh);
     }
     
     // Gear rides the body transform so it leans/squashes with the knight.

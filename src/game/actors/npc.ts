@@ -23,6 +23,8 @@ import { Player } from './player';
  */
 export interface NpcDef {
   name: string;
+  /** Validate per-room instance props before spawning. */
+  validateProps?(props: Record<string, unknown>, path: string): void;
   sprite: LoadedSprite;
   /** Animation to render (default: idle). */
   anim?: string;

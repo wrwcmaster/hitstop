@@ -40,6 +40,30 @@ export interface WeaponSpec {
   hilt: string;
 }
 
+function parseWeaponSpec(value: unknown, path: string): WeaponSpec {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${path}: expected a weapon object`);
+  }
+  const spec = value as Record<string, unknown>;
+  const numbers = ['lightDamage', 'heavyDamage', 'lightStrength', 'heavyStrength', 'reach', 'bladeLen', 'bladeW'] as const;
+  for (const key of numbers) {
+    if (typeof spec[key] !== 'number' || !Number.isFinite(spec[key])) {
+      throw new Error(`${path}.${key}: expected a finite number`);
+    }
+  }
+  for (const key of ['blade', 'hilt'] as const) {
+    if (typeof spec[key] !== 'string') throw new Error(`${path}.${key}: expected a color string`);
+  }
+  if (!Array.isArray(spec.colors) || spec.colors.length === 0 || spec.colors.some((color) => typeof color !== 'string')) {
+    throw new Error(`${path}.colors: expected a non-empty string array`);
+  }
+  return spec as unknown as WeaponSpec;
+}
+
+function weaponProps(itemId: string, spec: WeaponSpec): { weapon: WeaponSpec } {
+  return { weapon: parseWeaponSpec(spec, `item "${itemId}".props.weapon`) };
+}
+
 export function weaponSpecOf(itemId: string | null): WeaponSpec {
   const fallback: WeaponSpec = {
     lightDamage: 1, heavyDamage: 1, lightStrength: 0.3, heavyStrength: 0.5,
@@ -47,7 +71,8 @@ export function weaponSpecOf(itemId: string | null): WeaponSpec {
     bladeLen: 0, bladeW: 1, blade: COLORS.steel, hilt: COLORS.gold, // fists: nothing drawn
   };
   if (!itemId) return fallback;
-  return (itemDef(itemId).props?.weapon as WeaponSpec) ?? fallback;
+  const value = itemDef(itemId).props?.weapon;
+  return value === undefined ? fallback : parseWeaponSpec(value, `item "${itemId}".props.weapon`);
 }
 
 defineItem<ItemCtx>('rusty-sword', {
@@ -56,13 +81,11 @@ defineItem<ItemCtx>('rusty-sword', {
   icon: ICON_SWORD,
   kind: 'equipment',
   slot: 'weapon',
-  props: {
-    weapon: {
-      lightDamage: 1, heavyDamage: 2, lightStrength: 0.45, heavyStrength: 0.8,
-      reach: 0, colors: [COLORS.white, COLORS.gold],
-      bladeLen: 7, bladeW: 1, blade: COLORS.steel, hilt: COLORS.gold,
-    } satisfies WeaponSpec,
-  },
+  props: weaponProps('rusty-sword', {
+    lightDamage: 1, heavyDamage: 2, lightStrength: 0.45, heavyStrength: 0.8,
+    reach: 0, colors: [COLORS.white, COLORS.gold],
+    bladeLen: 7, bladeW: 1, blade: COLORS.steel, hilt: COLORS.gold,
+  }),
 });
 
 defineItem<ItemCtx>('great-sword', {
@@ -72,13 +95,11 @@ defineItem<ItemCtx>('great-sword', {
   kind: 'equipment',
   slot: 'weapon',
   mods: { add: { attack: 1 } },
-  props: {
-    weapon: {
-      lightDamage: 2, heavyDamage: 4, lightStrength: 0.6, heavyStrength: 1.0,
-      reach: 5, colors: [COLORS.gold, COLORS.white, COLORS.red],
-      bladeLen: 12, bladeW: 2, blade: COLORS.gold, hilt: COLORS.red,
-    } satisfies WeaponSpec,
-  },
+  props: weaponProps('great-sword', {
+    lightDamage: 2, heavyDamage: 4, lightStrength: 0.6, heavyStrength: 1.0,
+    reach: 5, colors: [COLORS.gold, COLORS.white, COLORS.red],
+    bladeLen: 12, bladeW: 2, blade: COLORS.gold, hilt: COLORS.red,
+  }),
 });
 
 defineItem<ItemCtx>('iron-helmet', {
