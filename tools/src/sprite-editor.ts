@@ -197,6 +197,7 @@ function floodFill(startX: number, startY: number, fillChar: string): void {
 
 grid.addEventListener('contextmenu', (e) => e.preventDefault());
 grid.addEventListener('mousedown', (e) => {
+  saveHistory();
   erasing = e.button === 2;
   painting = true;
   paint(e);
@@ -693,11 +694,16 @@ $('btnUndo').onclick = () => undo();
 $('btnRedo').onclick = () => redo();
 
 window.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+  const key = e.key.toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && key === 'z') {
     e.preventDefault();
-    undo();
+    if (e.shiftKey) {
+      redo();
+    } else {
+      undo();
+    }
   }
-  if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+  if ((e.ctrlKey || e.metaKey) && key === 'y') {
     e.preventDefault();
     redo();
   }
