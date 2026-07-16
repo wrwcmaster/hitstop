@@ -2,6 +2,7 @@ import { Registry, type CollisionSource, type RoomEntity } from '@engine/index';
 import { Monster, monsters } from '../actors/monster';
 import { Npc, npcs } from '../actors/npc';
 import type { ActionGame } from '../defs';
+import { rejectUnknownProps } from './prop-validation';
 
 /**
  * Placeables: everything a room (or a tool) can put into the world, in
@@ -34,6 +35,8 @@ export interface Placeable {
   h: number;
   /** Extra palette hint ("hp 4"). */
   hint?: string;
+  /** Validate this placeable's per-instance property bag at room load. */
+  validateProps?(props: Record<string, unknown>, path: string): void;
   /** Whether to spawn on this room visit (default yes). */
   shouldSpawn?(ctx: PlaceableCtx, e: RoomEntity): boolean;
   /** Create the entity in the world. `e.props` carries per-instance config. */
@@ -66,6 +69,7 @@ export function registerPlaceables(): void {
       w: def.w,
       h: def.h,
       hint: `hp ${def.hp}`,
+      validateProps: def.validateProps ?? ((props, path) => rejectUnknownProps(props, [], path)),
       // A defeated boss stays defeated across saves.
       shouldSpawn: ({ flags }) => !(def.boss && flags.has('bossDefeated')),
       spawn: ({ game, tilemap }, e) => {
@@ -81,6 +85,7 @@ export function registerPlaceables(): void {
       colors: ['#94b0c2'],
       w: def.sprite.hitbox.w,
       h: def.sprite.hitbox.h,
+      validateProps: def.validateProps ?? ((props, path) => rejectUnknownProps(props, [], path)),
       spawn: ({ game, tilemap }, e) => {
         game.world.spawn(new Npc(id, game, tilemap, e.x, e.y));
       },

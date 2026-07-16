@@ -88,7 +88,7 @@ Two subtleties worth knowing:
 
 ## Data formats
 
-- **Rooms** (`RoomDef`): `{ name, tileSize, legend: {char→tileId}, tiles: string[], playerSpawn, entities: [{type,x,y,props?}] }`. Validated on load (`validateRoom`) since tools and saves produce it.
+- **Rooms** (`RoomDef`): `{ name, tileSize, legend: {char→tileId}, tiles: string[], playerSpawn, entities: [{type,x,y,props?}] }`. `validateRoom` checks the transport shape; `validateRoomContent` then delegates open property bags to the registered placeable, trigger action, and room-feature definitions.
 - **Sprites**: rows of palette characters + `{char→color|null}`. The sprite editor round-trips `{palette, frames, fps}`.
 - Both are diffable text — deliberate, so game content works like code: reviewable, revertable, greppable.
 
@@ -100,9 +100,10 @@ The level editor imports the *game's* content modules; its tile palette is `tile
 
 The second wave of systems keeps the same shape — registries of data + small hooks, engine mechanics with no game knowledge:
 
-- **Weapons** are equipment items whose `props.weapon` carries an attack spec (damage, feel strength, reach, colors). The player's swing reads whatever is in the weapon slot; new weapons never touch player code.
+- **Weapons** are equipment items whose `props.weapon` carries a parsed attack spec (damage, feel strength, reach, colors and rendering fields). Invalid extensions fail with an item/property path instead of surfacing during a swing.
 - **Consumables/instants** (`potion`, `mana-orb`, `coin`) are `use`/`onPickup` hooks with a game-provided context. The `Pickup` entity (game side) handles the drop → magnet → collect loop.
-- **Skills** cast via a `SkillBook` that gates on cooldown + resource; the fireball is ~40 lines in `content/skills.ts`, most of it visuals.
+- **Skills** cast via a `SkillBook` that gates on cooldown + resource. Input dispatch walks `DEFAULT_SKILL_LOADOUT`, so adding or moving a skill slot is a content-table change rather than a Player branch.
+- **Player capabilities** are semantic flags/modifiers granted by tree-node hooks. Mechanics ask for `dashStrike`, `airJumps`, or `skillCooldownScale`; they never ask whether node `w4`, `v4`, or `m2` is owned.
 - **Conversations** are `ConversationDef` data played by `DialogueScene` as a stack overlay; rooms start them through `talk` triggers, so a level designer wires dialogue in the editor without code.
 - **System menu** (`scenes/pause.ts`) composes the engine `Menu` widget; inventory/equip/volume/restart are menu entries with callbacks.
 - **Minimap** bakes the tilemap once and draws live entity markers each frame.
@@ -112,7 +113,7 @@ The second wave of systems keeps the same shape — registries of data + small h
 `scenes/play.ts` owns the run/room lifecycle, score, and event wiring — and delegates everything else to focused modules under `scenes/play/`, each seeing the scene only through the narrow `PlayHost` seam (`play/host.ts`: live reads of game/player/tilemap/room + banner/goToRoom/openConversation):
 
 - **`play/waves.ts` — WaveDirector**: runs a room's wave combat from a **wave table** (`content/waves.ts`, a registry — `props.waves: "<table id>"` names the recipe; rooms can run different gauntlets). Also handles `waveGoal`/`gateKey`: clearing the goal wave drops the key and stops the waves.
-- **`play/trigger-actions.ts`**: what each trigger `event` means — `talk` and `door` (with key locking) ship; `defineTriggerAction('chest', ...)` makes a new trigger type available to every room with no scene changes.
+- **`play/trigger-actions.ts`**: what each trigger `event` means — behavior plus an optional definition-owned `validateProps`. `talk` and `door` validate their payloads before a room starts; custom unregistered events still flow through the event bus.
 - **`play/hud.ts` — Hud**: all in-game screen-space drawing (vitals, purse, level, statuses, minimap, boss bar, combo, banners) plus the world-space gate marker. Pure rendering; state stays in the scene.
 - **`play/screens.ts`**: the title screen (menu + render) and the game-over overlay.
 - **`play/cheats.ts`**: debug cheats as a data table — the key handler and the on-screen legend both walk it, so a new cheat is one entry.
@@ -120,9 +121,9 @@ The second wave of systems keeps the same shape — registries of data + small h
 ## The world layer (rooms / boss / saves)
 
 - **Rooms & doors**: the world is a `ROOMS` registry of RoomDefs connected by `door` triggers (`props.room` + spawn point). `PlayScene.setRoom` rebuilds tilemap/minimap/triggers behind a fade, `World.retain` keeps only the player, and waves run only in rooms with `props.waves`. The level editor's trigger mode places doors.
-- **Placeables**: everything a room can put in the world lives in one catalog (`content/placeables.ts`) — label/category/colors/footprint for the tools, plus `shouldSpawn`/`spawn` over the full `RoomEntity` (including its `props` bag). `PlayScene.setRoom`, the level editor's entity palette, and the test spawner all consume it; monsters and NPCs are bridged in from their registries by `registerPlaceables()`, and a new placeable kind (chest, checkpoint...) is one `definePlaceable` call that lights up all three sites at once.
+- **Placeables**: everything a room can put in the world lives in one catalog (`content/placeables.ts`) — label/category/colors/footprint for the tools, plus `validateProps`/`shouldSpawn`/`spawn` over the full `RoomEntity`. Built-in monster/NPC placeables reject unsupported instance properties; custom definitions validate the keys they consume.
 - **Gear visuals**: visible equipment is a **layer registry** (`content/gear-visuals.ts`) keyed by slot — a sprite sheet on the knight's frame grid plus optional per-frame anchors, composited in `order` (armor under helmet). The player render walks the registry, so a new visible slot (boots, cape, shield) is a JSON sheet + one `defineGearVisual` call.
-- **Bosses**: a boss is a monster with `boss: true` and an engine `FSM` driving telegraphed attack states (see the Slime King in `actors/boss.ts`); every attack resolves through Strikes/Projectiles so feedback is uniform. The `bossDefeated` flag keeps him dead across saves. Contact damage on the player also routes through `Combat.hit` — `Player.onHurt` adds the player-specific channels (i-frames, red flash, combo reset) on top of the standard bundle, whatever the damage source.
+- **Bosses**: a boss is a monster with `boss: true` and an engine `FSM` driving telegraphed attack states. Unusual touch behavior belongs to `MonsterDef.onPlayerContact`; held-player effects and overlays belong to its `swallow` strategy. Player only runs the generic contact/held lifecycle and contains no monster ids.
 - **Saves**: `JsonStore` (versioned localStorage) + `save.ts`. Checkpoints at every room entrance and boss defeat; death → last checkpoint at full HP; title screen offers CONTINUE. Fired one-shot triggers persist so intro dialogue doesn't replay.
 
 ## Where this goes next (Metroidvania roadmap)

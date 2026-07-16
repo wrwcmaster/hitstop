@@ -51,10 +51,28 @@ export function validateRoom(def: unknown): RoomDef {
   if (!d || typeof d !== 'object') throw new Error('room: not an object');
   if (typeof d.name !== 'string') throw new Error('room: missing name');
   if (typeof d.tileSize !== 'number' || d.tileSize <= 0) throw new Error('room: bad tileSize');
-  if (!Array.isArray(d.tiles) || d.tiles.length === 0) throw new Error('room: missing tiles');
+  if (!Array.isArray(d.tiles) || d.tiles.length === 0 || d.tiles.some((row) => typeof row !== 'string')) {
+    throw new Error('room: tiles must be a non-empty string array');
+  }
   if (!d.legend || typeof d.legend !== 'object') throw new Error('room: missing legend');
-  if (!d.playerSpawn) throw new Error('room: missing playerSpawn');
+  if (!d.playerSpawn || !Number.isFinite(d.playerSpawn.x) || !Number.isFinite(d.playerSpawn.y)) {
+    throw new Error('room: bad playerSpawn');
+  }
   if (!Array.isArray(d.entities)) throw new Error('room: missing entities');
+  d.entities.forEach((entity, index) => {
+    if (!entity || typeof entity !== 'object') throw new Error(`room: entities[${index}] is not an object`);
+    if (typeof entity.type !== 'string' || !Number.isFinite(entity.x) || !Number.isFinite(entity.y)) {
+      throw new Error(`room: entities[${index}] has a bad type or position`);
+    }
+  });
   if (d.triggers !== undefined && !Array.isArray(d.triggers)) throw new Error('room: triggers must be an array');
+  d.triggers?.forEach((trigger, index) => {
+    if (!trigger || typeof trigger !== 'object') throw new Error(`room: triggers[${index}] is not an object`);
+    if (typeof trigger.event !== 'string' ||
+        !Number.isFinite(trigger.x) || !Number.isFinite(trigger.y) ||
+        !Number.isFinite(trigger.w) || !Number.isFinite(trigger.h)) {
+      throw new Error(`room: triggers[${index}] has a bad event or bounds`);
+    }
+  });
   return d as RoomDef;
 }

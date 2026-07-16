@@ -18,6 +18,7 @@ import { Player } from '../actors/player';
 import { Monster, monsters } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
 import { placeables, type PlaceableCtx } from '../content/placeables';
+import { validateRoomContent } from '../content/room-features';
 import { PauseScene } from './pause';
 import { OptionsScene } from './options';
 import { Background } from './background';
@@ -180,7 +181,7 @@ export class PlayScene implements Scene {
     on(game.events.on('waveClear', () => {
       // SECOND WIND (skill tree): every cleared wave knits a wound.
       const p = this.player;
-      if (p && p.hp > 0 && p.tree.has('v3') && p.hp < p.maxHp) {
+      if (p && p.hp > 0 && p.capabilities.has('secondWind') && p.hp < p.maxHp) {
         p.heal(1);
         game.feel.text(p.cx, p.y - 10, '+1 HP', COLORS.red);
         game.feel.sfx.play('heal');
@@ -279,6 +280,7 @@ export class PlayScene implements Scene {
     const g = this.game;
     this.roomId = id;
     this.room = this.roomById(id);
+    validateRoomContent(this.room, id);
     this.tilemap = buildTilemap(this.room);
     this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
     this.triggers = new Triggers(this.room.triggers ?? []);
@@ -426,7 +428,7 @@ export class PlayScene implements Scene {
     // Always on the bus (custom events, ad-hoc listeners), then routed to
     // whatever registered action gives the event its meaning.
     this.game.events.emit('trigger', { event: def.event, props: def.props });
-    if (triggerActions.has(def.event)) triggerActions.get(def.event)(def, this.host);
+    if (triggerActions.has(def.event)) triggerActions.get(def.event).run(def, this.host);
   }
 
   private openConversation(id: string): void {

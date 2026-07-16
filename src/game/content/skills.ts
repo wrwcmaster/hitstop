@@ -2,12 +2,19 @@ import { defineSkill } from '@engine/index';
 import { COLORS } from './palette';
 import type { ActionGame } from '../defs';
 import type { Player } from '../actors/player';
+import type { Action } from '../defs';
 
 /** Context handed to skill casts. */
 export interface SkillCtx {
   game: ActionGame;
   player: Player;
 }
+
+/** Input-to-skill mapping. Player dispatches this table without knowing skill ids. */
+export const DEFAULT_SKILL_LOADOUT: readonly { action: Action; skillId: string; startsKnown?: boolean }[] = [
+  { action: 'skill', skillId: 'fireball', startsKnown: true },
+  { action: 'skill2', skillId: 'nova' },
+];
 
 /**
  * Skills, including magic. A cast typically fires a Projectile or a
@@ -48,7 +55,7 @@ defineSkill<SkillCtx>('fireball', {
         },
         onExpire(p) {
           // PYRE (skill tree): the bolt goes out with a bang.
-          if (player.tree.has('m4')) {
+          if (player.capabilities.has('pyre')) {
             const blast = game.combat.strike({
               damage: 2,
               targets: 'enemy',

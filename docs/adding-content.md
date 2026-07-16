@@ -140,6 +140,7 @@ defineItem<ItemCtx>('dagger', {
       lightStrength: 0.3, heavyStrength: 0.6,   // feel scale per hit
       reach: -4,                                 // hitbox size delta
       colors: [COLORS.white],
+      bladeLen: 5, bladeW: 1, blade: COLORS.steel, hilt: COLORS.gold,
     } satisfies WeaponSpec,
   },
 });
@@ -166,7 +167,7 @@ defineSkill<SkillCtx>('ice-shard', {
 });
 ```
 
-Teach it with `player.skills.learn('ice-shard')` and cast from an input binding or AI. The `SkillBook` handles cooldowns and mana; return `false` from `cast` to abort without charging.
+Teach it with `player.skills.learn('ice-shard')` and add an input slot to `DEFAULT_SKILL_LOADOUT` (or cast it from AI). The `SkillBook` handles cooldowns and mana; return `false` from `cast` to abort without charging.
 
 ## A conversation
 
@@ -198,7 +199,7 @@ Rooms carry `triggers` — rectangles that fire a named event when the player en
 ]
 ```
 
-Two events are built in: `talk` opens the conversation named in `props.conversation`, and `door` transitions to `props.room` (spawning at `props.x/y`, with a fade; use `"once": false` so doors re-fire). Any other event name is yours: listen with `game.events.on('trigger', ({ event, props }) => ...)` for ambushes, checkpoints, boss walls.
+Two events are built in: `talk` opens the conversation named in `props.conversation`, and `door` transitions to `props.room` (spawning at `props.x/y`, with a fade; use `"once": false` so doors re-fire). Their definitions validate those property bags at room entry. A registered action supplies both `run` and optional `validateProps`; unregistered event names remain available to ad-hoc event-bus listeners.
 
 ## A new room in the world
 
@@ -279,7 +280,7 @@ The built-ins show the three tiers, all resolving through Strikes/Projectiles so
 
 - **Ranged debuff** (the Slime King's sticky spit): lob a 0-damage projectile whose `onHit` applies a status. Zero-damage hits skip damage numbers and player i-frames automatically.
 - **Telegraph → lunge** (devourer, boss slam): a shiver/windup state the player can read, then the attack. Never skip the telegraph — readable attacks are what make hard fights fair.
-- **Grab mechanics** (devourer): the swallow moves the *player* into a special FSM state (`swallowed`: input locked to mashing, position pinned, escape counter) while the monster ticks damage on its own timer. The stolen weapon lives in `monster.state.stolenItem` and drops on kill — grabs that cost something recoverable are scary without being unfair.
+- **Grab mechanics** (Slime King): `MonsterDef.onPlayerContact` starts the generic held-player FSM, while the definition's `swallow` strategy owns status, release cleanup, colors, and overlay. Devourer's gear theft is likewise its own contact hook. New unusual enemies do not add branches to Player.
 
 ## A skill tree node
 
@@ -290,12 +291,13 @@ defineTreeNode<TreeCtx>('w5', {
   name: 'BLOODLUST', desc: 'KILLS RESTORE 1 MP',
   cost: 3, branch: 0, tier: 4, requires: ['w4'],
   // stat effects: mods: { add: { attack: 1 } }
-  // mechanics: check tree.has('w4') where the mechanic lives,
-  // or flip something here in onUnlock (runs again on save load)
+  onUnlock({ player }) {
+    player.capabilities.enable('restoreMpOnKill');
+  },
 });
 ```
 
-Add the id to `TREE_GRID` so the tree screen shows it. Three effect styles, by example: declarative stat mods (`SHARP STEEL`), a named check where the mechanic lives (`EXECUTIONER` in `Player.beginAttack`, `SECOND WIND` in the wave-clear handler, `ARCANE FLOW` in the SkillBook's cooldown scale), or an imperative unlock (`NOVA` calls `player.skills.learn`).
+Add the id to `TREE_GRID` so the tree screen shows it. Use declarative stat mods for stats, named capabilities/modifiers for mechanics, and imperative unlocks such as `player.skills.learn('nova')` for catalog entries. `onUnlock` re-runs during save restore, so runtime code depends on semantic capability names rather than tree node ids.
 
 XP itself: monsters grant `def.xp ?? score/20` on kill; the curve lives in the Player's `Progression` constructor (40 XP for level 2, +25 per level after); each level awards a skill point, fully heals, and autosaves.
 

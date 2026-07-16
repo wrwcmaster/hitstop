@@ -10,11 +10,10 @@ export interface TreeCtx {
 
 /**
  * The knight's skill tree: three branches, three tiers. Effects are
- * either declarative stat mods (applied while owned, restored with
- * saves) or onUnlock hooks (learning Nova); a couple of nodes are
- * checked by name where their mechanic lives (Executioner in
- * Player.beginAttack, Second Wind in the wave-clear handler, Arcane
- * Flow in the SkillBook's cooldown scale).
+ * either declarative stat mods (applied while owned, restored with saves)
+ * or onUnlock hooks. Mechanics grant named player capabilities/modifiers,
+ * so runtime code never depends on tree node ids; active skills are
+ * learned through the same hook.
  */
 
 export const BRANCH_NAMES = ['WARRIOR', 'VITALITY', 'MAGIC'];
@@ -46,14 +45,18 @@ defineTreeNode<TreeCtx>('w3', {
   name: 'EXECUTIONER',
   desc: 'Heavy finisher deals +2 damage',
   cost: 2, branch: 0, tier: 2, requires: ['w2'],
-  // Checked by name in Player.beginAttack.
+  onUnlock({ player }) {
+    player.capabilities.enable('heavyFinisherBonus');
+  },
 });
 
 defineTreeNode<TreeCtx>('w4', {
   name: 'DASH STRIKE',
   desc: 'Dashing through enemies cuts them',
   cost: 3, branch: 0, tier: 3, requires: ['w3'],
-  // Checked by name in Player.beginDash.
+  onUnlock({ player }) {
+    player.capabilities.enable('dashStrike');
+  },
 });
 
 /* ---- VITALITY ---- */
@@ -76,14 +79,18 @@ defineTreeNode<TreeCtx>('v3', {
   name: 'SECOND WIND',
   desc: 'Heal 1 HP on every wave clear',
   cost: 2, branch: 1, tier: 2, requires: ['v2'],
-  // Checked by name in the PlayScene's waveClear handler.
+  onUnlock({ player }) {
+    player.capabilities.enable('secondWind');
+  },
 });
 
 defineTreeNode<TreeCtx>('v4', {
   name: 'SKY DANCER',
   desc: 'Double jump: press jump again in the air',
   cost: 3, branch: 1, tier: 3, requires: ['v3'],
-  // Checked by name in the Player's landing logic (airJumps refresh).
+  onUnlock({ player }) {
+    player.capabilities.setModifier('airJumps', 1);
+  },
 });
 
 /* ---- MAGIC ---- */
@@ -99,7 +106,9 @@ defineTreeNode<TreeCtx>('m2', {
   name: 'ARCANE FLOW',
   desc: 'Skill cooldowns halved',
   cost: 1, branch: 2, tier: 1, requires: ['m1'],
-  // Checked by name in the Player's SkillBook cooldownScale.
+  onUnlock({ player }) {
+    player.capabilities.setModifier('skillCooldownScale', 0.5);
+  },
 });
 
 defineTreeNode<TreeCtx>('m3', {
@@ -115,7 +124,9 @@ defineTreeNode<TreeCtx>('m4', {
   name: 'PYRE',
   desc: 'Fireballs explode where they die',
   cost: 3, branch: 2, tier: 3, requires: ['m3'],
-  // Checked by name in the fireball's onExpire.
+  onUnlock({ player }) {
+    player.capabilities.enable('pyre');
+  },
 });
 
 /** Importing this module registers the tree. */

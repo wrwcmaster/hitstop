@@ -7,6 +7,18 @@ import {
   type CollisionSource,
 } from '@engine/index';
 import type { ActionGame } from '../defs';
+import type { Player } from './player';
+
+export interface SwallowDef {
+  status?: string;
+  escapeNeed?: number;
+  message?: string;
+  colors?: string[];
+  onEnter?(m: Monster, player: Player): void;
+  onRelease?(m: Monster, player: Player, burst: boolean): void;
+  /** Draw inside the player's transformed body coordinates. */
+  drawPlayerOverlay?(g: CanvasRenderingContext2D, m: Monster, player: Player, w: number, h: number): void;
+}
 
 /**
  * Data-driven monsters.
@@ -25,6 +37,8 @@ export interface MonsterDef {
   score: number;
   /** Feedback + gib colors — also used for spawn telegraphs. */
   colors: string[];
+  /** Validate per-room instance props before spawning. */
+  validateProps?(props: Record<string, unknown>, path: string): void;
   mass?: number;
   flies?: boolean;
   /** Loot rolled on death (each entry rolls independently). */
@@ -41,6 +55,10 @@ export interface MonsterDef {
    * attacks test against stays full size — forgiving both ways.
    */
   contactInset?: number;
+  /** Definition-owned unusual contact. Return true to suppress normal damage. */
+  onPlayerContact?(m: Monster, player: Player): boolean | void;
+  /** Strategy for holding and presenting a swallowed player. */
+  swallow?: SwallowDef;
   /** XP granted on kill (default: score / 20). */
   xp?: number;
   /** One-time setup; stash per-instance state on the monster. */
