@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 import { resolveSpriteGeometry, sprite, epx, type Palette, type SpriteFile } from '@engine/index';
 import { PAL } from '@game/content/palette';
 
@@ -64,6 +66,40 @@ const grid = $('grid') as HTMLCanvasElement;
 const gctx = grid.getContext('2d')!;
 const preview = $('preview') as HTMLCanvasElement;
 const pctx = preview.getContext('2d')!;
+
+const SPRITE_ROOT = '/src/game/content/sprites/';
+const spriteModules = import.meta.glob('/src/game/content/sprites/**/*.json', {
+  eager: true,
+  import: 'default',
+}) as Record<string, SpriteFile>;
+const existingSprites = new Map(
+  Object.entries(spriteModules)
+    .map(([modulePath, spriteFile]) => [modulePath.slice(SPRITE_ROOT.length), spriteFile] as const)
+    .sort(([a], [b]) => a.localeCompare(b)),
+);
+
+function populateSpriteSelect(id: string): void {
+  const select = $(id) as HTMLSelectElement;
+  for (const path of existingSprites.keys()) {
+    const option = document.createElement('option');
+    option.value = path;
+    option.textContent = path
+      .replace(/\.json$/, '')
+      .replaceAll('-', ' ')
+      .replaceAll('/', ' / ');
+    select.appendChild(option);
+  }
+}
+
+function existingSprite(path: string): SpriteFile {
+  const spriteFile = existingSprites.get(path);
+  if (!spriteFile) throw new Error(`unknown sprite "${path}"`);
+  // Editor mutations must not alter the cached module or reference layer.
+  return normalize(structuredClone(spriteFile));
+}
+
+populateSpriteSelect('selectSprite');
+populateSpriteSelect('selectRefSprite');
 
 function flash(msg: string): void {
   const s = $('status');
@@ -523,29 +559,23 @@ $('btnLoad').onclick = () => ($('fileInput') as HTMLInputElement).click();
 $('selectSprite').onchange = (e) => {
   const val = (e.target as HTMLSelectElement).value;
   if (!val) return;
-  fetch('/src/game/content/sprites/' + val)
-    .then(r => {
-      if (!r.ok) throw new Error(`HTTP error! status: ${r.status}`);
-      return r.json();
-    })
-    .then(json => {
-      file = normalize(json);
-      animName = Object.keys(file.anims)[0];
-      frameIdx = 0;
-      currentChar = firstPaintChar();
-      
-      const parts = val.split('/');
-      currentFileName = parts[parts.length - 1];
-      
-      undoStack.length = 0;
-      redoStack.length = 0;
-      updateUndoRedoButtons();
-      refreshUI();
-      flash(`loaded ${val}`);
-    })
-    .catch(err => {
-      flash(`load failed: ${err.message}`);
-    });
+  try {
+    file = existingSprite(val);
+    animName = Object.keys(file.anims)[0];
+    frameIdx = 0;
+    currentChar = firstPaintChar();
+
+    const parts = val.split('/');
+    currentFileName = parts[parts.length - 1];
+
+    undoStack.length = 0;
+    redoStack.length = 0;
+    updateUndoRedoButtons();
+    refreshUI();
+    flash(`loaded ${val}`);
+  } catch (err) {
+    flash(`load failed: ${(err as Error).message}`);
+  }
 };
 
 // Save the current sprite as a downloadable .json.
@@ -635,19 +665,13 @@ $('selectRefSprite').onchange = (e) => {
     redraw();
     return;
   }
-  fetch('/src/game/content/sprites/' + val)
-    .then(r => {
-      if (!r.ok) throw new Error(`HTTP error! status: ${r.status}`);
-      return r.json();
-    })
-    .then(json => {
-      refFile = normalize(json);
-      redraw();
-      flash(`loaded reference: ${val}`);
-    })
-    .catch(err => {
-      flash(`reference load failed: ${err.message}`);
-    });
+  try {
+    refFile = existingSprite(val);
+    redraw();
+    flash(`loaded reference: ${val}`);
+  } catch (err) {
+    flash(`reference load failed: ${(err as Error).message}`);
+  }
 };
 
 ($('showRef') as HTMLInputElement).onchange = () => redraw();

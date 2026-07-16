@@ -2,6 +2,7 @@ import {
   Registry,
   frameAt,
   loadSprite,
+  offscreen,
   withFacing,
   type FacingAnimSet,
   type SpriteFile,
@@ -38,6 +39,8 @@ export interface WeaponTrailCtx {
 }
 
 export interface WeaponVisual {
+  /** Normalized 8x8-logical-pixel item/pickup icon. */
+  icon?: HTMLCanvasElement;
   drawHeld(g: CanvasRenderingContext2D, ctx: HeldWeaponCtx): void;
   drawTrail?(g: CanvasRenderingContext2D, ctx: WeaponTrailCtx): void;
 }
@@ -56,6 +59,13 @@ export function drawWeaponTrail(g: CanvasRenderingContext2D, id: string | null, 
   if (id) weaponVisuals.get(id).drawTrail?.(g, ctx);
 }
 
+/** Resolve the UI/pickup icon owned by a registered weapon visual. */
+export function weaponIcon(id: string): HTMLCanvasElement {
+  const icon = weaponVisuals.get(id).icon;
+  if (!icon) throw new Error(`weapon visual "${id}" has no icon`);
+  return icon;
+}
+
 export interface SpriteWeaponConfig {
   /** Transparent weapon-only frames aligned to the knight's world origin. */
   anims: FacingAnimSet;
@@ -69,7 +79,11 @@ export interface SpriteWeaponConfig {
 
 /** Build a visual from authored, animation-aligned sprite layers. */
 export function spriteWeapon(config: SpriteWeaponConfig): WeaponVisual {
+  const iconFrame = config.anims.right.idle?.frames[0]
+    ?? Object.values(config.anims.right)[0]?.frames[0];
+  if (!iconFrame) throw new Error('sprite weapon needs at least one frame');
   return {
+    icon: normalizedIcon(iconFrame),
     drawHeld(g, ctx) {
       const set = ctx.facing === 1 ? config.anims.right : config.anims.left;
       const attackAnim = ctx.attack ? set.attack : undefined;
@@ -90,6 +104,47 @@ export function spriteWeapon(config: SpriteWeaponConfig): WeaponVisual {
     },
     drawTrail: config.trail === false ? undefined : drawSlashTrail,
   };
+}
+
+/** Trim a world sprite and fit it into the established 8x8 icon footprint. */
+function normalizedIcon(image: HTMLCanvasElement): HTMLCanvasElement {
+  const size = 8 * TEXEL;
+  const padding = 1 * TEXEL;
+  const source = image.getContext('2d')!.getImageData(0, 0, image.width, image.height);
+  let minX = image.width;
+  let minY = image.height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < image.height; y++) {
+    for (let x = 0; x < image.width; x++) {
+      if (source.data[(y * image.width + x) * 4 + 3] === 0) continue;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  const [icon, g] = offscreen(size, size);
+  if (maxX < minX || maxY < minY) return icon;
+  const sourceW = maxX - minX + 1;
+  const sourceH = maxY - minY + 1;
+  const scale = Math.min((size - padding * 2) / sourceW, (size - padding * 2) / sourceH);
+  const drawW = Math.max(1, Math.round(sourceW * scale));
+  const drawH = Math.max(1, Math.round(sourceH * scale));
+  g.imageSmoothingEnabled = false;
+  g.drawImage(
+    image,
+    minX,
+    minY,
+    sourceW,
+    sourceH,
+    Math.floor((size - drawW) / 2),
+    Math.floor((size - drawH) / 2),
+    drawW,
+    drawH,
+  );
+  return icon;
 }
 
 export interface ProceduralBladeConfig {

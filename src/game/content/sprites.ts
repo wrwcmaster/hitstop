@@ -56,8 +56,6 @@ export const MANA_PIP_EMPTY = hud.frame('manaPipEmpty');
 /* ---------------- item icons ---------------- */
 
 const icons = load(iconsJson);
-export const ICON_SWORD = icons.frame('sword');
-export const ICON_GREATSWORD = icons.frame('greatsword');
 export const ICON_POTION = icons.frame('potion');
 export const ICON_ORB = icons.frame('orb');
 export const ICON_CHARM = icons.frame('charm');

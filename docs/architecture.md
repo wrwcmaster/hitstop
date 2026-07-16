@@ -100,7 +100,7 @@ The level editor imports the *game's* content modules; its tile palette is `tile
 
 The second wave of systems keeps the same shape — registries of data + small hooks, engine mechanics with no game knowledge:
 
-- **Weapons** split mechanics from appearance. `props.weapon` carries parsed combat data plus a `visual` id; `content/weapon-visuals.ts` owns held rendering and trails. Visual entries may be compact procedural blades or authored, knight-frame-aligned sprite layers. Player only supplies pose context, so axes, bows, or ornate weapons add no Player branches.
+- **Weapons** split mechanics from appearance. `props.weapon` carries parsed combat data plus a `visual` id; `content/weapon-visuals.ts` owns held rendering, trails, and normalized item icons derived from authored idle frames. Visual entries may be compact procedural blades or authored, knight-frame-aligned sprite layers. Player only supplies pose context, so axes, bows, or ornate weapons add no Player branches.
 - **Consumables/instants** (`potion`, `mana-orb`, `coin`) are `use`/`onPickup` hooks with a game-provided context. The `Pickup` entity (game side) handles the drop → magnet → collect loop.
 - **Skills** cast via a `SkillBook` that gates on cooldown + resource. Input dispatch walks `DEFAULT_SKILL_LOADOUT`, so adding or moving a skill slot is a content-table change rather than a Player branch.
 - **Player capabilities** are semantic flags/modifiers granted by tree-node hooks. Mechanics ask for `dashStrike`, `airJumps`, or `skillCooldownScale`; they never ask whether node `w4`, `v4`, or `m2` is owned.

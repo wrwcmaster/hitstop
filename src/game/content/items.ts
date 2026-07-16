@@ -1,8 +1,6 @@
 import { defineItem, itemDef } from '@engine/index';
 import { COLORS } from './palette';
 import {
-  ICON_SWORD,
-  ICON_GREATSWORD,
   ICON_POTION,
   ICON_ORB,
   ICON_CHARM,
@@ -12,7 +10,7 @@ import {
 } from './sprites';
 import type { ActionGame } from '../defs';
 import type { Player } from '../actors/player';
-import { weaponVisuals } from './weapon-visuals';
+import { weaponIcon, weaponVisuals } from './weapon-visuals';
 
 /** Context handed to item use/onPickup hooks. */
 export interface ItemCtx {
@@ -75,7 +73,7 @@ export function weaponSpecOf(itemId: string | null): WeaponSpec {
 defineItem<ItemCtx>('rusty-sword', {
   name: 'RUSTY SWORD',
   desc: 'A knight starts somewhere.',
-  icon: ICON_SWORD,
+  icon: weaponIcon('rusty-sword'),
   kind: 'equipment',
   slot: 'weapon',
   props: weaponProps('rusty-sword', {
@@ -88,7 +86,7 @@ defineItem<ItemCtx>('rusty-sword', {
 defineItem<ItemCtx>('great-sword', {
   name: 'GREAT SWORD',
   desc: 'Slow heart, heavy hands.',
-  icon: ICON_GREATSWORD,
+  icon: weaponIcon('great-sword'),
   kind: 'equipment',
   slot: 'weapon',
   mods: { add: { attack: 1 } },
