@@ -13,7 +13,7 @@ import {
   chance,
   clamp,
 } from '@engine/index';
-import { type ActionGame, type Action } from '../defs';
+import { menuLine, type ActionGame, type Action } from '../defs';
 import { Player } from '../actors/player';
 import { Monster, monsters } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
@@ -437,6 +437,7 @@ export class PlayScene implements Scene {
         confirm: 'confirm',
         up: 'up',
         down: 'down',
+        choiceLineHeight: menuLine(10),
         blip: () => this.game.feel.sfx.play('blip'),
       }),
     );

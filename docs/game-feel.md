@@ -36,6 +36,10 @@ The struck sprite renders as a solid white silhouette for ~0.12s. Confirms *whic
 
 Directional sprays sell impact direction and material (spark colors for hits, the monster's palette for gibs). Squash particle counts, not sizes: 7 for a light hit, 12–16 for heavy, 16+width for a kill. All rectangles — this is pixel art.
 
+### Named effects (`feel.effect(x, y, id, scale?)`)
+
+Composed set-pieces — an explosion, a freeze burst — registered once with `defineEffect` (game side: `content/effects.ts`) and played by name everywhere. An effect is a list of **staged emitters** (each with an optional `delay`, so the flash precedes the debris precedes the smoke) plus turnkey screen feedback (shake/flash/hitstop/sfx). Emitters extend `burst` with two extra tools: a **color `ramp`** across each particle's lifetime (fire cooling into smoke) and a `'ring'` **shape** (expanding shockwave stroke). `scale` sizes the particles without re-authoring — the fireball's fizzle is `effect(x, y, 'explosion', 0.7)`, PYRE's bang is `1.4`. Cheat key `0` detonates one for tuning.
+
 ### Floating text (`feel.text(x, y, str, color, scale)`)
 
 Damage numbers scale with the hit (1× white for light, 2× gold for heavy). Blinks out in the last 30% of its life.

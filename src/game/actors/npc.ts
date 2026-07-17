@@ -13,7 +13,7 @@ import { blit, merchantSprite } from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { ShopScene } from '../scenes/shop';
 import { SpawnerScene } from '../scenes/spawner';
-import { prettyCode, prettyButton, type ActionGame, type Action } from '../defs';
+import { prettyCode, prettyButton, menuLine, type ActionGame, type Action } from '../defs';
 import { Player } from './player';
 
 /**
@@ -95,6 +95,7 @@ export class Npc extends Actor {
         confirm: 'confirm',
         up: 'up',
         down: 'down',
+        choiceLineHeight: menuLine(10),
         blip: () => this.game.feel.sfx.play('blip'),
         onEnd: (choice) => this.onDialogueEnd(choice),
       }),

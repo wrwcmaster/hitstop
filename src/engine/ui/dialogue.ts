@@ -51,6 +51,8 @@ export interface DialogueOptions<A extends string> {
   down: A;
   /** Characters revealed per second (default 45). */
   charsPerSec?: number;
+  /** Row height for the choice menu (default 10; raise for touch). */
+  choiceLineHeight?: number;
   /** Called when the conversation (including chained ones) finishes. */
   onEnd?(lastChoice?: ConversationChoice): void;
   /** Sound blip per revealed character batch. */
@@ -137,25 +139,30 @@ export class DialogueScene<A extends string> implements Scene {
     this.blinkT += dt;
     if (this.choiceMenu) {
       this.choiceMenu.update(this.host.input);
+      const t = this.host.input.consumeTap();
+      if (t) this.choiceMenu.tapAt(t.x, t.y);
       return;
     }
+    // A tap anywhere acts as confirm: skip the reveal, then advance.
+    const tapped = this.host.input.consumeTap() !== null;
     if (!this.fullyRevealed) {
       const before = Math.floor(this.revealT * (this.opts.charsPerSec ?? 45));
       this.revealT += dt;
       const after = Math.floor(this.revealT * (this.opts.charsPerSec ?? 45));
       if (after > before && after % 3 === 0) this.opts.blip?.();
-      if (this.host.input.consumePress(this.opts.confirm)) this.revealT = 999; // skip
+      if (tapped || this.host.input.consumePress(this.opts.confirm)) this.revealT = 999; // skip
       return;
     }
-    if (this.host.input.consumePress(this.opts.confirm)) this.advance();
+    if (tapped || this.host.input.consumePress(this.opts.confirm)) this.advance();
   }
 
   render(g: CanvasRenderingContext2D): void {
     const W = this.host.width;
     const H = this.host.height;
     const lines = this.wrapped();
+    const clh = this.opts.choiceLineHeight ?? 10;
     const choices = this.choiceMenu ? this.def.choices!.length : 0;
-    const boxH = 26 + lines.length * 8 + choices * 10;
+    const boxH = 26 + lines.length * 8 + choices * clh;
     const y = H - boxH - 8;
     drawPanel(g, 12, y, W - 24, boxH);
 
@@ -173,7 +180,7 @@ export class DialogueScene<A extends string> implements Scene {
       ty += 8;
     }
     if (this.choiceMenu) {
-      this.choiceMenu.render(g, 30, ty + 2, { lineHeight: 10 });
+      this.choiceMenu.render(g, 30, ty + 2, { lineHeight: clh, width: W - 84 });
     } else if (this.fullyRevealed && Math.floor(this.blinkT * 2.5) % 2) {
       drawText(g, 'v', W - 26, y + boxH - 9, '#ffcd75');
     }

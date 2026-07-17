@@ -71,6 +71,7 @@ export class Input<A extends string = string> {
     this.captureFn = fn;
   }
 
+  /** Abandon a pending captureNextKey (touch users have no Escape). */
   cancelCapture(): void {
     this.captureFn = null;
   }

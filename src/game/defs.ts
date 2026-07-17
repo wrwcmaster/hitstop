@@ -3,7 +3,7 @@ import { Game, type GamepadMapping, type GamepadInput } from '@engine/index';
 /** The game's input actions and default bindings. */
 export type Action =
   | 'left' | 'right' | 'up' | 'down'
-  | 'jump' | 'attack' | 'dash' | 'skill' | 'skill2'
+  | 'jump' | 'attack' | 'dash' | 'skill' | 'skill2' | 'skill3'
   | 'interact'
   | 'confirm' | 'cancel' | 'menu';
 
@@ -18,6 +18,7 @@ export const KEYMAP: Record<string, Action | Action[]> = {
   KeyX: ['dash', 'cancel'], KeyK: ['dash', 'cancel'], ShiftLeft: 'dash',
   KeyC: 'skill', KeyL: 'skill',
   KeyV: 'skill2',
+  KeyB: 'skill3',
   KeyE: 'interact', KeyF: 'interact',
   Escape: 'menu',
 };
@@ -59,6 +60,7 @@ export const REBINDABLE: { action: Action; label: string; aliases: Action[] }[] 
   { action: 'dash', label: 'DASH', aliases: ['cancel'] },
   { action: 'skill', label: 'FIREBALL', aliases: [] },
   { action: 'skill2', label: 'NOVA', aliases: [] },
+  { action: 'skill3', label: 'ICE SHARD', aliases: [] },
   { action: 'interact', label: 'INTERACT', aliases: [] },
   { action: 'left', label: 'MOVE LEFT', aliases: [] },
   { action: 'right', label: 'MOVE RIGHT', aliases: [] },
@@ -114,6 +116,19 @@ export type ActionGame = Game<Action, GameEvents> & { pad?: GamepadInput<Action>
 /** Build version, injected from package.json at build time (see vite configs). */
 declare const __APP_VERSION__: string;
 export const VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0';
+
+/**
+ * Coarse-pointer (touch) device. Menus scale their row spacing up with
+ * `menuLine` so thumb-sized taps land — at 480 logical px across a phone
+ * screen, a 13px row is only ~10 CSS px tall otherwise.
+ */
+export const COARSE_POINTER =
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  !window.matchMedia('(pointer: fine)').matches;
+
+/** Menu row height: the desktop baseline, opened up ~1.5x on touch. */
+export const menuLine = (base: number): number => (COARSE_POINTER ? Math.round(base * 1.5) : base);
 
 export const VIEW_W = 480;
 export const VIEW_H = 270;

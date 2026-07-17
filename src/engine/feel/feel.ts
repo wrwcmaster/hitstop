@@ -1,8 +1,29 @@
 import { Loop } from '../core/loop';
 import { Camera } from '../gfx/camera';
-import { Particles, BurstOptions } from './particles';
+import { Registry } from '../core/registry';
+import { Particles, BurstOptions, EffectDef } from './particles';
 import { Floaters } from './floaters';
 import { Sfx } from '../audio/sfx';
+
+/**
+ * A named, composed particle effect (explosion, freeze burst, poof...):
+ * staged emitters plus optional turnkey screen feedback. Content registers
+ * these once; gameplay plays them with `feel.effect(x, y, 'explosion')`.
+ */
+export interface NamedEffectDef extends EffectDef {
+  shake?: number;
+  flash?: number;
+  flashColor?: string;
+  hitstop?: number;
+  /** SFX id played through the game's Sfx registry. */
+  sfx?: string;
+}
+
+export const effects = new Registry<NamedEffectDef>('effect');
+
+export function defineEffect(id: string, def: NamedEffectDef): void {
+  effects.register(id, def);
+}
 
 /**
  * The Feel system — hitstop's reason to exist.
@@ -76,6 +97,17 @@ export class Feel {
 
   burst(x: number, y: number, n: number, opts?: BurstOptions): void {
     this.particles.burst(x, y, n, opts);
+  }
+
+  /** Play a registered named effect (see defineEffect). `scale` sizes the
+   * particles; the screen feedback plays as authored. */
+  effect(x: number, y: number, id: string, scale = 1): void {
+    const def = effects.get(id);
+    this.particles.playEffect(x, y, def, scale);
+    if (def.shake) this.shake(def.shake);
+    if (def.flash) this.flash(def.flash, def.flashColor);
+    if (def.hitstop) this.hitstop(def.hitstop);
+    if (def.sfx) this.sfx.play(def.sfx);
   }
 
   text(x: number, y: number, str: string | number, color?: string, scale?: number): void {

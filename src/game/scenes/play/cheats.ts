@@ -73,6 +73,12 @@ export const CHEATS: Cheat[] = [
     },
   },
   {
+    code: 'Digit0', label: '0 boom',
+    run: ({ game, player }) => {
+      game.feel.effect(player.cx + player.facing * 28, player.cy, 'explosion');
+    },
+  },
+  {
     code: 'Digit9', label: '9 equip',
     run: ({ player, say }) => {
       // Cycle helmet → armor → both → none, granting pieces as needed.

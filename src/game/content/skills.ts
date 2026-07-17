@@ -3,6 +3,7 @@ import { COLORS } from './palette';
 import type { ActionGame } from '../defs';
 import type { Player } from '../actors/player';
 import type { Action } from '../defs';
+import { Monster } from '../actors/monster';
 
 /** Context handed to skill casts. */
 export interface SkillCtx {
@@ -14,6 +15,7 @@ export interface SkillCtx {
 export const DEFAULT_SKILL_LOADOUT: readonly { action: Action; skillId: string; startsKnown?: boolean }[] = [
   { action: 'skill', skillId: 'fireball', startsKnown: true },
   { action: 'skill2', skillId: 'nova' },
+  { action: 'skill3', skillId: 'ice-shard', startsKnown: true },
 ];
 
 /**
@@ -45,6 +47,11 @@ defineSkill<SkillCtx>('fireball', {
           strength: 0.7,
           colors: [COLORS.gold, COLORS.red, COLORS.white],
         },
+        onHit(target, p) {
+          // Fire IGNITES: a burning DoT on the victim + a pop at impact.
+          if (target instanceof Monster) target.statuses.apply('burning');
+          game.feel.effect(p.x, p.y, 'explosion', 0.5);
+        },
         draw(g, p) {
           // Flickering two-tone flame with a sparse trail.
           const flick = Math.floor(p.t * 30) % 2;
@@ -64,17 +71,11 @@ defineSkill<SkillCtx>('fireball', {
               colors: [COLORS.gold, COLORS.red, COLORS.white],
             });
             blast.apply({ x: p.x - 26, y: p.y - 22, w: 52, h: 44 });
-            game.feel.shake(0.3);
-            game.feel.flash(0.12, COLORS.gold);
-            game.feel.sfx.play('nova');
-            game.feel.burst(p.x, p.y, 20, {
-              color: [COLORS.gold, COLORS.red, COLORS.white], speed: 150, life: 0.4, grav: 150, drag: 2.5,
-            });
+            game.feel.effect(p.x, p.y, 'explosion', 1.4);
             return;
           }
-          game.feel.burst(p.x, p.y, 8, {
-            color: [COLORS.gold, COLORS.red], speed: 90, life: 0.3, drag: 3,
-          });
+          // Fizzle-out is still a little detonation.
+          game.feel.effect(p.x, p.y, 'explosion', 0.7);
         },
       },
       player.collision,
@@ -89,6 +90,66 @@ defineSkill<SkillCtx>('fireball', {
     });
     // Trail system: a few embers per cast frame come from the projectile's
     // draw; heavier trails would go in a world system.
+  },
+});
+
+/**
+ * ICE SHARD — the other element: slower, weaker bolt that FREEZES what it
+ * hits (the 'frozen' status halts the monster's brain — see statuses.ts).
+ * Fire burns, ice freezes: one status + one effect definition each.
+ */
+defineSkill<SkillCtx>('ice-shard', {
+  name: 'ICE SHARD',
+  desc: 'A shard of ice. Freezes its victim solid.',
+  cooldown: 1.8,
+  cost: 1,
+  cast({ game, player }) {
+    const dir = player.facing;
+    game.combat.shoot(
+      {
+        x: player.cx + dir * 8,
+        y: player.cy - 1,
+        vx: dir * 200,
+        vy: 0,
+        w: 6,
+        h: 6,
+        life: 1.2,
+        strike: {
+          damage: 1,
+          targets: 'enemy',
+          attacker: player,
+          strength: 0.5,
+          colors: ['#73eff7', COLORS.blue, COLORS.white],
+        },
+        onHit(target, p) {
+          if (target instanceof Monster) target.statuses.apply('frozen');
+          game.feel.effect(p.x, p.y, 'freeze');
+        },
+        draw(g, p) {
+          // A glinting diamond shard.
+          const flick = Math.floor(p.t * 30) % 2;
+          g.save();
+          g.translate(Math.round(p.x), Math.round(p.y));
+          g.rotate(Math.PI / 4);
+          g.fillStyle = flick ? '#73eff7' : COLORS.blue;
+          g.fillRect(-3, -3, 6, 6);
+          g.fillStyle = COLORS.white;
+          g.fillRect(-1, -1, 2, 2);
+          g.restore();
+        },
+        onExpire(p) {
+          game.feel.effect(p.x, p.y, 'freeze', 0.6);
+        },
+      },
+      player.collision,
+    );
+    player.vx -= dir * 30;
+    game.feel.sfx.play('blip');
+    game.feel.kick(-dir * 1, 0);
+    game.feel.burst(player.cx + dir * 8, player.cy - 1, 5, {
+      color: ['#73eff7', COLORS.white], speed: 50, life: 0.2,
+      angle: dir > 0 ? 0 : Math.PI, spread: 1.2, drag: 4,
+    });
   },
 });
 

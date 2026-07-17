@@ -8,7 +8,7 @@ import {
 import { shops } from '../content/shops';
 import { ICON_COIN, blit } from '../content/sprites';
 import { COLORS } from '../content/palette';
-import type { ActionGame, Action } from '../defs';
+import { menuLine, type ActionGame, type Action } from '../defs';
 import type { Player } from '../actors/player';
 import type { ItemCtx } from '../content/items';
 
@@ -93,8 +93,9 @@ export class ShopScene implements Scene {
   render(g: CanvasRenderingContext2D): void {
     const gm = this.game;
     const def = shops.get(this.shopId);
+    const lh = menuLine(12);
     const bw = 250;
-    const bh = 140;
+    const bh = Math.min(gm.height - 16, 66 + this.menu.entries.length * lh);
     const x = (gm.width - bw) / 2;
     const y = (gm.height - bh) / 2;
     g.fillStyle = 'rgba(7,7,13,0.6)';
@@ -106,7 +107,7 @@ export class ShopScene implements Scene {
     blit(g, ICON_COIN, x + bw - 58, y + 8);
     drawText(g, String(this.player.gold), x + bw - 50, y + 9, COLORS.gold);
 
-    this.menu.render(g, x + 24, y + 30, { width: bw - 44, lineHeight: 12 });
+    this.menu.render(g, x + 24, y + 30, { width: bw - 44, lineHeight: lh });
 
     // Selected ware's description, then flash messages over it.
     const sel = def.wares[this.menu.index];
