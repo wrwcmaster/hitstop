@@ -1,5 +1,5 @@
 import { drawText, Menu, type Input } from '@engine/index';
-import { VERSION, type ActionGame, type Action } from '../../defs';
+import { VERSION, COARSE_POINTER, menuLine, type ActionGame, type Action } from '../../defs';
 import { COLORS } from '../../content/palette';
 import { KNIGHT_IDLE_SPRITE, TEXEL } from '../../content/sprites';
 import { saveStore } from '../../save';
@@ -59,10 +59,14 @@ export class TitleScreen {
     g.restore();
     drawText(g, 'HITSTOP', gm.width / 2, 48, COLORS.white, 4, 'center');
     drawText(g, 'Game feel is the foundation', gm.width / 2, 80, COLORS.steel, 1, 'center');
-    this.menu.render(g, gm.width / 2 - 24, 162, { lineHeight: 13 });
-    drawText(g, 'Move: Arrows / WASD - Jump: Space', gm.width / 2, 208, COLORS.steelDark, 1, 'center');
-    drawText(g, 'Attack: Z - Dash: X - Skill: C - Menu: Esc', gm.width / 2, 220, COLORS.steelDark, 1, 'center');
-    drawText(g, 'Z or Enter to select', gm.width / 2, 238, COLORS.gold, 1, 'center');
+    // Touch: taller, thumb-sized rows, and no keyboard hints (they'd be
+    // wrong — everything here is tappable and the pad has its buttons).
+    this.menu.render(g, gm.width / 2 - 24, COARSE_POINTER ? 152 : 162, { lineHeight: menuLine(13), width: 60 });
+    if (!COARSE_POINTER) {
+      drawText(g, 'Move: Arrows / WASD - Jump: Space', gm.width / 2, 208, COLORS.steelDark, 1, 'center');
+      drawText(g, 'Attack: Z - Dash: X - Skill: C - Menu: Esc', gm.width / 2, 220, COLORS.steelDark, 1, 'center');
+      drawText(g, 'Z or Enter to select', gm.width / 2, 238, COLORS.gold, 1, 'center');
+    }
     // Small build version, tucked in the corner.
     drawText(g, `v${VERSION}`, gm.width - 6, gm.height - 10, COLORS.steelDark, 1, 'right');
   }

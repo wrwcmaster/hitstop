@@ -1,5 +1,5 @@
 import { type Scene, Menu, drawPanel, drawText, clamp } from '@engine/index';
-import { KEYMAP, GAMEPAD, REBINDABLE, prettyCode, prettyButton, type ActionGame, type Action } from '../defs';
+import { KEYMAP, GAMEPAD, REBINDABLE, prettyCode, prettyButton, menuLine, COARSE_POINTER, type ActionGame, type Action } from '../defs';
 import { COLORS } from '../content/palette';
 import { saveSettings } from '../settings';
 
@@ -162,9 +162,11 @@ export class OptionsScene implements Scene {
   update(_dt: number): void {
     const input = this.game.input;
     if (this.rebinding) {
-      // A pad rebind has no keydown to intercept, so let Esc back out here.
-      if (this.padCapturing && input.consumePress('menu')) {
-        this.game.pad?.cancelCapture();
+      // The 'menu' ACTION cancels either capture — a keydown-only escape
+      // would strand touch users, whose ☰ button never emits a keydown.
+      if (input.consumePress('menu')) {
+        if (this.padCapturing) this.game.pad?.cancelCapture();
+        else input.cancelCapture();
         this.rebinding = null;
         this.padCapturing = false;
         this.game.sfx.play('menuClose');
@@ -183,9 +185,7 @@ export class OptionsScene implements Scene {
     const menu = this.page === 'options' ? this.optionsMenu : this.controlsMenu;
     menu.update(input);
     const t = input.consumeTap();
-    // Rebinding needs a real key/pad button, so leave the controls rows to
-    // those devices; the options page is tap-to-select.
-    if (t && this.page !== 'controls') menu.tapAt(t.x, t.y);
+    if (t) menu.tapAt(t.x, t.y);
   }
 
   render(g: CanvasRenderingContext2D): void {
@@ -195,26 +195,28 @@ export class OptionsScene implements Scene {
     g.fillRect(0, 0, W, H);
 
     if (this.page === 'options') {
+      const lh = menuLine(13);
       const bw = 170;
-      const bh = 126;
+      const bh = 44 + this.optionsMenu.entries.length * lh;
       const x = (W - bw) / 2;
       const y = (H - bh) / 2;
       drawPanel(g, x, y, bw, bh);
       drawText(g, 'OPTIONS', W / 2, y + 8, COLORS.gold, 2, 'center');
-      this.optionsMenu.render(g, x + 24, y + 30, { width: bw - 40, lineHeight: 13 });
+      this.optionsMenu.render(g, x + 24, y + 30, { width: bw - 40, lineHeight: lh });
       drawText(g, 'Left/Right: adjust', W / 2, y + bh - 9, COLORS.steelDark, 1, 'center');
     } else {
+      const lh = menuLine(11);
       const bw = 210;
-      const bh = 170;
+      const bh = Math.min(H - 12, 56 + this.controlsMenu.entries.length * lh);
       const x = (W - bw) / 2;
       const y = (H - bh) / 2;
       drawPanel(g, x, y, bw, bh);
       drawText(g, 'CONTROLS', W / 2, y + 8, COLORS.gold, 2, 'center');
-      this.controlsMenu.render(g, x + 20, y + 26, { width: bw - 36, lineHeight: 11 });
+      this.controlsMenu.render(g, x + 20, y + 26, { width: bw - 36, lineHeight: lh });
       if (this.rebinding) {
         const what = this.padCapturing ? 'button' : 'key';
         drawText(g, `Press a ${what} for ${this.rebinding}`, W / 2, y + bh - 20, COLORS.gold, 1, 'center');
-        drawText(g, 'Esc to cancel', W / 2, y + bh - 11, COLORS.steelDark, 1, 'center');
+        drawText(g, COARSE_POINTER ? 'Menu button to cancel' : 'Esc to cancel', W / 2, y + bh - 11, COLORS.steelDark, 1, 'center');
       } else if (this.device === 'gamepad' && !this.game.pad?.connected) {
         drawText(g, 'Connect a pad, then Z to bind a button', W / 2, y + bh - 11, COLORS.steelDark, 1, 'center');
       } else {

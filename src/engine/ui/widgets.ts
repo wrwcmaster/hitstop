@@ -104,6 +104,8 @@ export class Menu<A extends string = string> {
    * Activate the entry under a logical-space point (touch/click). Returns
    * true if a live entry was hit — selecting it and firing its onSelect,
    * so a tap picks a menu item directly with no on-screen arrows.
+   * Hit zones are generous: rows tile contiguously and extend well past
+   * the text, so an imprecise thumb still lands.
    */
   tapAt(px: number, py: number): boolean {
     const L = this.layout;
@@ -113,8 +115,8 @@ export class Menu<A extends string = string> {
       if (this.isDisabled(e)) continue;
       const rowY = L.y + i * L.lh;
       const label = typeof e.label === 'function' ? e.label() : e.label;
-      const right = L.x + Math.max(L.width ?? 0, textWidth(label, L.s)) + 8;
-      if (px >= L.x - 10 && px <= right && py >= rowY - 2 && py <= rowY + L.lh - 2) {
+      const right = L.x + Math.max(L.width ?? 0, textWidth(label, L.s)) + 24;
+      if (px >= L.x - 24 && px <= right && py >= rowY - 2 && py <= rowY + L.lh - 2) {
         this.index = i;
         e.onSelect?.();
         return true;

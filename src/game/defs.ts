@@ -115,6 +115,19 @@ export type ActionGame = Game<Action, GameEvents> & { pad?: GamepadInput<Action>
 declare const __APP_VERSION__: string;
 export const VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0';
 
+/**
+ * Coarse-pointer (touch) device. Menus scale their row spacing up with
+ * `menuLine` so thumb-sized taps land — at 480 logical px across a phone
+ * screen, a 13px row is only ~10 CSS px tall otherwise.
+ */
+export const COARSE_POINTER =
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  !window.matchMedia('(pointer: fine)').matches;
+
+/** Menu row height: the desktop baseline, opened up ~1.5x on touch. */
+export const menuLine = (base: number): number => (COARSE_POINTER ? Math.round(base * 1.5) : base);
+
 export const VIEW_W = 480;
 export const VIEW_H = 270;
 /** Device pixels per logical pixel: 1920×1080 backing store — native

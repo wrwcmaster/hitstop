@@ -1,7 +1,7 @@
 import { type Scene, Menu, drawPanel, drawText, textWidth } from '@engine/index';
 import { blit, TEXEL } from '../content/sprites';
 import { COLORS } from '../content/palette';
-import type { ActionGame, Action } from '../defs';
+import { menuLine, type ActionGame, type Action } from '../defs';
 
 export interface PromptOption {
   label: string;
@@ -60,8 +60,9 @@ export class PromptScene implements Scene {
     g.fillStyle = 'rgba(7,7,13,0.55)';
     g.fillRect(0, 0, W, H);
 
+    const lh = menuLine(11);
     const bw = Math.max(120, textWidth(this.title, 1) + 40);
-    const bh = 62;
+    const bh = 40 + this.menu.entries.length * lh + (this.icon ? this.icon.height / TEXEL + 2 : 0);
     const x = (W - bw) / 2;
     const y = (H - bh) / 2;
     drawPanel(g, x, y, bw, bh);
@@ -72,6 +73,6 @@ export class PromptScene implements Scene {
       ty += this.icon.height / TEXEL + 2;
     }
     drawText(g, this.title, W / 2, ty, COLORS.gold, 1, 'center');
-    this.menu.render(g, x + 26, ty + 14, { width: bw - 44, lineHeight: 11 });
+    this.menu.render(g, x + 26, ty + 14, { width: bw - 44, lineHeight: lh });
   }
 }

@@ -5,7 +5,7 @@ import {
   drawText,
   itemDef,
 } from '@engine/index';
-import { type ActionGame, type Action } from '../defs';
+import { menuLine, type ActionGame, type Action } from '../defs';
 import type { Player } from '../actors/player';
 import type { ItemCtx } from '../content/items';
 import { COLORS } from '../content/palette';
@@ -135,22 +135,24 @@ export class PauseScene implements Scene {
     g.fillRect(0, 0, W, H);
 
     if (this.page === 'main') {
+      const lh = menuLine(13);
       const bw = 150;
-      const bh = 100;
+      const bh = 44 + this.mainMenu.entries.length * lh;
       const x = (W - bw) / 2;
       const y = (H - bh) / 2;
       drawPanel(g, x, y, bw, bh);
       drawText(g, 'PAUSED', W / 2, y + 8, COLORS.gold, 2, 'center');
-      this.mainMenu.render(g, x + 24, y + 30, { width: bw - 40, lineHeight: 13 });
+      this.mainMenu.render(g, x + 24, y + 30, { width: bw - 40, lineHeight: lh });
       drawText(g, 'Esc: close', W / 2, y + bh - 9, COLORS.steelDark, 1, 'center');
     } else {
+      const lh = menuLine(11);
       const bw = 240;
-      const bh = 150;
+      const bh = Math.min(H - 16, 62 + this.invMenu.entries.length * lh);
       const x = (W - bw) / 2;
       const y = (H - bh) / 2;
       drawPanel(g, x, y, bw, bh);
       drawText(g, 'INVENTORY', W / 2, y + 8, COLORS.gold, 2, 'center');
-      this.invMenu.render(g, x + 20, y + 28, { width: bw - 36, lineHeight: 11 });
+      this.invMenu.render(g, x + 20, y + 28, { width: bw - 36, lineHeight: lh });
 
       // Stat sheet along the bottom: current + equipment-modified values.
       const p = this.player;

@@ -8,7 +8,7 @@ import {
   type CollisionSource,
 } from '@engine/index';
 import { COLORS } from '../content/palette';
-import type { ActionGame, Action } from '../defs';
+import { menuLine, type ActionGame, type Action } from '../defs';
 import type { Player } from '../actors/player';
 import { Monster } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
@@ -151,8 +151,9 @@ export class SpawnerScene implements Scene {
 
   render(g: CanvasRenderingContext2D): void {
     const gm = this.game;
+    const lh = menuLine(11);
     const bw = 200;
-    const bh = 130;
+    const bh = Math.min(gm.height - 16, 52 + this.menu.entries.length * lh);
     const x = (gm.width - bw) / 2;
     const y = (gm.height - bh) / 2;
 
@@ -168,7 +169,7 @@ export class SpawnerScene implements Scene {
 
     drawText(g, title, gm.width / 2, y + 8, COLORS.gold, 2, 'center');
 
-    this.menu.render(g, x + 24, y + 26, { width: bw - 48, lineHeight: 11 });
+    this.menu.render(g, x + 24, y + 26, { width: bw - 48, lineHeight: lh });
     drawText(g, 'Esc: back / exit', gm.width / 2, y + bh - 10, COLORS.steelDark, 1, 'center');
   }
 }

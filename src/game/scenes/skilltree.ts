@@ -35,6 +35,42 @@ export class SkillTreeScene implements Scene {
     return TREE_GRID[this.branch][this.tier];
   }
 
+  /** Panel + node grid geometry, shared by render and tap hit-testing. */
+  private layout() {
+    const gm = this.game;
+    const bw = 280;
+    const bh = 200;
+    const x = (gm.width - bw) / 2;
+    const y = (gm.height - bh) / 2;
+    const colW = bw / 3;
+    return { bw, bh, x, y, colW, nodeW: 58, nodeH: 20, topY: y + 34, gapY: 34 };
+  }
+
+  private nodeRect(b: number, t: number): { x: number; y: number; w: number; h: number } {
+    const L = this.layout();
+    const cx = L.x + L.colW * b + L.colW / 2;
+    return { x: cx - L.nodeW / 2, y: L.topY + t * L.gapY, w: L.nodeW, h: L.nodeH };
+  }
+
+  /** Tap: first tap selects a node, a second tap on it learns it. */
+  private tapAt(px: number, py: number): void {
+    for (let b = 0; b < TREE_GRID.length; b++) {
+      for (let t = 0; t < TREE_GRID[b].length; t++) {
+        const r = this.nodeRect(b, t);
+        // Pad the hit zone toward the row gap so thumbs land.
+        if (px < r.x - 8 || px > r.x + r.w + 8 || py < r.y - 6 || py > r.y + r.h + 6) continue;
+        if (this.branch === b && this.tier === t) {
+          this.tryUnlock();
+        } else {
+          this.branch = b;
+          this.tier = t;
+          this.game.sfx.play('menuMove');
+        }
+        return;
+      }
+    }
+  }
+
   private say(msg: string): void {
     this.message = msg;
     this.messageT = 2;
@@ -82,15 +118,14 @@ export class SkillTreeScene implements Scene {
     if (input.consumePress('up')) move(0, -1);
     if (input.consumePress('down')) move(0, 1);
     if (input.consumePress('confirm')) this.tryUnlock();
+    const tap = input.consumeTap();
+    if (tap) this.tapAt(tap.x, tap.y);
   }
 
   render(g: CanvasRenderingContext2D): void {
     const gm = this.game;
     const p = this.player;
-    const bw = 280;
-    const bh = 200;
-    const x = (gm.width - bw) / 2;
-    const y = (gm.height - bh) / 2;
+    const { bw, bh, x, y, colW, nodeW, nodeH, gapY } = this.layout();
     g.fillStyle = 'rgba(7,7,13,0.7)';
     g.fillRect(0, 0, gm.width, gm.height);
     drawPanel(g, x, y, bw, bh);
@@ -98,19 +133,12 @@ export class SkillTreeScene implements Scene {
     drawText(g, `LV ${p.progression.level}`, x + 12, y + 8, COLORS.white);
     drawText(g, `SP ${p.progression.skillPoints}`, x + bw - 12, y + 8, COLORS.gold, 1, 'right');
 
-    const colW = bw / 3;
-    const nodeW = 58;
-    const nodeH = 20;
-    const topY = y + 34;
-    const gapY = 34;
-
     TREE_GRID.forEach((branchNodes, b) => {
       const cx = x + colW * b + colW / 2;
       drawText(g, BRANCH_NAMES[b], cx, y + 22, COLORS.steelDark, 1, 'center');
       branchNodes.forEach((id, t) => {
         const def = treeNodeDef(id);
-        const nx = cx - nodeW / 2;
-        const ny = topY + t * gapY;
+        const { x: nx, y: ny } = this.nodeRect(b, t);
 
         // Connector to the node above.
         if (t > 0) {
