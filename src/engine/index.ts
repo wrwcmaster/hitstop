@@ -38,8 +38,8 @@ export {
 export { drawText, textWidth, type TextAlign } from './gfx/font';
 export { Camera } from './gfx/camera';
 
-export { Feel, type ImpactOptions } from './feel/feel';
-export { Particles, type BurstOptions } from './feel/particles';
+export { Feel, effects, defineEffect, type ImpactOptions, type NamedEffectDef } from './feel/feel';
+export { Particles, type BurstOptions, type EffectDef, type EffectEmitter } from './feel/particles';
 export { Floaters } from './feel/floaters';
 
 export { AudioBus } from './audio/bus';

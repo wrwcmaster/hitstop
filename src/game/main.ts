@@ -13,6 +13,7 @@ import { registerStatuses } from './content/statuses';
 import { registerConversations } from './content/conversations';
 import { registerShops } from './content/shops';
 import { registerPlaceables } from './content/placeables';
+import { registerEffects } from './content/effects';
 import { loadSettings } from './settings';
 import './content/tiles';
 import { PlayScene } from './scenes/play';
@@ -49,6 +50,7 @@ registerStatuses();
 registerConversations();
 registerShops();
 registerPlaceables(); // bridges monsters + NPCs; must come after them
+registerEffects();
 
 // Gamepad: polled every frame, feeding the same action system. Attached to
 // the game so the controls UI can rebind its buttons. Created before
@@ -71,6 +73,7 @@ bind('bJ', 'jump', 'up');
 bind('bA', 'attack', 'confirm');
 bind('bD', 'dash', 'down');
 bind('bI', 'interact'); // talk to NPCs / use, the touch equivalent of E
+bind('bF', 'skill3'); // ice shard
 bind('bM', 'menu'); // Esc: opens the system menu (and closes it — pause consumes 'menu')
 
 // Taps on the canvas count as "any key" (start/restart on mobile) and, in

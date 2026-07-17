@@ -1,6 +1,7 @@
 import {
   Actor,
   Registry,
+  Statuses,
   applyGravity,
   moveAndCollide,
   whiteOf,
@@ -79,6 +80,8 @@ export class Monster extends Actor {
   def: MonsterDef;
   /** Free-form per-instance state for defs (hop timers, phases, FSMs...). */
   state: Record<string, unknown> = {};
+  /** Elemental debuffs (burning, frozen...) — same system as the player. */
+  statuses = new Statuses(this);
 
   constructor(
     public readonly type: string,
@@ -113,13 +116,29 @@ export class Monster extends Actor {
 
   update(dt: number): void {
     this.tickTimers(dt);
-    this.def.update?.(this, dt);
+    this.statuses.update(dt);
+    // A halting status (frozen, stunned) stops the brain but not physics —
+    // a frozen bat still falls out of the sky.
+    if (this.statuses.halted) {
+      this.vx = 0;
+    } else {
+      this.def.update?.(this, dt);
+    }
     applyGravity(this, dt);
     moveAndCollide(this, dt, this.collision, { ignoreOneWay: true });
   }
 
   render(g: CanvasRenderingContext2D): void {
     this.def.draw(g, this);
+    // Encasing veil (ice, amber): a translucent block over the body.
+    for (const s of this.statuses.list()) {
+      if (!s.def.veil) continue;
+      g.save();
+      g.globalAlpha = 0.4;
+      g.fillStyle = s.def.veil;
+      g.fillRect(Math.round(this.x - 1), Math.round(this.y - 1), this.w + 2, this.h + 2);
+      g.restore();
+    }
   }
 
   onDeath(): void {

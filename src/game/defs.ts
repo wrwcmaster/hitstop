@@ -3,7 +3,7 @@ import { Game, type GamepadMapping, type GamepadInput } from '@engine/index';
 /** The game's input actions and default bindings. */
 export type Action =
   | 'left' | 'right' | 'up' | 'down'
-  | 'jump' | 'attack' | 'dash' | 'skill' | 'skill2'
+  | 'jump' | 'attack' | 'dash' | 'skill' | 'skill2' | 'skill3'
   | 'interact'
   | 'confirm' | 'cancel' | 'menu';
 
@@ -18,6 +18,7 @@ export const KEYMAP: Record<string, Action | Action[]> = {
   KeyX: ['dash', 'cancel'], KeyK: ['dash', 'cancel'], ShiftLeft: 'dash',
   KeyC: 'skill', KeyL: 'skill',
   KeyV: 'skill2',
+  KeyB: 'skill3',
   KeyE: 'interact', KeyF: 'interact',
   Escape: 'menu',
 };
@@ -59,6 +60,7 @@ export const REBINDABLE: { action: Action; label: string; aliases: Action[] }[] 
   { action: 'dash', label: 'DASH', aliases: ['cancel'] },
   { action: 'skill', label: 'FIREBALL', aliases: [] },
   { action: 'skill2', label: 'NOVA', aliases: [] },
+  { action: 'skill3', label: 'ICE SHARD', aliases: [] },
   { action: 'interact', label: 'INTERACT', aliases: [] },
   { action: 'left', label: 'MOVE LEFT', aliases: [] },
   { action: 'right', label: 'MOVE RIGHT', aliases: [] },

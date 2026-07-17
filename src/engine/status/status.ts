@@ -24,6 +24,11 @@ export interface StatusDef {
   mods?: import('../items/stats').StatMods;
   /** Seconds between onTick calls (omit for no ticking). */
   tickEvery?: number;
+  /** While active, the owner's brain halts (frozen, petrified, stunned):
+   * actors that honor it skip their AI/def update and stop moving. */
+  halts?: boolean;
+  /** Translucent encasing overlay drawn over the owner (ice, amber...). */
+  veil?: string;
   onApply?(owner: Actor): void;
   onTick?(owner: Actor): void;
   onExpire?(owner: Actor): void;
@@ -85,6 +90,12 @@ export class Statuses {
 
   has(id: string): boolean {
     return this.active.has(id);
+  }
+
+  /** Any active status that halts the owner's brain (frozen, stunned). */
+  get halted(): boolean {
+    for (const a of this.active.values()) if (a.def.halts) return true;
+    return false;
   }
 
   /** 0..1 fraction of duration left (for HUD bars). */
