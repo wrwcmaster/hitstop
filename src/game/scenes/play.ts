@@ -294,6 +294,7 @@ export class PlayScene implements Scene {
     g.world.spawn(this.player);
     if (this.coop) {
       this.player.name = displayName('host'); // tags live while co-op does
+      this.coop.setHostName(this.player.name); // so a same-named guest differs
       const knight = new Player(g, this.tilemap, 0, 0); // positioned by setRoom
       this.coop.adopt(knight);
       g.world.spawn(knight);
