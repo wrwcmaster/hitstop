@@ -147,5 +147,20 @@ defineConversation('vault-entry', {
   ],
 });
 
+defineConversation('ramparts-entry', {
+  lines: [
+    { speaker: 'VOICE', text: 'The wall walk. The town below sleeps because she paces here.' },
+    { speaker: 'VOICE', text: 'The Duelist. Saber and sidearm. Watch the glint - it always fires after the glint.' },
+    { speaker: 'VOICE', text: 'And when she blurs, knight... do not be where you were.' },
+  ],
+});
+
+defineConversation('duelist-fallen', {
+  lines: [
+    { speaker: 'VOICE', text: 'The saber drops. She salutes with an empty hand and is gone.' },
+    { speaker: 'VOICE', text: 'Her sidearm stays. A duelist pays her debts, knight.' },
+  ],
+});
+
 /** Importing this module registers the conversations. */
 export function registerConversations(): void {}

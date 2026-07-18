@@ -48,6 +48,8 @@ export interface MonsterDef {
   boss?: boolean;
   /** Shown on the boss HP bar. */
   displayName?: string;
+  /** Conversation played after this boss falls (default 'victory'). */
+  epilogue?: string;
   /** Touching this monster doesn't hurt (it attacks some other way). */
   noContactDamage?: boolean;
   /**

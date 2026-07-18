@@ -146,7 +146,7 @@ export class Hud {
     const w = 160;
     const x = (gm.width - w) / 2;
     const y = gm.height - 18;
-    drawText(g, boss.def.displayName ?? 'BOSS', gm.width / 2, y - 8, COLORS.gold, 1, 'center');
+    drawText(g, t(boss.def.displayName ?? 'BOSS'), gm.width / 2, y - 8, COLORS.gold, 1, 'center');
     g.fillStyle = '#07070d';
     g.fillRect(x - 1, y - 1, w + 2, 6);
     g.strokeStyle = COLORS.navyLight;

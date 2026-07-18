@@ -1,8 +1,9 @@
-import { FSM, rand, pick } from '@engine/index';
+import { FSM, rand, pick, frameAt, ballisticVelocity, t } from '@engine/index';
 import { defineMonster, Monster } from './monster';
-import { SLIME1, SLIME2, TEXEL } from '../content/sprites';
+import { SLIME1, SLIME2, TEXEL, DUELIST_ANIMS, duelistSprite } from '../content/sprites';
 import { tintOf, whiteOf } from '@engine/index';
 import { COLORS } from '../content/palette';
+import { shootBullet, muzzleFlash, BULLET_GRAVITY } from '../content/ballistics';
 import type { Player } from './player';
 
 /** Lob a sticky slime ball: no damage, applies the slow on hit. */
@@ -352,3 +353,362 @@ defineMonster('slime-king', {
 
 /** Importing this module registers the boss. */
 export function registerBosses(): void {}
+
+/* ================ THE DUELIST ================ */
+
+/**
+ * THE DUELIST — the human boss: a fallen knight with a saber in one
+ * hand and a flintlock in the other, rendered from the same animation
+ * set as the player (tinted crimson — her dark mirror). The fight is
+ * about movement: lunge combos up close, a backstep that flows into a
+ * pistol shot, and the blur — an afterimage dash straight through you
+ * with steel out. Below half health the tempo rises and an aerial
+ * bullet volley joins the deck.
+ */
+
+const DUEL_TINT = '#8a1f35';
+const DUEL_TINT_ENRAGED = '#c0243f';
+
+interface Ghost { x: number; y: number; facing: 1 | -1; t: number }
+
+function duelEnraged(m: Monster): boolean {
+  return m.hp <= m.maxHp / 2;
+}
+
+/** Distance/direction to the player (falls back to facing forward). */
+function toPlayer(m: Monster): { dx: number; dy: number; dist: number; dir: 1 | -1 } {
+  const p = m.player;
+  const dx = p ? p.cx - m.cx : m.facing * 100;
+  const dy = p ? p.cy - m.cy : 0;
+  return { dx, dy, dist: Math.hypot(dx, dy), dir: (Math.sign(dx) || 1) as 1 | -1 };
+}
+
+/** Leave an afterimage at the current pose. */
+function ghost(m: Monster): void {
+  const ghosts = m.state.ghosts as Ghost[];
+  ghosts.push({ x: m.x, y: m.y, facing: m.facing, t: 0 });
+  if (ghosts.length > 8) ghosts.shift();
+}
+
+/** One saber cut: hitbox in front, spark arc, sound. */
+function saberStrike(m: Monster): void {
+  const strike = m.game.combat.strike({
+    damage: 1, targets: 'player', attacker: m,
+    strength: 0.55, knockback: 150,
+    colors: [DUEL_TINT_ENRAGED, COLORS.white],
+  });
+  const reach = 26;
+  strike.apply({
+    x: m.facing === 1 ? m.x + m.w - 4 : m.x - reach + 4,
+    y: m.y + 2, w: reach, h: m.h - 4,
+  });
+  m.game.feel.sfx.play('slash');
+}
+
+/** A leveled pistol shot straight at the knight. */
+function pistolShot(m: Monster): void {
+  const { dx, dy } = toPlayer(m);
+  const v = ballisticVelocity(dx, dy, 600, BULLET_GRAVITY) ?? { vx: m.facing * 600, vy: 0 };
+  shootBullet(m.game, m.collision, {
+    x: m.cx + m.facing * 8, y: m.cy - 2, vx: v.vx, vy: v.vy,
+    damage: 1, targets: 'player', attacker: m,
+  });
+  muzzleFlash(m.game, m.cx + m.facing * 9, m.cy - 2, m.facing, 'bullet');
+}
+
+function makeDuelistFsm(m: Monster): FSM<Monster> {
+  const fsm: FSM<Monster> = new FSM<Monster>(m, {
+    /** Read the duel: pace, keep spacing, pick the next move. */
+    idle: {
+      enter(b) {
+        b.state.wait = rand(0.55, 0.95) * (duelEnraged(b) ? 0.6 : 1);
+      },
+      update(b) {
+        const { dist, dir } = toPlayer(b);
+        b.facing = dir;
+        // Footwork: drift toward a duelist's measure (~90px).
+        if (dist > 120) b.vx += dir * 260 * 0.016;
+        else if (dist < 60) b.vx -= dir * 200 * 0.016;
+        else b.vx *= 0.82;
+        b.vx = Math.max(-90, Math.min(90, b.vx));
+        if (fsm.t < (b.state.wait as number)) return;
+        const deck = dist > 150
+          ? ['pistol', 'blur', 'blur', 'approach']
+          : dist < 80
+            ? ['combo', 'combo', 'backstep', 'blur']
+            : ['combo', 'pistol', 'blur', 'backstep'];
+        if (duelEnraged(b)) deck.push('volley', 'volley');
+        return pick(deck);
+      },
+    },
+
+    /** Close the measure at a run, then open the combo. */
+    approach: {
+      update(b) {
+        const { dist, dir } = toPlayer(b);
+        b.facing = dir;
+        b.vx = dir * 190;
+        if (dist < 85) return 'combo';
+        if (fsm.t > 1.1) return 'idle';
+      },
+    },
+
+    /** Lunge combo: two cuts (three enraged), each with its own step-in. */
+    combo: {
+      enter(b) {
+        b.state.swings = 0;
+        b.state.struck = false;
+      },
+      update(b) {
+        const swings = b.state.swings as number;
+        const total = duelEnraged(b) ? 3 : 2;
+        const tSwing = fsm.t - swings * 0.3;
+        if (tSwing < 0.1) {
+          // Wind-up: plant and face the mark.
+          const { dir } = toPlayer(b);
+          if (!(b.state.struck as boolean)) b.facing = dir;
+          b.vx *= 0.7;
+        } else if (!(b.state.struck as boolean)) {
+          // The lunge and the cut land together.
+          b.state.struck = true;
+          b.vx = b.facing * (duelEnraged(b) ? 300 : 240);
+          saberStrike(b);
+          b.game.feel.burst(b.cx + b.facing * 14, b.cy, 6, {
+            color: [COLORS.white, DUEL_TINT_ENRAGED], speed: 90, life: 0.18,
+            angle: b.facing === 1 ? 0 : Math.PI, spread: 1.1, drag: 5,
+          });
+        } else if (tSwing > 0.3) {
+          b.state.swings = swings + 1;
+          b.state.struck = false;
+          if ((swings + 1) >= total) return 'idle';
+        }
+        if (b.state.struck) b.vx *= 0.88;
+      },
+    },
+
+    /** Duelist's retreat: a sharp hop back that flows into the pistol. */
+    backstep: {
+      enter(b) {
+        const { dir } = toPlayer(b);
+        b.facing = dir;
+        b.vy = -190;
+        b.vx = -dir * 240;
+        b.game.feel.sfx.play('dash');
+      },
+      update(b) {
+        if (Math.floor(fsm.t * 30) % 2 === 0) ghost(b);
+        if (b.onGround && fsm.t > 0.2) return 'pistol';
+        if (fsm.t > 1) return 'pistol';
+      },
+    },
+
+    /** Level the flintlock (the glint is the tell), then fire. */
+    pistol: {
+      enter(b) {
+        b.state.fired = 0;
+        const { dir } = toPlayer(b);
+        b.facing = dir;
+      },
+      update(b) {
+        b.vx *= 0.8;
+        const fired = b.state.fired as number;
+        const shots = duelEnraged(b) ? 2 : 1;
+        if (fired < shots && fsm.t > 0.38 + fired * 0.28) {
+          b.state.fired = fired + 1;
+          pistolShot(b);
+          b.vx -= b.facing * 70; // the kick
+        }
+        if (fsm.t > 0.5 + shots * 0.28) return 'idle';
+      },
+    },
+
+    /** The blur: a crouch shimmer, then an afterimage dash THROUGH the
+     * knight with the saber out — the cut travels with the dash. */
+    blur: {
+      enter(b) {
+        b.state.blurPhase = 0;
+        b.state.cutDone = false;
+        const { dir } = toPlayer(b);
+        b.facing = dir;
+        b.vx = 0;
+      },
+      update(b) {
+        const phase = b.state.blurPhase as number;
+        if (phase === 0) {
+          // Shimmer telegraph: the image splits before the dash.
+          if (Math.floor(fsm.t * 40) % 3 === 0) ghost(b);
+          if (fsm.t > 0.28) {
+            b.state.blurPhase = 1;
+            b.state.blurT = fsm.t;
+            const { dir } = toPlayer(b);
+            b.facing = dir;
+            b.vx = dir * 540;
+            b.game.feel.sfx.play('dash');
+            b.game.feel.shake(0.15);
+          }
+        } else if (phase === 1) {
+          ghost(b);
+          b.vy = 0; // the blur rides a flat line
+          // The traveling cut: a moving strike across the dash line.
+          if (!(b.state.cutDone as boolean)) {
+            const strike = b.game.combat.strike({
+              damage: 1, targets: 'player', attacker: b,
+              strength: 0.6, knockback: 120,
+              colors: [DUEL_TINT_ENRAGED, COLORS.white],
+            });
+            const hits = strike.apply({ x: b.x - 6, y: b.y, w: b.w + 12, h: b.h });
+            if (hits.length) b.state.cutDone = true;
+          }
+          if (fsm.t - (b.state.blurT as number) > 0.32) {
+            b.vx *= 0.2;
+            return 'idle';
+          }
+        }
+      },
+    },
+
+    /** Enraged only: leap, hang in the air, and fan bullets down. */
+    volley: {
+      enter(b) {
+        b.vy = -330;
+        b.state.fired = 0;
+        b.game.feel.sfx.play('jump');
+      },
+      update(b) {
+        if (fsm.t < 0.45) return; // rising
+        // The hang: gravity is beaten for a beat while the pistol works.
+        if (fsm.t < 1.0) {
+          b.vy = 0;
+          b.vx *= 0.85;
+          const fired = b.state.fired as number;
+          if (fired < 4 && fsm.t > 0.5 + fired * 0.12) {
+            b.state.fired = fired + 1;
+            const { dx, dy } = toPlayer(b);
+            const base = Math.atan2(dy, dx);
+            const ang = base + (fired - 1.5) * 0.16; // the fan
+            shootBullet(b.game, b.collision, {
+              x: b.cx, y: b.cy, vx: Math.cos(ang) * 560, vy: Math.sin(ang) * 560,
+              damage: 1, targets: 'player', attacker: b,
+            });
+            muzzleFlash(b.game, b.cx, b.cy, b.facing, 'bullet');
+          }
+          return;
+        }
+        if (b.onGround && fsm.t > 1.1) return 'idle';
+        if (fsm.t > 2.5) return 'idle';
+      },
+    },
+  }, 'idle');
+  return fsm;
+}
+
+defineMonster('duelist', {
+  hp: 30,
+  damage: 1,
+  w: duelistSprite.hitbox.w,
+  h: duelistSprite.hitbox.h,
+  // A fencer wounds with steel and powder, not by being brushed against.
+  noContactDamage: true,
+  score: 8000,
+  mass: 1.4,
+  boss: true,
+  displayName: 'THE DUELIST',
+  epilogue: 'duelist-fallen',
+  colors: [DUEL_TINT, DUEL_TINT_ENRAGED, COLORS.steel],
+  drops: [
+    { id: 'flintlock', chance: 1 }, // her sidearm, yours now
+    { id: 'coin', chance: 1 },
+    { id: 'coin', chance: 1 },
+    { id: 'potion', chance: 1 },
+  ],
+  xp: 220,
+  init(m) {
+    m.state.fsm = makeDuelistFsm(m);
+    m.state.ghosts = [] as Ghost[];
+    m.state.wasEnraged = false;
+  },
+  update(m, dt) {
+    const fsm = m.state.fsm as FSM<Monster>;
+    for (const g of m.state.ghosts as Ghost[]) g.t += dt;
+    (m.state.ghosts as Ghost[]) = (m.state.ghosts as Ghost[]).filter((g) => g.t < 0.35);
+    if (duelEnraged(m) && !(m.state.wasEnraged as boolean)) {
+      m.state.wasEnraged = true;
+      m.game.feel.slowmo(0.5, 0.4);
+      m.game.feel.shake(0.5);
+      m.game.feel.text(m.cx, m.y - 12, t('EN GARDE!'), COLORS.red, 2);
+      m.game.feel.sfx.play('hurt');
+    }
+    fsm.update(dt);
+  },
+  draw(g, m) {
+    const fsm = m.state.fsm as FSM<Monster>;
+    const enragedNow = m.state.wasEnraged as boolean;
+
+    const dw = duelistSprite.w;
+    const dh = duelistSprite.h;
+    const ox = duelistSprite.hitbox.x;
+    const oy = duelistSprite.hitbox.y;
+
+    // Afterimages first: her own run frame as fading crimson echoes.
+    for (const gh of m.state.ghosts as Ghost[]) {
+      const set = gh.facing === 1 ? DUELIST_ANIMS.right : DUELIST_ANIMS.left;
+      const img = tintOf(frameAt(set, 'run', 0), DUEL_TINT_ENRAGED, 0.5);
+      g.globalAlpha = Math.max(0, 0.4 - gh.t * 1.2);
+      g.drawImage(img, Math.round(gh.x - ox), Math.round(gh.y - oy), dw, dh);
+    }
+    g.globalAlpha = 1;
+
+    // The duelist herself, drawn from her own crimson-coat sprite.
+    let anim = 'idle';
+    if (!m.onGround) anim = 'air';
+    else if (Math.abs(m.vx) > 12 || fsm.is('combo', 'blur', 'approach')) anim = 'run';
+    const set = m.facing === 1 ? DUELIST_ANIMS.right : DUELIST_ANIMS.left;
+    let img = frameAt(set, anim, m.animT);
+    if (m.flashT > 0) img = whiteOf(img);
+    else if (enragedNow) img = tintOf(img, DUEL_TINT_ENRAGED, 0.25); // hotter crimson enraged
+    g.drawImage(img, Math.round(m.x - ox), Math.round(m.y - oy), dw, dh);
+
+    const f = m.facing;
+    // The saber springs from her leading (sword) hand — anchored to the
+    // sprite's forward reach, ~2px above the coat's waist line.
+    const hx = m.cx + f * 5;
+    const hy = m.y + 9;
+    // Angle follows the current move.
+    let angle = -0.45; // resting guard, tip up
+    if (fsm.is('combo')) {
+      const struck = m.state.struck as boolean;
+      angle = struck ? 0.55 : -1.15; // wind-up high, follow-through low
+    } else if (fsm.is('blur')) angle = 0.05; // leveled through the dash
+    else if (fsm.is('air')) angle = -0.9;
+    g.save();
+    g.translate(hx, hy);
+    g.rotate(f === 1 ? angle : Math.PI - angle);
+    // Gold hilt + guard, then a tapering steel blade.
+    g.fillStyle = m.flashT > 0 ? '#ffffff' : COLORS.gold;
+    g.fillRect(-1, -1, 2, 2); // pommel/guard, compact
+    g.strokeStyle = m.flashT > 0 ? '#ffffff' : COLORS.steel;
+    g.lineWidth = 1.1;
+    g.beginPath();
+    g.moveTo(1, 0);
+    g.lineTo(12, 0);
+    g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,0.85)'; // fuller glint
+    g.lineWidth = 0.5;
+    g.beginPath();
+    g.moveTo(3, -0.5);
+    g.lineTo(11, -0.5);
+    g.stroke();
+    g.restore();
+
+    // The flintlock in the off hand — leveled and glinting while aiming.
+    const aiming = fsm.is('pistol', 'volley');
+    const gy = m.y + (aiming ? 11 : 14);
+    g.fillStyle = m.flashT > 0 ? '#ffffff' : COLORS.steelDark;
+    if (f === 1) g.fillRect(m.cx + 2, gy, 7, 1.5);
+    else g.fillRect(m.cx - 9, gy, 7, 1.5);
+    if (aiming && Math.floor(m.animT * 12) % 2 === 0) {
+      g.fillStyle = COLORS.white;
+      g.fillRect(m.cx + (f === 1 ? 8.5 : -10), gy - 0.5, 1.5, 1.5);
+    }
+  },
+});

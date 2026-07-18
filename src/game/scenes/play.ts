@@ -95,6 +95,8 @@ export class PlayScene implements Scene {
   private bannerT = 0;
   private overT = 0;
   private victoryT = 0;
+  /** Which epilogue the fallen boss earned (see MonsterDef.epilogue). */
+  private pendingEpilogue = 'victory';
   /** Free-running clock for idle UI wobble (the gate marker). */
   private uiT = 0;
   /** A keyed door in the current room, for the floating gate marker. */
@@ -207,7 +209,7 @@ export class PlayScene implements Scene {
         });
         game.feel.text(info.target.cx, info.target.y - 16, t('GEAR FREED!'), COLORS.gold);
       }
-      if (info.target.def.boss) this.onBossDefeated();
+      if (info.target.def.boss) this.onBossDefeated(info.target);
     }));
     on(game.events.on('score', ({ points, x, y }) => {
       this.score += points;
@@ -299,6 +301,11 @@ export class PlayScene implements Scene {
     if (save) {
       restorePlayer(this.player, save.player);
       this.flags = new Set(save.flags);
+      // Legacy saves predate per-boss slain flags: their 'bossDefeated'
+      // could only have meant the Slime King.
+      if (this.flags.has('bossDefeated') && ![...this.flags].some((f) => f.startsWith('slain:'))) {
+        this.flags.add('slain:slime-king');
+      }
       this.firedTriggers = { ...save.firedTriggers };
       this.best = Math.max(this.best, save.best);
     } else {
@@ -506,8 +513,10 @@ export class PlayScene implements Scene {
     return null;
   }
 
-  private onBossDefeated(): void {
+  private onBossDefeated(boss: Monster): void {
     this.flags.add('bossDefeated');
+    this.flags.add(`slain:${boss.type}`);
+    this.pendingEpilogue = boss.def.epilogue ?? 'victory';
     this.showBanner(t('VICTORY!'), 2);
     this.victoryT = 1.6; // let the gibs settle before the epilogue speaks
     this.autosave();
@@ -582,7 +591,7 @@ export class PlayScene implements Scene {
     }
     if (this.victoryT > 0) {
       this.victoryT -= dt;
-      if (this.victoryT <= 0) this.openConversation('victory');
+      if (this.victoryT <= 0) this.openConversation(this.pendingEpilogue);
     }
     this.bannerT = Math.max(0, this.bannerT - dt);
 

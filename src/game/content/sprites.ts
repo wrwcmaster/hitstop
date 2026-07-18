@@ -1,6 +1,7 @@
 import { loadSprite, loadSheet, loadImage, withFacing, type SpriteFile, type SheetDescriptor } from '@engine/index';
 import { PAL } from './palette';
 import knightJson from './sprites/knight.json';
+import duelistJson from './sprites/duelist.json';
 import slimeJson from './sprites/slime.json';
 import batJson from './sprites/bat.json';
 import pikeJson from './sprites/pike.json';
@@ -36,6 +37,14 @@ export async function loadKnightSheet(imageUrl: string, desc: SheetDescriptor): 
   KNIGHT_ANIMS = withFacing(sheet.animSet());
   KNIGHT_IDLE_SPRITE = sheet.frame('idle', 0);
 }
+
+/* ---------------- the Duelist (human boss) ---------------- */
+
+// Her own body art — a crimson-coated fencer with a swept ponytail — so
+// she reads as a distinct human, not a recolored knight. The saber and
+// pistol are drawn as code overlays (they animate with her FSM state).
+export const duelistSprite = load(duelistJson);
+export const DUELIST_ANIMS = withFacing(duelistSprite.animSet());
 
 /* ---------------- enemies ---------------- */
 

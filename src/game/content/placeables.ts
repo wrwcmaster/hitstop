@@ -70,8 +70,9 @@ export function registerPlaceables(): void {
       h: def.h,
       hint: `hp ${def.hp}`,
       validateProps: def.validateProps ?? ((props, path) => rejectUnknownProps(props, [], path)),
-      // A defeated boss stays defeated across saves.
-      shouldSpawn: ({ flags }) => !(def.boss && flags.has('bossDefeated')),
+      // A defeated boss stays defeated across saves — each by its own
+      // slain flag, so felling one boss doesn't banish the others.
+      shouldSpawn: ({ flags }) => !(def.boss && flags.has(`slain:${id}`)),
       spawn: ({ game, tilemap }, e) => {
         game.world.spawn(new Monster(id, game, tilemap, e.x, e.y));
       },
