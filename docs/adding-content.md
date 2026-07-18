@@ -175,6 +175,30 @@ No player-code changes: combo length, timing, damage windows, range, lunge, feel
 
 For authored art, create a transparent weapon-only JSON sheet with `idle`/`run`/`air` frames aligned to the knight's world origin (optionally add `attack` frames), load it with `loadSprite` + `withFacing`, and register `spriteWeapon({ anims, origin?, anchors? })`. A sheet may be larger than the knight frame so long blades and attack arcs are not clipped. `spriteWeapon` also trims and fits the idle frame into the standard item-icon footprint, so the item can use `weaponIcon(visualId)` instead of duplicating art in `icons.json`. The built-in swords follow this route in `content/sprites/equipment/`; `scripts/generate-weapon-sheets.mjs` is their reproducible source. The sprite editor can refine the sheets, while the origin and anchors provide alignment corrections without adding weapon logic to Player.
 
+## A ranged weapon (bow, gun) or ballistic attack
+
+Give a weapon type a `ranged` block and the attack button shoots instead of swinging:
+
+```ts
+defineWeaponType('bow', {
+  comboWindow: 0,
+  attacks: [], // ranged types may skip melee entirely
+  ranged: { projectile: 'arrow', speed: 330, gravity: 420, cooldown: 0.55, recoil: 30 },
+});
+```
+
+Arrows arc under gravity (hold ↑ to loose at 45°, ↓ mid-air for a steep shot); bullets are fast and nearly flat. Both fire through `content/ballistics.ts` — `shootArrow`/`shootBullet` wrap `game.combat.shoot` with the shared visuals, feel, and a `snapKind` tag that co-op guests use to draw the real silhouette.
+
+Monsters aim with the engine solvers from `math/ballistics.ts`:
+
+```ts
+const v = ballisticVelocity(dx, dy, 320, ARROW_GRAVITY) // fixed speed; null if out of range
+  ?? ballisticLob(dx, dy, ARROW_GRAVITY, 70);           // mortar-style, always solvable
+shootArrow(m.game, m.collision, { x: m.cx, y: m.y + 4, vx: v.vx, vy: v.vy, damage: 1, targets: 'player', attacker: m });
+```
+
+See the `archer` (solver-aimed arcing arrows with a draw-back telegraph) and `gunner` (leveled musket, flat crack) in `actors/enemies.ts`.
+
 ## A new skill / spell
 
 In `src/game/content/skills.ts`. A skill is cooldown + cost + a cast that usually fires a `Strike` or a projectile — so impact feedback comes free:

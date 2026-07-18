@@ -16,6 +16,7 @@ import { Player } from '../actors/player';
 import { Monster, monsters } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
 import { drawPlatform, drawLever, drawPlate, drawBarrier, type GizmoSnap } from '../actors/gizmos';
+import { drawArrow, drawBullet } from '../content/ballistics';
 import { Background } from '../scenes/background';
 import { Hud } from '../scenes/play/hud';
 import type { PlayHost } from '../scenes/play/host';
@@ -340,12 +341,17 @@ export class CoopGuestScene implements Scene {
       const sorted = [...this.puppets.values()].sort((a, b) => a.actor.layer - b.actor.layer);
       for (const p of sorted) p.actor.render(g);
       this.me?.render(g); // the predicted knight, on top of the puppets
-      // Projectiles come across as plain rects; draw them as glow dots.
+      // Projectiles come across as plain rects; ballistic kinds carry
+      // their velocity so arrows/bullets draw for real, the rest glow.
       for (const s of this.snap?.shots ?? []) {
-        g.fillStyle = COLORS.gold;
-        g.fillRect(Math.round(s.x), Math.round(s.y), Math.max(2, s.w), Math.max(2, s.h));
-        g.fillStyle = COLORS.white;
-        g.fillRect(Math.round(s.x + s.w / 4), Math.round(s.y + s.h / 4), Math.max(1, s.w / 2), Math.max(1, s.h / 2));
+        if (s.k === 'arrow') drawArrow(g, s.x, s.y, s.vx ?? 1, s.vy ?? 0);
+        else if (s.k === 'bullet') drawBullet(g, s.x, s.y, s.vx ?? 1, s.vy ?? 0);
+        else {
+          g.fillStyle = COLORS.gold;
+          g.fillRect(Math.round(s.x), Math.round(s.y), Math.max(2, s.w), Math.max(2, s.h));
+          g.fillStyle = COLORS.white;
+          g.fillRect(Math.round(s.x + s.w / 4), Math.round(s.y + s.h / 4), Math.max(1, s.w / 2), Math.max(1, s.h / 2));
+        }
       }
       gm.feel.renderWorld(g); // puppet state-enter hooks spawn real particles
       gm.camera.end(g);

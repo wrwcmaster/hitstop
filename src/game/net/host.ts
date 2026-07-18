@@ -135,7 +135,10 @@ export class CoopHost {
       } else if (e instanceof Pickup) {
         snap.picks.push({ id: this.id(e), item: e.itemId, x: r(e.x), y: r(e.y) });
       } else if (e instanceof Projectile) {
-        snap.shots.push({ x: r(e.x), y: r(e.y), w: e.w, h: e.h });
+        const kind = (e as Projectile & { snapKind?: string }).snapKind;
+        snap.shots.push(kind
+          ? { x: r(e.x), y: r(e.y), w: e.w, h: e.h, k: kind, vx: r(e.vx), vy: r(e.vy) }
+          : { x: r(e.x), y: r(e.y), w: e.w, h: e.h });
       } else if (isGizmo(e)) {
         const s = e.gizmoSnap();
         snap.giz.push({ id: this.id(e), ...s, x: r(s.x), y: r(s.y) });

@@ -46,11 +46,31 @@ export interface WeaponAttackDef {
 }
 
 /**
+ * A ranged weapon type: pressing attack looses a ballistic projectile
+ * instead of swinging steel. Both projectile kinds ride the engine's
+ * gravity-aware Projectile — arrows arc, bullets fly nearly flat.
+ */
+export interface RangedDef {
+  projectile: 'arrow' | 'bullet';
+  /** Muzzle speed, px/s. */
+  speed: number;
+  /** Arc gravity in px/s² (arrows ~420; guns nearly 0). */
+  gravity: number;
+  /** Seconds between shots. */
+  cooldown: number;
+  /** Backward kick on the shooter, px/s. */
+  recoil: number;
+  /** Vertical muzzle offset from the shooter's center. */
+  muzzleY?: number;
+}
+
+/**
  * A weapon type's full moveset: the grounded combo chain plus the
  * contextual attacks the player resolves from her situation — airborne
  * (aerial), airborne holding down (plunge), holding up (upper), or
  * mid-dash (dashAttack). Contextual entries are optional; a type
- * without one falls back to the first grounded swing.
+ * without one falls back to the first grounded swing. A type with
+ * `ranged` shoots instead — its melee lists may be empty.
  */
 export interface WeaponTypeDef {
   comboWindow: number;
@@ -59,6 +79,7 @@ export interface WeaponTypeDef {
   plunge?: WeaponAttackDef;
   upper?: WeaponAttackDef;
   dashAttack?: WeaponAttackDef;
+  ranged?: RangedDef;
 }
 
 export interface WeaponDef {
@@ -88,7 +109,21 @@ export function defineWeaponType(id: string, def: WeaponTypeDef): void {
   if (!Number.isFinite(def.comboWindow) || def.comboWindow < 0) {
     throw new Error(`weapon type "${id}".comboWindow: expected a non-negative finite number`);
   }
-  if (!def.attacks.length) throw new Error(`weapon type "${id}".attacks: expected at least one attack`);
+  if (def.ranged) {
+    const r = def.ranged;
+    if (r.projectile !== 'arrow' && r.projectile !== 'bullet') {
+      throw new Error(`weapon type "${id}".ranged.projectile: expected 'arrow' or 'bullet'`);
+    }
+    for (const [field, value] of Object.entries({
+      speed: r.speed, gravity: r.gravity, cooldown: r.cooldown, recoil: r.recoil,
+    })) finite(value, `weapon type "${id}".ranged.${field}`);
+    if (r.speed <= 0 || r.cooldown <= 0 || r.gravity < 0 || r.recoil < 0) {
+      throw new Error(`weapon type "${id}".ranged: speed/cooldown must be positive, gravity/recoil non-negative`);
+    }
+  }
+  if (!def.attacks.length && !def.ranged) {
+    throw new Error(`weapon type "${id}".attacks: expected at least one attack`);
+  }
   const named: [string, WeaponAttackDef][] = def.attacks.map((a, i) => [`attacks[${i}]`, a]);
   for (const key of ['aerial', 'plunge', 'upper', 'dashAttack'] as const) {
     if (def[key]) named.push([key, def[key]]);
@@ -288,6 +323,24 @@ defineWeaponType('great-sword', {
   ],
 });
 
+/* ---- ranged types: the attack button shoots ---- */
+
+// The bow: arrows leave at a real muzzle speed and arc under gravity —
+// aim up for distance, or loose flat and let the drop do the work.
+defineWeaponType('bow', {
+  comboWindow: 0,
+  attacks: [],
+  ranged: { projectile: 'arrow', speed: 330, gravity: 420, cooldown: 0.55, recoil: 30, muzzleY: -2 },
+});
+
+// The flintlock: a fast, nearly-flat shot with a real kick. Slow to
+// reload — every bang has to count.
+defineWeaponType('gun', {
+  comboWindow: 0,
+  attacks: [],
+  ranged: { projectile: 'bullet', speed: 640, gravity: 30, cooldown: 0.85, recoil: 90, muzzleY: -1 },
+});
+
 defineWeapon('unarmed', {
   type: 'unarmed',
   visual: 'unarmed',
@@ -307,6 +360,20 @@ defineWeapon('great-sword', {
   visual: 'great-sword',
   baseDamage: 2,
   colors: [COLORS.gold, COLORS.white, COLORS.red],
+});
+
+defineWeapon('hunting-bow', {
+  type: 'bow',
+  visual: 'hunting-bow',
+  baseDamage: 2,
+  colors: ['#8a6b3f', COLORS.steel],
+});
+
+defineWeapon('flintlock', {
+  type: 'gun',
+  visual: 'flintlock',
+  baseDamage: 3,
+  colors: [COLORS.gold, COLORS.steel],
 });
 
 /** Importing this module registers weapon types and concrete weapons. */

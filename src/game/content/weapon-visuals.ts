@@ -321,3 +321,83 @@ defineWeaponVisual('great-sword', spriteWeapon({
   anims: withFacing(load(greatSwordJson).animSet()),
   origin: { x: 16, y: 16 },
 }));
+
+/* ---- ranged visuals: procedural bow + flintlock ---- */
+
+/** Bake a chunky icon by drawing logical pixels at TEXEL density. */
+function bakedIcon(paint: (px: (x: number, y: number, w: number, h: number, color: string) => void) => void): HTMLCanvasElement {
+  const [icon, g] = offscreen(8 * TEXEL, 8 * TEXEL);
+  paint((x, y, w, h, color) => {
+    g.fillStyle = color;
+    g.fillRect(x * TEXEL, y * TEXEL, w * TEXEL, h * TEXEL);
+  });
+  return icon;
+}
+
+const WOOD = '#8a6b3f';
+const WOOD_DARK = '#5d4728';
+
+// The hunting bow: a strung arc held at the knight's leading hand. The
+// arc leans with the run cycle like the blades do.
+defineWeaponVisual('hunting-bow', {
+  icon: bakedIcon((px) => {
+    px(5, 0, 1, 1, WOOD); px(6, 1, 1, 2, WOOD); px(7, 3, 1, 2, WOOD_DARK);
+    px(6, 5, 1, 2, WOOD); px(5, 7, 1, 1, WOOD);
+    px(5, 0, 1, 1, COLORS.white); // string, straight down the left
+    for (let y = 0; y < 8; y++) px(4, y, 1, 1, y % 2 ? COLORS.steel : COLORS.white);
+  }),
+  drawHeld(g, ctx) {
+    const f = ctx.facing;
+    let hx = 2.25;
+    let hy = -4.75;
+    if (ctx.anim === 'run') hy += ctx.frame === 1 ? 0.5 : -0.25;
+    else if (ctx.anim !== 'air') hy += Math.sin(ctx.animT * 4.5) * 0.2;
+    g.save();
+    g.translate(hx * f, hy);
+    if (f === -1) g.scale(-1, 1);
+    g.strokeStyle = WOOD;
+    g.lineWidth = 1.4;
+    g.beginPath(); // the stave: an arc bowing forward
+    g.arc(0, 0, 5.5, -Math.PI / 2.6, Math.PI / 2.6);
+    g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,0.8)';
+    g.lineWidth = 0.6;
+    const tipY = 5.5 * Math.sin(Math.PI / 2.6);
+    const tipX = 5.5 * Math.cos(Math.PI / 2.6);
+    g.beginPath(); // the string between the stave's tips
+    g.moveTo(tipX, -tipY);
+    g.lineTo(tipX, tipY);
+    g.stroke();
+    g.restore();
+  },
+});
+
+// The flintlock: a stubby barrel + drooping grip at the hand.
+defineWeaponVisual('flintlock', {
+  icon: bakedIcon((px) => {
+    px(1, 3, 6, 1, COLORS.steel); px(6, 2, 1, 1, COLORS.white); // barrel + muzzle
+    px(1, 4, 2, 1, WOOD); px(1, 5, 1, 2, WOOD_DARK); // stock + grip
+    px(3, 4, 1, 1, COLORS.gold); // trigger guard glint
+  }),
+  drawHeld(g, ctx) {
+    const f = ctx.facing;
+    let hx = 2;
+    let hy = -4.5;
+    if (ctx.anim === 'run') hy += ctx.frame === 1 ? 0.4 : -0.2;
+    else if (ctx.anim !== 'air') hy += Math.sin(ctx.animT * 4.5) * 0.2;
+    g.save();
+    g.translate(hx * f, hy);
+    if (f === -1) g.scale(-1, 1);
+    g.fillStyle = COLORS.steel;
+    g.fillRect(0, -1, 6, 1.5); // barrel
+    g.fillStyle = COLORS.white;
+    g.fillRect(5.4, -1.4, 0.8, 0.8); // sight
+    g.fillStyle = WOOD;
+    g.fillRect(-1.5, -1, 2.2, 1.6); // stock
+    g.fillStyle = WOOD_DARK;
+    g.fillRect(-1.2, 0.4, 1.2, 2); // grip drops toward the hand
+    g.fillStyle = COLORS.gold;
+    g.fillRect(0.4, 0.5, 0.8, 0.8); // trigger guard
+    g.restore();
+  },
+});

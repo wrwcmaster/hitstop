@@ -59,12 +59,18 @@ export interface PickSnap {
 }
 
 /** Projectiles draw via game closures the guest can't rebuild, so they
- * cross the wire as plain rects and render as generic glow dots. */
+ * cross the wire as plain rects and render as generic glow dots —
+ * except tagged ballistic kinds (arrow/bullet), whose velocity rides
+ * along so the guest can draw the real silhouette at the right angle. */
 export interface ShotSnap {
   x: number;
   y: number;
   w: number;
   h: number;
+  /** Ballistic kind tag ('arrow' | 'bullet'); absent = generic glow. */
+  k?: string;
+  vx?: number;
+  vy?: number;
 }
 
 /** host → guest: the world as of this instant. */

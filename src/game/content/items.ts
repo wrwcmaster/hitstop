@@ -35,6 +35,22 @@ defineItem<ItemCtx>('great-sword', {
   mods: { add: { attack: 1 } },
 });
 
+defineItem<ItemCtx>('hunting-bow', {
+  name: 'HUNTING BOW',
+  desc: 'Arrows arc. Lead your mark.',
+  icon: weaponIcon('hunting-bow'),
+  kind: 'equipment',
+  slot: 'weapon',
+});
+
+defineItem<ItemCtx>('flintlock', {
+  name: 'FLINTLOCK',
+  desc: 'One loud argument, slowly reloaded.',
+  icon: weaponIcon('flintlock'),
+  kind: 'equipment',
+  slot: 'weapon',
+});
+
 defineItem<ItemCtx>('iron-helmet', {
   name: 'IRON HELMET',
   desc: 'Protects the skull from heavy blows.',

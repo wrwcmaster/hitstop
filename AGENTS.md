@@ -112,6 +112,17 @@ Details and code samples: `docs/adding-content.md`. The short version —
   above the head; `pogo: <speed>` makes an airborne down-hit bounce her
   up with air jumps and the dash refreshed. Plunges ride gravity and
   finish on landing; only grounded swings advance the combo chain.
+- **Ranged weapon / ballistic shot**: give a weapon type a `ranged`
+  block (`projectile: 'arrow'|'bullet'`, `speed`, `gravity`, `cooldown`,
+  `recoil`) — the attack button then shoots instead of swinging (melee
+  lists may be empty; the player braces through the cast state). Shots
+  fire through `content/ballistics.ts` (`shootArrow`/`shootBullet`) —
+  the same helpers monsters use — and are engine Projectiles with
+  gravity, so arrows arc and bullets fly nearly flat. Monster aim uses
+  the engine solvers `ballisticVelocity` (fixed speed, null when out of
+  range) / `ballisticLob` (always solvable) from `math/ballistics.ts`;
+  see the `archer`/`gunner` monsters. Tagged shots (`snapKind`) render
+  properly on co-op guests (velocity rides the `ShotSnap`).
 - **Weapon visual**: `defineWeaponVisual` in `content/weapon-visuals.ts`.
   Use `proceduralBlade(...)` for compact generated art or
   `spriteWeapon(...)` for a frame-aligned JSON sheet; sprite weapons

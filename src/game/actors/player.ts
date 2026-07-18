@@ -43,6 +43,7 @@ import {
 import { drawHeldWeapon, drawWeaponTrail } from '../content/weapon-visuals';
 import { type SkillCtx } from '../content/skills';
 import { classes, DEFAULT_CLASS } from '../content/classes';
+import { shootArrow, shootBullet, muzzleFlash } from '../content/ballistics';
 import { Monster } from './monster';
 import { PlayerCapabilities } from './player-capabilities';
 import { QuestLog } from '../content/quests';
@@ -193,6 +194,9 @@ export class Player extends Actor {
   /** Active spell + its animation window (the `cast` state). */
   private pendingSkill: string | null = null;
   private castDur = 0;
+  /** Ranged weapon: a queued shot + the reload clock. */
+  private pendingRanged = false;
+  private rangedCd = 0;
   deadT = 0;
 
   /** Debug god mode (cheat): no damage, always topped up. */
@@ -437,6 +441,16 @@ export class Player extends Actor {
   moveUpdate(dt: number): string | void {
     this.runControls(dt);
     if (this.atkBuf.consume()) {
+      // Ranged steel shoots instead of swinging: the attack press
+      // queues a shot and enters the cast state for the recoil brace.
+      const rangedType = weaponTypeOf(this.weapon);
+      if (rangedType.ranged) {
+        if (this.rangedCd <= 0) {
+          this.pendingRanged = true;
+          return 'cast';
+        }
+        return; // dry-fire: the reload isn't done
+      }
       // Context picks the move: airborne+down plunges, up-held swings
       // overhead, airborne swipes aerial, grounded runs the combo chain.
       // Not in water, though: tucking down there is how you hold depth,
@@ -461,6 +475,11 @@ export class Player extends Actor {
 
   /** Fire the queued spell and brace into a recoil for the cast window. */
   beginCast(): void {
+    if (this.pendingRanged) {
+      this.pendingRanged = false;
+      this.fireRanged();
+      return;
+    }
     const id = this.pendingSkill;
     this.pendingSkill = null;
     if (!id) {
@@ -476,6 +495,34 @@ export class Player extends Actor {
   castUpdate(): string | void {
     this.vx *= 0.86; // braced stance
     if (this.fsm.t >= this.castDur) return 'move';
+  }
+
+  /** Loose the equipped ranged weapon along the current aim. */
+  private fireRanged(): void {
+    const w = this.weapon;
+    const r = weaponTypeOf(w).ranged!;
+    this.castDur = 0.16;
+    this.rangedCd = r.cooldown;
+    // Aim: level by default, 45° up with up held, steep down mid-air.
+    let angle = 0;
+    if (this.input.held('up')) angle = -Math.PI / 4;
+    else if (!this.onGround && this.input.held('down')) angle = Math.PI / 3;
+    const vx = Math.cos(angle) * r.speed * this.facing;
+    const vy = Math.sin(angle) * r.speed;
+    const mx = this.cx + this.facing * 7;
+    const my = this.cy + (r.muzzleY ?? 0);
+    const shot = {
+      x: mx, y: my, vx, vy,
+      damage: Math.round(w.baseDamage + this.stats.get('attack')),
+      targets: 'enemy' as const,
+      attacker: this,
+      gravity: r.gravity,
+    };
+    if (r.projectile === 'arrow') shootArrow(this.game, this.collision, shot);
+    else shootBullet(this.game, this.collision, shot);
+    muzzleFlash(this.game, mx, my, this.facing, r.projectile);
+    this.vx -= this.facing * r.recoil;
+    this.squash = 0.92;
   }
 
   beginAttack(): void {
@@ -704,6 +751,7 @@ export class Player extends Actor {
     this.coyote.update(dt);
     this.comboT = Math.max(0, this.comboT - dt);
     this.dashCd = Math.max(0, this.dashCd - dt);
+    this.rangedCd = Math.max(0, this.rangedCd - dt);
     this.skills.update(dt);
     this.statuses.update(dt);
     this.squash += (1 - this.squash) * Math.min(1, dt * 10);
