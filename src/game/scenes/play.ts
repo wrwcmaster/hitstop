@@ -12,6 +12,7 @@ import {
   itemDef,
   chance,
   clamp,
+  t,
 } from '@engine/index';
 import { menuLine, type ActionGame, type Action } from '../defs';
 import { Player } from '../actors/player';
@@ -168,7 +169,7 @@ export class PlayScene implements Scene {
       this.comboT = 2;
       if (this.combo > 0 && this.combo % 5 === 0 && this.player) {
         game.feel.sfx.play('combo');
-        game.feel.text(this.player.cx, this.player.y - 10, `COMBO X${this.combo}`, COLORS.gold);
+        game.feel.text(this.player.cx, this.player.y - 10, t('COMBO X{n}', { n: this.combo }), COLORS.gold);
       }
     }));
     on(game.events.on('kill', (info) => {
@@ -184,7 +185,7 @@ export class PlayScene implements Scene {
       // Quest progress: any kill may advance an accepted quest.
       for (const q of this.player?.quests.onKill(info.target.type) ?? []) {
         if (q.justCompleted) {
-          this.showBanner('QUEST COMPLETE!', 1.5);
+          this.showBanner(t('QUEST COMPLETE!'), 1.5);
           game.feel.sfx.play('levelup');
         } else {
           game.feel.text(info.target.cx, info.target.y - 16, `${q.n}/${q.need}`, COLORS.gold);
@@ -198,7 +199,7 @@ export class PlayScene implements Scene {
           const dx = (i - (stolen.length - 1) / 2) * 7;
           game.world.spawn(new Pickup(id as string, game, this.tilemap, info.target.cx + dx, info.target.y));
         });
-        game.feel.text(info.target.cx, info.target.y - 16, 'GEAR FREED!', COLORS.gold);
+        game.feel.text(info.target.cx, info.target.y - 16, t('GEAR FREED!'), COLORS.gold);
       }
       if (info.target.def.boss) this.onBossDefeated();
     }));
@@ -400,7 +401,7 @@ export class PlayScene implements Scene {
       if (this.waves.active) this.waves.begin();
       this.autosave();
       if (id !== START_ROOM || this.bannerT <= 0) {
-        this.showBanner(this.room.name.toUpperCase(), 1.2);
+        this.showBanner(t(this.room.name.toUpperCase()), 1.2);
       }
     }
   }
@@ -464,7 +465,7 @@ export class PlayScene implements Scene {
     const data = this.buildSave();
     if (!data) return;
     slotStore(slot).save(data);
-    this.showBanner('GAME SAVED', 1);
+    this.showBanner(t('GAME SAVED'), 1);
   }
 
   /** Resume from any slot (pause LOAD GAME / title LOAD GAME). */
@@ -501,7 +502,7 @@ export class PlayScene implements Scene {
 
   private onBossDefeated(): void {
     this.flags.add('bossDefeated');
-    this.showBanner('VICTORY!', 2);
+    this.showBanner(t('VICTORY!'), 2);
     this.victoryT = 1.6; // let the gibs settle before the epilogue speaks
     this.autosave();
     this.updateMusic(); // the boss theme dies with him
@@ -604,7 +605,7 @@ export class PlayScene implements Scene {
     this.coop.close();
     this.coop = null;
     if (this.player) this.player.name = ''; // solo again: tag off
-    this.showBanner('GUEST LEFT', 1.5);
+    this.showBanner(t('GUEST LEFT'), 1.5);
   }
 
   frame(realDt: number): void {
@@ -635,7 +636,7 @@ export class PlayScene implements Scene {
           comboT: this.comboT,
           banner: this.banner,
           bannerT: this.bannerT,
-          label: this.waves.active ? `WAVE ${this.waves.wave}` : this.room.name.toUpperCase(),
+          label: this.waves.active ? t('WAVE {n}', { n: this.waves.wave }) : t(this.room.name.toUpperCase()),
           uiT: this.uiT,
         },
         this.minimap,

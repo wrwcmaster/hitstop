@@ -1,4 +1,4 @@
-import { JsonStore, type ItemStack } from '@engine/index';
+import { JsonStore, t, type ItemStack } from '@engine/index';
 import type { Player } from './actors/player';
 
 /**
@@ -48,8 +48,8 @@ export function slotStore(slot: number): JsonStore<SaveData> {
 /** One line per slot for the save/load UI. */
 export function slotSummary(slot: number): string {
   const d = slotStore(slot).load();
-  const name = slot === 0 ? 'AUTO' : `SLOT ${slot}`;
-  if (!d) return `${name}: empty`;
+  const name = slot === 0 ? t('AUTO') : t('SLOT {n}', { n: slot });
+  if (!d) return `${name}: ${t('empty')}`;
   return `${name}: ${d.roomId.toUpperCase()} LV${d.player.progression.level} ${d.player.gold}g`;
 }
 

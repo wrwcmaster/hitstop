@@ -1,4 +1,4 @@
-import { drawText, Menu, type Input } from '@engine/index';
+import { drawText, Menu, t, type Input } from '@engine/index';
 import { VERSION, COARSE_POINTER, menuLine, type ActionGame, type Action } from '../../defs';
 import { COLORS } from '../../content/palette';
 import { KNIGHT_IDLE_SPRITE, TEXEL } from '../../content/sprites';
@@ -66,14 +66,15 @@ export class TitleScreen {
     g.drawImage(KNIGHT_IDLE_SPRITE, 0, 0, kw, kh);
     g.restore();
     drawText(g, 'HITSTOP', gm.width / 2, 48, COLORS.white, 4, 'center');
-    drawText(g, 'Game feel is the foundation', gm.width / 2, 80, COLORS.steel, 1, 'center');
+    drawText(g, t('Game feel is the foundation'), gm.width / 2, 80, COLORS.steel, 1, 'center');
     // Touch: taller, thumb-sized rows, and no keyboard hints (they'd be
     // wrong — everything here is tappable and the pad has its buttons).
-    this.menu.render(g, gm.width / 2 - 24, COARSE_POINTER ? 152 : 162, { lineHeight: menuLine(13), width: 60 });
+    // Six entries now — start higher and keep the hints clear below.
+    this.menu.render(g, gm.width / 2 - 24, COARSE_POINTER ? 148 : 150, { lineHeight: menuLine(13), width: 60 });
     if (!COARSE_POINTER) {
-      drawText(g, 'Move: Arrows / WASD - Jump: Space', gm.width / 2, 208, COLORS.steelDark, 1, 'center');
-      drawText(g, 'Attack: Z - Dash: X - Skill: C - Menu: Esc', gm.width / 2, 220, COLORS.steelDark, 1, 'center');
-      drawText(g, 'Z or Enter to select', gm.width / 2, 238, COLORS.gold, 1, 'center');
+      drawText(g, t('Move: Arrows / WASD - Jump: Space'), gm.width / 2, 232, COLORS.steelDark, 1, 'center');
+      drawText(g, t('Attack: Z - Dash: X - Skill: C - Menu: Esc'), gm.width / 2, 242, COLORS.steelDark, 1, 'center');
+      drawText(g, t('Z or Enter to select'), gm.width / 2, 254, COLORS.gold, 1, 'center');
     }
     // Small build version, tucked in the corner.
     drawText(g, `v${VERSION}`, gm.width - 6, gm.height - 10, COLORS.steelDark, 1, 'right');
@@ -88,13 +89,13 @@ export function renderGameOver(
 ): void {
   g.fillStyle = 'rgba(7,7,13,0.55)';
   g.fillRect(0, 0, game.width, game.height);
-  drawText(g, 'GAME OVER', game.width / 2, 70, COLORS.red, 4, 'center');
-  drawText(g, `SCORE ${view.score}`, game.width / 2, 110, COLORS.white, 2, 'center');
-  drawText(g, `BEST ${view.best}`, game.width / 2, 130, COLORS.steel, 1, 'center');
+  drawText(g, t('GAME OVER'), game.width / 2, 70, COLORS.red, 4, 'center');
+  drawText(g, t('SCORE {n}', { n: view.score }), game.width / 2, 110, COLORS.white, 2, 'center');
+  drawText(g, t('BEST {n}', { n: view.best }), game.width / 2, 130, COLORS.steel, 1, 'center');
   if (saveStore.exists()) {
-    drawText(g, 'You will wake at the last gate', game.width / 2, 148, COLORS.steel, 1, 'center');
+    drawText(g, t('You will wake at the last gate'), game.width / 2, 148, COLORS.steel, 1, 'center');
   }
   if (view.ready && Math.floor(performance.now() / 400) % 2) {
-    drawText(g, 'Press any key', game.width / 2, 190, COLORS.gold, 2, 'center');
+    drawText(g, t('Press any key'), game.width / 2, 190, COLORS.gold, 2, 'center');
   }
 }

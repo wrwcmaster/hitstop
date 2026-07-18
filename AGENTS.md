@@ -149,6 +149,16 @@ Details and code samples: `docs/adding-content.md`. The short version —
   (transparent except the gear) + `defineGearVisual(slot, ...)` in
   `content/gear-visuals.ts`. No player-render changes.
 - **Cheat**: one entry in `play/cheats.ts` (legend updates itself).
+- **Language**: gettext-style — the English string IS the key. Add a
+  table to `content/locales.ts` (`defineLocale('ja', { name, strings })`)
+  and it appears in OPTIONS → LANGUAGE; untranslated strings fall back
+  to English. Engine menus + dialogue translate at render time via
+  `t()`; game code wraps its own drawText literals (`t('WAVE {n}',
+  { n })` for templates). Non-ASCII glyphs (CJK etc.) render through the
+  font's Unicode fallback: rasterized once from a system font at bitmap
+  resolution, thresholded to hard pixels, wide chars advancing double —
+  so foreign text keeps the pixel aesthetic with zero glyph authoring.
+  CJK-aware dialogue wrap breaks per glyph (no spaces needed).
 - **Sprite**: text-grid JSON in `content/sprites/` (author in the sprite
   editor; PNG art via the sheet slicer's "to sprite json"). Art is
   EPX-upscaled to 4× texel density; draw at `img.width / TEXEL`.

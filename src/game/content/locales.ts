@@ -1,0 +1,203 @@
+import { defineLocale } from '@engine/index';
+
+/**
+ * Translations, gettext-style: the English source string is the key, so
+ * content stays authored inline and this table is the single place a
+ * language lives. Anything missing falls back to English — a partial
+ * translation ships gracefully. Templates keep their {vars}.
+ *
+ * 简体中文 (Simplified Chinese) — the first non-English locale, and the
+ * proof that the CJK font fallback + pixel-wrap path works end to end.
+ */
+defineLocale('zh', {
+  name: '中文',
+  strings: {
+    /* ---- title ---- */
+    'NEW GAME': '新游戏',
+    'CONTINUE': '继续',
+    'LOAD GAME': '读取存档',
+    'CO-OP': '联机合作',
+    'TEST ROOM': '测试房间',
+    'OPTIONS': '设置',
+    'Game feel is the foundation': '手感即根基',
+    'Move: Arrows / WASD - Jump: Space': '移动:方向键/WASD - 跳跃:空格',
+    'Attack: Z - Dash: X - Skill: C - Menu: Esc': '攻击:Z - 冲刺:X - 技能:C - 菜单:Esc',
+    'Z or Enter to select': '按 Z 或回车选择',
+
+    /* ---- pause / inventory ---- */
+    'RESUME': '继续游戏',
+    'INVENTORY': '背包',
+    'SKILL TREE': '技能树',
+    'SAVE GAME': '保存游戏',
+    'RESTART RUN': '重新开始',
+    'PAUSED': '暂停',
+    'Esc: close': 'Esc:关闭',
+    'Esc: back': 'Esc:返回',
+    'EQUIPPED': '已装备',
+    'EQUIP': '装备',
+    'USE': '使用',
+    'Nothing yet': '空空如也',
+    'Bare hands': '赤手空拳',
+    'Equip {name}?': '装备{name}吗?',
+    'Equip': '装备',
+    'Keep in bag': '放进背包',
+
+    /* ---- options ---- */
+    'MASTER': '主音量',
+    'MUSIC': '音乐',
+    'SFX': '音效',
+    'FULLSCREEN': '全屏',
+    'ON': '开',
+    'OFF': '关',
+    'CONTROLS': '按键设置',
+    'RESET DEFAULTS': '恢复默认',
+    'LANGUAGE': '语言',
+    'DEVICE': '设备',
+    'KEYBOARD': '键盘',
+    'GAMEPAD': '手柄',
+    'BACK': '返回',
+
+    /* ---- save slots ---- */
+    'Pick a slot to save into': '选择要保存的栏位',
+    'Pick a save to resume': '选择要读取的存档',
+    'AUTO': '自动',
+    'SLOT {n}': '栏位 {n}',
+    'empty': '空',
+
+    /* ---- portals ---- */
+    'PORTAL': '传送门',
+    'Greenwood - the arena gate': '绿林 - 竞技场之门',
+    'Sunless Cavern': '无光洞窟',
+    "Slime King's throne": '史莱姆王的王座',
+    'Haven - the town square': '避风镇 - 镇中广场',
+    'Step through to a distant gate': '跨入远方之门',
+    'Nowhere else yet': '尚无去处',
+    'CANCEL': '取消',
+
+    /* ---- HUD / banners / game over ---- */
+    'SCORE {n}': '得分 {n}',
+    'WAVE {n}': '第 {n} 波',
+    'LV {n}': '等级 {n}',
+    'COMBO X{n}': '连击 X{n}',
+    'MASH TO ESCAPE!': '连打挣脱!',
+    'GAME SAVED': '游戏已保存',
+    'QUEST COMPLETE!': '任务完成!',
+    'GUEST LEFT': '同伴已离开',
+    'VICTORY!': '胜利!',
+    'WAVE CLEAR!': '本波清除!',
+    'THE GATE KEY DROPS': '大门钥匙掉落了',
+    'GEAR FREED!': '装备夺回!',
+    'LOCKED': '锁住了',
+    'THE GATE IS LOCKED': '大门紧锁',
+    "SEALED BY THE KING'S POWER": '被国王之力封印',
+    'GAME OVER': '游戏结束',
+    'BEST {n}': '最高 {n}',
+    'You will wake at the last gate': '你将在最后的门前醒来',
+    'Press any key': '按任意键',
+    'ARENA': '竞技场',
+    'CAVERN': '洞窟',
+    'THRONE': '王座厅',
+    'TOWN': '小镇',
+
+    /* ---- town services ---- */
+    'HEALED': '已治愈',
+    'ALREADY WHOLE': '毫发无损',
+    'NEED {n} GOLD': '需要 {n} 金币',
+    'QUEST ACCEPTED': '接受任务',
+    'NOTHING LEFT TO TEACH THIS BLADE': '这把剑已臻化境',
+    'FORGED +{n}': '锻造 +{n}',
+    '+{n} GOLD': '+{n} 金币',
+    'Not enough gold': '金币不足',
+    'OWNED': '已拥有',
+    'TALK': '交谈',
+
+    /* ---- items & quests ---- */
+    'RUSTY SWORD': '锈剑',
+    'GREAT SWORD': '巨剑',
+    'IRON HELMET': '铁盔',
+    'STEEL ARMOR': '钢甲',
+    'POTION': '药水',
+    'MANA ORB': '法力球',
+    'COIN': '金币',
+    'HASTE DRAUGHT': '疾速药剂',
+    'GATE KEY': '大门钥匙',
+    'CULL THE SLIMES': '清剿史莱姆',
+    'Slay 5 slimes for the town elder.': '为镇上的长老消灭 5 只史莱姆。',
+
+    /* ---- speakers ---- */
+    'VOICE': '声音',
+    'HEALER': '治疗师',
+    'BLACKSMITH': '铁匠',
+    'ELDER': '长老',
+    'MERCHANT': '商人',
+    'SLIME KING': '史莱姆王',
+
+    /* ---- conversations ---- */
+    'Another knight. The arena remembers them all.': '又一位骑士。竞技场记得他们每一个。',
+    'The slimes come in waves. The bats come for your head.': '史莱姆成波而来,蝙蝠直取你的首级。',
+    'Strike thrice for the heavy blow. Dash through what you cannot block.': '三连击可出重斩。挡不住的,就冲刺穿过去。',
+    'And when your hands burn... press C. You will understand.': '当你双手灼热时……按下 C,你自会明白。',
+    'I am ready.': '我准备好了。',
+    'Who are you?': '你是谁?',
+    'The last one who asked is wave seven now.': '上一个这么问的人,现在是第七波了。',
+    'Fight well, knight. The gate east opens to the cavern, if the waves bore you.': '好好战斗,骑士。若嫌波次无聊,东边的门通往洞窟。',
+    'The cavern. Quieter than the arena. Not safer.': '洞窟。比竞技场安静,却并不更安全。',
+    'Something old and green sits on a throne past the east gate.': '东门之后,有个又老又绿的东西坐在王座上。',
+    'Bow, or do not. He cannot tell.': '鞠躬与否,悉听尊便。反正他分不出来。',
+    '...Blorp.': '……咕啵。',
+    'When he shivers, move. When he burns red, pray.': '他颤抖时,快跑。他烧红时,祈祷吧。',
+    'Ah. A customer with a pulse. Rare, down here.': '啊,一位还有脉搏的客人。在这下面可真少见。',
+    'Coins for goods. Goods for surviving. Everyone wins.': '金币换货物,货物保性命。皆大欢喜。',
+    'Show me your wares.': '看看你的货物。',
+    'Where am I?': '这是哪里?',
+    'Just passing.': '路过而已。',
+    'The cavern under the arena. The king sits past the east gate.': '竞技场下的洞窟。国王就在东门之后。',
+    'He eats swords, you know. And the knights holding them.': '他吃剑,你知道吗。连举着剑的骑士一起吃。',
+    'And he spits. Sticky business, that. A draught burns it right off.': '他还会吐口水,黏糊糊的。一剂药水就能烧掉。',
+    'The crown rolls. The throne sits empty.': '王冠滚落,王座空悬。',
+    'You are what the arena remembers now, knight.': '如今竞技场记住的,是你,骑士。',
+    'The seal on the east road is broken. The town is waking up.': '东路的封印已破。小镇正在苏醒。',
+    'The town. It slept while the king sat fat below.': '小镇。国王在下面养膘时,它一直沉睡。',
+    'A healer, a smith, an elder with troubles - and a portal, humming east.': '治疗师、铁匠、满腹愁事的长老——还有东边嗡鸣的传送门。',
+    'Sit. You are more wound than knight.': '坐下吧。你身上的伤比骑士本身还多。',
+    'Ten gold and I will close all of it.': '十枚金币,我把它们全部合上。',
+    'Heal me. (10g)': '治疗我。(10金)',
+    'Not now.': '先不用。',
+    'That edge would bounce off warm bread.': '你这剑刃,砍热面包都会弹开。',
+    'Gold and fire fix most things. Swords especially.': '金子和炉火能修好大多数东西,尤其是剑。',
+    'Upgrade my weapon.': '强化我的武器。',
+    'Maybe later.': '以后再说。',
+    'Knight. The king is dead, but his spawn still choke the arena.': '骑士。国王虽死,他的子嗣仍挤满竞技场。',
+    'Cull five slimes and the town will not forget it.': '清掉五只史莱姆,小镇不会忘记你的恩情。',
+    'I will help.': '我来帮忙。',
+    'Not my problem.': '与我无关。',
+    'The slimes still squelch out there. The portal will take you to the arena.': '外面的史莱姆还在吧唧作响。传送门可以送你去竞技场。',
+    'The squelching has stopped. The town breathes easier.': '吧唧声停了。小镇喘了口气。',
+    'Take this - and our thanks.': '收下这个——还有我们的谢意。',
+    'Claim reward.': '领取报酬。',
+    'Rest, knight. The town owes you its quiet.': '歇息吧,骑士。小镇的安宁是欠你的。',
+
+    /* ---- co-op lobby ---- */
+    'Two players, one world, no server: you and a friend swap two codes over any chat, then the browsers connect directly.':
+      '两名玩家,一个世界,无需服务器:与朋友通过任意聊天工具交换两段代码,浏览器即可直接互联。',
+    "Your knight's name (floats overhead in co-op):": '你的骑士之名(联机时显示在头顶):',
+    'HOST GAME': '创建主机',
+    'JOIN GAME': '加入游戏',
+    'Preparing your invite code...': '正在生成邀请码……',
+    '1. Send this invite code to your friend:': '1. 把这段邀请码发给朋友:',
+    "2. Paste your friend's reply code here:": '2. 把朋友的回复码粘贴到这里:',
+    'COPY CODE': '复制代码',
+    'CONNECT': '连接',
+    'Connecting...': '连接中……',
+    "1. Paste the host's invite code:": '1. 粘贴主机的邀请码:',
+    'ACCEPT INVITE': '接受邀请',
+    '2. Send this reply code back to the host:': '2. 把这段回复码发回给主机:',
+    'Waiting for the host to connect...': '等待主机连接……',
+    'Building your reply code...': '正在生成回复码……',
+    'CO-OP GUEST': '联机来宾',
+    'CONNECTION LOST': '连接断开',
+  },
+});
+
+/** Importing this module registers the locales. */
+export function registerLocales(): void {}

@@ -10,9 +10,11 @@ const store = new JsonStore<string>('hitstop.name', 1);
 
 export const NAME_MAX = 12;
 
-/** Trim, cap, and strip anything the pixel font can't draw. */
+/** Trim, cap, and strip control characters (the font's Unicode
+ * fallback draws everything printable — CJK names welcome). */
 export function cleanName(raw: string): string {
-  return raw.replace(/[^ -~]/g, '').trim().slice(0, NAME_MAX);
+  // eslint-disable-next-line no-control-regex
+  return raw.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, NAME_MAX);
 }
 
 export function playerName(): string {

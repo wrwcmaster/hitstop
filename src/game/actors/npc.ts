@@ -5,6 +5,7 @@ import {
   moveAndCollide,
   drawText,
   DialogueScene,
+  t,
   type ConversationChoice,
   type CollisionSource,
   type LoadedSprite,
@@ -157,7 +158,7 @@ export class Npc extends Actor {
       return b != null ? prettyButton(b) : 'Y';
     }
     if (typeof window !== 'undefined' && !window.matchMedia('(pointer: fine)').matches) {
-      return 'TALK';
+      return t('TALK');
     }
     const code = this.game.input.codesFor('interact')[0];
     return code ? prettyCode(code) : 'E';

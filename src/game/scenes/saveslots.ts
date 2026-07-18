@@ -1,4 +1,4 @@
-import { type Scene, Menu, drawPanel, drawText } from '@engine/index';
+import { type Scene, Menu, drawPanel, drawText, t } from '@engine/index';
 import { COLORS } from '../content/palette';
 import { menuLine, type ActionGame, type Action } from '../defs';
 import { SAVE_SLOT_COUNT, slotStore, slotSummary } from '../save';
@@ -82,11 +82,11 @@ export class SaveSlotsScene implements Scene {
     const x = (W - bw) / 2;
     const y = (H - bh) / 2;
     drawPanel(g, x, y, bw, bh);
-    drawText(g, this.mode === 'save' ? 'SAVE GAME' : 'LOAD GAME', W / 2, y + 8, COLORS.gold, 2, 'center');
+    drawText(g, this.mode === 'save' ? t('SAVE GAME') : t('LOAD GAME'), W / 2, y + 8, COLORS.gold, 2, 'center');
     this.menu.render(g, x + 22, y + 30, { width: bw - 40, lineHeight: lh });
     drawText(
       g,
-      this.mode === 'save' ? 'Pick a slot to save into' : 'Pick a save to resume',
+      this.mode === 'save' ? t('Pick a slot to save into') : t('Pick a save to resume'),
       W / 2, y + bh - 9, COLORS.steelDark, 1, 'center',
     );
   }

@@ -6,6 +6,7 @@ import {
   overlaps,
   rand,
   chance,
+  t,
   type Body,
   type CollisionSource,
 } from '@engine/index';
@@ -112,7 +113,7 @@ export class Pickup extends Entity implements Body {
       player.inventory.add(this.itemId);
       def.onPickup?.(ctx);
       this.game.feel.sfx.play('pickup');
-      this.game.feel.text(player.cx, this.y - 6, def.name, COLORS.gold);
+      this.game.feel.text(player.cx, this.y - 6, t(def.name), COLORS.gold);
       // Equipment offers to go on right away, so you're not menu-diving
       // mid-run (and it's how you re-equip gear a Devourer coughed up).
       // Only for the local knight — a net guest's pickup can't open a
@@ -121,7 +122,7 @@ export class Pickup extends Entity implements Body {
         this.game.scenes.push(
           new PromptScene(
             this.game,
-            `Equip ${def.name}?`,
+            t('Equip {name}?', { name: t(def.name) }),
             [
               {
                 label: 'Equip',

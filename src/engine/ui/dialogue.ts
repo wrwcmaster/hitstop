@@ -1,9 +1,10 @@
 import { Registry } from '../core/registry';
 import { Scene } from '../core/scene';
 import { Input } from '../input/input';
-import { drawText } from '../gfx/font';
+import { drawText, textWidth } from '../gfx/font';
 import { drawPanel } from './widgets';
 import { Menu } from './widgets';
+import { t } from '../core/i18n';
 
 /**
  * Conversations.
@@ -62,7 +63,26 @@ export interface DialogueOptions<A extends string> {
   blip?(): void;
 }
 
-const WRAP_CHARS = 4; // 3x5 font advance in px per char at scale 1
+/** A char that wraps freely (no spaces in CJK prose): CJK ideographs,
+ * kana, fullwidth forms and their punctuation. */
+const CJK = /[⺀-鿿　-〿豈-﫿＀-￯]/;
+
+/** Split into wrap units: Latin words stay whole, CJK breaks per glyph. */
+function wrapTokens(text: string): string[] {
+  const out: string[] = [];
+  let word = '';
+  for (const ch of text) {
+    if (ch === ' ' || CJK.test(ch)) {
+      if (word) out.push(word);
+      word = '';
+      out.push(ch);
+    } else {
+      word += ch;
+    }
+  }
+  if (word) out.push(word);
+  return out;
+}
 
 export class DialogueScene<A extends string> implements Scene {
   private lineIdx = 0;
@@ -83,22 +103,31 @@ export class DialogueScene<A extends string> implements Scene {
     return this.def.lines[this.lineIdx];
   }
 
+  /** The line as displayed: translated to the active locale. */
+  private get text(): string {
+    return t(this.line.text);
+  }
+
+  /** Pixel-measured wrap: Latin breaks at spaces, CJK anywhere. */
   private wrapped(): string[] {
-    const maxChars = Math.floor((this.host.width - 40) / WRAP_CHARS);
+    const maxW = this.host.width - 44;
     const out: string[] = [];
-    for (const word of this.line.text.split(' ')) {
-      const last = out[out.length - 1];
-      if (last !== undefined && (last + ' ' + word).length <= maxChars) {
-        out[out.length - 1] = last + ' ' + word;
+    let cur = '';
+    for (const tok of wrapTokens(this.text)) {
+      const next = cur + tok;
+      if (cur && textWidth(next) > maxW) {
+        out.push(cur);
+        cur = tok === ' ' ? '' : tok; // never lead a line with the break space
       } else {
-        out.push(word);
+        cur = next;
       }
     }
-    return out;
+    if (cur) out.push(cur);
+    return out.length ? out : [''];
   }
 
   private get fullyRevealed(): boolean {
-    return this.revealT * (this.opts.charsPerSec ?? 45) >= this.line.text.length;
+    return this.revealT * (this.opts.charsPerSec ?? 45) >= this.text.length;
   }
 
   private advance(): void {
@@ -171,7 +200,7 @@ export class DialogueScene<A extends string> implements Scene {
 
     let ty = y + 8;
     if (this.line.speaker) {
-      drawText(g, this.line.speaker, 20, ty, '#ffcd75');
+      drawText(g, t(this.line.speaker), 20, ty, '#ffcd75');
       ty += 9;
     }
     // Typewriter reveal across wrapped lines.

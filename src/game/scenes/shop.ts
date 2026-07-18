@@ -4,6 +4,7 @@ import {
   drawPanel,
   drawText,
   itemDef,
+  t,
 } from '@engine/index';
 import { shops } from '../content/shops';
 import { ICON_COIN, blit } from '../content/sprites';
@@ -45,8 +46,8 @@ export class ShopScene implements Scene {
     const keepIndex = this.menu?.index ?? 0;
     this.menu = new Menu<Action>(
       def.wares.map((w) => ({
-        label: itemDef(w.item).name,
-        hint: () => (this.owned(w.item) ? 'OWNED' : `${w.price}G`),
+        label: () => t(itemDef(w.item).name),
+        hint: () => (this.owned(w.item) ? t('OWNED') : `${w.price}G`),
         disabled: () => this.owned(w.item),
         onSelect: () => this.buy(w.item, w.price),
       })),
@@ -59,7 +60,7 @@ export class ShopScene implements Scene {
     const p = this.player;
     if (p.gold < price) {
       this.game.sfx.play('denied');
-      this.say('Not enough gold');
+      this.say(t('Not enough gold'));
       return;
     }
     p.gold -= price;

@@ -1,4 +1,4 @@
-import { type Scene, PeerLink, drawText } from '@engine/index';
+import { type Scene, PeerLink, drawText, t } from '@engine/index';
 import { COLORS } from '../content/palette';
 import type { ActionGame } from '../defs';
 import { NAME_MAX, playerName, setPlayerName } from '../name';
@@ -127,9 +127,9 @@ export class CoopScene implements Scene {
 
   private buildMenu(): void {
     const box = this.panel();
-    this.el(box, 'div', 'CO-OP', 'font-size:18px;color:#ffd166;margin-bottom:4px;');
-    this.note(box, 'Two players, one world, no server: you and a friend swap two codes over any chat, then the browsers connect directly.');
-    this.note(box, "Your knight's name (floats overhead in co-op):");
+    this.el(box, 'div', t('CO-OP'), 'font-size:18px;color:#ffd166;margin-bottom:4px;');
+    this.note(box, t('Two players, one world, no server: you and a friend swap two codes over any chat, then the browsers connect directly.'));
+    this.note(box, t("Your knight's name (floats overhead in co-op):"));
     const name = this.el(box, 'input', '',
       'width:100%;margin:2px 0 8px;padding:6px;background:#07070d;color:#ffd166;' +
       'border:1px solid #3b4a6b;font-family:monospace;font-size:13px;');
@@ -137,15 +137,15 @@ export class CoopScene implements Scene {
     name.placeholder = 'e.g. Sir Bonk';
     name.value = playerName();
     name.oninput = () => setPlayerName(name.value);
-    this.button(box, 'HOST GAME', () => void this.buildHost());
-    this.button(box, 'JOIN GAME', () => this.buildJoin());
-    this.button(box, 'BACK', () => this.close());
+    this.button(box, t('HOST GAME'), () => void this.buildHost());
+    this.button(box, t('JOIN GAME'), () => this.buildJoin());
+    this.button(box, t('BACK'), () => this.close());
   }
 
   private async buildHost(): Promise<void> {
     const box = this.panel();
-    this.el(box, 'div', 'HOST GAME', 'font-size:16px;color:#ffd166;');
-    const wait = this.note(box, 'Preparing your invite code...');
+    this.el(box, 'div', t('HOST GAME'), 'font-size:16px;color:#ffd166;');
+    const wait = this.note(box, t('Preparing your invite code...'));
     try {
       this.link = await PeerLink.host();
     } catch (err) {
@@ -153,42 +153,42 @@ export class CoopScene implements Scene {
       this.button(box, 'BACK', () => this.buildMenu());
       return;
     }
-    wait.textContent = '1. Send this invite code to your friend:';
+    wait.textContent = t('1. Send this invite code to your friend:');
     const out = this.codeArea(box, true);
     out.value = this.link.code;
-    const copyBtn = this.button(box, 'COPY CODE', () => void this.copy(out.value, copyBtn));
-    this.note(box, "2. Paste your friend's reply code here:");
+    const copyBtn = this.button(box, t('COPY CODE'), () => void this.copy(out.value, copyBtn));
+    this.note(box, t("2. Paste your friend's reply code here:"));
     const inArea = this.codeArea(box, false);
     const status = this.note(box, '');
     this.link.onOpen = () => this.connected('host');
-    this.button(box, 'CONNECT', () => {
-      status.textContent = 'Connecting...';
+    this.button(box, t('CONNECT'), () => {
+      status.textContent = t('Connecting...');
       this.link!.accept(inArea.value).catch((err) => {
         status.textContent = `Bad reply code: ${(err as Error).message}`;
       });
     });
-    this.button(box, 'CANCEL', () => { this.link?.close(); this.buildMenu(); });
+    this.button(box, t('CANCEL'), () => { this.link?.close(); this.buildMenu(); });
   }
 
   private buildJoin(): void {
     const box = this.panel();
-    this.el(box, 'div', 'JOIN GAME', 'font-size:16px;color:#ffd166;');
-    this.note(box, "1. Paste the host's invite code:");
+    this.el(box, 'div', t('JOIN GAME'), 'font-size:16px;color:#ffd166;');
+    this.note(box, t("1. Paste the host's invite code:"));
     const inArea = this.codeArea(box, false);
     const status = this.note(box, '');
-    this.button(box, 'ACCEPT INVITE', () => {
-      status.textContent = 'Building your reply code...';
+    this.button(box, t('ACCEPT INVITE'), () => {
+      status.textContent = t('Building your reply code...');
       PeerLink.join(inArea.value).then((link) => {
         this.link = link;
         link.onOpen = () => this.connected('guest');
         const box2 = this.panel();
-        this.el(box2, 'div', 'JOIN GAME', 'font-size:16px;color:#ffd166;');
-        this.note(box2, '2. Send this reply code back to the host:');
+        this.el(box2, 'div', t('JOIN GAME'), 'font-size:16px;color:#ffd166;');
+        this.note(box2, t('2. Send this reply code back to the host:'));
         const out = this.codeArea(box2, true);
         out.value = link.code;
-        const copyBtn = this.button(box2, 'COPY CODE', () => void this.copy(out.value, copyBtn));
-        this.note(box2, 'Waiting for the host to connect...');
-        this.button(box2, 'CANCEL', () => { link.close(); this.buildMenu(); });
+        const copyBtn = this.button(box2, t('COPY CODE'), () => void this.copy(out.value, copyBtn));
+        this.note(box2, t('Waiting for the host to connect...'));
+        this.button(box2, t('CANCEL'), () => { link.close(); this.buildMenu(); });
       }).catch((err) => {
         status.textContent = `Bad invite code: ${(err as Error).message}`;
       });

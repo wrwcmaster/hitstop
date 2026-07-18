@@ -1,4 +1,4 @@
-import { type Scene, Menu, drawPanel, drawText, clamp } from '@engine/index';
+import { type Scene, Menu, drawPanel, drawText, clamp, t, locale, setLocale, localeIds, localeName } from '@engine/index';
 import { KEYMAP, GAMEPAD, REBINDABLE, prettyCode, prettyButton, menuLine, COARSE_POINTER, type ActionGame, type Action } from '../defs';
 import { COLORS } from '../content/palette';
 import { saveSettings } from '../settings';
@@ -18,8 +18,17 @@ export class OptionsScene implements Scene {
   private padCapturing = false;
 
   constructor(private game: ActionGame) {
+    // Cycle through registered locales; the whole UI repaints live
+    // because menus/dialogue translate at render time.
+    const cycleLocale = (dir: 1 | -1) => {
+      const ids = localeIds();
+      const next = ids[(ids.indexOf(locale()) + dir + ids.length) % ids.length];
+      setLocale(next);
+      saveSettings(this.game);
+      this.game.sfx.play('menuMove');
+    };
     const volumeRow = (label: string, channel: 'master' | 'music' | 'sfx') => ({
-      label: () => `${label}: ${Math.round(this.game.audio.getVolume(channel) * 100)}%`,
+      label: () => `${t(label)}: ${Math.round(this.game.audio.getVolume(channel) * 100)}%`,
       onAdjust: (dir: -1 | 1) => {
         this.game.audio.setVolume(channel, clamp(this.game.audio.getVolume(channel) + dir * 0.1, 0, 1));
         saveSettings(this.game);
@@ -38,9 +47,14 @@ export class OptionsScene implements Scene {
         volumeRow('MUSIC', 'music'),
         volumeRow('SFX', 'sfx'),
         {
-          label: () => `FULLSCREEN: ${isFullscreen() ? 'ON' : 'OFF'}`,
+          label: () => `${t('FULLSCREEN')}: ${isFullscreen() ? t('ON') : t('OFF')}`,
           onSelect: () => this.toggleFullscreen(),
           onAdjust: () => this.toggleFullscreen(),
+        },
+        {
+          label: () => `${t('LANGUAGE')}: ${localeName(locale())}`,
+          onSelect: () => cycleLocale(1),
+          onAdjust: (dir: -1 | 1) => cycleLocale(dir),
         },
         {
           label: 'CONTROLS',

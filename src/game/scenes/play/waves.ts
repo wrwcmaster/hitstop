@@ -3,6 +3,7 @@ import { Monster, monsters } from '../../actors/monster';
 import { Pickup } from '../../actors/pickup';
 import { COLORS } from '../../content/palette';
 import { waveTables, type WaveTable } from '../../content/waves';
+import { t } from '@engine/index';
 import type { PlayHost } from './host';
 
 /** A monster queued to spawn, currently telegraphing. */
@@ -61,7 +62,7 @@ export class WaveDirector {
     this.wave++;
     this.clearShown = false;
     g.feel.sfx.play('wave');
-    this.host.banner(`WAVE ${this.wave}`, 1.5);
+    this.host.banner(t('WAVE {n}', { n: this.wave }), 1.5);
     this.queue.push(...this.table.compose(this.wave));
     g.events.emit('waveStart', { wave: this.wave });
   }
@@ -106,7 +107,7 @@ export class WaveDirector {
     if (!this.queue.length && !this.pending.length && !enemiesLeft && player && player.hp > 0) {
       if (!this.clearShown) {
         this.clearShown = true;
-        this.host.banner('WAVE CLEAR!', 1);
+        this.host.banner(t('WAVE CLEAR!'), 1);
         g.feel.sfx.play('combo');
         g.events.emit('waveClear', { wave: this.wave });
       }
@@ -131,7 +132,7 @@ export class WaveDirector {
     if (!p.inventory.has(keyId)) {
       g.world.spawn(new Pickup(keyId, g, this.host.tilemap, p.cx, p.cy - 8));
     }
-    this.host.banner('THE GATE KEY DROPS', 2);
+    this.host.banner(t('THE GATE KEY DROPS'), 2);
     g.feel.sfx.play('levelup');
     g.feel.flash(0.15, COLORS.gold);
   }
