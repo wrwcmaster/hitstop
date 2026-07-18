@@ -1,4 +1,4 @@
-import { drawText, textWidth, Minimap } from '@engine/index';
+import { drawText, textWidth, Minimap, t } from '@engine/index';
 import { Monster } from '../../actors/monster';
 import { Pickup } from '../../actors/pickup';
 import { COLORS } from '../../content/palette';
@@ -67,7 +67,7 @@ export class Hud {
       blit(g, ICON_COIN, 6, 23);
       drawText(g, String(p.gold), 14, 24, COLORS.gold);
       // Level + XP bar (+ a nudge when skill points are waiting).
-      drawText(g, `LV ${p.progression.level}`, 6, 33, COLORS.white);
+      drawText(g, t('LV {n}', { n: p.progression.level }), 6, 33, COLORS.white);
       g.fillStyle = '#07070d';
       g.fillRect(28, 34, 32, 3);
       g.fillStyle = COLORS.gold;
@@ -98,7 +98,7 @@ export class Hud {
       }
       // Swallowed: the escape prompt IS the HUD priority.
       if (p.fsm.is('swallowed')) {
-        drawText(g, 'MASH TO ESCAPE!', gm.width / 2, 84, COLORS.white, 2, 'center');
+        drawText(g, t('MASH TO ESCAPE!'), gm.width / 2, 84, COLORS.white, 2, 'center');
         const w = 60;
         const x = gm.width / 2 - w / 2;
         g.fillStyle = '#07070d';
@@ -109,12 +109,12 @@ export class Hud {
         g.fillRect(x, 98, Math.round(w * Math.min(1, p.escapeN / p.escapeNeed)), 3);
       }
     }
-    drawText(g, `SCORE ${view.score}`, gm.width - 6, 7, COLORS.white, 1, 'right');
+    drawText(g, t('SCORE {n}', { n: view.score }), gm.width - 6, 7, COLORS.white, 1, 'right');
     drawText(g, view.label, gm.width / 2, 7, COLORS.steel, 1, 'center');
     this.renderMinimap(g, minimap);
     if (boss) this.renderBossBar(g, boss);
     if (view.combo >= 2) {
-      drawText(g, `COMBO X${view.combo}`, gm.width / 2, 18, COLORS.gold, 1, 'center');
+      drawText(g, t('COMBO X{n}', { n: view.combo }), gm.width / 2, 18, COLORS.gold, 1, 'center');
       g.fillStyle = COLORS.gold;
       g.fillRect(Math.round(gm.width / 2 - 15), 26, Math.round((30 * view.comboT) / 2), 2);
     }

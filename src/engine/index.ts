@@ -109,3 +109,5 @@ export { Minimap, type MinimapMarker } from './ui/minimap';
 export { DebugOverlay } from './debug/overlay';
 
 export { PeerLink, encodeSignal, decodeSignal, type PeerRole } from './net/peer';
+
+export { t, defineLocale, setLocale, locale, localeIds, localeName, type LocaleDef } from './core/i18n';

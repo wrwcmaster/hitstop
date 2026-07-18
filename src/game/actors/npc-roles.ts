@@ -1,4 +1,4 @@
-import type { LoadedSprite } from '@engine/index';
+import { t, type LoadedSprite } from '@engine/index';
 import { COLORS } from '../content/palette';
 import type { QuestReward } from '../content/quests';
 import type { NpcCtx, NpcDef } from './npc';
@@ -32,7 +32,7 @@ function note(ctx: NpcCtx, text: string, color: string, scale = 1): void {
 /** Charge `cost` gold; on failure show a notice + denied sound, return false. */
 function spend(ctx: NpcCtx, cost: number): boolean {
   if (ctx.player.gold < cost) {
-    note(ctx, `NEED ${cost} GOLD`, COLORS.red);
+    note(ctx, t('NEED {n} GOLD', { n: cost }), COLORS.red);
     ctx.game.sfx.play('denied');
     return false;
   }
@@ -57,7 +57,7 @@ export function healer(cfg: RoleBase & { cost: number }): NpcDef {
       if (choice.action !== 'heal') return;
       const { game, player } = ctx;
       if (player.hp >= player.maxHp && player.mp >= player.maxMp) {
-        note(ctx, 'ALREADY WHOLE', COLORS.steel);
+        note(ctx, t('ALREADY WHOLE'), COLORS.steel);
         return;
       }
       if (!spend(ctx, cfg.cost)) return;
@@ -68,7 +68,7 @@ export function healer(cfg: RoleBase & { cost: number }): NpcDef {
       game.feel.burst(player.cx, player.cy, 14, {
         color: [COLORS.red, COLORS.white], speed: 50, life: 0.6, grav: -70, drag: 3,
       });
-      note(ctx, 'HEALED', COLORS.red);
+      note(ctx, t('HEALED'), COLORS.red);
     },
   };
 }
@@ -84,7 +84,7 @@ export function forge(cfg: RoleBase & { costs: number[] }): NpcDef {
       if (choice.action !== 'forge') return;
       const { game, player } = ctx;
       if (player.forgeLevel >= cfg.costs.length) {
-        note(ctx, 'NOTHING LEFT TO TEACH THIS BLADE', COLORS.steel);
+        note(ctx, t('NOTHING LEFT TO TEACH THIS BLADE'), COLORS.steel);
         return;
       }
       if (!spend(ctx, cfg.costs[player.forgeLevel])) return;
@@ -95,7 +95,7 @@ export function forge(cfg: RoleBase & { costs: number[] }): NpcDef {
       game.feel.burst(player.cx, player.cy - 6, 16, {
         color: [COLORS.gold, COLORS.white], speed: 90, life: 0.5, drag: 3,
       });
-      game.feel.text(player.cx, player.y - 12, `FORGED +${player.forgeLevel}`, COLORS.gold, 2);
+      game.feel.text(player.cx, player.y - 12, t('FORGED +{n}', { n: player.forgeLevel }), COLORS.gold, 2);
     },
   };
 }
@@ -135,7 +135,7 @@ export function questGiver(cfg: {
       const { game, player } = ctx;
       if (choice.action === 'quest:accept') {
         player.quests.start(quest);
-        note(ctx, 'QUEST ACCEPTED', COLORS.gold);
+        note(ctx, t('QUEST ACCEPTED'), COLORS.gold);
         game.sfx.play('menuSelect');
       } else if (choice.action === 'quest:claim') {
         const def = player.quests.turnIn(quest);
@@ -143,7 +143,7 @@ export function questGiver(cfg: {
         grantReward(player, def.reward);
         game.feel.sfx.play('levelup');
         game.feel.flash(0.2, COLORS.gold);
-        game.feel.text(player.cx, player.y - 12, `+${def.reward.gold ?? 0} GOLD`, COLORS.gold, 2);
+        game.feel.text(player.cx, player.y - 12, t('+{n} GOLD', { n: def.reward.gold ?? 0 }), COLORS.gold, 2);
       }
     },
   };

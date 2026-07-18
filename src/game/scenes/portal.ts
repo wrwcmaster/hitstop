@@ -1,4 +1,4 @@
-import { type Scene, Menu, drawPanel, drawText } from '@engine/index';
+import { type Scene, Menu, drawPanel, drawText, t } from '@engine/index';
 import { COLORS } from '../content/palette';
 import { menuLine, type ActionGame, type Action } from '../defs';
 import { portalDests, type PortalDest } from '../content/portals';
@@ -69,8 +69,8 @@ export class PortalScene implements Scene {
     const x = (W - bw) / 2;
     const y = (H - bh) / 2;
     drawPanel(g, x, y, bw, bh);
-    drawText(g, 'PORTAL', W / 2, y + 8, COLORS.blue, 2, 'center');
+    drawText(g, t('PORTAL'), W / 2, y + 8, COLORS.blue, 2, 'center');
     this.menu.render(g, x + 22, y + 30, { width: bw - 40, lineHeight: lh });
-    drawText(g, 'Step through to a distant gate', W / 2, y + bh - 9, COLORS.steelDark, 1, 'center');
+    drawText(g, t('Step through to a distant gate'), W / 2, y + bh - 9, COLORS.steelDark, 1, 'center');
   }
 }

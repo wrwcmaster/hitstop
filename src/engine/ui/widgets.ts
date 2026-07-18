@@ -1,5 +1,6 @@
 import { drawText, textWidth } from '../gfx/font';
 import { Input } from '../input/input';
+import { t } from '../core/i18n';
 
 /**
  * Tiny retained widgets for pixel-font UI: a panel background and a
@@ -114,7 +115,7 @@ export class Menu<A extends string = string> {
       const e = this.entries[i];
       if (this.isDisabled(e)) continue;
       const rowY = L.y + i * L.lh;
-      const label = typeof e.label === 'function' ? e.label() : e.label;
+      const label = t(typeof e.label === 'function' ? e.label() : e.label);
       const right = L.x + Math.max(L.width ?? 0, textWidth(label, L.s)) + 24;
       if (px >= L.x - 24 && px <= right && py >= rowY - 2 && py <= rowY + L.lh - 2) {
         this.index = i;
@@ -135,8 +136,10 @@ export class Menu<A extends string = string> {
     const s = opts.scale ?? 1;
     this.layout = { x, y, lh, s, width: opts.width };
     this.entries.forEach((e, i) => {
-      const label = typeof e.label === 'function' ? e.label() : e.label;
-      const hint = typeof e.hint === 'function' ? e.hint() : e.hint;
+      // Labels translate at render time, so a locale switch repaints
+      // every open menu live (dynamic labels just miss the table).
+      const label = t(typeof e.label === 'function' ? e.label() : e.label);
+      const hint = t(typeof e.hint === 'function' ? (e.hint() ?? '') : (e.hint ?? ''));
       const sel = i === this.index;
       const color = this.isDisabled(e) ? '#566c86' : sel ? '#ffcd75' : '#f4f4f4';
       if (sel) drawText(g, '>', x - 8, y + i * lh, '#ffcd75', s);

@@ -6,6 +6,7 @@ import {
   buildTilemap,
   drawText,
   clamp,
+  t,
 } from '@engine/index';
 import type { ActionGame } from '../defs';
 import { COLORS } from '../content/palette';
@@ -289,11 +290,11 @@ export class CoopGuestScene implements Scene {
         uiT: this.uiT,
       }, this.minimap, boss);
     }
-    drawText(g, 'CO-OP GUEST', gm.width - 6, gm.height - 10, COLORS.steelDark, 1, 'right');
+    drawText(g, t('CO-OP GUEST'), gm.width - 6, gm.height - 10, COLORS.steelDark, 1, 'right');
     if (this.closedT >= 0) {
       g.fillStyle = 'rgba(7,7,13,0.6)';
       g.fillRect(0, 0, gm.width, gm.height);
-      drawText(g, 'CONNECTION LOST', gm.width / 2, gm.height / 2 - 4, COLORS.red, 2, 'center');
+      drawText(g, t('CONNECTION LOST'), gm.width / 2, gm.height / 2 - 4, COLORS.red, 2, 'center');
     }
   }
 

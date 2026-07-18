@@ -16,6 +16,7 @@ import { registerPlaceables } from './content/placeables';
 import { registerEffects } from './content/effects';
 import { registerQuests } from './content/quests';
 import { registerPortals } from './content/portals';
+import { registerLocales } from './content/locales';
 import { loadSettings } from './settings';
 import './content/tiles';
 import { PlayScene } from './scenes/play';
@@ -55,6 +56,7 @@ registerPlaceables(); // bridges monsters + NPCs; must come after them
 registerEffects();
 registerQuests();
 registerPortals();
+registerLocales();
 
 // Gamepad: polled every frame, feeding the same action system. Attached to
 // the game so the controls UI can rebind its buttons. Created before

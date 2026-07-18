@@ -4,6 +4,7 @@ import {
   drawPanel,
   drawText,
   itemDef,
+  t,
 } from '@engine/index';
 import { menuLine, type ActionGame, type Action } from '../defs';
 import type { Player } from '../actors/player';
@@ -106,7 +107,7 @@ export class PauseScene implements Scene {
     const entries = p.inventory.slots.map((s) => {
       const def = itemDef<ItemCtx>(s.id);
       return {
-        label: `${def.name}${s.count > 1 ? ` x${s.count}` : ''}`,
+        label: `${t(def.name)}${s.count > 1 ? ` x${s.count}` : ''}`,
         hint: () =>
           def.kind === 'equipment'
             ? p.equipment.isEquipped(s.id) ? 'EQUIPPED' : 'EQUIP'
@@ -169,9 +170,9 @@ export class PauseScene implements Scene {
       const x = (W - bw) / 2;
       const y = (H - bh) / 2;
       drawPanel(g, x, y, bw, bh);
-      drawText(g, 'PAUSED', W / 2, y + 8, COLORS.gold, 2, 'center');
+      drawText(g, t('PAUSED'), W / 2, y + 8, COLORS.gold, 2, 'center');
       this.mainMenu.render(g, x + 24, y + 30, { width: bw - 40, lineHeight: lh });
-      drawText(g, 'Esc: close', W / 2, y + bh - 9, COLORS.steelDark, 1, 'center');
+      drawText(g, t('Esc: close'), W / 2, y + bh - 9, COLORS.steelDark, 1, 'center');
     } else {
       const lh = menuLine(11);
       const bw = 240;
@@ -179,7 +180,7 @@ export class PauseScene implements Scene {
       const x = (W - bw) / 2;
       const y = (H - bh) / 2;
       drawPanel(g, x, y, bw, bh);
-      drawText(g, 'INVENTORY', W / 2, y + 8, COLORS.gold, 2, 'center');
+      drawText(g, t('INVENTORY'), W / 2, y + 8, COLORS.gold, 2, 'center');
       this.invMenu.render(g, x + 20, y + 28, { width: bw - 36, lineHeight: lh });
 
       // Stat sheet along the bottom: current + equipment-modified values.
@@ -194,8 +195,8 @@ export class PauseScene implements Scene {
       drawText(g, `MP ${p.mp}/${p.maxMp}`, x + 70, statY, COLORS.blue);
       drawText(g, `ATK +${Math.round(p.stats.get('attack'))}`, x + 124, statY, COLORS.white);
       const weapon = p.equipment.get('weapon');
-      drawText(g, weapon ? itemDef(weapon).name : 'Bare hands', x + 12, statY + 9, COLORS.steel);
-      drawText(g, 'Esc: back', x + bw - 12, statY + 9, COLORS.steelDark, 1, 'right');
+      drawText(g, weapon ? t(itemDef(weapon).name) : t('Bare hands'), x + 12, statY + 9, COLORS.steel);
+      drawText(g, t('Esc: back'), x + bw - 12, statY + 9, COLORS.steelDark, 1, 'right');
     }
   }
 }

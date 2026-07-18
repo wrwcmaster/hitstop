@@ -180,10 +180,90 @@ function glyphCanvas(ch: string, color: string): HTMLCanvasElement | undefined {
   return c;
 }
 
+/**
+ * Fallback glyphs for everything the bitmap font doesn't cover — CJK,
+ * accented Latin, anything Unicode. The character is rasterized ONCE
+ * from a system font at bitmap-font resolution and thresholded to hard
+ * pixels, so foreign text keeps the same chunky aesthetic and bakes to
+ * per-color canvases exactly like native glyphs. Wide (CJK) characters
+ * advance double; the shape cache is measured per character.
+ */
+const FALLBACK_CELL_H = 12; // device px, same as the native glyph cell
+const FALLBACK_FONT = `11px 'Noto Sans', sans-serif`;
+
+interface FallbackShape {
+  rows: string[];
+  /** Advance in logical px (native glyphs use 4). */
+  advance: number;
+}
+
+const fallbackShapes = new Map<string, FallbackShape | null>();
+
+function buildFallback(ch: string): FallbackShape | null {
+  if (typeof document === 'undefined') return null;
+  const [, g] = offscreen(24, FALLBACK_CELL_H + 4);
+  g.font = FALLBACK_FONT;
+  g.textBaseline = 'top';
+  const wDev = Math.min(24, Math.ceil(g.measureText(ch).width));
+  if (!wDev) return null;
+  g.fillStyle = '#fff';
+  g.fillText(ch, 0, 0);
+  const data = g.getImageData(0, 0, 24, FALLBACK_CELL_H + 4).data;
+  const rows: string[] = [];
+  let any = false;
+  for (let y = 0; y < FALLBACK_CELL_H; y++) {
+    let row = '';
+    for (let x = 0; x < wDev; x++) {
+      const on = data[(y * 24 + x) * 4 + 3] >= 110; // alpha threshold → crisp pixels
+      row += on ? '#' : '.';
+      any = any || on;
+    }
+    rows.push(row);
+  }
+  if (!any) return null;
+  // Half-logical device px → logical advance, plus the 1px letter gap.
+  return { rows, advance: Math.ceil(wDev / 2) + 1 };
+}
+
+function fallbackShape(ch: string): FallbackShape | null {
+  let s = fallbackShapes.get(ch);
+  if (s === undefined) {
+    s = buildFallback(ch);
+    fallbackShapes.set(ch, s);
+  }
+  return s;
+}
+
+function fallbackCanvas(ch: string, color: string): { img: HTMLCanvasElement; advance: number } | null {
+  const key = `fb:${ch}:${color}`;
+  const hit = baked.get(key);
+  const shape = fallbackShape(ch);
+  if (!shape) return null;
+  if (hit) return { img: hit, advance: shape.advance };
+  const w = shape.rows[0]?.length || 1;
+  const [c, g] = offscreen(w, FALLBACK_CELL_H);
+  g.fillStyle = color;
+  shape.rows.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) {
+      if (row[x] === '#') g.fillRect(x, y, 1, 1);
+    }
+  });
+  baked.set(key, c);
+  return { img: c, advance: shape.advance };
+}
+
+/** Per-character advance in logical px (native 4; fallback measured). */
+function advanceOf(ch: string): number {
+  if (hdGlyph(ch)) return 4;
+  return fallbackShape(ch)?.advance ?? 4;
+}
+
 export type TextAlign = 'left' | 'center' | 'right';
 
 export function textWidth(str: string, scale = 1): number {
-  return str.length * 4 * scale - scale;
+  let w = 0;
+  for (const ch of String(str)) w += advanceOf(ch);
+  return (w || 1) * scale - scale;
 }
 
 export function drawText(
@@ -206,7 +286,18 @@ export function drawText(
     const img = glyphCanvas(ch, color);
     // The 12-row cell adds one logical pixel of descender room below
     // the 5px cap box; metrics and line layout are unchanged.
-    if (img) g.drawImage(img, x, y, 3 * s, 6 * s);
-    x += 4 * s;
+    if (img) {
+      g.drawImage(img, x, y, 3 * s, 6 * s);
+      x += 4 * s;
+      continue;
+    }
+    const fb = fallbackCanvas(ch, color);
+    if (fb) {
+      // Fallback cells share the native 12-row height and baseline.
+      g.drawImage(fb.img, x, y, (fb.img.width / 2) * s, 6 * s);
+      x += fb.advance * s;
+    } else {
+      x += 4 * s; // truly unrenderable: keep the layout stable
+    }
   }
 }

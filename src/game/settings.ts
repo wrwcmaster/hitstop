@@ -1,4 +1,4 @@
-import { JsonStore } from '@engine/index';
+import { JsonStore, locale, setLocale } from '@engine/index';
 import type { ActionGame, Action } from './defs';
 
 /** Persisted user options (separate from save games). */
@@ -10,6 +10,8 @@ export interface Settings {
   keys?: Record<string, Action[]>;
   /** Gamepad button bindings snapshot (index -> actions). Absent = defaults. */
   pad?: Record<number, Action[]>;
+  /** UI language ('en', 'zh', ...). Absent = English. */
+  locale?: string;
 }
 
 export const settingsStore = new JsonStore<Settings>('hitstop.settings', 2);
@@ -22,6 +24,7 @@ export function loadSettings(game: ActionGame): void {
   game.audio.setVolume('sfx', s.sfx);
   if (s.keys) game.input.setKeymap(s.keys);
   if (s.pad && game.pad) game.pad.setButtonMap(s.pad);
+  if (s.locale) setLocale(s.locale);
 }
 
 export function saveSettings(game: ActionGame): void {
@@ -31,5 +34,6 @@ export function saveSettings(game: ActionGame): void {
     sfx: game.audio.getVolume('sfx'),
     keys: game.input.getKeymap(),
     pad: game.pad?.getButtonMap(),
+    locale: locale(),
   });
 }
