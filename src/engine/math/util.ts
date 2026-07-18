@@ -36,22 +36,44 @@ export function sign(v: number): number {
   return v > 0 ? 1 : v < 0 ? -1 : 0;
 }
 
+/**
+ * The GAMEPLAY random stream. Everything that affects the simulation
+ * (drops, wave composition, AI rolls) draws from here via the helpers
+ * below, so seeding it makes a whole run reproducible from an input tape.
+ * Purely visual noise (camera shake, star fields, sfx pitch jitter) calls
+ * `Math.random` directly and stays OUT of this stream — it runs per
+ * wall-clock frame, and letting it consume seeded numbers would tie the
+ * simulation to the frame rate and break replays.
+ */
+let random: () => number = Math.random;
+
+/** Seed the gameplay stream (mulberry32). Recording/replay sets this at boot. */
+export function seedRandom(seed: number): void {
+  let a = seed >>> 0;
+  random = () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 /** Random float in [lo, hi). */
 export function rand(lo = 0, hi = 1): number {
-  return lo + Math.random() * (hi - lo);
+  return lo + random() * (hi - lo);
 }
 
 /** Random integer in [lo, hi]. */
 export function randInt(lo: number, hi: number): number {
-  return lo + Math.floor(Math.random() * (hi - lo + 1));
+  return lo + Math.floor(random() * (hi - lo + 1));
 }
 
 /** Random element of a non-empty array. */
 export function pick<T>(arr: readonly T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
+  return arr[Math.floor(random() * arr.length)];
 }
 
 /** Random chance: true with probability p. */
 export function chance(p: number): boolean {
-  return Math.random() < p;
+  return random() < p;
 }

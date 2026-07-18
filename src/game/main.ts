@@ -1,3 +1,6 @@
+// FIRST import: in harness mode (?harness=1&seed=N) this seeds Math.random
+// before any other module can draw from it — key to deterministic replays.
+import { attachHarness } from './test/harness';
 import { Game, GamepadInput, validateRoom } from '@engine/index';
 import { KEYMAP, GAMEPAD, VIEW_W, VIEW_H, ZOOM, WORLD_ZOOM, type Action, type GameEvents, type ActionGame } from './defs';
 import { registerSounds } from './content/sfx';
@@ -142,3 +145,8 @@ declare global {
 }
 window.hitstop = game;
 window.hitstopPad = gamepad;
+
+// Record/replay: every run tapes its inputs (window.__replay.save() to
+// keep one); ?harness=1 additionally stops the loop and hands time
+// control to window.__harness so agents/replays step deterministically.
+attachHarness(game);

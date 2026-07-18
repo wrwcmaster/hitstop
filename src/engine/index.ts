@@ -8,14 +8,14 @@ export { Game, type GameOptions } from './core/game';
 export { Loop, STEP, type LoopHooks } from './core/loop';
 export { EventBus, type Unsubscribe } from './core/events';
 export { Registry } from './core/registry';
-export { JsonStore } from './core/storage';
+export { JsonStore, sandboxStorage, snapshotStorage } from './core/storage';
 export { SceneManager, type Scene } from './core/scene';
 
 export * from './math/util';
 export * from './math/ballistics';
 export { type Rect, overlaps, containsPoint, centerX, centerY, expand } from './math/rect';
 
-export { Input, Buffer } from './input/input';
+export { Input, Buffer, type RawInputEvent } from './input/input';
 export { GamepadInput, type GamepadMapping, type GamepadAxisMapping } from './input/gamepad';
 
 export { createPixelCanvas, offscreen, type PixelCanvas } from './gfx/canvas';

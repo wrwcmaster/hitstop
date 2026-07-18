@@ -66,29 +66,39 @@ export class Loop {
       this.raf = requestAnimationFrame(tick);
       const realDt = Math.min(0.1, (now - this.last) / 1000);
       this.last = now;
-
-      this.hooks.frame?.(realDt);
-
-      if (this.freezeT > 0) {
-        this.freezeT -= realDt;
-      } else {
-        let scale = 1;
-        if (this.slowT > 0) {
-          scale = this.slowScale;
-          this.slowT -= realDt;
-        }
-        this.acc += realDt * scale;
-        let n = 0;
-        while (this.acc >= STEP && n++ < MAX_STEPS) {
-          this.hooks.update(STEP);
-          this.acc -= STEP;
-        }
-        if (this.acc > STEP * MAX_STEPS) this.acc = 0;
-      }
-
-      this.hooks.render();
+      this.advance(realDt);
     };
     this.raf = requestAnimationFrame(tick);
+  }
+
+  /**
+   * Advance the loop by `realDt` seconds of wall time: frame hooks, time
+   * manipulation (freeze/slow), fixed updates, one render. The rAF tick
+   * feeds this in real time; test harnesses and replays call it directly
+   * (loop stopped, a constant realDt) so stepped play goes through the
+   * exact same time machinery as live play — hitstop included.
+   */
+  advance(realDt: number): void {
+    this.hooks.frame?.(realDt);
+
+    if (this.freezeT > 0) {
+      this.freezeT -= realDt;
+    } else {
+      let scale = 1;
+      if (this.slowT > 0) {
+        scale = this.slowScale;
+        this.slowT -= realDt;
+      }
+      this.acc += realDt * scale;
+      let n = 0;
+      while (this.acc >= STEP && n++ < MAX_STEPS) {
+        this.hooks.update(STEP);
+        this.acc -= STEP;
+      }
+      if (this.acc > STEP * MAX_STEPS) this.acc = 0;
+    }
+
+    this.hooks.render();
   }
 
   stop(): void {

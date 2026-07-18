@@ -5,6 +5,7 @@ import {
   applyGravity,
   moveAndCollide,
   whiteOf,
+  rand,
   type CollisionSource,
 } from '@engine/index';
 import type { ActionGame } from '../defs';
@@ -102,7 +103,9 @@ export class Monster extends Actor {
     this.hp = this.maxHp = this.def.hp;
     this.mass = this.def.mass ?? 1;
     this.flies = this.def.flies ?? false;
-    this.animT = Math.random() * 9;
+    // Gameplay stream, not Math.random: spawned during the sim, and some
+    // def logic could key off animT — keep it inside the replayable world.
+    this.animT = rand(0, 9);
     this.def.init?.(this);
   }
 

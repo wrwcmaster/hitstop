@@ -92,8 +92,22 @@ export function prettyButton(index: number): string {
   return named[index] ?? `B${index}`;
 }
 
+/**
+ * How a run began. Every run start funnels through PlayScene.beginRun
+ * with one of these, so the replay recorder can cut a per-run tape and
+ * a replay can start the run the exact same way.
+ */
+export type RunStart =
+  | { kind: 'new' }
+  | { kind: 'continue' }
+  | { kind: 'autosave' }
+  | { kind: 'testroom' }
+  | { kind: 'slot'; slot: number };
+
 /** Game-level events (combat events come from the engine). */
 export interface GameEvents extends Record<string, unknown> {
+  /** A run is about to start (before the world resets). */
+  runStart: RunStart;
   playerHurt: { hp: number };
   playerDied: Record<string, never>;
   waveStart: { wave: number };

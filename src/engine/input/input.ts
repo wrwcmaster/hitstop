@@ -10,12 +10,18 @@
  * calls `endStep()` after each fixed update, so a press is visible for
  * exactly one update no matter the frame rate.
  */
+/** An effective input event, post device mapping (see Input.onRaw). */
+export type RawInputEvent<A extends string> =
+  | { t: 'down' | 'up'; a: A }
+  | { t: 'tap'; x: number; y: number };
+
 export class Input<A extends string = string> {
   private held_ = new Set<A>();
   private pressed_ = new Set<A>();
   private released_ = new Set<A>();
   private keymap: Record<string, A | A[]>;
   private anyPressListeners: (() => void)[] = [];
+  private rawListeners: ((ev: RawInputEvent<A>) => void)[] = [];
   private captureFn: ((code: string) => void) | null = null;
   /** Latest tap in logical (screen-space) coords, for menu hit-testing. */
   private tap_: { x: number; y: number } | null = null;
@@ -23,6 +29,24 @@ export class Input<A extends string = string> {
   /** A key may map to several actions (ArrowUp = jump in-game AND up in menus). */
   constructor(keymap: Record<string, A | A[]>) {
     this.keymap = { ...keymap };
+  }
+
+  /**
+   * Observe every effective input event — action edges and taps — after
+   * device mapping. This is the recording seam: whatever the device
+   * (keyboard, touch, gamepad, a test), the sim only ever sees these
+   * events, so a log of them replays the run. Returns an unsubscribe.
+   */
+  onRaw(fn: (ev: RawInputEvent<A>) => void): () => void {
+    this.rawListeners.push(fn);
+    return () => {
+      const i = this.rawListeners.indexOf(fn);
+      if (i >= 0) this.rawListeners.splice(i, 1);
+    };
+  }
+
+  private emitRaw(ev: RawInputEvent<A>): void {
+    for (const fn of this.rawListeners) fn(ev);
   }
 
   private actionsFor(code: string): A[] {
@@ -108,6 +132,7 @@ export class Input<A extends string = string> {
     if (!this.held_.has(a)) {
       this.held_.add(a);
       this.pressed_.add(a);
+      this.emitRaw({ t: 'down', a });
     }
     for (const fn of this.anyPressListeners) fn();
   }
@@ -116,6 +141,7 @@ export class Input<A extends string = string> {
     if (this.held_.has(a)) {
       this.held_.delete(a);
       this.released_.add(a);
+      this.emitRaw({ t: 'up', a });
     }
   }
 
@@ -137,6 +163,7 @@ export class Input<A extends string = string> {
   /** Record a tap at logical (screen) coords — see consumeTap / Menu.tapAt. */
   notifyTap(x: number, y: number): void {
     this.tap_ = { x, y };
+    this.emitRaw({ t: 'tap', x, y });
   }
 
   /** Consume this step's tap position (once), for menu/pointer hit-testing. */

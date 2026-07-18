@@ -24,6 +24,8 @@ export class PauseScene implements Scene {
   private page: 'main' | 'inventory' = 'main';
   private mainMenu: Menu<Action>;
   private invMenu: Menu<Action> = new Menu([], MENU_ACTIONS);
+  /** "SAVED!" flash on the SAVE REPLAY row, in seconds remaining. */
+  private replaySavedT = 0;
 
   constructor(
     private game: ActionGame,
@@ -67,6 +69,18 @@ export class PauseScene implements Scene {
                 this.hooks.onLoadSlot?.(slot);
               },
             }));
+          },
+        },
+        {
+          // Download this run's input tape (see src/game/test/harness.ts) —
+          // a bug report that reproduces itself via `npm run replay`.
+          label: 'SAVE REPLAY',
+          hint: () => (this.replaySavedT > 0 ? t('SAVED!') : ''),
+          onSelect: () => {
+            if (!window.__replay) return;
+            window.__replay.save();
+            this.replaySavedT = 3;
+            this.game.sfx.play('menuSelect');
           },
         },
         {
@@ -140,7 +154,8 @@ export class PauseScene implements Scene {
     this.invMenu.index = keepIndex;
   }
 
-  update(_dt: number): void {
+  update(dt: number): void {
+    if (this.replaySavedT > 0) this.replaySavedT -= dt;
     const input = this.game.input;
     if (input.consumePress('menu') || input.consumePress('cancel')) {
       if (this.page !== 'main') {
