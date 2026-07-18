@@ -98,6 +98,10 @@ defineLocale('zh', {
     'CAVERN': '洞窟',
     'THRONE': '王座厅',
     'TOWN': '小镇',
+    'GROTTO': '水窟',
+    'The Drowned Grotto': '沉水洞窟',
+    'The grotto drowned long before the king grew fat.': '早在国王养膘之前,这座洞窟便已沉入水中。',
+    'Breathe at the surface. Dive with down. And watch your bubbles, knight.': '在水面换气,按下键下潜。骑士,盯紧你的气泡。',
 
     /* ---- town services ---- */
     'HEALED': '已治愈',

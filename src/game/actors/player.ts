@@ -13,6 +13,8 @@ import {
   overlaps,
   expand,
   chance,
+  rand,
+  GRAVITY,
   drawText,
   type Input,
   type StateDef,
@@ -60,6 +62,28 @@ export function nearestPlayer(world: World, x: number, y: number): Player | null
 }
 
 /** Movement + combat tuning in one place. Tweak freely. */
+/**
+ * Water feel. Buoyancy beats gravity once you're deep, so the knight
+ * bobs to the surface on her own; strokes (jump) kick upward, holding
+ * down dives, and a stroke near the surface breaches into a real jump.
+ * Armor doesn't rust, but lungs are lungs: `airSeconds` underwater,
+ * then a heart per `drownEvery` until you surface.
+ */
+const SWIM = {
+  buoyancy: 1.35, // × gravity at full submersion (net upward force)
+  tuckBuoyancy: 0.35, // holding down tucks: buoyancy loses, you sink
+  dragY: 0.08, // per-second velocity keep factors (heavy water)
+  dragX: 0.4,
+  maxRise: 110, // lets a stroke's kick actually carry
+  maxSink: 70,
+  stroke: 115, // upward kick per jump press
+  dive: 240, // px/s² while holding down
+  breachDepth: 0.55, // shallower than this, a stroke launches you out
+  airSeconds: 8,
+  refillSeconds: 2,
+  drownEvery: 1,
+};
+
 export const PLAYER_TUNING = {
   runSpeed: 110,
   runAccel: 1400,
@@ -317,6 +341,13 @@ export class Player extends Actor {
    * so solo play stays clean. */
   name = '';
 
+  /** How deep in water the body sits (0 dry .. 1 fully under). */
+  submersion = 0;
+  /** Breath remaining (0..1). Depletes with the head underwater. */
+  air = 1;
+  private drownT = SWIM.drownEvery;
+  private wasWet = false;
+
   /** Input driving this knight. Defaults to the local device; a net
    * session substitutes a remote-fed Input for the guest's knight. */
   source: Input<Action> | null = null;
@@ -552,10 +583,42 @@ export class Player extends Actor {
 
     this.fsm.update(dt);
 
+    // Water: how deep the body sits decides which physics rules apply.
+    const sub = this.collision.submersion?.(this) ?? 0;
+    const swimming = sub > 0.2 && !this.fsm.is('dead');
+
     // Gravity + jump physics (dash overrides velocity; the dead still fall).
     if (!this.fsm.is('dash')) {
       applyGravity(this, dt);
-      if (this.jumpBuf.active && this.coyote.active && !this.fsm.is('dead', 'attack')) {
+      if (swimming) {
+        // Buoyancy overcomes gravity when deep; drag steadies everything.
+        // Tucking (holding down) collapses buoyancy so the dive wins.
+        const buoy = this.input.held('down') ? SWIM.tuckBuoyancy : SWIM.buoyancy;
+        this.vy -= GRAVITY * sub * buoy * dt; // deep enough, this beats gravity
+        this.vy *= Math.pow(SWIM.dragY, dt);
+        this.vx *= Math.pow(SWIM.dragX, dt);
+        this.vy = clamp(this.vy, -SWIM.maxRise, SWIM.maxSink);
+        if (this.jumpBuf.active && !this.fsm.is('attack')) {
+          this.jumpBuf.consume();
+          if (sub < SWIM.breachDepth) {
+            // Breach: a stroke at the surface launches you clear out.
+            this.vy = -T.jumpSpeed * 0.85;
+            this.squash = 1.3;
+            this.feel.sfx.play('jump');
+            this.feel.burst(this.cx, this.y + this.h, 10, {
+              color: ['#4d7bd6', COLORS.white], speed: 70, life: 0.35,
+              angle: -Math.PI / 2, spread: 2.2, drag: 3, grav: 300,
+            });
+          } else {
+            this.vy = -SWIM.stroke;
+            this.squash = 1.15;
+            this.feel.burst(this.cx, this.cy, 4, {
+              color: ['#9fd0ff', COLORS.white], speed: 25, life: 0.4, grav: -50, drag: 2,
+            });
+          }
+        }
+        if (this.input.held('down')) this.vy += SWIM.dive * dt;
+      } else if (this.jumpBuf.active && this.coyote.active && !this.fsm.is('dead', 'attack')) {
         this.jumpBuf.consume();
         this.coyote.consume();
         this.vy = -T.jumpSpeed;
@@ -578,10 +641,50 @@ export class Player extends Actor {
         });
       }
       // Variable jump height: releasing jump early cuts the ascent.
-      if (!this.fsm.is('dead') && !this.input.held('jump') && this.vy < -T.jumpCutSpeed) {
+      // (Not while swimming — strokes and breaches are fixed impulses.)
+      if (!swimming && !this.fsm.is('dead') && !this.input.held('jump') && this.vy < -T.jumpCutSpeed) {
         this.vy = -T.jumpCutSpeed;
       }
     }
+    // Entry splash: hitting the surface with speed reads as impact.
+    this.submersion = sub;
+    if (sub > 0.25 && !this.wasWet && this.vy > 60) {
+      this.feel.sfx.play('splat');
+      this.feel.burst(this.cx, this.y, 12, {
+        color: ['#4d7bd6', '#9fd0ff', COLORS.white], speed: 80, life: 0.4,
+        angle: -Math.PI / 2, spread: 2.4, drag: 3, grav: 320,
+      });
+      this.vy *= 0.45; // water catches the fall
+    }
+    this.wasWet = sub > 0.25;
+
+    // Oxygen: the head is what breathes. Depletes underwater, refills
+    // fast in air (surface or an air pocket), drowns a heart at a time.
+    const headWet = (this.collision.submersion?.({ x: this.x, y: this.y, w: this.w, h: 5 }) ?? 0) > 0.5;
+    if (headWet && this.hp > 0) {
+      this.air = Math.max(0, this.air - dt / SWIM.airSeconds);
+      if (chance(dt * 1.6)) {
+        this.feel.particles.spawn({
+          x: this.cx + this.facing * 3, y: this.y + 2,
+          vy: -26, vx: rand(-6, 6), life: 0.8, size: 1, color: '#bfe0ff', drag: 0.5,
+        });
+      }
+      if (this.air <= 0 && !this.godMode) {
+        this.drownT -= dt;
+        if (this.drownT <= 0) {
+          this.drownT = SWIM.drownEvery;
+          this.hp--;
+          this.feel.flash(0.25, '#2b5aa8');
+          this.feel.sfx.play('hurt');
+          this.feel.shake(0.3);
+          if (this.hp <= 0) this.die();
+        }
+      }
+    } else {
+      this.air = Math.min(1, this.air + dt / SWIM.refillSeconds);
+      this.drownT = SWIM.drownEvery;
+    }
+
     const fallSpeed = this.vy;
     moveAndCollide(this, dt, this.collision);
 

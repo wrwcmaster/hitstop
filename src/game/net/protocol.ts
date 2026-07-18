@@ -77,7 +77,7 @@ export interface SnapMsg {
   picks: PickSnap[];
   shots: ShotSnap[];
   /** The guest knight's HUD numbers (host-authoritative). */
-  hud: { hp: number; maxHp: number; mp: number; maxMp: number; gold: number; level: number; score: number };
+  hud: { hp: number; maxHp: number; mp: number; maxMp: number; gold: number; level: number; score: number; air: number };
   banner: string | null;
 }
 

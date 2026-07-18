@@ -58,6 +58,13 @@ definePortal('town', {
   order: 4,
 });
 
+definePortal('grotto', {
+  room: 'grotto',
+  label: 'The Drowned Grotto',
+  x: 60, y: 78,
+  order: 5,
+});
+
 /** Destinations in menu order (the caller filters by what's visited). */
 export function portalDests(): PortalDest[] {
   return portals.ids()

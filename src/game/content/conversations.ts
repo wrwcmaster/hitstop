@@ -133,5 +133,12 @@ defineConversation('elder-done', {
   ],
 });
 
+defineConversation('grotto-entry', {
+  lines: [
+    { speaker: 'VOICE', text: 'The grotto drowned long before the king grew fat.' },
+    { speaker: 'VOICE', text: 'Breathe at the surface. Dive with down. And watch your bubbles, knight.' },
+  ],
+});
+
 /** Importing this module registers the conversations. */
 export function registerConversations(): void {}

@@ -156,6 +156,7 @@ export class CoopGuestScene implements Scene {
       me.mp = s.hud.mp;
       me.mpCap = s.hud.maxMp;
       me.gold = s.hud.gold;
+      me.air = s.hud.air ?? 1;
       me.progression.restore({ xp: 0, level: s.hud.level, skillPoints: 0 });
       this.hudHost.player = me;
     }

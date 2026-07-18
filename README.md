@@ -26,6 +26,8 @@ In-game: arrows/WASD move, Space jumps, `Z`/`J` attack, `X`/`K` dash, `C`/`L` fi
 
 Beat the **Slime King** and the road to **Haven** opens — a town with a healer, a quest-giving elder, and a blacksmith who forges your weapon sharper. A **portal** in town (and at every key location) warps you between anywhere you've visited, so you can always get home. Save into any of three manual slots (or the autosave) from the title or the pause menu.
 
+**Water:** the **Drowned Grotto** (through the mid-cavern gate, or the portal) is a flooded cavern — float at the surface, stroke with jump, hold down to dive, and watch your air bubbles: lungs empty means hearts start going. Air pockets trapped under rock refill your breath mid-dive.
+
 **Multi-language:** switch under OPTIONS → LANGUAGE (English / 中文 so far). The engine's pixel font renders any script — non-ASCII glyphs are rasterized once into the same crisp pixel style, so adding a language is just a translation table (`src/game/content/locales.ts`), no glyph art.
 
 **Online co-op, no server:** pick **CO-OP** on the title screen. The host sends an invite code to a friend over any chat; the friend replies with their code; paste it back and the two browsers connect *directly* (WebRTC peer-to-peer). The guest **brings their own saved knight** — gear, gold, forge levels — fights in the host's world with **client-side prediction** (movement feels instant, the host stays authoritative), and takes their co-op loot and XP home to their own save. Name your knight in the lobby — names float above each knight so you always know who's who. Copy-paste signaling means zero infrastructure, though very strict NATs may fail to connect (there's no relay server, by design).

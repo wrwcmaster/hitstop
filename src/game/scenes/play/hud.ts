@@ -46,6 +46,11 @@ export class Hud {
   render(g: CanvasRenderingContext2D, view: HudView, minimap: Minimap, boss: Monster | null): void {
     const gm = this.host.game;
     const p = this.host.player;
+    // Underwater: a cool blue veil over the whole view sells the depth.
+    if (p && p.submersion > 0.55) {
+      g.fillStyle = 'rgba(40,90,180,0.16)';
+      g.fillRect(0, 0, gm.width, gm.height);
+    }
     if (p) {
       for (let i = 0; i < p.maxHp; i++) {
         blit(g, i < p.hp ? HEART : HEART_EMPTY, 6 + i * 9, 6);
@@ -77,6 +82,19 @@ export class Hud {
       }
       // Active buffs/debuffs: chip + remaining-time sliver.
       let by = 42;
+      // Breath: air bubbles appear only while the meter is in play.
+      if (p.air < 1) {
+        for (let i = 0; i < 6; i++) {
+          const filled = p.air * 6 > i + 0.5;
+          g.fillStyle = filled ? COLORS.blue : COLORS.navyLight;
+          g.fillRect(6 + i * 6, by, 4, 4);
+          if (filled) {
+            g.fillStyle = COLORS.white;
+            g.fillRect(7 + i * 6, by + 1, 1, 1);
+          }
+        }
+        by += 8;
+      }
       for (const s of p.statuses.list()) {
         g.fillStyle = s.def.color;
         g.fillRect(6, by, 4, 4);
