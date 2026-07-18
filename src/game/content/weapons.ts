@@ -37,11 +37,28 @@ export interface WeaponAttackDef {
   /** Fraction of horizontal velocity retained after one second. */
   movementKeep: number;
   finisher?: boolean;
+  /** Where the hitbox points: ahead of the knight (default), below her
+   * feet (plunges), or above her head (anti-air). */
+  aim?: 'forward' | 'down' | 'up';
+  /** Landing a hit with this attack while airborne bounces the knight
+   * up at this speed (the pogo — refreshes air jumps and the dash). */
+  pogo?: number;
 }
 
+/**
+ * A weapon type's full moveset: the grounded combo chain plus the
+ * contextual attacks the player resolves from her situation — airborne
+ * (aerial), airborne holding down (plunge), holding up (upper), or
+ * mid-dash (dashAttack). Contextual entries are optional; a type
+ * without one falls back to the first grounded swing.
+ */
 export interface WeaponTypeDef {
   comboWindow: number;
   attacks: readonly WeaponAttackDef[];
+  aerial?: WeaponAttackDef;
+  plunge?: WeaponAttackDef;
+  upper?: WeaponAttackDef;
+  dashAttack?: WeaponAttackDef;
 }
 
 export interface WeaponDef {
@@ -59,13 +76,25 @@ function finite(value: number, path: string): void {
   if (!Number.isFinite(value)) throw new Error(`${path}: expected a finite number`);
 }
 
+/** Every attack a type owns, contextual entries included. */
+export function allAttacks(type: WeaponTypeDef): WeaponAttackDef[] {
+  return [
+    ...type.attacks,
+    ...[type.aerial, type.plunge, type.upper, type.dashAttack].filter((a): a is WeaponAttackDef => !!a),
+  ];
+}
+
 export function defineWeaponType(id: string, def: WeaponTypeDef): void {
   if (!Number.isFinite(def.comboWindow) || def.comboWindow < 0) {
     throw new Error(`weapon type "${id}".comboWindow: expected a non-negative finite number`);
   }
   if (!def.attacks.length) throw new Error(`weapon type "${id}".attacks: expected at least one attack`);
-  def.attacks.forEach((attack, index) => {
-    const path = `weapon type "${id}".attacks[${index}]`;
+  const named: [string, WeaponAttackDef][] = def.attacks.map((a, i) => [`attacks[${i}]`, a]);
+  for (const key of ['aerial', 'plunge', 'upper', 'dashAttack'] as const) {
+    if (def[key]) named.push([key, def[key]]);
+  }
+  named.forEach(([slot, attack]) => {
+    const path = `weapon type "${id}".${slot}`;
     if (!attack.animation) throw new Error(`${path}.animation: expected a non-empty string`);
     if (attack.frameDirection !== 1 && attack.frameDirection !== -1) {
       throw new Error(`${path}.frameDirection: expected 1 or -1`);
@@ -97,6 +126,9 @@ export function defineWeaponType(id: string, def: WeaponTypeDef): void {
     if (attack.trail.radius <= 0 || attack.trail.thickness <= 0) {
       throw new Error(`${path}.trail: radius and thickness must be positive`);
     }
+    if (attack.pogo !== undefined && (!Number.isFinite(attack.pogo) || attack.pogo <= 0)) {
+      throw new Error(`${path}.pogo: expected a positive finite number`);
+    }
   });
   weaponTypes.register(id, def);
 }
@@ -112,7 +144,7 @@ export function defineWeapon(id: string, def: Omit<WeaponDef, 'id'>): void {
   }
   const visualAnimations = weaponVisuals.get(def.visual).animations;
   if (visualAnimations) {
-    for (const attack of weaponTypes.get(def.type).attacks) {
+    for (const attack of allAttacks(weaponTypes.get(def.type))) {
       if (!visualAnimations.includes(attack.animation)) {
         throw new Error(`weapon "${id}": visual "${def.visual}" has no "${attack.animation}" animation`);
       }
@@ -140,8 +172,51 @@ const attack = (
   ...overrides,
 });
 
+/**
+ * The contextual moveset, scaled per weapon class. `reach` is the
+ * forward hitbox width, `arc` the vertical coverage, `heft` scales
+ * damage/feel for heavier steel.
+ */
+const contextuals = (p: { reach: number; arc: number; heft: number }) => ({
+  // Jump attack: a quick mid-air swipe that keeps your momentum.
+  aerial: attack({
+    duration: 0.15, active: [0.1, 0.55], damageScale: 1, strength: 0.4 * p.heft, lunge: 0,
+    hitbox: { forward: -2, y: 0, w: p.reach, h: p.arc },
+    trail: { startAngle: -1.2, endAngle: 1.2, radius: p.reach * 0.65, thickness: 3 },
+    movementKeep: 0.9,
+    bodyWeight: 0.8,
+  }),
+  // Down attack: point the steel at the ground and ride gravity. A hit
+  // pogos the knight back into the air with her dash and jumps refreshed.
+  plunge: attack({
+    duration: 0.9, active: [0.06, 1], damageScale: 1.3 * p.heft, strength: 0.7 * p.heft, lunge: 0,
+    aim: 'down', pogo: 250,
+    hitbox: { forward: -3, y: 0, w: p.arc + 6, h: 13 },
+    trail: { startAngle: 0.8, endAngle: 2.3, radius: p.reach * 0.6, thickness: 3.5 },
+    movementKeep: 0.35,
+    bodyWeight: 1.1,
+  }),
+  // Up attack: the anti-air arc for bats and anything overhead.
+  upper: attack({
+    duration: 0.16, active: [0.1, 0.55], damageScale: 1, strength: 0.45 * p.heft, lunge: 0,
+    aim: 'up',
+    hitbox: { forward: -3, y: 0, w: p.reach, h: 13 },
+    trail: { startAngle: -0.8, endAngle: -2.3, radius: p.reach * 0.65, thickness: 3.5 },
+    movementKeep: 0.5,
+  }),
+  // Dash attack: steel follows speed — a committed thrust out of the dash.
+  dashAttack: attack({
+    duration: 0.2, active: [0.05, 0.6], damageScale: 1.5 * p.heft, strength: 0.8, lunge: 120,
+    hitbox: { forward: 0, y: 0, w: p.reach + 8, h: p.arc - 2 },
+    trail: { startAngle: -0.35, endAngle: 0.35, radius: p.reach * 0.9, thickness: 4 },
+    movementKeep: 0.6,
+    bodyWeight: 1.2,
+  }),
+});
+
 defineWeaponType('unarmed', {
   comboWindow: 0.2,
+  ...contextuals({ reach: 14, arc: 12, heft: 0.8 }),
   attacks: [
     attack({
       duration: 0.16, active: [0.16, 0.52], damageScale: 1, strength: 0.3, lunge: 20,
@@ -162,6 +237,7 @@ defineWeaponType('unarmed', {
 
 defineWeaponType('sword', {
   comboWindow: 0.24,
+  ...contextuals({ reach: 20, arc: 16, heft: 1 }),
   attacks: [
     attack({
       duration: 0.16, active: [0.15, 0.56], damageScale: 1, strength: 0.42, lunge: 45,
@@ -189,6 +265,7 @@ defineWeaponType('sword', {
 
 defineWeaponType('great-sword', {
   comboWindow: 0.34,
+  ...contextuals({ reach: 28, arc: 20, heft: 1.3 }),
   attacks: [
     attack({
       duration: 0.34, active: [0.3, 0.62], damageScale: 1, strength: 0.75, lunge: 25,

@@ -105,6 +105,13 @@ Details and code samples: `docs/adding-content.md`. The short version —
   `content/weapons.ts`. Types own combo timing, per-swing hitboxes, lunges,
   trails, and feel strength; weapons select a type, visual, base damage,
   and colors. Player only executes the resolved attack definition.
+  Types also carry the **contextual moveset** — optional `aerial`,
+  `plunge`, `upper`, `dashAttack` entries the player resolves from her
+  situation (airborne, airborne+down in dry air, up held, mid-dash).
+  An attack's `aim: 'down' | 'up'` points its hitbox below the feet or
+  above the head; `pogo: <speed>` makes an airborne down-hit bounce her
+  up with air jumps and the dash refreshed. Plunges ride gravity and
+  finish on landing; only grounded swings advance the combo chain.
 - **Weapon visual**: `defineWeaponVisual` in `content/weapon-visuals.ts`.
   Use `proceduralBlade(...)` for compact generated art or
   `spriteWeapon(...)` for a frame-aligned JSON sheet; sprite weapons
