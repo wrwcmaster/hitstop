@@ -1,0 +1,28 @@
+{
+  "hd": true,
+  "w": 14,
+  "h": 6,
+  "anims": {
+    "swim": {
+      "fps": 6,
+      "frames": [
+        [
+          "..............",
+          "......gGGGg...",
+          ".g..gGGGGGGGg.",
+          ".ggGGGGGGOGGGW",
+          ".g..gGGGGGGgg.",
+          "......gGGg...."
+        ],
+        [
+          "..............",
+          "..g...gGGGg...",
+          "..gggGGGGGGGg.",
+          "...gGGGGGOGGGW",
+          "..gggGGGGGGgg.",
+          "..g...gGGg...."
+        ]
+      ]
+    }
+  }
+}

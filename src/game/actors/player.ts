@@ -593,11 +593,13 @@ export class Player extends Actor {
       if (swimming) {
         // Buoyancy overcomes gravity when deep; drag steadies everything.
         // Tucking (holding down) collapses buoyancy so the dive wins.
+        // DEEP LUNGS (skill tree) boosts stroke power and cruise speed.
+        const boost = 1 + this.capabilities.modifier('swimBoost', 0);
         const buoy = this.input.held('down') ? SWIM.tuckBuoyancy : SWIM.buoyancy;
         this.vy -= GRAVITY * sub * buoy * dt; // deep enough, this beats gravity
         this.vy *= Math.pow(SWIM.dragY, dt);
-        this.vx *= Math.pow(SWIM.dragX, dt);
-        this.vy = clamp(this.vy, -SWIM.maxRise, SWIM.maxSink);
+        this.vx *= Math.pow(SWIM.dragX / boost, dt);
+        this.vy = clamp(this.vy, -SWIM.maxRise * boost, SWIM.maxSink * boost);
         if (this.jumpBuf.active && !this.fsm.is('attack')) {
           this.jumpBuf.consume();
           if (sub < SWIM.breachDepth) {
@@ -662,7 +664,8 @@ export class Player extends Actor {
     // fast in air (surface or an air pocket), drowns a heart at a time.
     const headWet = (this.collision.submersion?.({ x: this.x, y: this.y, w: this.w, h: 5 }) ?? 0) > 0.5;
     if (headWet && this.hp > 0) {
-      this.air = Math.max(0, this.air - dt / SWIM.airSeconds);
+      // DEEP LUNGS (skill tree) extends how long a breath lasts.
+      this.air = Math.max(0, this.air - dt / (SWIM.airSeconds + this.capabilities.modifier('extraAirSeconds', 0)));
       if (chance(dt * 1.6)) {
         this.feel.particles.spawn({
           x: this.cx + this.facing * 3, y: this.y + 2,

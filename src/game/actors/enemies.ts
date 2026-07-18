@@ -1,6 +1,6 @@
 import { rand, sign, tintOf, itemDef } from '@engine/index';
 import { defineMonster, Monster } from './monster';
-import { SLIME1, SLIME2, BAT1, BAT2, TEXEL, blit, slimeSprite, batSprite } from '../content/sprites';
+import { SLIME1, SLIME2, BAT1, BAT2, PIKE1, PIKE2, CHEST, TEXEL, blit, slimeSprite, batSprite, pikeSprite, chestSprite } from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { Player } from './player';
 
@@ -264,6 +264,86 @@ defineMonster('devourer', {
         }
       }
     }
+  },
+});
+
+/**
+ * Pike: the thing that hunts in the deep. Lives in water and never
+ * leaves it — lazy figure-eights around its home pool until a knight
+ * gets wet, then a fast straight rush. On land you are safe; in the
+ * water you are prey.
+ */
+defineMonster('pike', {
+  hp: 3, damage: 1, w: pikeSprite.hitbox.w, h: pikeSprite.hitbox.h, score: 220, xp: 14, flies: true,
+  colors: [COLORS.green, COLORS.greenDark, COLORS.white],
+  drops: [
+    { id: 'coin', chance: 0.6 },
+    { id: 'mana-orb', chance: 0.25 },
+  ],
+  init(m) {
+    m.state.phase = rand(0, 9);
+    m.state.homeX = m.x;
+    m.state.homeY = m.y;
+  },
+  update(m, dt) {
+    const t = m.animT + (m.state.phase as number);
+    const target = m.player as unknown as { cx: number; cy: number; submersion: number } | undefined;
+    const hunting = !!target && target.submersion > 0.25;
+    if (hunting) {
+      m.vx += sign(target.cx - m.cx) * 260 * dt;
+      m.vy += sign(target.cy - m.cy) * 200 * dt;
+    } else {
+      // Idle: drift a slow figure-eight around home.
+      const hx = (m.state.homeX as number) + Math.sin(t * 0.8) * 30;
+      const hy = (m.state.homeY as number) + Math.sin(t * 1.6) * 10;
+      m.vx += sign(hx - m.x) * 60 * dt;
+      m.vy += sign(hy - m.y) * 60 * dt;
+    }
+    // Never leave the water: if the next beat of travel would surface,
+    // steer hard back toward home depth instead.
+    const look = { x: m.x + m.vx * 0.25, y: m.y + m.vy * 0.25, w: m.w, h: m.h };
+    if ((m.collision.submersion?.(look) ?? 0) < 0.7) {
+      m.vx += sign((m.state.homeX as number) - m.x) * 200 * dt;
+      m.vy += sign((m.state.homeY as number) - m.y) * 300 * dt;
+    }
+    const sp = Math.hypot(m.vx, m.vy);
+    const max = hunting ? 115 : 35;
+    if (sp > max) {
+      m.vx *= max / sp;
+      m.vy *= max / sp;
+    }
+    if (Math.abs(m.vx) > 2) m.facing = m.vx > 0 ? 1 : -1;
+  },
+  draw(g, m) {
+    const frame = m.img(Math.floor(m.animT * 6) % 2 ? PIKE1 : PIKE2);
+    g.save();
+    if (m.facing === -1) {
+      g.translate(m.cx * 2, 0);
+      g.scale(-1, 1);
+    }
+    blit(g, frame, m.x - pikeSprite.hitbox.x, m.y - pikeSprite.hitbox.y);
+    g.restore();
+  },
+});
+
+/**
+ * Treasure chest: a stationary breakable. It fights back with nothing —
+ * crack it open (two hits) and the deep pays out. Registered as a
+ * monster so strikes, drops, and the placeables palette all come free.
+ */
+defineMonster('chest', {
+  hp: 2, damage: 0, w: chestSprite.hitbox.w, h: chestSprite.hitbox.h, score: 50, xp: 0,
+  noContactDamage: true,
+  colors: [COLORS.gold, COLORS.white],
+  drops: [
+    { id: 'coin', chance: 1 },
+    { id: 'coin', chance: 1 },
+    { id: 'coin', chance: 0.8 },
+    { id: 'potion', chance: 0.5 },
+    { id: 'mana-orb', chance: 0.5 },
+  ],
+  draw(g, m) {
+    blit(g, m.img(CHEST), m.x - chestSprite.hitbox.x, m.y - chestSprite.hitbox.y);
   },
 });
 
