@@ -21,10 +21,11 @@ import { placeables, type PlaceableCtx } from '../content/placeables';
 import { validateRoomContent } from '../content/room-features';
 import { PauseScene } from './pause';
 import { OptionsScene } from './options';
+import { SaveSlotsScene } from './saveslots';
 import { Background } from './background';
 import { COLORS } from '../content/palette';
 import { ROOMS, START_ROOM } from '../content/rooms';
-import { saveStore, snapshotPlayer, restorePlayer, type SaveData } from '../save';
+import { saveStore, slotStore, newestSave, snapshotPlayer, restorePlayer, type SaveData } from '../save';
 import type { PlayHost } from './play/host';
 import { WaveDirector } from './play/waves';
 import { triggerActions } from './play/trigger-actions';
@@ -113,15 +114,21 @@ export class PlayScene implements Scene {
       get player() { return scene.player; },
       get tilemap() { return scene.tilemap; },
       get room() { return scene.room; },
+      get roomId() { return scene.roomId; },
       banner: (text, seconds = 1.2) => this.showBanner(text, seconds),
       goToRoom: (roomId, x, y) => this.goToRoom(roomId, x, y),
       openConversation: (id) => this.openConversation(id),
+      hasFlag: (id) => this.flags.has(id),
     };
     this.waves = new WaveDirector(this.host);
     this.hud = new Hud(this.host);
     this.title = new TitleScreen(game, {
       newGame: () => this.startRun(null),
-      continueRun: () => this.startRun(saveStore.load()),
+      continueRun: () => this.startRun(newestSave()),
+      loadGame: () => {
+        game.sfx.play('menuSelect');
+        game.scenes.push(new SaveSlotsScene(game, 'load', { loadFrom: (slot) => this.loadSlot(slot) }));
+      },
       testRoom: () => this.startTestRoom(),
       options: () => {
         game.sfx.play('menuSelect');
@@ -158,6 +165,15 @@ export class PlayScene implements Scene {
       game.feel.text(info.target.cx, info.target.y - 8, pts, COLORS.gold);
       this.player?.gainXp(info.target.def.xp ?? Math.round(info.target.def.score / 20));
       this.rollDrops(info.target);
+      // Quest progress: any kill may advance an accepted quest.
+      for (const q of this.player?.quests.onKill(info.target.type) ?? []) {
+        if (q.justCompleted) {
+          this.showBanner('QUEST COMPLETE!', 1.5);
+          game.feel.sfx.play('levelup');
+        } else {
+          game.feel.text(info.target.cx, info.target.y - 16, `${q.n}/${q.need}`, COLORS.gold);
+        }
+      }
       // A Devourer that swallowed your gear coughs it all back up — only
       // this one carried it, so only this kill returns it.
       const stolen = info.target.state.stolenItems;
@@ -280,6 +296,8 @@ export class PlayScene implements Scene {
     const g = this.game;
     this.roomId = id;
     this.room = this.roomById(id);
+    // Portal network: a visited key location becomes a destination.
+    if (this.player) this.flags.add(`visited:${id}`);
     validateRoomContent(this.room, id);
     this.tilemap = buildTilemap(this.room);
     this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
@@ -376,15 +394,36 @@ export class PlayScene implements Scene {
     this.game.music.play(song);
   }
 
-  private autosave(): void {
-    if (this.testRoom || !this.player) return;
-    saveStore.save({
+  /** The current run as save data (null on test rooms / no player). */
+  private buildSave(): SaveData | null {
+    if (this.testRoom || !this.player) return null;
+    return {
       roomId: this.roomId,
       best: this.best,
+      savedAt: Date.now(),
       flags: [...this.flags],
       firedTriggers: this.firedTriggers,
       player: snapshotPlayer(this.player),
-    });
+    };
+  }
+
+  private autosave(): void {
+    const data = this.buildSave();
+    if (data) saveStore.save(data);
+  }
+
+  /** Manual save into a slot (the pause menu's SAVE GAME). */
+  private saveToSlot(slot: number): void {
+    const data = this.buildSave();
+    if (!data) return;
+    slotStore(slot).save(data);
+    this.showBanner('GAME SAVED', 1);
+  }
+
+  /** Resume from any slot (pause LOAD GAME / title LOAD GAME). */
+  private loadSlot(slot: number): void {
+    const data = slotStore(slot).load();
+    if (data) this.startRun(data);
   }
 
   /* ---------------- loot ---------------- */
@@ -467,7 +506,11 @@ export class PlayScene implements Scene {
     }
 
     if (this.phase === 'play' && this.player && g.input.consumePress('menu')) {
-      g.scenes.push(new PauseScene(g, this.player, { onRestart: () => this.startRun(saveStore.load()) }));
+      g.scenes.push(new PauseScene(g, this.player, {
+        onRestart: () => this.startRun(saveStore.load()),
+        onSaveSlot: (slot) => this.saveToSlot(slot),
+        onLoadSlot: (slot) => this.loadSlot(slot),
+      }));
       return;
     }
 

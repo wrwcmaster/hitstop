@@ -24,6 +24,8 @@ No setup at all? Open **[`hitstop.html`](hitstop.html)** — the whole game comp
 
 In-game: arrows/WASD move, Space jumps, `Z`/`J` attack, `X`/`K` dash, `C`/`L` fireball, `V` nova, `E`/`F` talk to NPCs, `Esc` opens the system menu (inventory, skill tree, options — including **key rebinding** under OPTIONS → CONTROLS), `` ` `` (backquote) toggles the debug overlay. **Gamepads work out of the box** (standard layout: A jump, X attack, B dash, Y interact, LB/RB skills, Start menu).
 
+Beat the **Slime King** and the road to **Haven** opens — a town with a healer, a quest-giving elder, and a blacksmith who forges your weapon sharper. A **portal** in town (and at every key location) warps you between anywhere you've visited, so you can always get home. Save into any of three manual slots (or the autosave) from the title or the pause menu.
+
 `demo.html` is the original single-file proof of concept — zero dependencies, open it directly in a browser. Everything else in this repo is that POC grown into a real architecture.
 
 ## What's here
@@ -31,7 +33,7 @@ In-game: arrows/WASD move, Space jumps, `Z`/`J` attack, `X`/`K` dash, `C`/`L` fi
 | Path | What it is |
 | --- | --- |
 | `src/engine/` | The engine: loop, events, input, graphics, **feel**, audio, physics, world, combat + projectiles, FSM, levels + triggers, items/equipment/stats, skills, UI (menus, dialogue, minimap). No game knowledge. |
-| `src/game/` | The game built on it: player, enemies, weapons, spells, drops, conversations, pause menu, HUD — mostly *content definitions*, not engine plumbing. |
+| `src/game/` | The game built on it: player, enemies, weapons, spells, drops, conversations, town + NPCs (healer, quest elder, blacksmith), quests, a portal network, multi-slot saves, pause menu, HUD — mostly *content definitions*, not engine plumbing. |
 | `tools/` | Browser-based design tools: level editor and sprite editor, sharing the game's registries ([guide](docs/design-tools.md)). |
 | `docs/` | Architecture, game-feel guide, content cookbook, design-tools guide, and a game-dev primer for software engineers. |
 

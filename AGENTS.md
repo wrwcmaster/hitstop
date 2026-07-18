@@ -28,9 +28,10 @@ npm run build:single   # everything → hitstop.html (also copies it to the repo
    registry, hook) and drive it with game data.
 2. **Content is data in registries, not special cases in code.** Items,
    monsters, NPCs, tiles, rooms, skills, statuses, conversations, shops,
-   songs, SFX, wave tables, gear visuals, trigger actions — all are
-   `Registry` entries. Before adding an `if (id === 'thing')` anywhere,
-   look for the registry that makes it a data change instead.
+   songs, SFX, wave tables, gear visuals, trigger actions, quests, portal
+   destinations — all are `Registry` entries. Before adding an
+   `if (id === 'thing')` anywhere, look for the registry that makes it a
+   data change instead.
 3. **No new runtime dependencies.** Dev-tooling (like Playwright) is fine.
 4. **Verify in the running game, not just the compiler.** Typecheck and
    build prove it compiles; a Playwright drive of the real flow proves it
@@ -61,10 +62,12 @@ src/game/
   main.ts     bootstrap: register content, bind touch buttons, start
   content/    the game's data: items, tiles, skills, statuses, music,
               sfx, conversations, shops, rooms/*.json, sprites/*.json,
-              waves.ts (wave tables), gear-visuals.ts (equipment layers)
+              waves.ts (wave tables), gear-visuals.ts (equipment layers),
+              quests.ts (quest defs + QuestLog), portals.ts (portal network)
   actors/     Player, Monster (+ enemies/boss defs), Npc, Pickup
   scenes/     play.ts (orchestrator) + play/ modules, pause, options,
-              shop, skilltree, prompt, spawner, background
+              shop, skilltree, prompt, spawner, background,
+              saveslots (multi-slot save/load), portal (destination menu)
 tools/        level editor, sprite editor, sheet slicer (client-only)
 ```
 
@@ -109,11 +112,28 @@ Details and code samples: `docs/adding-content.md`. The short version —
   the entry's `validateProps`.
 - **Room**: author in the level editor → JSON in `content/rooms/` →
   register in `rooms/index.ts`. Doors are `door` triggers; a locked door
-  adds `props.key: '<item id>'`. Waves via `props.waves: '<table id>'`
-  (+ optional `waveGoal`/`gateKey`).
+  adds `props.key: '<item id>'` (item lock) and/or `props.flag: '<flag>'`
+  with `props.lockedText` (story lock — e.g. the throne→town gate needs
+  `bossDefeated`). Waves via `props.waves: '<table id>'` (+ optional
+  `waveGoal`/`gateKey`). Entering a room sets a `visited:<id>` flag.
 - **Wave table**: `defineWaveTable` in `content/waves.ts`.
 - **Trigger type**: `defineTriggerAction` in `play/trigger-actions.ts`;
-  definitions own both `run` and their optional `validateProps`.
+  definitions own both `run` and their optional `validateProps`. The
+  `portal` trigger opens the portal menu; a `door` trigger reads `flag`
+  as a story lock via `host.hasFlag`.
+- **Quest**: `defineQuest` in `content/quests.ts` (kill-N-of-a-monster
+  goal + reward). The player's `QuestLog` is the runtime, fed by
+  PlayScene's `kill` event, persisted in saves; the elder NPC's dynamic
+  `greet`/`onChoice` drive accept → progress → turn-in with zero combat
+  code. Any monster type is a valid target.
+- **Portal destination**: `definePortal` in `content/portals.ts` (target
+  room + arrival coords + label). Drop a `portal` trigger and a gate
+  visual in that room's JSON; the menu lists every destination the player
+  has visited, so town is always reachable once seen.
+- **NPC behaviour**: `defineNpc` in `actors/npc.ts`. `greet` can be a
+  `(ctx) => conversationId` for state-driven dialogue; `onChoice(choice,
+  ctx)` reacts to a picked conversation option (heal, forge, quest
+  accept/claim) before any attached shop opens.
 - **Visible gear slot**: equipment JSON sheet on the knight's frame grid
   (transparent except the gear) + `defineGearVisual(slot, ...)` in
   `content/gear-visuals.ts`. No player-render changes.

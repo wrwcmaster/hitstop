@@ -1,6 +1,7 @@
 import { Registry, conversations, items, type TriggerDef } from '@engine/index';
 import { COLORS } from '../../content/palette';
 import type { PlayHost } from './host';
+import { PortalScene } from '../portal';
 import { optionalFiniteNumber, optionalString, rejectUnknownProps, requireString } from '../../content/prop-validation';
 
 /**
@@ -34,23 +35,48 @@ defineTriggerAction('talk', {
 
 defineTriggerAction('door', {
   validateProps(props, path) {
-    rejectUnknownProps(props, ['room', 'x', 'y', 'key'], path);
+    rejectUnknownProps(props, ['room', 'x', 'y', 'key', 'flag', 'lockedText'], path);
     requireString(props, 'room', path);
     const key = optionalString(props, 'key', path);
     if (key && !items.has(key)) throw new Error(`${path}.key: unknown item "${key}"`);
+    optionalString(props, 'flag', path);
+    optionalString(props, 'lockedText', path);
     optionalFiniteNumber(props, 'x', path);
     optionalFiniteNumber(props, 'y', path);
   },
   run(def, host) {
     const props = def.props!;
-    const keyId = props.key as string | undefined;
     const p = host.player;
-    if (keyId && p && !p.inventory.has(keyId)) {
-      host.banner('THE GATE IS LOCKED', 1.2);
-      host.game.feel.text(p.cx, p.y - 8, 'LOCKED', COLORS.red);
+    // Two kinds of lock: a key item in the inventory, or a story flag
+    // (props.flag — e.g. 'bossDefeated' seals the town road until then).
+    const keyId = props.key as string | undefined;
+    const flag = props.flag as string | undefined;
+    const locked =
+      (keyId && p && !p.inventory.has(keyId)) ||
+      (flag && !host.hasFlag(flag));
+    if (locked) {
+      host.banner((props.lockedText as string) ?? 'THE GATE IS LOCKED', 1.2);
+      if (p) host.game.feel.text(p.cx, p.y - 8, 'LOCKED', COLORS.red);
       host.game.sfx.play('denied');
       return;
     }
     host.goToRoom(props.room as string, props.x as number | undefined, props.y as number | undefined);
+  },
+});
+
+defineTriggerAction('portal', {
+  validateProps(props, path) {
+    rejectUnknownProps(props, [], path);
+  },
+  run(_def, host) {
+    host.game.sfx.play('menuSelect');
+    host.game.scenes.push(
+      new PortalScene(
+        host.game,
+        host.roomId,
+        (room) => host.roomId === room || host.hasFlag(`visited:${room}`),
+        (dest) => host.goToRoom(dest.room, dest.x, dest.y),
+      ),
+    );
   },
 });
