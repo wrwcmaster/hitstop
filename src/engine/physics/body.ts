@@ -10,6 +10,9 @@ export interface CollisionSource {
   solidsNear(r: Rect): Iterable<Solid>;
   /** Horizontal world extent, used to clamp bodies inside the room. */
   worldW: number;
+  /** Fraction (0..1) of a rect covered by water, if this source has any
+   * (tilemaps do). Absent = a dry world. */
+  submersion?(r: Rect): number;
 }
 
 /** A moving AABB. Position is top-left; velocities in px/s. */

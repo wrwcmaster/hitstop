@@ -3,6 +3,7 @@ import arenaJson from './arena.json';
 import cavernJson from './cavern.json';
 import throneJson from './throne.json';
 import townJson from './town.json';
+import grottoJson from './grotto.json';
 import testRoomJson from './test_room.json';
 
 /**
@@ -14,6 +15,7 @@ export const ROOMS: Record<string, RoomDef> = {
   cavern: validateRoom(cavernJson),
   throne: validateRoom(throneJson),
   town: validateRoom(townJson),
+  grotto: validateRoom(grottoJson),
   test_room: validateRoom(testRoomJson),
 };
 

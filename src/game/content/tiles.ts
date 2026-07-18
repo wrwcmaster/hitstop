@@ -68,3 +68,36 @@ tiles.register('platform', {
     g.fillRect(px, py + size - 2, size, 2);
   },
 });
+
+/** Deep water: swimmable, translucent, with drifting light motes. */
+tiles.register('water', {
+  water: true,
+  draw(g, px, py, size, tx, ty) {
+    g.fillStyle = 'rgba(38,84,164,0.55)';
+    g.fillRect(px, py, size, size);
+    // A sparse mote per some tiles, drifting on a per-tile phase.
+    if ((tx * 7 + ty * 13) % 5 === 0) {
+      const t = performance.now() / 1000 + tx * 1.7 + ty * 0.9;
+      const mx = px + 2 + ((Math.sin(t) + 1) / 2) * (size - 4);
+      const my = py + 2 + ((Math.cos(t * 0.7) + 1) / 2) * (size - 4);
+      g.fillStyle = 'rgba(148,200,255,0.25)';
+      g.fillRect(Math.round(mx), Math.round(my), 1, 1);
+    }
+  },
+});
+
+/** Water surface: swimmable, with an animated highlight lapping on top. */
+tiles.register('waterTop', {
+  water: true,
+  draw(g, px, py, size, tx) {
+    g.fillStyle = 'rgba(38,84,164,0.5)';
+    g.fillRect(px, py, size, size);
+    const t = performance.now() / 1000;
+    // Two bright crests sliding across the surface row.
+    const w1 = Math.round(((Math.sin(t * 1.6 + tx * 0.9) + 1) / 2) * (size - 2));
+    g.fillStyle = 'rgba(180,220,255,0.65)';
+    g.fillRect(px, py, size, 1);
+    g.fillStyle = 'rgba(255,255,255,0.55)';
+    g.fillRect(px + w1, py, 2, 1);
+  },
+});

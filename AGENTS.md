@@ -124,6 +124,14 @@ Details and code samples: `docs/adding-content.md`. The short version —
   `bossDefeated`). Waves via `props.waves: '<table id>'` (+ optional
   `waveGoal`/`gateKey`). Entering a room sets a `visited:<id>` flag.
 - **Wave table**: `defineWaveTable` in `content/waves.ts`.
+- **Water**: mark a tile `water: true` and rooms can flood — the
+  tilemap answers `submersion(rect)` (area fraction) and the player does
+  the rest: buoyancy floats her at ~3/4 submerged, strokes (jump) kick
+  up, holding down tucks and dives, a stroke near the surface breaches,
+  and the head being underwater drains `air` (drowning ticks at zero;
+  surfaces and trapped air pockets refill). Tunables in `SWIM`
+  (player.ts); `water`/`waterTop` tiles in `content/tiles.ts`; the
+  grotto (`rooms/grotto.json`) is the reference flooded room.
 - **Trigger type**: `defineTriggerAction` in `play/trigger-actions.ts`;
   definitions own both `run` and their optional `validateProps`. The
   `portal` trigger opens the portal menu; a `door` trigger reads `flag`

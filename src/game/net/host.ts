@@ -114,6 +114,7 @@ export class CoopHost {
       hud: {
         hp: g?.hp ?? 0, maxHp: g?.maxHp ?? 1, mp: g?.mp ?? 0, maxMp: g?.maxMp ?? 1,
         gold: g?.gold ?? 0, level: g?.progression.level ?? 1, score: view.score,
+        air: g?.air ?? 1,
       },
       banner: view.banner,
     };
