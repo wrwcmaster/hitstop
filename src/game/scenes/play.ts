@@ -86,6 +86,9 @@ export class PlayScene implements Scene {
   private flags = new Set<string>();
   /** Fired once-trigger indices per room. Serialized into saves. */
   private firedTriggers: Record<string, number[]> = {};
+  /** A checkpoint's wave, consumed by the next setRoom so a saved gauntlet
+   * resumes where it left off rather than restarting at wave 1. */
+  private pendingWave = 0;
 
   private score = 0;
   private best = 0;
@@ -309,9 +312,11 @@ export class PlayScene implements Scene {
       }
       this.firedTriggers = { ...save.firedTriggers };
       this.best = Math.max(this.best, save.best);
+      this.pendingWave = save.wave ?? 0; // resume a saved gauntlet mid-run
     } else {
       this.flags.clear();
       this.firedTriggers = {};
+      this.pendingWave = 0;
     }
     this.score = 0;
     this.combo = 0;
@@ -412,7 +417,8 @@ export class PlayScene implements Scene {
     this.updateMusic();
 
     if (this.phase === 'play') {
-      if (this.waves.active) this.waves.begin();
+      if (this.waves.active) this.waves.begin(this.pendingWave || 1);
+      this.pendingWave = 0; // consumed: later room entries start fresh
       this.autosave();
       if (id !== START_ROOM || this.bannerT <= 0) {
         this.showBanner(t(this.room.name.toUpperCase()), 1.2);
@@ -465,6 +471,7 @@ export class PlayScene implements Scene {
       savedAt: Date.now(),
       flags: [...this.flags],
       firedTriggers: this.firedTriggers,
+      wave: this.waves.active ? this.waves.wave : undefined,
       player: snapshotPlayer(this.player),
     };
   }
