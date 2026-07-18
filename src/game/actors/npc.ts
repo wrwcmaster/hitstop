@@ -14,7 +14,7 @@ import { COLORS } from '../content/palette';
 import { ShopScene } from '../scenes/shop';
 import { SpawnerScene } from '../scenes/spawner';
 import { prettyCode, prettyButton, menuLine, type ActionGame, type Action } from '../defs';
-import { Player } from './player';
+import { Player, nearestPlayer } from './player';
 import { healer, forge, questGiver } from './npc-roles';
 
 /**
@@ -75,8 +75,10 @@ export class Npc extends Actor {
   }
 
   private playerNear(): Player | null {
-    const p = this.world.first(Player);
-    if (!p || p.hp <= 0) return null;
+    // Only the locally-driven knight can talk — dialogue and shops live on
+    // this screen. A net guest's knight walks past NPCs without prompts.
+    const p = nearestPlayer(this.world, this.cx, this.cy);
+    if (!p || !p.isLocal) return null;
     const dx = Math.abs(p.cx - this.cx);
     const dy = Math.abs(p.cy - this.cy);
     return dx < INTERACT_RANGE && dy < 24 ? p : null;
@@ -94,15 +96,15 @@ export class Npc extends Actor {
     }
   }
 
-  /** Hook context (player is the live one; talk() only runs when near). */
+  /** Hook context (player is the talking knight; talk() only runs when near). */
   private ctx(): NpcCtx | null {
-    const player = this.world.first(Player);
-    return player ? { game: this.game, player, npc: this } : null;
+    const player = nearestPlayer(this.world, this.cx, this.cy);
+    return player?.isLocal ? { game: this.game, player, npc: this } : null;
   }
 
   private talk(): void {
     if (this.type === 'spawner') {
-      const p = this.world.first(Player);
+      const p = this.ctx()?.player;
       if (p) this.game.scenes.push(new SpawnerScene(this.game, p, this.collision));
       return;
     }
@@ -126,7 +128,7 @@ export class Npc extends Actor {
     const ctx = this.ctx();
     if (ctx) this.def.onChoice?.(choice, ctx);
     if (this.def.shop && choice.action === 'shop') {
-      const p = this.world.first(Player);
+      const p = this.ctx()?.player;
       if (p) this.game.scenes.push(new ShopScene(this.game, p, this.def.shop));
     }
   }

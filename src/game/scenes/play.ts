@@ -32,6 +32,10 @@ import { triggerActions } from './play/trigger-actions';
 import { Hud, type GateMarker } from './play/hud';
 import { TitleScreen, renderGameOver } from './play/screens';
 import { CHEATS, cheatFor } from './play/cheats';
+import { CoopHost } from '../net/host';
+import { CoopGuestScene } from '../net/guest';
+import { CoopScene } from './coop';
+import type { PeerLink } from '@engine/index';
 
 /** Fallback music per room (rooms can override via props.music). */
 const ROOM_MUSIC: Record<string, string> = {
@@ -73,6 +77,8 @@ export class PlayScene implements Scene {
   private phase: Phase = 'title';
   private player: Player | null = null;
   private transition: Transition | null = null;
+  /** Live co-op hosting session (guest knight + snapshot stream). */
+  private coop: CoopHost | null = null;
 
   /** Story flags ('bossDefeated', ...). Serialized into saves. */
   private flags = new Set<string>();
@@ -129,6 +135,13 @@ export class PlayScene implements Scene {
         game.sfx.play('menuSelect');
         game.scenes.push(new SaveSlotsScene(game, 'load', { loadFrom: (slot) => this.loadSlot(slot) }));
       },
+      coop: () => {
+        game.sfx.play('menuSelect');
+        game.scenes.push(new CoopScene(game, {
+          hostStart: (link) => this.startCoopHost(link),
+          guestStart: (link) => this.startCoopGuest(link),
+        }));
+      },
       testRoom: () => this.startTestRoom(),
       options: () => {
         game.sfx.play('menuSelect');
@@ -163,7 +176,9 @@ export class PlayScene implements Scene {
       const pts = info.target.def.score * mult;
       this.score += pts;
       game.feel.text(info.target.cx, info.target.y - 8, pts, COLORS.gold);
-      this.player?.gainXp(info.target.def.xp ?? Math.round(info.target.def.score / 20));
+      const xp = info.target.def.xp ?? Math.round(info.target.def.score / 20);
+      this.player?.gainXp(xp);
+      this.coop?.guest?.gainXp(xp); // both knights grow in co-op
       this.rollDrops(info.target);
       // Quest progress: any kill may advance an accepted quest.
       for (const q of this.player?.quests.onKill(info.target.type) ?? []) {
@@ -226,6 +241,8 @@ export class PlayScene implements Scene {
   exit(): void {
     for (const d of this.disposers) d();
     this.disposers.length = 0;
+    this.coop?.close();
+    this.coop = null;
   }
 
   private startRoomId(): string {
@@ -244,12 +261,32 @@ export class PlayScene implements Scene {
 
   /* ---------------- runs & rooms ---------------- */
 
+  /** Begin hosting: the run starts from the newest save with the guest's
+   * knight alongside — a real Player fed by the remote action stream. */
+  startCoopHost(link: PeerLink): void {
+    this.coop = new CoopHost(this.game, link);
+    this.startRun(newestSave());
+  }
+
+  /** Become the guest: swap to the snapshot-rendering scene entirely. */
+  startCoopGuest(link: PeerLink): void {
+    const g = this.game;
+    const guest = new CoopGuestScene(g, link);
+    guest.onLeave = () => g.scenes.switch(new PlayScene(g));
+    g.scenes.switch(guest);
+  }
+
   private startRun(save: SaveData | null): void {
     const g = this.game;
     g.world.clear();
     g.feel.reset();
     this.player = new Player(g, this.tilemap, 0, 0); // positioned by setRoom
     g.world.spawn(this.player);
+    if (this.coop) {
+      const knight = new Player(g, this.tilemap, 0, 0); // positioned by setRoom
+      this.coop.adopt(knight);
+      g.world.spawn(knight);
+    }
     if (save) {
       restorePlayer(this.player, save.player);
       this.flags = new Set(save.flags);
@@ -307,7 +344,7 @@ export class PlayScene implements Scene {
     // a lip of ground, not a wall of underground rock.
     g.camera.setBounds(0, -30, this.tilemap.worldW, this.tilemap.worldH - 16);
 
-    g.world.retain((e) => e === this.player);
+    g.world.retain((e) => e === this.player || e === this.coop?.guest);
     g.feel.particles.clear();
     g.feel.floaters.clear();
 
@@ -332,6 +369,14 @@ export class PlayScene implements Scene {
       this.player.y = aimY;
       this.player.vx = 0;
       this.player.vy = 0;
+    }
+    const knight = this.coop?.guest;
+    if (knight) {
+      knight.collision = this.tilemap;
+      knight.x = aimX + 14; // beside the host, not inside them
+      knight.y = aimY;
+      knight.vx = 0;
+      knight.vy = 0;
     }
     g.camera.x = clamp(aimX - g.camera.viewW / 2, 0, Math.max(0, this.tilemap.worldW - g.camera.viewW));
     g.camera.y = clamp(aimY - g.camera.viewH * 0.62, -30, Math.max(-30, this.tilemap.worldH - g.camera.viewH));
@@ -514,7 +559,12 @@ export class PlayScene implements Scene {
       return;
     }
 
+    this.coop?.applyInput(); // remote edges land before the world steps
     g.world.update(dt);
+    if (this.coop) {
+      this.coop.step({ roomId: this.roomId, score: this.score, banner: this.bannerT > 0 ? this.banner : null });
+      if (this.coop.dropped) this.endCoop();
+    }
     if (this.phase === 'play') this.waves.update(dt);
     this.comboT = Math.max(0, this.comboT - dt);
     if (this.comboT <= 0) this.combo = 0;
@@ -531,12 +581,27 @@ export class PlayScene implements Scene {
       // Camera leads the player: facing offset + velocity lookahead,
       // and (with the zoomed-in view) follows vertically too, biased so
       // more of the world above the knight is visible than below.
+      // With a co-op guest alive, aim at the midpoint of the two knights.
       const p = this.player;
+      const knight = this.coop?.guest;
       const cam = g.camera;
-      const tx = p.cx - cam.viewW / 2 + p.facing * 18 + p.vx * 0.1;
-      const ty = p.cy - cam.viewH * 0.62 + p.vy * 0.05;
-      cam.follow(tx, ty, dt);
+      let ax = p.cx + p.facing * 18 + p.vx * 0.1;
+      let ay = p.cy + p.vy * 0.05;
+      if (knight && knight.hp > 0) {
+        ax = (p.cx + knight.cx) / 2;
+        ay = (p.cy + knight.cy) / 2;
+      }
+      cam.follow(ax - cam.viewW / 2, ay - cam.viewH * 0.62, dt);
     }
+  }
+
+  /** Tear down a co-op session (guest left or link died). */
+  private endCoop(): void {
+    if (!this.coop) return;
+    if (this.coop.guest) this.coop.guest.dead = true;
+    this.coop.close();
+    this.coop = null;
+    this.showBanner('GUEST LEFT', 1.5);
   }
 
   frame(realDt: number): void {

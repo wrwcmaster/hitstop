@@ -107,3 +107,5 @@ export {
 export { Minimap, type MinimapMarker } from './ui/minimap';
 
 export { DebugOverlay } from './debug/overlay';
+
+export { PeerLink, encodeSignal, decodeSignal, type PeerRole } from './net/peer';

@@ -14,7 +14,7 @@ import { TEXEL, blit } from '../content/sprites';
 import type { ItemCtx } from '../content/items';
 import type { ActionGame } from '../defs';
 import { PromptScene } from '../scenes/prompt';
-import { Player } from './player';
+import { Player, nearestPlayer } from './player';
 
 /**
  * A dropped item in the world: pops out with a hop, settles and bobs,
@@ -64,7 +64,7 @@ export class Pickup extends Entity implements Body {
       return;
     }
 
-    const player = this.world.first(Player);
+    const player = nearestPlayer(this.world, this.x + this.w / 2, this.y + this.h / 2);
 
     // Magnet: after the initial hop, drift toward a nearby living player.
     if (player && player.hp > 0 && this.age > 0.4) {
@@ -115,7 +115,9 @@ export class Pickup extends Entity implements Body {
       this.game.feel.text(player.cx, this.y - 6, def.name, COLORS.gold);
       // Equipment offers to go on right away, so you're not menu-diving
       // mid-run (and it's how you re-equip gear a Devourer coughed up).
-      if (def.kind === 'equipment' && def.slot && !player.equipment.isEquipped(this.itemId)) {
+      // Only for the local knight — a net guest's pickup can't open a
+      // prompt on the host's screen; their gear just goes in the bag.
+      if (def.kind === 'equipment' && def.slot && player.isLocal && !player.equipment.isEquipped(this.itemId)) {
         this.game.scenes.push(
           new PromptScene(
             this.game,

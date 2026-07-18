@@ -56,7 +56,8 @@ npm run build:single   # everything → hitstop.html (also copies it to the repo
 
 ```
 src/engine/   core (loop/scenes/events), gfx, feel, audio, physics,
-              combat, FSM, input, items/stats, level, ui, debug
+              combat, FSM, input, items/stats, level, ui, debug,
+              net (PeerLink: WebRTC DataChannel + copy-paste signaling)
 src/game/
   defs.ts     actions, keymap/gamepad map, VIEW_W/H, ActionGame type
   main.ts     bootstrap: register content, bind touch buttons, start
@@ -68,7 +69,12 @@ src/game/
               factories: healer/forge/questGiver), Pickup
   scenes/     play.ts (orchestrator) + play/ modules, pause, options,
               shop, skilltree, prompt, spawner, background,
-              saveslots (multi-slot save/load), portal (destination menu)
+              saveslots (multi-slot save/load), portal (destination menu),
+              coop (P2P lobby: the copy-paste code exchange, DOM overlay)
+  net/        online co-op: protocol.ts (wire types), host.ts (CoopHost:
+              guest knight fed by a remote Input + 20Hz snapshots out),
+              guest.ts (CoopGuestScene: renders snapshots via puppet
+              actors — real render code, never simulated)
 tools/        level editor, sprite editor, sheet slicer (client-only)
 ```
 
@@ -146,6 +152,26 @@ Details and code samples: `docs/adding-content.md`. The short version —
 - **Sprite**: text-grid JSON in `content/sprites/` (author in the sprite
   editor; PNG art via the sheet slicer's "to sprite json"). Art is
   EPX-upscaled to 4× texel density; draw at `img.width / TEXEL`.
+
+## Online co-op (how it works, and its edges)
+
+Two players, one world, no server. The **host is authoritative**: the
+guest's knight is a real `Player` in the host's world driven by a
+remote-fed `Input` (`Player.source` — the game can't tell it from a
+local knight), and 20 Hz JSON snapshots go back over one WebRTC
+DataChannel (`engine/net/peer.ts`). Signaling is **manual**: the SDP
+offer/answer travel as compressed base64 codes the players copy-paste to
+each other (`scenes/coop.ts`) — no infrastructure, but peers behind
+strict NATs may fail (STUN only, no TURN). The guest
+(`net/guest.ts`) renders snapshots through **puppet actors** — real
+`Player`/`Monster`/`Pickup` instances that are positioned and posed
+(`fsm.set`) but never simulated, so poses, gear, trails, and the boss
+bar come from the same render code. Known v1 edges: guest inputs feel
+one RTT late (no prediction); dialogue/shops/pause are host-screen only
+(NPCs ignore non-`isLocal` knights); the guest knight is ephemeral (not
+saved); projectiles render as generic dots on the guest. When touching
+multiplayer-adjacent code, keep the single-player path byte-identical —
+`nearestPlayer()` and `isLocal` are the seams that keep both true.
 
 ## Verification playbook
 

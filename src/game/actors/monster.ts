@@ -8,7 +8,7 @@ import {
   type CollisionSource,
 } from '@engine/index';
 import type { ActionGame } from '../defs';
-import type { Player } from './player';
+import { nearestPlayer, type Player } from './player';
 
 export interface SwallowDef {
   status?: string;
@@ -109,9 +109,9 @@ export class Monster extends Actor {
     return this.flashT > 0 ? whiteOf(frame) : frame;
   }
 
-  /** The player actor, if alive (AI targeting helper). */
+  /** The nearest living player (AI targeting helper — co-op aware). */
   get player(): Actor | undefined {
-    return this.world.actors('player')[0];
+    return nearestPlayer(this.world, this.cx, this.cy) ?? undefined;
   }
 
   update(dt: number): void {
