@@ -12,6 +12,7 @@ import {
   TEXEL,
   blit,
 } from '../../content/sprites';
+import { quests } from '../../content/quests';
 import type { PlayHost } from './host';
 
 /** A keyed door in the current room, for the floating gate marker. */
@@ -83,6 +84,17 @@ export class Hud {
         g.fillStyle = s.def.color;
         g.fillRect(13, by + 6, Math.round(textWidth(s.def.name) * s.fraction), 1);
         by += 10;
+      }
+      // Active quests: name + progress, gold once ready to turn in.
+      for (const [qid, n] of p.quests.active) {
+        const q = quests.get(qid);
+        const ready = n >= q.kill.count;
+        drawText(
+          g,
+          `${q.name} ${Math.min(n, q.kill.count)}/${q.kill.count}${ready ? ' !' : ''}`,
+          6, by, ready ? COLORS.gold : COLORS.steel,
+        );
+        by += 8;
       }
       // Swallowed: the escape prompt IS the HUD priority.
       if (p.fsm.is('swallowed')) {

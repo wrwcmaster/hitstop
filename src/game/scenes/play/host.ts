@@ -14,6 +14,8 @@ export interface PlayHost {
   readonly player: Player | null;
   readonly tilemap: Tilemap;
   readonly room: RoomDef;
+  /** Id of the live room ('arena', 'town', ...). */
+  readonly roomId: string;
 
   /** Show the big center-screen banner ("WAVE 3", "THE GATE IS LOCKED"). */
   banner(text: string, seconds?: number): void;
@@ -21,4 +23,6 @@ export interface PlayHost {
   goToRoom(roomId: string, x?: number, y?: number): void;
   /** Push the dialogue scene for a conversation id. */
   openConversation(id: string): void;
+  /** Read a story flag ('bossDefeated', 'visited:town', ...). */
+  hasFlag(id: string): boolean;
 }

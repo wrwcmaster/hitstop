@@ -64,6 +64,71 @@ defineConversation('victory', {
   lines: [
     { speaker: 'VOICE', text: 'The crown rolls. The throne sits empty.' },
     { speaker: 'VOICE', text: 'You are what the arena remembers now, knight.' },
+    { speaker: 'VOICE', text: 'The seal on the east road is broken. The town is waking up.' },
+  ],
+});
+
+/* ---------------- the town ---------------- */
+
+defineConversation('town-entry', {
+  lines: [
+    { speaker: 'VOICE', text: 'The town. It slept while the king sat fat below.' },
+    { speaker: 'VOICE', text: 'A healer, a smith, an elder with troubles - and a portal, humming east.' },
+  ],
+});
+
+defineConversation('healer-greet', {
+  lines: [
+    { speaker: 'HEALER', text: 'Sit. You are more wound than knight.' },
+    { speaker: 'HEALER', text: 'Ten gold and I will close all of it.' },
+  ],
+  choices: [
+    { label: 'Heal me. (10g)' },
+    { label: 'Not now.' },
+  ],
+});
+
+defineConversation('blacksmith-greet', {
+  lines: [
+    { speaker: 'BLACKSMITH', text: 'That edge would bounce off warm bread.' },
+    { speaker: 'BLACKSMITH', text: 'Gold and fire fix most things. Swords especially.' },
+  ],
+  choices: [
+    { label: 'Upgrade my weapon.' },
+    { label: 'Maybe later.' },
+  ],
+});
+
+/* Elder quest states: offer → in progress → complete → done. The elder
+ * NPC picks the conversation by quest state (see actors/npc.ts greet). */
+defineConversation('elder-offer', {
+  lines: [
+    { speaker: 'ELDER', text: 'Knight. The king is dead, but his spawn still choke the arena.' },
+    { speaker: 'ELDER', text: 'Cull five slimes and the town will not forget it.' },
+  ],
+  choices: [
+    { label: 'I will help.' },
+    { label: 'Not my problem.' },
+  ],
+});
+
+defineConversation('elder-progress', {
+  lines: [
+    { speaker: 'ELDER', text: 'The slimes still squelch out there. The portal will take you to the arena.' },
+  ],
+});
+
+defineConversation('elder-complete', {
+  lines: [
+    { speaker: 'ELDER', text: 'The squelching has stopped. The town breathes easier.' },
+    { speaker: 'ELDER', text: 'Take this - and our thanks.' },
+  ],
+  choices: [{ label: 'Claim reward.' }],
+});
+
+defineConversation('elder-done', {
+  lines: [
+    { speaker: 'ELDER', text: 'Rest, knight. The town owes you its quiet.' },
   ],
 });
 

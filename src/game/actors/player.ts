@@ -40,6 +40,7 @@ import { drawHeldWeapon, drawWeaponTrail } from '../content/weapon-visuals';
 import { DEFAULT_SKILL_LOADOUT, type SkillCtx } from '../content/skills';
 import { Monster } from './monster';
 import { PlayerCapabilities } from './player-capabilities';
+import { QuestLog } from '../content/quests';
 import type { ActionGame } from '../defs';
 
 /** Movement + combat tuning in one place. Tweak freely. */
@@ -106,6 +107,10 @@ export class Player extends Actor {
   );
   tree = new SkillTree<TreeCtx>({ stats: this.stats, syncStats: () => this.syncStats() });
   capabilities = new PlayerCapabilities();
+  /** Accepted/completed quests (persisted; see content/quests.ts). */
+  quests = new QuestLog();
+  /** Blacksmith weapon upgrades: each level adds +1 attack (persisted). */
+  forgeLevel = 0;
   skills = new SkillBook<SkillCtx>(
     {
       canAfford: (cost) => this.mp >= cost,
@@ -178,6 +183,12 @@ export class Player extends Actor {
     this.hp = this.maxHp;
     this.mp = this.maxMp;
     this.fsm = new FSM<Player>(this, PLAYER_STATES, 'move');
+  }
+
+  /** Project the forge upgrades into stats (call after forgeLevel changes). */
+  applyForge(): void {
+    this.stats.setSource('forge', { add: { attack: this.forgeLevel } });
+    this.syncStats();
   }
 
   /** Pull derived values from stats (call after equipment changes). */

@@ -2,7 +2,7 @@ import { drawText, Menu, type Input } from '@engine/index';
 import { VERSION, COARSE_POINTER, menuLine, type ActionGame, type Action } from '../../defs';
 import { COLORS } from '../../content/palette';
 import { KNIGHT_IDLE_SPRITE, TEXEL } from '../../content/sprites';
-import { saveStore } from '../../save';
+import { saveStore, newestSave } from '../../save';
 
 /**
  * The title screen: the menu plus its full-screen render. The scene tells
@@ -17,6 +17,7 @@ export class TitleScreen {
     actions: {
       newGame(): void;
       continueRun(): void;
+      loadGame(): void;
       testRoom(): void;
       options(): void;
     },
@@ -26,8 +27,13 @@ export class TitleScreen {
         { label: 'NEW GAME', onSelect: actions.newGame },
         {
           label: 'CONTINUE',
-          disabled: () => !saveStore.exists(),
+          disabled: () => newestSave() === null,
           onSelect: actions.continueRun,
+        },
+        {
+          label: 'LOAD GAME',
+          disabled: () => newestSave() === null,
+          onSelect: actions.loadGame,
         },
         { label: 'TEST ROOM', onSelect: actions.testRoom },
         { label: 'OPTIONS', onSelect: actions.options },

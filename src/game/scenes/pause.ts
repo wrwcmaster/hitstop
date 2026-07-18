@@ -11,6 +11,7 @@ import type { ItemCtx } from '../content/items';
 import { COLORS } from '../content/palette';
 import { SkillTreeScene } from './skilltree';
 import { OptionsScene } from './options';
+import { SaveSlotsScene } from './saveslots';
 
 /**
  * The system menu: an overlay scene (the frozen world stays visible
@@ -26,7 +27,13 @@ export class PauseScene implements Scene {
   constructor(
     private game: ActionGame,
     private player: Player,
-    private hooks: { onRestart(): void },
+    private hooks: {
+      onRestart(): void;
+      /** Persist the current run into a manual slot (1-based). */
+      onSaveSlot?(slot: number): void;
+      /** Resume a run from a slot (0 = autosave). */
+      onLoadSlot?(slot: number): void;
+    },
   ) {
     this.mainMenu = new Menu<Action>(
       [
@@ -38,6 +45,27 @@ export class PauseScene implements Scene {
           onSelect: () => {
             this.game.sfx.play('menuSelect');
             this.game.scenes.push(new SkillTreeScene(this.game, this.player));
+          },
+        },
+        {
+          label: 'SAVE GAME',
+          onSelect: () => {
+            this.game.sfx.play('menuSelect');
+            this.game.scenes.push(new SaveSlotsScene(this.game, 'save', {
+              saveTo: (slot) => this.hooks.onSaveSlot?.(slot),
+            }));
+          },
+        },
+        {
+          label: 'LOAD GAME',
+          onSelect: () => {
+            this.game.sfx.play('menuSelect');
+            this.game.scenes.push(new SaveSlotsScene(this.game, 'load', {
+              loadFrom: (slot) => {
+                this.close();
+                this.hooks.onLoadSlot?.(slot);
+              },
+            }));
           },
         },
         {
