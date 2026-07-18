@@ -87,6 +87,9 @@ export class PlayScene implements Scene {
   private flags = new Set<string>();
   /** Fired once-trigger indices per room. Serialized into saves. */
   private firedTriggers: Record<string, number[]> = {};
+  /** A checkpoint's wave, consumed by the next setRoom so a saved gauntlet
+   * resumes where it left off rather than restarting at wave 1. */
+  private pendingWave = 0;
 
   private score = 0;
   private best = 0;
@@ -224,6 +227,12 @@ export class PlayScene implements Scene {
       this.combo = 0;
       this.comboT = 0;
     }));
+    on(game.events.on('waveStart', ({ wave }) => {
+      // Checkpoint each new wave so a death (or reload) resumes the wave
+      // you were fighting, not the room's first. Wave 1 coincides with the
+      // room-entry autosave, so only the advances need their own.
+      if (wave > 1) this.autosave();
+    }));
     on(game.events.on('waveClear', () => {
       // SECOND WIND (skill tree): every cleared wave knits a wound.
       const p = this.player;
@@ -327,6 +336,7 @@ export class PlayScene implements Scene {
     g.world.spawn(this.player);
     if (this.coop) {
       this.player.name = displayName('host'); // tags live while co-op does
+      this.coop.setHostName(this.player.name); // so a same-named guest differs
       const knight = new Player(g, this.tilemap, 0, 0); // positioned by setRoom
       this.coop.adopt(knight);
       g.world.spawn(knight);
@@ -341,9 +351,11 @@ export class PlayScene implements Scene {
       }
       this.firedTriggers = { ...save.firedTriggers };
       this.best = Math.max(this.best, save.best);
+      this.pendingWave = save.wave ?? 0; // resume a saved gauntlet mid-run
     } else {
       this.flags.clear();
       this.firedTriggers = {};
+      this.pendingWave = 0;
     }
     this.score = 0;
     this.combo = 0;
@@ -444,7 +456,8 @@ export class PlayScene implements Scene {
     this.updateMusic();
 
     if (this.phase === 'play') {
-      if (this.waves.active) this.waves.begin();
+      if (this.waves.active) this.waves.begin(this.pendingWave || 1);
+      this.pendingWave = 0; // consumed: later room entries start fresh
       this.autosave();
       if (id !== START_ROOM || this.bannerT <= 0) {
         this.showBanner(t(this.room.name.toUpperCase()), 1.2);
@@ -497,6 +510,7 @@ export class PlayScene implements Scene {
       savedAt: Date.now(),
       flags: [...this.flags],
       firedTriggers: this.firedTriggers,
+      wave: this.waves.active ? this.waves.wave : undefined,
       player: snapshotPlayer(this.player),
     };
   }

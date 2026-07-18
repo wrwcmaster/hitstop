@@ -65,6 +65,9 @@ src/game/
   main.ts     bootstrap: register content, bind touch buttons, start
   content/    the game's data: items, tiles, skills, statuses, music,
               sfx, conversations, shops, rooms/*.json, sprites/*.json,
+              weapons.ts + weapon-visuals.ts (melee + ranged types),
+              ballistics.ts (shared arrow/bullet shots), classes.ts
+              (knight/mage/tidecaller), skilltree.ts (per-class nodes),
               waves.ts (wave tables), gear-visuals.ts (equipment layers),
               quests.ts (quest defs + QuestLog), portals.ts (portal network)
   actors/     Player, Monster (+ enemies/boss defs), Npc (+ npc-roles
@@ -189,6 +192,23 @@ Details and code samples: `docs/adding-content.md`. The short version —
   flat-tree saves migrate via `classOfNode`. Tree nodes themselves:
   `defineTreeNode` in `content/skilltree.ts`, then add the id to a
   class's grid (keep `requires` within that grid).
+- **Parry / deflection**: built on three generic `Actor` seams (see
+  `combat`/`world` in architecture.md) — the `parrying` flag (`Combat.hit`
+  routes to `onParried`, no damage), `hitstun` (Monster AI suspended while
+  > 0 → a staggered attacker), and `Projectile.reflect` + `Strike.retarget`
+  (turn a shot on the other team). The knight's parry is a `parry` FSM
+  state in `player.ts`: a guard window that deflects blows, reflects
+  player-bound shots in a front arc, and opens a riposte (empowered next
+  swing). Bound to `parry` (keyboard F/H, gamepad RT, touch shield; on
+  `NET_ACTIONS`). To give an enemy a parry, set its `parrying` flag during
+  a telegraphed beat and implement `onParried`.
+- **Boss**: a monster with `boss: true`, a `displayName` (HP bar), an
+  engine `FSM`, and optional `epilogue: '<conversation>'` (after-kill
+  dialogue; default `'victory'`). Felling one sets `slain:<type>` so each
+  boss stays down on its own. Two references in `actors/boss.ts`: the
+  Slime King (scaled blob) and the human **Duelist** (own sprite +
+  saber/pistol overlays + afterimage dashes). New boss art: a SpriteFile
+  JSON in `content/sprites/`, loaded in `content/sprites.ts`.
 - **Quest**: `defineQuest` in `content/quests.ts` (kill-N-of-a-monster
   goal + reward). The player's `QuestLog` is the runtime, fed by
   PlayScene's `kill` event, persisted in saves. A quest-giver NPC is one

@@ -24,7 +24,7 @@ npm run agent-play   # HTTP bridge for turn-based (LLM-agent) play
 
 No setup at all? Open **[`hitstop.html`](hitstop.html)** — the whole game compiled into a single self-contained file (committed for convenience; regenerate with `npm run build:single` after changes).
 
-In-game: arrows/WASD move, Space jumps, `Z`/`J` attack (**contextual**: attack in the air for an aerial swipe, hold ↓ in the air to plunge — a hit **pogos** you back up, hold ↑ for an anti-air upper, or attack mid-dash for a thrusting dash attack), `X`/`K` dash, `C`/`L` fireball, `V` nova, `E`/`F` talk to NPCs, `Esc` opens the system menu (inventory, skill tree, options — including **key rebinding** under OPTIONS → CONTROLS), `` ` `` (backquote) toggles the debug overlay. **Gamepads work out of the box** (standard layout: A jump, X attack, B dash, Y interact, LB/RB skills, Start menu).
+In-game: arrows/WASD move, Space jumps, `Z`/`J` attack (**contextual**: attack in the air for an aerial swipe, hold ↓ in the air to plunge — a hit **pogos** you back up, hold ↑ for an anti-air upper, or attack mid-dash for a thrusting dash attack), `X`/`K` dash, `F`/`H` **parry** (deflect a blow, reflect a shot, open a riposte), `C`/`L` fireball, `V` nova, `E` talk to NPCs, `Esc` opens the system menu (inventory, skill tree, options — including **key rebinding** under OPTIONS → CONTROLS), `` ` `` (backquote) toggles the debug overlay. **Gamepads work out of the box** (standard layout: A jump, X attack, B dash, Y interact, LB/RB skills, RT parry, Start menu).
 
 Beat the **Slime King** and the road to **Haven** opens — a town with a healer, a quest-giving elder, and a blacksmith who forges your weapon sharper. A **portal** in town (and at every key location) warps you between anywhere you've visited, so you can always get home. Save into any of three manual slots (or the autosave) from the title or the pause menu.
 
@@ -52,8 +52,8 @@ Beat the **Slime King** and the road to **Haven** opens — a town with a healer
 
 | Path | What it is |
 | --- | --- |
-| `src/engine/` | The engine: loop, events, input, graphics, **feel**, audio, physics, world, combat + projectiles, FSM, levels + triggers, items/equipment/stats, skills, UI (menus, dialogue, minimap). No game knowledge. |
-| `src/game/` | The game built on it: player, enemies, weapons, spells, drops, conversations, town + NPCs (healer, quest elder, blacksmith), quests, a portal network, multi-slot saves, pause menu, HUD — mostly *content definitions*, not engine plumbing. |
+| `src/engine/` | The engine: loop, events, input, graphics, **feel**, audio, physics, world, combat (strikes + parry + ballistic projectiles), FSM, levels + triggers (solid/water/hazard tiles), items/equipment/stats, skills, progression + skill trees, UI (menus, dialogue, minimap), net (P2P co-op). No game knowledge. |
+| `src/game/` | The game built on it: player (with classes, contextual attacks, parry/riposte, swimming), melee + ranged weapons, spells, enemies + shooters, two bosses (Slime King, Duelist), drops, conversations, town + NPCs (healer, quest elder, blacksmith), quests, puzzle gizmos, a portal network, multi-slot saves, pause menu, HUD — mostly *content definitions*, not engine plumbing. |
 | `tools/` | Browser-based design tools: level editor and sprite editor, sharing the game's registries ([guide](docs/design-tools.md)); and [agent-play](tools/agent-play/README.md), the record/replay + turn-based-agent harness. |
 | `docs/` | Architecture, game-feel guide, content cookbook, design-tools guide, and a game-dev primer for software engineers. |
 
