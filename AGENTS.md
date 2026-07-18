@@ -64,7 +64,8 @@ src/game/
               sfx, conversations, shops, rooms/*.json, sprites/*.json,
               waves.ts (wave tables), gear-visuals.ts (equipment layers),
               quests.ts (quest defs + QuestLog), portals.ts (portal network)
-  actors/     Player, Monster (+ enemies/boss defs), Npc, Pickup
+  actors/     Player, Monster (+ enemies/boss defs), Npc (+ npc-roles
+              factories: healer/forge/questGiver), Pickup
   scenes/     play.ts (orchestrator) + play/ modules, pause, options,
               shop, skilltree, prompt, spawner, background,
               saveslots (multi-slot save/load), portal (destination menu)
@@ -123,17 +124,21 @@ Details and code samples: `docs/adding-content.md`. The short version —
   as a story lock via `host.hasFlag`.
 - **Quest**: `defineQuest` in `content/quests.ts` (kill-N-of-a-monster
   goal + reward). The player's `QuestLog` is the runtime, fed by
-  PlayScene's `kill` event, persisted in saves; the elder NPC's dynamic
-  `greet`/`onChoice` drive accept → progress → turn-in with zero combat
-  code. Any monster type is a valid target.
+  PlayScene's `kill` event, persisted in saves. A quest-giver NPC is one
+  `questGiver({ quest, stages })` call (see below) — accept → progress →
+  turn-in with zero combat code. Any monster type is a valid target.
 - **Portal destination**: `definePortal` in `content/portals.ts` (target
   room + arrival coords + label). Drop a `portal` trigger and a gate
   visual in that room's JSON; the menu lists every destination the player
   has visited, so town is always reachable once seen.
 - **NPC behaviour**: `defineNpc` in `actors/npc.ts`. `greet` can be a
   `(ctx) => conversationId` for state-driven dialogue; `onChoice(choice,
-  ctx)` reacts to a picked conversation option (heal, forge, quest
-  accept/claim) before any attached shop opens.
+  ctx)` reacts to the picked choice's **`action`** id — never its display
+  `label` — so writers reword prose freely. Prefer a reusable *role* from
+  `actors/npc-roles.ts` (`healer`, `forge`, `questGiver`) over a bespoke
+  `onChoice`: each returns an `NpcDef` from data (sprite + conversation +
+  a cost/quest id), so a new service NPC is one call. A choice opens an
+  attached `shop` when its `action` is `'shop'`.
 - **Visible gear slot**: equipment JSON sheet on the knight's frame grid
   (transparent except the gear) + `defineGearVisual(slot, ...)` in
   `content/gear-visuals.ts`. No player-render changes.

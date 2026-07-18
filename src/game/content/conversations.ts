@@ -46,7 +46,7 @@ defineConversation('merchant-greet', {
     { speaker: 'MERCHANT', text: 'Coins for goods. Goods for surviving. Everyone wins.' },
   ],
   choices: [
-    { label: 'Show me your wares.' },
+    { label: 'Show me your wares.', action: 'shop' },
     { label: 'Where am I?', then: 'merchant-lore' },
     { label: 'Just passing.' },
   ],
@@ -83,7 +83,7 @@ defineConversation('healer-greet', {
     { speaker: 'HEALER', text: 'Ten gold and I will close all of it.' },
   ],
   choices: [
-    { label: 'Heal me. (10g)' },
+    { label: 'Heal me. (10g)', action: 'heal' },
     { label: 'Not now.' },
   ],
 });
@@ -94,20 +94,21 @@ defineConversation('blacksmith-greet', {
     { speaker: 'BLACKSMITH', text: 'Gold and fire fix most things. Swords especially.' },
   ],
   choices: [
-    { label: 'Upgrade my weapon.' },
+    { label: 'Upgrade my weapon.', action: 'forge' },
     { label: 'Maybe later.' },
   ],
 });
 
-/* Elder quest states: offer → in progress → complete → done. The elder
- * NPC picks the conversation by quest state (see actors/npc.ts greet). */
+/* Elder quest states: offer → in progress → complete → done. The
+ * `questGiver` role picks the conversation by quest state, and reacts to
+ * the choices' `action` ids (see actors/npc-roles.ts). */
 defineConversation('elder-offer', {
   lines: [
     { speaker: 'ELDER', text: 'Knight. The king is dead, but his spawn still choke the arena.' },
     { speaker: 'ELDER', text: 'Cull five slimes and the town will not forget it.' },
   ],
   choices: [
-    { label: 'I will help.' },
+    { label: 'I will help.', action: 'quest:accept' },
     { label: 'Not my problem.' },
   ],
 });
@@ -123,7 +124,7 @@ defineConversation('elder-complete', {
     { speaker: 'ELDER', text: 'The squelching has stopped. The town breathes easier.' },
     { speaker: 'ELDER', text: 'Take this - and our thanks.' },
   ],
-  choices: [{ label: 'Claim reward.' }],
+  choices: [{ label: 'Claim reward.', action: 'quest:claim' }],
 });
 
 defineConversation('elder-done', {

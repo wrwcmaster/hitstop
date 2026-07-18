@@ -6,12 +6,18 @@ import { Registry } from '@engine/index';
  * saves). Kill-counting is fed by PlayScene's kill listener, so any
  * monster type can be a target with zero new code.
  */
+/** What a quest pays out on turn-in. */
+export interface QuestReward {
+  gold?: number;
+  items?: string[];
+}
+
 export interface QuestDef {
   name: string;
   desc: string;
   /** Kill-N-of-a-monster goal (the only goal kind so far). */
   kill: { type: string; count: number };
-  reward: { gold?: number; items?: string[] };
+  reward: QuestReward;
 }
 
 export const quests = new Registry<QuestDef>('quest');
