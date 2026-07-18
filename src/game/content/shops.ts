@@ -14,7 +14,9 @@ shops.register('merchant', {
     { item: 'potion', price: 15 },
     { item: 'haste-draught', price: 20 },
     { item: 'iron-helmet', price: 40 },
+    { item: 'hunting-bow', price: 50 },
     { item: 'great-sword', price: 60 },
+    { item: 'flintlock', price: 75 },
     { item: 'steel-armor', price: 80 },
   ],
 });

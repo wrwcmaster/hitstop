@@ -1,5 +1,6 @@
-import { rand, sign, tintOf, itemDef } from '@engine/index';
+import { rand, sign, tintOf, itemDef, ballisticVelocity, ballisticLob } from '@engine/index';
 import { defineMonster, Monster } from './monster';
+import { shootArrow, shootBullet, muzzleFlash, ARROW_GRAVITY, BULLET_GRAVITY } from '../content/ballistics';
 import { SLIME1, SLIME2, BAT1, BAT2, PIKE1, PIKE2, CHEST, TEXEL, blit, slimeSprite, batSprite, pikeSprite, chestSprite } from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { Player } from './player';
@@ -344,6 +345,178 @@ defineMonster('chest', {
   ],
   draw(g, m) {
     blit(g, m.img(CHEST), m.x - chestSprite.hitbox.x, m.y - chestSprite.hitbox.y);
+  },
+});
+
+/* ---- the ballistic shooters ---- */
+
+const CLOAK = '#3f5e3a';
+const CLOAK_DARK = '#2a4027';
+const WOOD = '#8a6b3f';
+
+/**
+ * The archer: keeps its distance and lobs real ballistic arrows — the
+ * same solver-aimed, gravity-arced shots the player's bow fires, aimed
+ * with a touch of lead on a moving knight. The draw-back is the
+ * telegraph: when the bow comes up, move.
+ */
+defineMonster('archer', {
+  hp: 3, damage: 1, w: 12, h: 17, score: 350,
+  colors: [CLOAK, CLOAK_DARK, WOOD],
+  drops: [
+    { id: 'coin', chance: 0.5 },
+    { id: 'hunting-bow', chance: 0.25 }, // skipped by PlayScene once owned
+  ],
+  init(m) {
+    m.state.cd = rand(0.8, 1.8);
+    m.state.aim = 0;
+  },
+  update(m, dt) {
+    const p = m.player;
+    m.state.cd = Math.max(0, (m.state.cd as number) - dt);
+    if (!p || p.hp <= 0) return;
+    const dx = p.cx - m.cx;
+    const dy = p.cy - m.cy;
+    const dist = Math.hypot(dx, dy);
+    m.facing = (sign(dx) || 1) as 1 | -1;
+
+    if ((m.state.aim as number) > 0) {
+      // Drawn: hold still, then loose at where the knight will be.
+      m.vx *= 0.8;
+      m.state.aim = (m.state.aim as number) - dt;
+      if ((m.state.aim as number) <= 0) {
+        const lead = 0.22; // seconds of knight-motion to lead by
+        const tx = dx + p.vx * lead;
+        const v = ballisticVelocity(tx, dy, 320, ARROW_GRAVITY)
+          ?? ballisticLob(tx, dy, ARROW_GRAVITY, 70);
+        shootArrow(m.game, m.collision, {
+          x: m.cx + m.facing * 5, y: m.y + 4, vx: v.vx, vy: v.vy,
+          damage: 1, targets: 'player', attacker: m,
+        });
+        m.game.feel.sfx.play('bow');
+        m.state.cd = rand(2, 2.6);
+      }
+      return;
+    }
+    // Positioning: close to bow range, but never let the knight close in.
+    if (dist > 240) m.vx += m.facing * 90 * dt;
+    else if (dist < 90) m.vx -= m.facing * 110 * dt;
+    else m.vx *= 0.85;
+    m.vx = Math.max(-40, Math.min(40, m.vx));
+    if ((m.state.cd as number) <= 0 && dist < 300) m.state.aim = 0.45;
+  },
+  draw(g, m) {
+    const f = m.facing;
+    const x = Math.round(m.x);
+    const y = Math.round(m.y);
+    const flash = m.flashT > 0;
+    const cloak = flash ? '#ffffff' : CLOAK;
+    const dark = flash ? '#ffffff' : CLOAK_DARK;
+    // Cloak: a tapering hooded figure, swaying slightly.
+    const sway = Math.sin(m.animT * 3) * 0.5;
+    g.fillStyle = dark;
+    g.fillRect(x + 1, y + 6, 10, 11); // robe
+    g.fillStyle = cloak;
+    g.fillRect(x + 2, y + 2, 8, 6); // hood
+    g.fillRect(x + 3 + sway, y + 8, 7, 8); // chest wrap
+    g.fillStyle = '#0e0e16';
+    g.fillRect(x + (f === 1 ? 6 : 2), y + 4, 4, 2); // hood shadow (eyes)
+    // The bow, held forward; drawn back while aiming.
+    const aiming = (m.state.aim as number) > 0;
+    const bx = x + (f === 1 ? 11 : 1);
+    g.strokeStyle = flash ? '#ffffff' : WOOD;
+    g.lineWidth = 1.2;
+    g.beginPath();
+    g.arc(bx, y + 9, 5, -Math.PI / 2.4, Math.PI / 2.4);
+    g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,0.75)';
+    g.lineWidth = 0.6;
+    const t = 5 * Math.sin(Math.PI / 2.4);
+    const stringX = aiming ? bx - f * 3 : bx + 5 * Math.cos(Math.PI / 2.4) * (f === 1 ? 1 : -1);
+    g.beginPath();
+    g.moveTo(bx, y + 9 - t);
+    g.lineTo(stringX, y + 9);
+    g.lineTo(bx, y + 9 + t);
+    g.stroke();
+    if (aiming) {
+      g.fillStyle = flash ? '#ffffff' : COLORS.steel;
+      g.fillRect(Math.min(bx, stringX), y + 8.5, Math.abs(bx - stringX) + 3, 1); // nocked arrow
+    }
+  },
+});
+
+/**
+ * The gunner: a powder-keg imp with a long musket. Stands its ground,
+ * levels the barrel (the glint is the telegraph), and cracks off a
+ * fast, nearly-flat bullet. Long reload — punish it.
+ */
+defineMonster('gunner', {
+  hp: 4, damage: 1, w: 13, h: 14, score: 450,
+  colors: [COLORS.redDark, COLORS.steel, COLORS.gold],
+  drops: [
+    { id: 'coin', chance: 0.6 },
+    { id: 'flintlock', chance: 0.2 }, // skipped by PlayScene once owned
+  ],
+  init(m) {
+    m.state.cd = rand(1.2, 2.2);
+    m.state.aim = 0;
+  },
+  update(m, dt) {
+    const p = m.player;
+    m.state.cd = Math.max(0, (m.state.cd as number) - dt);
+    if (!p || p.hp <= 0) return;
+    const dx = p.cx - m.cx;
+    const dy = p.cy - m.cy;
+    m.facing = (sign(dx) || 1) as 1 | -1;
+    m.vx *= 0.8; // it holds its ground
+
+    if ((m.state.aim as number) > 0) {
+      m.state.aim = (m.state.aim as number) - dt;
+      if ((m.state.aim as number) <= 0) {
+        // Nearly flat: aim straight at the knight, tiny drop en route.
+        const v = ballisticVelocity(dx, dy, 620, BULLET_GRAVITY)
+          ?? { vx: m.facing * 620, vy: 0 };
+        shootBullet(m.game, m.collision, {
+          x: m.cx + m.facing * 8, y: m.cy - 1, vx: v.vx, vy: v.vy,
+          damage: 1, targets: 'player', attacker: m,
+        });
+        muzzleFlash(m.game, m.cx + m.facing * 9, m.cy - 1, m.facing, 'bullet');
+        m.vx -= m.facing * 60; // the kick
+        m.state.cd = rand(2.6, 3.4);
+      }
+      return;
+    }
+    // Only levels the musket at a target it can plausibly hit: near-flat.
+    if ((m.state.cd as number) <= 0 && Math.abs(dx) < 320 && Math.abs(dy) < 60) {
+      m.state.aim = 0.5;
+    }
+  },
+  draw(g, m) {
+    const f = m.facing;
+    const x = Math.round(m.x);
+    const y = Math.round(m.y);
+    const flash = m.flashT > 0;
+    // A squat red imp in a powder-stained coat.
+    g.fillStyle = flash ? '#ffffff' : COLORS.redDark;
+    g.fillRect(x + 2, y + 4, 9, 10); // body
+    g.fillStyle = flash ? '#ffffff' : COLORS.red;
+    g.fillRect(x + 3, y + 1, 7, 5); // head
+    g.fillStyle = '#0e0e16';
+    g.fillRect(x + (f === 1 ? 7 : 3), y + 3, 3, 1); // scowl
+    g.fillStyle = flash ? '#ffffff' : COLORS.gold;
+    g.fillRect(x + 3, y + 9, 7, 1); // bandolier
+    // The musket, leveled while aiming (the barrel glints).
+    const aiming = (m.state.aim as number) > 0;
+    const gy = y + (aiming ? 6 : 8);
+    g.fillStyle = flash ? '#ffffff' : COLORS.steel;
+    if (f === 1) g.fillRect(x + 8, gy, 11, 1.5);
+    else g.fillRect(x - 6, gy, 11, 1.5);
+    g.fillStyle = flash ? '#ffffff' : WOOD;
+    g.fillRect(x + (f === 1 ? 6 : 5), gy, 2, 2.5); // stock
+    if (aiming && Math.floor(m.animT * 12) % 2 === 0) {
+      g.fillStyle = COLORS.white;
+      g.fillRect(x + (f === 1 ? 18 : -6), gy - 0.5, 1.5, 1.5); // sight glint
+    }
   },
 });
 

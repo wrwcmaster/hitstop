@@ -12,6 +12,7 @@ export { JsonStore } from './core/storage';
 export { SceneManager, type Scene } from './core/scene';
 
 export * from './math/util';
+export * from './math/ballistics';
 export { type Rect, overlaps, containsPoint, centerX, centerY, expand } from './math/rect';
 
 export { Input, Buffer } from './input/input';

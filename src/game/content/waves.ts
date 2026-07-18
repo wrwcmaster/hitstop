@@ -36,6 +36,8 @@ defineWaveTable('default', {
       let type = 'slime';
       if (wave >= 2 && chance(0.4)) type = 'bat';
       if (wave >= 3 && chance(0.22)) type = 'brute';
+      if (wave >= 4 && chance(0.18)) type = 'archer';
+      if (wave >= 5 && chance(0.12)) type = 'gunner';
       out.push(type);
     }
     return out;
