@@ -1,5 +1,6 @@
 import { JsonStore, t, type ItemStack } from '@engine/index';
 import type { Player } from './actors/player';
+import { classOfNode, DEFAULT_CLASS } from './content/classes';
 
 /**
  * Save games. A save is a checkpoint at a room entrance: which room,
@@ -22,7 +23,12 @@ export interface SaveData {
     skills: string[];
     gold: number;
     progression: { xp: number; level: number; skillPoints: number };
+    /** Legacy: the active class's unlocked nodes (kept for old readers). */
     tree: string[];
+    /** Active class id (absent in old saves → knight). */
+    classId?: string;
+    /** Every class's unlocked nodes, active and dormant alike. */
+    trees?: Record<string, string[]>;
     /** Accepted quests (id, kills so far) + turned-in quest ids. */
     quests?: { active: [string, number][]; done: string[] };
     /** Blacksmith weapon upgrade level. */
@@ -71,9 +77,22 @@ export function snapshotPlayer(p: Player): SaveData['player'] {
     gold: p.gold,
     progression: p.progression.snapshot(),
     tree: p.tree.ownedIds(),
+    classId: p.classId,
+    trees: p.snapshotTrees(),
     quests: p.quests.snapshot(),
     forgeLevel: p.forgeLevel,
   };
+}
+
+/** Pre-class saves held one flat node list; deal it out to the class
+ * whose tree grid contains each node (unclaimed nodes are dropped). */
+function migrateFlatTree(flat: string[]): Record<string, string[]> {
+  const trees: Record<string, string[]> = {};
+  for (const id of flat) {
+    const cls = classOfNode(id);
+    if (cls) (trees[cls] ??= []).push(id);
+  }
+  return trees;
 }
 
 export function restorePlayer(p: Player, data: SaveData['player']): void {
@@ -81,11 +100,15 @@ export function restorePlayer(p: Player, data: SaveData['player']): void {
   for (const s of data.inventory) p.inventory.add(s.id, s.count);
   p.equipment.clear();
   for (const [, id] of data.equipped) p.equipment.equip(id);
-  for (const id of data.skills) p.skills.learn(id);
   p.gold = data.gold;
   p.progression.restore(data.progression);
-  // Re-applies stat mods and onUnlock effects (learned skills) without cost.
-  p.tree.restore(data.tree, { game: p.game, player: p });
+  // Class + trees: re-applies class mods, stat mods, and onUnlock
+  // effects (learned skills) without cost. Old flat saves migrate by
+  // sorting each node into the class whose grid contains it.
+  p.restoreClasses(data.classId ?? DEFAULT_CLASS, data.trees ?? migrateFlatTree(data.tree));
+  // After the class settles its loadout: any extra known skills
+  // (class change wipes and replays the book, so this must come last).
+  for (const id of data.skills) p.skills.learn(id);
   p.quests.restore(data.quests);
   p.forgeLevel = data.forgeLevel ?? 0;
   p.applyForge();

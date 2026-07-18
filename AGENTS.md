@@ -163,6 +163,19 @@ Details and code samples: `docs/adding-content.md`. The short version —
   definitions own both `run` and their optional `validateProps`. The
   `portal` trigger opens the portal menu; a `door` trigger reads `flag`
   as a story lock via `host.hasFlag`.
+- **Class**: `defineClass` in `content/classes.ts` — base stat mods
+  (source `class:<id>`), a skill loadout (which action slots exist,
+  what starts known), branch names, and a small tree grid of node ids.
+  Three shallow per-class trees replace one sprawling one; class change
+  is free from the SKILL TREE screen's class tabs and non-destructive:
+  `Player.setClass` parks the old class's nodes, strips every effect it
+  granted (tree/class stat sources, capabilities, skills), and replays
+  the new class's kit + remembered nodes — the same idempotent replay
+  saves use, so `onUnlock` hooks must stay replay-safe. Skill points are
+  one shared pool. Saves carry `classId` + per-class `trees`; old
+  flat-tree saves migrate via `classOfNode`. Tree nodes themselves:
+  `defineTreeNode` in `content/skilltree.ts`, then add the id to a
+  class's grid (keep `requires` within that grid).
 - **Quest**: `defineQuest` in `content/quests.ts` (kill-N-of-a-monster
   goal + reward). The player's `QuestLog` is the runtime, fed by
   PlayScene's `kill` event, persisted in saves. A quest-giver NPC is one
