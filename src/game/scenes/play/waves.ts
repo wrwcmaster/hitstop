@@ -52,8 +52,10 @@ export class WaveDirector {
     this.keyDropped = false;
   }
 
-  /** Arm the first wave (rooms that want waves, on entry). */
-  begin(): void {
+  /** Arm the waves on room entry. Pass `fromWave` to resume a checkpoint
+   * mid-gauntlet (the saved wave restarts fresh); omit for a new run. */
+  begin(fromWave = 1): void {
+    this.wave = Math.max(0, fromWave - 1);
     this.nextWave();
   }
 

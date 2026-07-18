@@ -32,6 +32,8 @@ export class CoopHost {
   private profile: SaveData['player'] | null = null;
   /** The guest's overhead tag (from their hello). */
   private guestName = 'PLAYER 2';
+  /** The host's own tag, so a same-named guest can be disambiguated. */
+  private hostName = 'PLAYER 1';
   /** Set when the guest vanishes; the scene shows a banner and detaches. */
   dropped = false;
 
@@ -43,7 +45,7 @@ export class CoopHost {
       const m = parseMsg(raw);
       if (m?.t === 'in') this.wanted = m.held.filter((a) => NET_ACTIONS.includes(a));
       if (m?.t === 'hello') {
-        this.guestName = cleanName(m.name ?? '') || 'PLAYER 2';
+        this.guestName = this.tag(m.name ?? '');
         if (this.guest) this.guest.name = this.guestName;
         // Their saved knight walks in: gear, gold, skills, quests intact.
         if (m.player) {
@@ -57,6 +59,21 @@ export class CoopHost {
       }
     };
     link.onClose = () => { this.dropped = true; };
+  }
+
+  /** Tell the host session its own knight's tag. Called before the guest
+   * is adopted so a guest that shares the name can be told apart on screen
+   * (both browsers can read the same device-level name — e.g. two tabs). */
+  setHostName(n: string): void {
+    this.hostName = n;
+    this.guestName = this.tag(this.guestName === 'PLAYER 2' ? '' : this.guestName);
+    if (this.guest) this.guest.name = this.guestName;
+  }
+
+  /** A guest tag that never collides with the host's: append " (2)". */
+  private tag(raw: string): string {
+    const n = cleanName(raw) || 'PLAYER 2';
+    return n === this.hostName ? `${n} (2)` : n;
   }
 
   /** Bind a freshly spawned knight to the remote stream. */

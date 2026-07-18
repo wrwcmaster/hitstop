@@ -17,6 +17,9 @@ export interface SaveData {
   flags: string[];
   /** Fired once-trigger indices per room id. */
   firedTriggers: Record<string, number[]>;
+  /** Current wave in a wave-combat room, so a checkpoint resumes the
+   * gauntlet instead of restarting at wave 1 (absent = no waves). */
+  wave?: number;
   player: {
     inventory: ItemStack[];
     equipped: [string, string][];

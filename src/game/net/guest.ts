@@ -123,9 +123,12 @@ export class CoopGuestScene implements Scene {
     const seen = new Set<number>();
     for (const k of s.knights) {
       // My own knight is predicted locally, not puppeted — remember the
-      // server's word for the correction pass in update().
+      // server's word for the correction pass in update(). Take the host's
+      // tag for it too: the host disambiguates a name that collides with
+      // its own, so this is what keeps two same-named knights distinct.
       if (k.id === s.you) {
         this.serverMe = k;
+        if (this.me && k.name) this.me.name = k.name;
         continue;
       }
       seen.add(k.id);
