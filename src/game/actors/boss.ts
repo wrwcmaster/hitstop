@@ -1,6 +1,6 @@
 import { FSM, rand, pick, frameAt, ballisticVelocity, t } from '@engine/index';
 import { defineMonster, Monster } from './monster';
-import { SLIME1, SLIME2, TEXEL, KNIGHT_ANIMS, baseKnight } from '../content/sprites';
+import { SLIME1, SLIME2, TEXEL, DUELIST_ANIMS, duelistSprite } from '../content/sprites';
 import { tintOf, whiteOf } from '@engine/index';
 import { COLORS } from '../content/palette';
 import { shootBullet, muzzleFlash, BULLET_GRAVITY } from '../content/ballistics';
@@ -605,8 +605,8 @@ function makeDuelistFsm(m: Monster): FSM<Monster> {
 defineMonster('duelist', {
   hp: 30,
   damage: 1,
-  w: baseKnight.hitbox.w,
-  h: baseKnight.hitbox.h,
+  w: duelistSprite.hitbox.w,
+  h: duelistSprite.hitbox.h,
   // A fencer wounds with steel and powder, not by being brushed against.
   noContactDamage: true,
   score: 8000,
@@ -643,65 +643,72 @@ defineMonster('duelist', {
   draw(g, m) {
     const fsm = m.state.fsm as FSM<Monster>;
     const enragedNow = m.state.wasEnraged as boolean;
-    const tint = enragedNow ? DUEL_TINT_ENRAGED : DUEL_TINT;
 
-    // Afterimages first, faded and untinted-flash-free.
-    const dw = baseKnight.w;
-    const dh = baseKnight.h;
+    const dw = duelistSprite.w;
+    const dh = duelistSprite.h;
+    const ox = duelistSprite.hitbox.x;
+    const oy = duelistSprite.hitbox.y;
+
+    // Afterimages first: her own run frame as fading crimson echoes.
     for (const gh of m.state.ghosts as Ghost[]) {
-      const set = gh.facing === 1 ? KNIGHT_ANIMS.right : KNIGHT_ANIMS.left;
-      const img = tintOf(frameAt(set, 'run', 0), tint, 0.85);
+      const set = gh.facing === 1 ? DUELIST_ANIMS.right : DUELIST_ANIMS.left;
+      const img = tintOf(frameAt(set, 'run', 0), DUEL_TINT_ENRAGED, 0.5);
       g.globalAlpha = Math.max(0, 0.4 - gh.t * 1.2);
-      g.drawImage(img, Math.round(gh.x - baseKnight.hitbox.x), Math.round(gh.y - baseKnight.hitbox.y), dw, dh);
+      g.drawImage(img, Math.round(gh.x - ox), Math.round(gh.y - oy), dw, dh);
     }
     g.globalAlpha = 1;
 
-    // The duelist herself: the knight's own frames, tinted crimson.
+    // The duelist herself, drawn from her own crimson-coat sprite.
     let anim = 'idle';
     if (!m.onGround) anim = 'air';
     else if (Math.abs(m.vx) > 12 || fsm.is('combo', 'blur', 'approach')) anim = 'run';
-    const set = m.facing === 1 ? KNIGHT_ANIMS.right : KNIGHT_ANIMS.left;
-    let img = tintOf(frameAt(set, anim, m.animT), tint, 0.55);
+    const set = m.facing === 1 ? DUELIST_ANIMS.right : DUELIST_ANIMS.left;
+    let img = frameAt(set, anim, m.animT);
     if (m.flashT > 0) img = whiteOf(img);
-    g.drawImage(img, Math.round(m.x - baseKnight.hitbox.x), Math.round(m.y - baseKnight.hitbox.y), dw, dh);
+    else if (enragedNow) img = tintOf(img, DUEL_TINT_ENRAGED, 0.25); // hotter crimson enraged
+    g.drawImage(img, Math.round(m.x - ox), Math.round(m.y - oy), dw, dh);
 
     const f = m.facing;
-    const hx = m.cx + f * 6;
-    const hy = m.y + 12;
-    // The saber: angle follows the current move.
-    let angle = -0.5; // resting guard
+    // The saber springs from her leading (sword) hand — anchored to the
+    // sprite's forward reach, ~2px above the coat's waist line.
+    const hx = m.cx + f * 5;
+    const hy = m.y + 9;
+    // Angle follows the current move.
+    let angle = -0.45; // resting guard, tip up
     if (fsm.is('combo')) {
       const struck = m.state.struck as boolean;
-      angle = struck ? 0.7 : -1.2; // wind-up high, follow-through low
-    } else if (fsm.is('blur')) angle = 0.1; // leveled through the dash
+      angle = struck ? 0.55 : -1.15; // wind-up high, follow-through low
+    } else if (fsm.is('blur')) angle = 0.05; // leveled through the dash
+    else if (fsm.is('air')) angle = -0.9;
     g.save();
     g.translate(hx, hy);
     g.rotate(f === 1 ? angle : Math.PI - angle);
+    // Gold hilt + guard, then a tapering steel blade.
+    g.fillStyle = m.flashT > 0 ? '#ffffff' : COLORS.gold;
+    g.fillRect(-1, -1, 2, 2); // pommel/guard, compact
     g.strokeStyle = m.flashT > 0 ? '#ffffff' : COLORS.steel;
-    g.lineWidth = 1.6;
+    g.lineWidth = 1.1;
     g.beginPath();
-    g.moveTo(0, 0);
-    g.lineTo(15, 0);
+    g.moveTo(1, 0);
+    g.lineTo(12, 0);
     g.stroke();
-    g.strokeStyle = 'rgba(255,255,255,0.85)';
-    g.lineWidth = 0.7;
+    g.strokeStyle = 'rgba(255,255,255,0.85)'; // fuller glint
+    g.lineWidth = 0.5;
     g.beginPath();
-    g.moveTo(3, -0.6);
-    g.lineTo(14, -0.6);
+    g.moveTo(3, -0.5);
+    g.lineTo(11, -0.5);
     g.stroke();
-    g.fillStyle = COLORS.gold;
-    g.fillRect(-1.5, -1.5, 3, 3); // guard
     g.restore();
 
-    // The pistol in the off hand — leveled and glinting while aiming.
+    // The flintlock in the off hand — leveled and glinting while aiming.
     const aiming = fsm.is('pistol', 'volley');
-    const gy = m.y + (aiming ? 14 : 18);
+    const gy = m.y + (aiming ? 11 : 14);
     g.fillStyle = m.flashT > 0 ? '#ffffff' : COLORS.steelDark;
-    if (f === 1) g.fillRect(m.cx + 2, gy, 8, 1.5);
-    else g.fillRect(m.cx - 10, gy, 8, 1.5);
+    if (f === 1) g.fillRect(m.cx + 2, gy, 7, 1.5);
+    else g.fillRect(m.cx - 9, gy, 7, 1.5);
     if (aiming && Math.floor(m.animT * 12) % 2 === 0) {
       g.fillStyle = COLORS.white;
-      g.fillRect(m.cx + (f === 1 ? 9.5 : -11), gy - 0.5, 1.5, 1.5);
+      g.fillRect(m.cx + (f === 1 ? 8.5 : -10), gy - 0.5, 1.5, 1.5);
     }
   },
 });

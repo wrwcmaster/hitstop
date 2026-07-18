@@ -295,7 +295,7 @@ reference puzzle room.
 
 ## A boss
 
-A boss is a monster with `boss: true`, a `displayName` (drives the HP bar), and an engine `FSM` in its state. Set `epilogue: '<conversation>'` for the after-kill dialogue (default `'victory'`); felling it sets a per-boss `slain:<type>` flag, so each boss stays down independently and never re-spawns for that save. Two live examples in `src/game/actors/boss.ts`: the **Slime King** (scaled blob, contact + spit) and the **Duelist**, a *human* boss that renders from the player's own `KNIGHT_ANIMS` frames tinted crimson, trails afterimage `ghosts` on her dashes, and mixes saber `strike`s with ballistic pistol shots. The Slime King in full:
+A boss is a monster with `boss: true`, a `displayName` (drives the HP bar), and an engine `FSM` in its state. Set `epilogue: '<conversation>'` for the after-kill dialogue (default `'victory'`); felling it sets a per-boss `slain:<type>` flag, so each boss stays down independently and never re-spawns for that save. Two live examples in `src/game/actors/boss.ts`: the **Slime King** (scaled blob, contact + spit) and the **Duelist**, a *human* boss with her own authored sprite (`sprites/duelist.json` → `DUELIST_ANIMS`) — a crimson-coated fencer — who trails afterimage `ghosts` on her dashes and mixes saber `strike`s with ballistic pistol shots (the saber and pistol are code overlays in `draw`, so they animate with her FSM state). The Slime King in full:
 
 ```ts
 defineMonster('my-boss', {
