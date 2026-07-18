@@ -1,4 +1,5 @@
 import type { Action } from '../defs';
+import type { SaveData } from '../save';
 
 /**
  * The co-op wire protocol (host-authoritative). The host runs the only
@@ -78,12 +79,27 @@ export interface SnapMsg {
   banner: string | null;
 }
 
+/** guest → host, once on connect: bring my saved knight into your world.
+ * No player = a fresh knight (the guest has no save yet). */
+export interface HelloMsg {
+  t: 'hello';
+  player?: SaveData['player'];
+}
+
+/** host → guest, every couple of seconds: your knight as it now stands
+ * (gold, XP, gear, quests). The guest folds it into their own save, so
+ * co-op progress goes home with them. */
+export interface SyncMsg {
+  t: 'sync';
+  player: SaveData['player'];
+}
+
 /** Either side: clean goodbye (the other returns to its title). */
 export interface ByeMsg {
   t: 'bye';
 }
 
-export type NetMsg = InMsg | SnapMsg | ByeMsg;
+export type NetMsg = InMsg | SnapMsg | HelloMsg | SyncMsg | ByeMsg;
 
 export function parseMsg(raw: string): NetMsg | null {
   try {

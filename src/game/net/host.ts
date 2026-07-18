@@ -3,7 +3,11 @@ import { KEYMAP, type Action, type ActionGame } from '../defs';
 import { Player } from '../actors/player';
 import { Monster } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
+import { restorePlayer, snapshotPlayer, type SaveData } from '../save';
 import { NET_ACTIONS, SNAP_HZ, parseMsg, type SnapMsg } from './protocol';
+
+/** How often the guest's knight state is synced back for their save. */
+const SYNC_STEPS = 120; // 2s of fixed steps
 
 /**
  * The host side of a co-op session. The guest's knight is a real Player
@@ -22,6 +26,8 @@ export class CoopHost {
   private stepsPerSnap = Math.max(1, Math.round(60 / SNAP_HZ));
   private ids = new WeakMap<object, number>();
   private nextId = 1;
+  /** The guest's saved knight, if their hello beat the spawn. */
+  private profile: SaveData['player'] | null = null;
   /** Set when the guest vanishes; the scene shows a banner and detaches. */
   dropped = false;
 
@@ -32,7 +38,15 @@ export class CoopHost {
     link.onMessage = (raw) => {
       const m = parseMsg(raw);
       if (m?.t === 'in') this.wanted = m.held.filter((a) => NET_ACTIONS.includes(a));
-      if (m?.t === 'bye') this.dropped = true;
+      if (m?.t === 'hello' && m.player) {
+        // Their saved knight walks in: gear, gold, skills, quests intact.
+        if (this.guest) restorePlayer(this.guest, m.player);
+        else this.profile = m.player;
+      }
+      if (m?.t === 'bye') {
+        this.syncBack(); // last chance to send their progress home
+        this.dropped = true;
+      }
     };
     link.onClose = () => { this.dropped = true; };
   }
@@ -41,6 +55,16 @@ export class CoopHost {
   adopt(p: Player): void {
     this.guest = p;
     p.source = this.remote;
+    if (this.profile) {
+      restorePlayer(p, this.profile);
+      this.profile = null;
+    }
+  }
+
+  /** Ship the guest knight's current state back for their local save. */
+  private syncBack(): void {
+    if (!this.guest) return;
+    this.link.send(JSON.stringify({ t: 'sync', player: snapshotPlayer(this.guest) }));
   }
 
   /** Before the world steps: turn the latest held-set into press/release edges. */
@@ -54,7 +78,9 @@ export class CoopHost {
   /** After the world steps: snapshot cadence + edge-flag cleanup. */
   step(view: { roomId: string; score: number; banner: string | null }): void {
     this.remote.endStep();
-    if (++this.stepN % this.stepsPerSnap !== 0) return;
+    this.stepN++;
+    if (this.stepN % SYNC_STEPS === 0) this.syncBack();
+    if (this.stepN % this.stepsPerSnap !== 0) return;
     this.link.send(JSON.stringify(this.snapshot(view)));
   }
 
