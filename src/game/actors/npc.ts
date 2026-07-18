@@ -15,6 +15,7 @@ import { ShopScene } from '../scenes/shop';
 import { SpawnerScene } from '../scenes/spawner';
 import { prettyCode, prettyButton, menuLine, type ActionGame, type Action } from '../defs';
 import { Player } from './player';
+import { healer, forge, questGiver } from './npc-roles';
 
 /**
  * NPCs: friendly actors you talk to. An NpcDef is a sprite, a greeting
@@ -37,12 +38,11 @@ export interface NpcDef {
   anim?: string;
   /** Conversation played on interact — or a picker (quest states, moods). */
   greet: string | ((ctx: NpcCtx) => string);
-  /** Shop opened when a choice labeled with `shopChoice` is picked. */
+  /** Shop opened when a choice with `action: 'shop'` is picked. */
   shop?: string;
-  /** The choice label that opens the shop (default: starts with 'show'). */
-  shopChoice?: string;
   /** Service hook: runs with whatever choice ended the dialogue (healing,
-   * upgrades, quest accept/turn-in...). Runs before the shop check. */
+   * upgrades, quest accept/turn-in...). Reacts to `choice.action`, not the
+   * display label. Runs before the shop check. */
   onChoice?(choice: ConversationChoice, ctx: NpcCtx): void;
 }
 
@@ -125,11 +125,7 @@ export class Npc extends Actor {
     if (!choice) return;
     const ctx = this.ctx();
     if (ctx) this.def.onChoice?.(choice, ctx);
-    if (!this.def.shop) return;
-    const opens = this.def.shopChoice
-      ? choice.label === this.def.shopChoice
-      : choice.label.toUpperCase().startsWith('SHOW');
-    if (opens) {
+    if (this.def.shop && choice.action === 'shop') {
       const p = this.world.first(Player);
       if (p) this.game.scenes.push(new ShopScene(this.game, p, this.def.shop));
     }
@@ -181,94 +177,31 @@ defineNpc('spawner', {
   greet: '',
 });
 
-/* ---- the town ---- */
-
-defineNpc('healer', {
-  name: 'HEALER',
-  sprite: merchantSprite,
-  greet: 'healer-greet',
-  onChoice(choice, { game, player }) {
-    if (!choice.label.startsWith('Heal me')) return;
-    if (player.hp >= player.maxHp && player.mp >= player.maxMp) {
-      game.feel.text(player.cx, player.y - 10, 'ALREADY WHOLE', COLORS.steel);
-      return;
-    }
-    if (player.gold < 10) {
-      game.feel.text(player.cx, player.y - 10, 'NOT ENOUGH GOLD', COLORS.red);
-      game.sfx.play('denied');
-      return;
-    }
-    player.gold -= 10;
-    player.hp = player.maxHp;
-    player.mp = player.maxMp;
-    game.feel.sfx.play('heal');
-    game.feel.flash(0.15, COLORS.red);
-    game.feel.burst(player.cx, player.cy, 14, {
-      color: [COLORS.red, COLORS.white], speed: 50, life: 0.6, grav: -70, drag: 3,
-    });
-    game.feel.text(player.cx, player.y - 10, 'HEALED', COLORS.red);
-  },
-});
+/* ---- the town: roles are data, built from reusable behaviours ---- */
 
 /** Upgrade costs per forge level (cap = length). */
 export const FORGE_COSTS = [30, 60, 90];
 
-defineNpc('blacksmith', {
+defineNpc('healer', healer({
+  name: 'HEALER',
+  sprite: merchantSprite,
+  greet: 'healer-greet',
+  cost: 10,
+}));
+
+defineNpc('blacksmith', forge({
   name: 'BLACKSMITH',
   sprite: merchantSprite,
   greet: 'blacksmith-greet',
-  onChoice(choice, { game, player }) {
-    if (!choice.label.startsWith('Upgrade')) return;
-    if (player.forgeLevel >= FORGE_COSTS.length) {
-      game.feel.text(player.cx, player.y - 10, 'NOTHING LEFT TO TEACH THIS BLADE', COLORS.steel);
-      return;
-    }
-    const cost = FORGE_COSTS[player.forgeLevel];
-    if (player.gold < cost) {
-      game.feel.text(player.cx, player.y - 10, `NEED ${cost} GOLD`, COLORS.red);
-      game.sfx.play('denied');
-      return;
-    }
-    player.gold -= cost;
-    player.forgeLevel++;
-    player.applyForge();
-    game.feel.sfx.play('unlock');
-    game.feel.flash(0.15, COLORS.gold);
-    game.feel.burst(player.cx, player.cy - 6, 16, {
-      color: [COLORS.gold, COLORS.white], speed: 90, life: 0.5, drag: 3,
-    });
-    game.feel.text(player.cx, player.y - 12, `FORGED +${player.forgeLevel}`, COLORS.gold, 2);
-  },
-});
+  costs: FORGE_COSTS,
+}));
 
-defineNpc('elder', {
+defineNpc('elder', questGiver({
   name: 'ELDER',
   sprite: merchantSprite,
-  // The greeting tracks the quest: offer → progress → complete → done.
-  greet: ({ player }) => {
-    const q = player.quests;
-    if (q.done.has('cull-slimes')) return 'elder-done';
-    if (!q.started('cull-slimes')) return 'elder-offer';
-    return q.isComplete('cull-slimes') ? 'elder-complete' : 'elder-progress';
-  },
-  onChoice(choice, { game, player }) {
-    if (choice.label === 'I will help.') {
-      player.quests.start('cull-slimes');
-      game.feel.text(player.cx, player.y - 10, 'QUEST ACCEPTED', COLORS.gold);
-      game.sfx.play('menuSelect');
-      return;
-    }
-    if (choice.label === 'Claim reward.') {
-      const def = player.quests.turnIn('cull-slimes');
-      if (!def) return;
-      player.gold += def.reward.gold ?? 0;
-      for (const id of def.reward.items ?? []) player.inventory.add(id);
-      game.feel.sfx.play('levelup');
-      game.feel.flash(0.2, COLORS.gold);
-      game.feel.text(player.cx, player.y - 12, `+${def.reward.gold} GOLD`, COLORS.gold, 2);
-    }
-  },
-});
+  quest: 'cull-slimes',
+  stages: { offer: 'elder-offer', progress: 'elder-progress', complete: 'elder-complete', done: 'elder-done' },
+}));
 
 /** Importing this module registers the NPCs. */
 export function registerNpcs(): void {}

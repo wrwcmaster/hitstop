@@ -25,6 +25,9 @@ export interface ConversationChoice {
   label: string;
   /** Conversation id to chain into when picked. */
   then?: string;
+  /** Stable intent id the game reacts to (e.g. 'heal', 'quest:accept').
+   * Decouples logic from the display `label`, so prose can change freely. */
+  action?: string;
 }
 
 export interface ConversationDef {
