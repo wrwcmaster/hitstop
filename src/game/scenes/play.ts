@@ -35,6 +35,7 @@ import { CHEATS, cheatFor } from './play/cheats';
 import { CoopHost } from '../net/host';
 import { CoopGuestScene } from '../net/guest';
 import { CoopScene } from './coop';
+import { displayName } from '../name';
 import type { PeerLink } from '@engine/index';
 
 /** Fallback music per room (rooms can override via props.music). */
@@ -265,7 +266,7 @@ export class PlayScene implements Scene {
    * knight alongside — a real Player fed by the remote action stream. */
   startCoopHost(link: PeerLink): void {
     this.coop = new CoopHost(this.game, link);
-    this.startRun(newestSave());
+    this.startRun(newestSave()); // names both knights, spawns the guest's
   }
 
   /** Become the guest: swap to the snapshot-rendering scene entirely. */
@@ -283,6 +284,7 @@ export class PlayScene implements Scene {
     this.player = new Player(g, this.tilemap, 0, 0); // positioned by setRoom
     g.world.spawn(this.player);
     if (this.coop) {
+      this.player.name = displayName('host'); // tags live while co-op does
       const knight = new Player(g, this.tilemap, 0, 0); // positioned by setRoom
       this.coop.adopt(knight);
       g.world.spawn(knight);
@@ -601,6 +603,7 @@ export class PlayScene implements Scene {
     if (this.coop.guest) this.coop.guest.dead = true;
     this.coop.close();
     this.coop = null;
+    if (this.player) this.player.name = ''; // solo again: tag off
     this.showBanner('GUEST LEFT', 1.5);
   }
 

@@ -155,7 +155,14 @@ export class Input<A extends string = string> {
 
   /** Listen to keyboard events on `target` using the keymap. */
   attachKeyboard(target: GlobalEventHandlers = window): void {
+    // Typing into a form field (a name box, a paste-a-code textarea) must
+    // never drive game actions — nor be eaten by their preventDefault.
+    const editable = (e: KeyboardEvent): boolean => {
+      const t = e.target as HTMLElement | null;
+      return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+    };
     target.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (editable(e)) return;
       // A rebind UI is listening: hand it the raw code instead.
       if (this.captureFn) {
         e.preventDefault();
@@ -173,6 +180,7 @@ export class Input<A extends string = string> {
       }
     });
     target.addEventListener('keyup', (e: KeyboardEvent) => {
+      if (editable(e)) return;
       for (const a of this.actionsFor(e.code)) this.release(a);
     });
   }

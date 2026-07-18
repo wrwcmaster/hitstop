@@ -26,6 +26,8 @@ export interface InMsg {
 /** A knight in a snapshot: enough to puppet a real Player's render. */
 export interface KnightSnap {
   id: number;
+  /** Overhead name tag. */
+  name?: string;
   x: number;
   y: number;
   facing: number;
@@ -83,6 +85,8 @@ export interface SnapMsg {
  * No player = a fresh knight (the guest has no save yet). */
 export interface HelloMsg {
   t: 'hello';
+  /** The guest's chosen name (their overhead tag). */
+  name?: string;
   player?: SaveData['player'];
 }
 

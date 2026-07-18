@@ -4,6 +4,7 @@ import { Player } from '../actors/player';
 import { Monster } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
 import { restorePlayer, snapshotPlayer, type SaveData } from '../save';
+import { cleanName } from '../name';
 import { NET_ACTIONS, SNAP_HZ, parseMsg, type SnapMsg } from './protocol';
 
 /** How often the guest's knight state is synced back for their save. */
@@ -28,6 +29,8 @@ export class CoopHost {
   private nextId = 1;
   /** The guest's saved knight, if their hello beat the spawn. */
   private profile: SaveData['player'] | null = null;
+  /** The guest's overhead tag (from their hello). */
+  private guestName = 'PLAYER 2';
   /** Set when the guest vanishes; the scene shows a banner and detaches. */
   dropped = false;
 
@@ -38,10 +41,14 @@ export class CoopHost {
     link.onMessage = (raw) => {
       const m = parseMsg(raw);
       if (m?.t === 'in') this.wanted = m.held.filter((a) => NET_ACTIONS.includes(a));
-      if (m?.t === 'hello' && m.player) {
+      if (m?.t === 'hello') {
+        this.guestName = cleanName(m.name ?? '') || 'PLAYER 2';
+        if (this.guest) this.guest.name = this.guestName;
         // Their saved knight walks in: gear, gold, skills, quests intact.
-        if (this.guest) restorePlayer(this.guest, m.player);
-        else this.profile = m.player;
+        if (m.player) {
+          if (this.guest) restorePlayer(this.guest, m.player);
+          else this.profile = m.player;
+        }
       }
       if (m?.t === 'bye') {
         this.syncBack(); // last chance to send their progress home
@@ -55,6 +62,7 @@ export class CoopHost {
   adopt(p: Player): void {
     this.guest = p;
     p.source = this.remote;
+    p.name = this.guestName;
     if (this.profile) {
       restorePlayer(p, this.profile);
       this.profile = null;
@@ -112,7 +120,7 @@ export class CoopHost {
     for (const e of this.game.world.all()) {
       if (e instanceof Player) {
         snap.knights.push({
-          id: this.id(e), x: r(e.x), y: r(e.y), facing: e.facing,
+          id: this.id(e), name: e.name, x: r(e.x), y: r(e.y), facing: e.facing,
           state: e.fsm.state, st: r(e.fsm.t), animT: r(e.animT),
           hp: e.hp, maxHp: e.maxHp,
         });

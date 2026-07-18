@@ -174,7 +174,10 @@ dead/swallowed forced from the server. The guest's knight is also
 **persistent**: a `hello` carries their saved player in
 (`restorePlayer` on the host's copy), and the host syncs the knight
 back every ~2s (`sync` → folded into the guest's autosave), so co-op
-gold/XP/gear go home. Known edges: dialogue/shops/pause are host-screen
+gold/XP/gear go home. Knights are **named** in co-op: a device-level
+name (`name.ts`, edited in the lobby) rides the `hello` and snapshots
+and renders as an overhead tag (`Player.name` — empty in solo, so no
+tag). Known edges: dialogue/shops/pause are host-screen
 only (NPCs ignore non-`isLocal` knights); projectiles render as generic
 dots on the guest; strict NATs may fail (STUN only). When touching
 multiplayer-adjacent code, keep the single-player path byte-identical —

@@ -17,6 +17,7 @@ import { Background } from '../scenes/background';
 import { Hud } from '../scenes/play/hud';
 import type { PlayHost } from '../scenes/play/host';
 import { saveStore, newestSave, restorePlayer, type SaveData } from '../save';
+import { displayName } from '../name';
 import { NET_ACTIONS, parseMsg, type SnapMsg, type KnightSnap } from './protocol';
 
 /** Beyond this far from the server's word, stop gliding and snap. */
@@ -73,8 +74,8 @@ export class CoopGuestScene implements Scene {
       if (m?.t === 'bye') this.drop();
     };
     link.onClose = () => this.drop();
-    // Bring my knight: the host restores this snapshot onto their copy.
-    link.send(JSON.stringify({ t: 'hello', player: this.profile }));
+    // Bring my knight: name for the tag, snapshot for the host's copy.
+    link.send(JSON.stringify({ t: 'hello', name: displayName('guest'), player: this.profile }));
   }
 
   /** Fold the host's word on my knight into my own save, so co-op gold,
@@ -116,6 +117,7 @@ export class CoopGuestScene implements Scene {
       const knight = p.actor as Player;
       p.tx = k.x;
       p.ty = k.y;
+      knight.name = k.name ?? '';
       knight.facing = k.facing as 1 | -1;
       knight.hp = k.hp;
       knight.maxHp = k.maxHp;
@@ -188,6 +190,7 @@ export class CoopGuestScene implements Scene {
     // (otherwise empty) local world so real physics can drive it.
     this.game.world.clear();
     this.me = new Player(this.game, this.tilemap, room.playerSpawn.x, room.playerSpawn.y);
+    this.me.name = displayName('guest');
     if (this.profile) restorePlayer(this.me, this.profile); // my gear, my look
     this.game.world.spawn(this.me);
     this.hudHost.player = this.me;
