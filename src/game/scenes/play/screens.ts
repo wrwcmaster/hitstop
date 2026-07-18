@@ -18,6 +18,7 @@ export class TitleScreen {
       newGame(): void;
       continueRun(): void;
       loadGame(): void;
+      coop(): void;
       testRoom(): void;
       options(): void;
     },
@@ -35,6 +36,7 @@ export class TitleScreen {
           disabled: () => newestSave() === null,
           onSelect: actions.loadGame,
         },
+        { label: 'CO-OP', onSelect: actions.coop },
         { label: 'TEST ROOM', onSelect: actions.testRoom },
         { label: 'OPTIONS', onSelect: actions.options },
       ],

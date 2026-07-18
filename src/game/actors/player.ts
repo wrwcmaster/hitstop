@@ -13,6 +13,7 @@ import {
   overlaps,
   expand,
   chance,
+  type Input,
   type StateDef,
   type CollisionSource,
   type Rect,
@@ -41,7 +42,21 @@ import { DEFAULT_SKILL_LOADOUT, type SkillCtx } from '../content/skills';
 import { Monster } from './monster';
 import { PlayerCapabilities } from './player-capabilities';
 import { QuestLog } from '../content/quests';
-import type { ActionGame } from '../defs';
+import type { World } from '@engine/index';
+import type { ActionGame, Action } from '../defs';
+
+/** The living player nearest to (x, y) — for AI targeting, pickup
+ * magnets, and NPC prompts, which all stop assuming a lone knight. */
+export function nearestPlayer(world: World, x: number, y: number): Player | null {
+  let best: Player | null = null;
+  let bd = Infinity;
+  for (const a of world.actors('player')) {
+    if (!(a instanceof Player) || a.hp <= 0) continue;
+    const d = Math.hypot(a.cx - x, a.cy - y);
+    if (d < bd) { bd = d; best = a; }
+  }
+  return best;
+}
 
 /** Movement + combat tuning in one place. Tweak freely. */
 export const PLAYER_TUNING = {
@@ -122,7 +137,11 @@ export class Player extends Actor {
   );
   mp = PLAYER_TUNING.maxMp;
 
+  /** Net puppets: authoritative maxMp from the host (stats live there). */
+  mpCap: number | null = null;
+
   get maxMp(): number {
+    if (this.mpCap !== null) return this.mpCap;
     return Math.round(this.stats.get('maxMp'));
   }
 
@@ -293,8 +312,18 @@ export class Player extends Actor {
     return this.hp <= 0 ? 'dead' : 'move';
   }
 
+  /** Input driving this knight. Defaults to the local device; a net
+   * session substitutes a remote-fed Input for the guest's knight. */
+  source: Input<Action> | null = null;
+
   get input() {
-    return this.game.input;
+    return this.source ?? this.game.input;
+  }
+
+  /** True when this knight answers to the local device (menus, prompts,
+   * NPC talk keys) rather than a remote player's stream. */
+  get isLocal(): boolean {
+    return this.source === null;
   }
 
   get feel() {
