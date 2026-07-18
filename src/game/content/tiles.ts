@@ -56,6 +56,36 @@ tiles.register('gate', {
   },
 });
 
+/** Portal vortex: non-solid, purely visual. Pair with a `portal` trigger.
+ * A swirling violet gate — deliberately unlike the blue rectangular door,
+ * so a warp pad never reads as an ordinary locked gate. Magenta and cyan
+ * flecks orbit each tile's centre on a shared phase, so the stacked column
+ * reads as one turning whirlpool. */
+tiles.register('portal', {
+  draw(g, px, py, size, tx, ty) {
+    const now = performance.now() / 1000;
+    // Deep violet core wash.
+    g.fillStyle = 'rgba(93,39,93,0.5)';
+    g.fillRect(px, py, size, size);
+    g.fillStyle = 'rgba(127,46,127,0.4)';
+    g.fillRect(px + 1, py + 1, size - 2, size - 2);
+    const cx = px + size / 2;
+    const cy = py + size / 2;
+    // Two orbiting sparks (magenta + cyan), swirling in and out.
+    for (let k = 0; k < 2; k++) {
+      const a = now * 2.4 + (tx + ty) * 0.7 + k * Math.PI;
+      const r = 1 + ((Math.sin(now * 3 + k * 1.6) + 1) / 2) * (size / 2 - 0.5);
+      const sx = Math.round(cx + Math.cos(a) * r);
+      const sy = Math.round(cy + Math.sin(a) * r);
+      g.fillStyle = k === 0 ? 'rgba(233,110,233,0.9)' : 'rgba(115,205,255,0.85)';
+      g.fillRect(sx, sy, 1, 1);
+    }
+    // A bright core mote that bobs, the eye of the whirl.
+    g.fillStyle = 'rgba(255,224,255,0.65)';
+    g.fillRect(Math.round(cx - 0.5), Math.round(cy - 0.5 + Math.sin(now * 4 + ty) * 1.2), 1, 1);
+  },
+});
+
 /** One-way platform: jump through from below, stand on top. */
 tiles.register('platform', {
   oneWay: true,

@@ -1,7 +1,6 @@
 import { Registry, conversations, items, type TriggerDef } from '@engine/index';
 import { COLORS } from '../../content/palette';
 import type { PlayHost } from './host';
-import { PortalScene } from '../portal';
 import { optionalFiniteNumber, optionalString, rejectUnknownProps, requireString } from '../../content/prop-validation';
 
 /**
@@ -68,15 +67,10 @@ defineTriggerAction('portal', {
   validateProps(props, path) {
     rejectUnknownProps(props, [], path);
   },
-  run(_def, host) {
-    host.game.sfx.play('menuSelect');
-    host.game.scenes.push(
-      new PortalScene(
-        host.game,
-        host.roomId,
-        (room) => host.roomId === room || host.hasFlag(`visited:${room}`),
-        (dest) => host.goToRoom(dest.room, dest.x, dest.y),
-      ),
-    );
-  },
+  // A `portal` trigger no longer opens the menu on contact — that forced a
+  // destination choice mid-fight. It now marks an interaction zone that
+  // PlayScene drives: stand on the pad and press interact (E) to travel.
+  // Kept registered so room JSON stays validated; the run is intentionally
+  // inert.
+  run() {},
 });
