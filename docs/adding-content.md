@@ -63,6 +63,7 @@ In `src/game/content/tiles.ts`:
 ```ts
 tiles.register('spikes', {
   solid: false,          // or solid / oneWay
+  hazard: 1,             // hearts of damage on touch (see the real spikes)
   draw(g, px, py, size) {
     g.fillStyle = COLORS.steel;
     for (let i = 0; i < size; i += 4) {
@@ -74,7 +75,11 @@ tiles.register('spikes', {
 });
 ```
 
-It immediately appears in the level editor's tile palette. (Damage-on-touch would be a small `World` system: check actors overlapping spike tiles — see `World.systems`.)
+It immediately appears in the level editor's tile palette. A `hazard`
+tile hurts on touch: the tilemap answers `hazardAt(rect)` (the strongest
+hazard the rect overlaps) and the player reacts after her move — damage,
+i-frames, and an upward launch. `water: true` marks a tile swimmable
+(see the grotto).
 
 ## A new room / level
 
@@ -230,6 +235,39 @@ Two events are built in: `talk` opens the conversation named in `props.conversat
 3. Connect it: draw `gate` tiles where the doorway should look like one, and drag a `door` trigger over them pointing at the target room (and one pointing back). Spawn points should sit a couple of tiles clear of the return door so you don't ping-pong.
 
 Entering a room spawns its `entities`, arms its `triggers`, starts waves only if `props.waves` is set, and drops a checkpoint save.
+
+## A puzzle (platforms, levers, plates, barriers)
+
+The gizmos in `src/game/actors/gizmos.ts` are ordinary placeables, wired
+together in room JSON by **switch flags** — named story flags
+(`switch:<id>`) that levers and plates write via the `setFlag` event and
+barriers read live. Puzzle state persists in saves for free.
+
+```json
+"entities": [
+  { "type": "platform", "x": 100, "y": 200,
+    "props": { "w": 28, "h": 6, "dx": 60, "dy": 0, "period": 5 } },
+  { "type": "lever",   "x": 424, "y": 86,  "props": { "switch": "vault-a" } },
+  { "type": "barrier", "x": 480, "y": 176, "props": { "switch": "vault-a", "w": 8, "h": 56 } },
+  { "type": "plate",   "x": 566, "y": 190, "props": { "switch": "vault-b" } },
+  { "type": "barrier", "x": 728, "y": 176, "props": { "switch": "vault-b", "w": 8, "h": 56, "linger": 3.5 } }
+]
+```
+
+- **platform** glides a sine path (`dx/dy` offset over `period` seconds,
+  eased at both ends; `phase` staggers pairs) and carries whoever stands
+  on it. Its `Solid` lives in `Tilemap.extraSolids`, so normal physics
+  collides with it.
+- **lever** latches: interact (E) toggles its flag either way.
+- **plate** holds its flag only while someone stands on it
+  (`latch: true` makes the press permanent). In co-op, both knights press
+  plates; levers answer the host's interact key only.
+- **barrier** is a wall until its flag is set. `linger` keeps it open
+  N seconds after the flag drops — pair it with a plate for a timed run.
+
+Spike pits (`spikes` hazard tiles) are the traps between the machinery;
+the **vault** (`rooms/vault.json`, behind the heavy door in town) is the
+reference puzzle room.
 
 ## A boss
 

@@ -764,6 +764,25 @@ export class Player extends Actor {
     const fallSpeed = this.vy;
     moveAndCollide(this, dt, this.collision);
 
+    // Hazard tiles (spikes): a heart and a launch clear of the danger.
+    // Dashing skims across; i-frames blink through.
+    const hazard = this.collision.hazardAt?.(this) ?? 0;
+    if (hazard > 0 && this.invulnT <= 0 && !this.godMode && !this.fsm.is('dead', 'dash')) {
+      this.hp -= hazard;
+      this.invulnT = 1.2;
+      this.vy = -220;
+      this.vx = -this.facing * 60;
+      this.squash = 0.6;
+      this.feel.sfx.play('hurt');
+      this.feel.flash(0.2, COLORS.red);
+      this.feel.shake(0.3);
+      this.feel.burst(this.cx, this.y + this.h, 10, {
+        color: [COLORS.red, COLORS.steel], speed: 80, life: 0.35, drag: 3,
+      });
+      this.game.events.emit('playerHurt', { hp: this.hp });
+      if (this.hp <= 0) this.die();
+    }
+
     if (this.onGround) {
       this.coyote.set();
       this.airJumps = this.capabilities.modifier('airJumps', 0);

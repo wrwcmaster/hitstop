@@ -163,6 +163,12 @@ export class PlayScene implements Scene {
        subscription's unsubscribe is kept, so a replaced scene doesn't
        leave stale listeners behind (released in exit()). ---- */
     const on = (off: () => void) => this.disposers.push(off);
+    // Levers and pressure plates write story flags through this seam,
+    // so puzzle state persists in saves like any other flag.
+    on(game.events.on('setFlag', ({ id, on: value }) => {
+      if (value) this.flags.add(id);
+      else this.flags.delete(id);
+    }));
     on(game.events.on('hit', (info) => {
       if (info.target.team !== 'enemy') return; // the player being hit is not a combo
       this.combo++;

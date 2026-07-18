@@ -1,5 +1,6 @@
 import type { Action } from '../defs';
 import type { SaveData } from '../save';
+import type { GizmoSnap } from '../actors/gizmos';
 
 /**
  * The co-op wire protocol (host-authoritative). The host runs the only
@@ -76,6 +77,9 @@ export interface SnapMsg {
   mobs: MobSnap[];
   picks: PickSnap[];
   shots: ShotSnap[];
+  /** Puzzle gizmos (platforms, levers, plates, barriers), id-keyed like
+   * mobs so the guest can dock/undock their solids across snapshots. */
+  giz: (GizmoSnap & { id: number })[];
   /** The guest knight's HUD numbers (host-authoritative). */
   hud: { hp: number; maxHp: number; mp: number; maxMp: number; gold: number; level: number; score: number; air: number };
   banner: string | null;

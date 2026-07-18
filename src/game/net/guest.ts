@@ -1,6 +1,7 @@
 import {
   type Scene,
   type PeerLink,
+  type Solid,
   Tilemap,
   Minimap,
   buildTilemap,
@@ -14,6 +15,7 @@ import { ROOMS, START_ROOM } from '../content/rooms';
 import { Player } from '../actors/player';
 import { Monster, monsters } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
+import { drawPlatform, drawLever, drawPlate, drawBarrier, type GizmoSnap } from '../actors/gizmos';
 import { Background } from '../scenes/background';
 import { Hud } from '../scenes/play/hud';
 import type { PlayHost } from '../scenes/play/host';
@@ -30,6 +32,17 @@ interface Puppet {
   actor: Player | Monster | Pickup;
   tx: number;
   ty: number;
+}
+
+/** A gizmo puppet: rendered from its snap, gliding toward the newest
+ * one. Platforms and closed barriers dock a solid into the guest's
+ * tilemap so the predicted knight can stand on / bump into them. */
+interface GizPuppet {
+  snap: GizmoSnap;
+  x: number;
+  y: number;
+  solid: Solid;
+  docked: boolean;
 }
 
 /**
@@ -49,6 +62,7 @@ export class CoopGuestScene implements Scene {
   private hudHost: { game: ActionGame; player: Player | null };
   private roomId = '';
   private puppets = new Map<number, Puppet>();
+  private gizmos = new Map<number, GizPuppet>();
   /** The locally simulated knight (prediction) + the server's last word. */
   private me: Player | null = null;
   private serverMe: KnightSnap | null = null;
@@ -148,6 +162,37 @@ export class CoopGuestScene implements Scene {
     }
     for (const id of this.puppets.keys()) if (!seen.has(id)) this.puppets.delete(id);
 
+    // Gizmos: refresh state, dock/undock solids to match the host's world.
+    const gizSeen = new Set<number>();
+    for (const gz of s.giz ?? []) {
+      gizSeen.add(gz.id);
+      let p = this.gizmos.get(gz.id);
+      if (!p) {
+        p = { snap: gz, x: gz.x, y: gz.y, solid: { x: gz.x, y: gz.y, w: gz.w, h: gz.h }, docked: false };
+        this.gizmos.set(gz.id, p);
+      }
+      p.snap = gz;
+      const wantSolid = gz.kind === 'platform' || (gz.kind === 'barrier' && !gz.on);
+      const solids = this.tilemap?.extraSolids;
+      if (solids && wantSolid !== p.docked) {
+        if (wantSolid) solids.push(p.solid);
+        else {
+          const i = solids.indexOf(p.solid);
+          if (i >= 0) solids.splice(i, 1);
+        }
+        p.docked = wantSolid;
+      }
+    }
+    for (const [id, p] of this.gizmos) {
+      if (gizSeen.has(id)) continue;
+      if (p.docked) {
+        const solids = this.tilemap?.extraSolids;
+        const i = solids?.indexOf(p.solid) ?? -1;
+        if (solids && i >= 0) solids.splice(i, 1);
+      }
+      this.gizmos.delete(id);
+    }
+
     // The predicted knight carries the authoritative HUD numbers.
     const me = this.me;
     if (me) {
@@ -181,6 +226,7 @@ export class CoopGuestScene implements Scene {
   private enterRoom(id: string): void {
     this.roomId = id;
     this.puppets.clear();
+    this.gizmos.clear(); // buildTilemap starts extraSolids fresh
     this.serverMe = null;
     const room = ROOMS[id];
     if (!room) return;
@@ -249,6 +295,25 @@ export class CoopGuestScene implements Scene {
       if (p.actor instanceof Player || p.actor instanceof Monster) p.actor.animT += dt;
       if (p.actor instanceof Player) p.actor.fsm.t += dt;
     }
+    // Gizmos glide the same way; their solids track so the predicted
+    // knight rides a platform instead of clipping through it.
+    for (const p of this.gizmos.values()) {
+      const ddx = (p.snap.x - p.x) * blend;
+      const ddy = (p.snap.y - p.y) * blend;
+      // Carry my predicted knight if she stands on this platform.
+      const s = p.solid;
+      if (me && p.snap.kind === 'platform' && p.docked &&
+          Math.abs(me.y + me.h - s.y) < 2 && me.x + me.w > s.x - 1 && me.x < s.x + s.w + 1 && me.vy >= 0) {
+        me.x += ddx;
+        me.y += ddy;
+      }
+      p.x += ddx;
+      p.y += ddy;
+      s.x = p.x;
+      s.y = p.y;
+      s.w = p.snap.w;
+      s.h = p.snap.h;
+    }
     if (me) {
       const cam = this.game.camera;
       const tx = me.cx - cam.viewW / 2 + me.facing * 18 + me.vx * 0.1;
@@ -264,6 +329,14 @@ export class CoopGuestScene implements Scene {
     if (this.tilemap) {
       gm.camera.begin(g);
       this.tilemap.render(g, gm.camera.x, gm.camera.y, gm.camera.viewW, gm.camera.viewH);
+      // Machinery draws under the actors, with the shared gizmo looks.
+      for (const p of this.gizmos.values()) {
+        const s = p.snap;
+        if (s.kind === 'platform') drawPlatform(g, p.x, p.y, s.w, s.h);
+        else if (s.kind === 'lever') drawLever(g, p.x, p.y, s.on);
+        else if (s.kind === 'plate') drawPlate(g, p.x, p.y, s.on);
+        else drawBarrier(g, p.x, p.y, s.w, s.h, s.on);
+      }
       const sorted = [...this.puppets.values()].sort((a, b) => a.actor.layer - b.actor.layer);
       for (const p of sorted) p.actor.render(g);
       this.me?.render(g); // the predicted knight, on top of the puppets

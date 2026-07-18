@@ -101,3 +101,25 @@ tiles.register('waterTop', {
     g.fillRect(px + w1, py, 2, 1);
   },
 });
+
+/** Floor spikes: non-solid, but standing in them costs a heart. */
+tiles.register('spikes', {
+  hazard: 1,
+  draw(g, px, py, size, tx) {
+    // A row of steel points on a dark base, alternating heights per tile.
+    g.fillStyle = COLORS.navyDark;
+    g.fillRect(px, py + size - 2, size, 2);
+    g.fillStyle = COLORS.steel;
+    const tall = tx % 2 === 0;
+    for (let i = 0; i < size; i += 4) {
+      const h = tall && i % 8 === 0 ? size - 1 : size - 4;
+      g.beginPath();
+      g.moveTo(px + i, py + size);
+      g.lineTo(px + i + 2, py + size - h);
+      g.lineTo(px + i + 4, py + size);
+      g.fill();
+    }
+    g.fillStyle = COLORS.white;
+    for (let i = 0; i < size; i += 8) g.fillRect(px + i + 1, py + 3, 1, 1);
+  },
+});
