@@ -222,6 +222,12 @@ export class PlayScene implements Scene {
       this.combo = 0;
       this.comboT = 0;
     }));
+    on(game.events.on('waveStart', ({ wave }) => {
+      // Checkpoint each new wave so a death (or reload) resumes the wave
+      // you were fighting, not the room's first. Wave 1 coincides with the
+      // room-entry autosave, so only the advances need their own.
+      if (wave > 1) this.autosave();
+    }));
     on(game.events.on('waveClear', () => {
       // SECOND WIND (skill tree): every cleared wave knits a wound.
       const p = this.player;
