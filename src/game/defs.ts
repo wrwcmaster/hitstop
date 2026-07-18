@@ -4,6 +4,7 @@ import { Game, type GamepadMapping, type GamepadInput } from '@engine/index';
 export type Action =
   | 'left' | 'right' | 'up' | 'down'
   | 'jump' | 'attack' | 'dash' | 'skill' | 'skill2' | 'skill3'
+  | 'parry'
   | 'interact'
   | 'confirm' | 'cancel' | 'menu';
 
@@ -19,7 +20,8 @@ export const KEYMAP: Record<string, Action | Action[]> = {
   KeyC: 'skill', KeyL: 'skill',
   KeyV: 'skill2',
   KeyB: 'skill3',
-  KeyE: 'interact', KeyF: 'interact',
+  KeyE: 'interact',
+  KeyF: 'parry', KeyH: 'parry', // deflect + riposte
   Escape: 'menu',
 };
 
@@ -37,7 +39,7 @@ export const GAMEPAD: GamepadMapping<Action> = {
     4: 'skill',               // LB — fireball
     5: 'skill2',              // RB — nova
     6: 'skill',               // LT
-    7: 'skill2',              // RT
+    7: 'parry',               // RT — deflect
     8: 'menu',                // Select
     9: 'menu',                // Start
     12: 'up',                 // dpad
@@ -61,6 +63,7 @@ export const REBINDABLE: { action: Action; label: string; aliases: Action[] }[] 
   { action: 'skill', label: 'FIREBALL', aliases: [] },
   { action: 'skill2', label: 'NOVA', aliases: [] },
   { action: 'skill3', label: 'ICE SHARD', aliases: [] },
+  { action: 'parry', label: 'PARRY', aliases: [] },
   { action: 'interact', label: 'INTERACT', aliases: [] },
   { action: 'left', label: 'MOVE LEFT', aliases: [] },
   { action: 'right', label: 'MOVE RIGHT', aliases: [] },

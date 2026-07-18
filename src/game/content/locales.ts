@@ -21,7 +21,7 @@ defineLocale('zh', {
     'OPTIONS': '设置',
     'Game feel is the foundation': '手感即根基',
     'Move: Arrows / WASD - Jump: Space': '移动:方向键/WASD - 跳跃:空格',
-    'Attack: Z - Dash: X - Skill: C - Menu: Esc': '攻击:Z - 冲刺:X - 技能:C - 菜单:Esc',
+    'Attack: Z - Dash: X - Parry: F - Skill: C': '攻击:Z - 冲刺:X - 格挡:F - 技能:C',
     'Z or Enter to select': '按 Z 或回车选择',
 
     /* ---- pause / inventory ---- */
@@ -100,6 +100,8 @@ defineLocale('zh', {
     'TOWN': '小镇',
     'GROTTO': '水窟',
     'VAULT': '宝库',
+    'PARRY': '格挡',
+    'PARRY!': '格挡!',
     'RAMPARTS': '城墙',
     'THE DUELIST': '决斗者',
     'EN GARDE!': '预备!',

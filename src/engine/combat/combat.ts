@@ -62,6 +62,13 @@ export class Strike {
     public opts: StrikeOptions,
   ) {}
 
+  /** Aim this strike at a new team (parry/deflect), optionally sweetening
+   * the damage, and forget who it has already hit so it can bite afresh. */
+  retarget(team: Team, damageBonus = 0): void {
+    this.opts = { ...this.opts, targets: team, damage: this.opts.damage + damageBonus };
+    this.hitSet.clear();
+  }
+
   /**
    * Test `box` against all live actors of the target team and apply hits.
    * Call every update while the attack is active. Returns actors hit
@@ -104,6 +111,14 @@ export class Combat {
    * full feedback bundle. Also usable directly for contact damage.
    */
   hit(target: Actor, opts: StrikeOptions, from?: Rect): void {
+    // Parry: a raised guard deflects the blow entirely. The target owns
+    // the reaction (spark, sound, staggering the attacker) — no damage,
+    // knockback, or i-frame bookkeeping happens here. Environmental
+    // hazards (pierceInvuln) blow through a guard.
+    if (target.parrying && !opts.pierceInvuln) {
+      target.onParried(opts, this);
+      return;
+    }
     const s = opts.strength ?? 0.5;
     const source = from ?? opts.attacker ?? target;
     const dir = centerX(target.hurtbox) >= centerX(source as Rect) ? 1 : -1;

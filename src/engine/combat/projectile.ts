@@ -76,6 +76,26 @@ export class Projectile extends Entity {
     return { x: this.x - this.w / 2, y: this.y - this.h / 2, w: this.w, h: this.h };
   }
 
+  /** The team this shot currently threatens. */
+  get targetTeam(): import('../world/entity').Team {
+    return this.strike.opts.targets;
+  }
+
+  /**
+   * Send this shot flying the other way, now dangerous to the opposite
+   * team (a parry/deflect). New velocity, refreshed life, and the strike
+   * forgets prior hits so it can strike its former owners.
+   */
+  reflect(vx: number, vy: number, damageBonus = 0): void {
+    const foe = this.strike.opts.targets === 'player' ? 'enemy' : 'player';
+    this.vx = vx;
+    this.vy = vy;
+    this.facing = vx >= 0 ? 1 : -1;
+    this.strike.retarget(foe, damageBonus);
+    this.life = Math.max(this.life, 1.4);
+    this.pierceLeft = Math.max(this.pierceLeft, 1);
+  }
+
   private expire(): void {
     if (this.dead) return;
     this.dead = true;

@@ -3,6 +3,7 @@ import {
   FSM,
   Buffer,
   Strike,
+  Projectile,
   applyGravity,
   moveAndCollide,
   frameAt,
@@ -16,6 +17,7 @@ import {
   rand,
   GRAVITY,
   drawText,
+  t,
   type Input,
   type StateDef,
   type CollisionSource,
@@ -57,6 +59,18 @@ export function nearestPlayer(world: World, x: number, y: number): Player | null
   let bd = Infinity;
   for (const a of world.actors('player')) {
     if (!(a instanceof Player) || a.hp <= 0) continue;
+    const d = Math.hypot(a.cx - x, a.cy - y);
+    if (d < bd) { bd = d; best = a; }
+  }
+  return best;
+}
+
+/** The living enemy nearest to (x, y) — reflected shots seek it. */
+function nearestMonster(world: World, x: number, y: number): Monster | null {
+  let best: Monster | null = null;
+  let bd = Infinity;
+  for (const a of world.actors('enemy')) {
+    if (!(a instanceof Monster) || a.dead || a.hp <= 0) continue;
     const d = Math.hypot(a.cx - x, a.cy - y);
     if (d < bd) { bd = d; best = a; }
   }
@@ -106,6 +120,15 @@ export const PLAYER_TUNING = {
   dashInvuln: 0.2,
   castTime: 0.2, // brief commit while a spell leaves the hand
   castRecoil: 40, // backward brace when a spell fires
+  // Parry: a short deflect window; land a hit inside it and the blow is
+  // turned aside, the attacker staggered, and a riposte opened.
+  parryWindow: 0.16, // the active guard (hits inside are deflected)
+  parryRecovery: 0.22, // committed lag after the window
+  parryCooldown: 0.4, // wait after the stance ends before guarding again
+  parryIFrames: 0.4, // grace granted on a successful parry
+  parryStagger: 0.55, // how long a parried melee attacker is stunned
+  riposteTime: 1.3, // window to cash in the empowered counter
+  riposteBonus: 3, // extra damage on the riposte swing
   hurtInvuln: 1.1,
   maxHp: 5,
   maxMp: 3,
@@ -197,6 +220,10 @@ export class Player extends Actor {
   /** Ranged weapon: a queued shot + the reload clock. */
   private pendingRanged = false;
   private rangedCd = 0;
+  /** Parry: reload clock between guards, and the empowered-counter window. */
+  private parryCd = 0;
+  riposteT = 0;
+  private parriedThisWindow = false;
   deadT = 0;
 
   /** Debug god mode (cheat): no damage, always topped up. */
@@ -440,6 +467,8 @@ export class Player extends Actor {
 
   moveUpdate(dt: number): string | void {
     this.runControls(dt);
+    // Parry is a reaction: raise the guard on demand (ground or air).
+    if (this.input.consumePress('parry') && this.parryCd <= 0) return 'parry';
     if (this.atkBuf.consume()) {
       // Ranged steel shoots instead of swinging: the attack press
       // queues a shot and enters the cast state for the recoil brace.
@@ -525,6 +554,89 @@ export class Player extends Actor {
     this.squash = 0.92;
   }
 
+  /* ---------------- parry ---------------- */
+
+  /** Raise the guard: the deflect window opens for a beat, then commits. */
+  beginParry(): void {
+    this.parrying = true;
+    this.parriedThisWindow = false;
+    this.squash = 0.85;
+    this.feel.sfx.play('parryReady');
+    this.feel.burst(this.cx + this.facing * 6, this.cy, 4, {
+      color: [COLORS.white, COLORS.steel], speed: 40, life: 0.18,
+      angle: this.facing === 1 ? 0 : Math.PI, spread: 1.2, drag: 5,
+    });
+  }
+
+  parryUpdate(dt: number): string | void {
+    const T = PLAYER_TUNING;
+    this.vx *= friction(0.02, dt); // planted stance
+    const active = this.fsm.t < T.parryWindow;
+    this.parrying = active;
+    // While the guard is up, catch and turn back incoming shots.
+    if (active) this.deflectProjectiles();
+    if (this.fsm.t >= T.parryWindow + T.parryRecovery) {
+      this.parryCd = T.parryCooldown;
+      return 'move';
+    }
+  }
+
+  /** Reflect any player-bound projectile inside the guard arc. */
+  private deflectProjectiles(): void {
+    const guard: Rect = { x: this.x - 6, y: this.y - 6, w: this.w + 12, h: this.h + 12 };
+    for (const e of this.game.world.all()) {
+      if (!(e instanceof Projectile) || e.dead) continue;
+      if (e.targetTeam !== 'player') continue;
+      if (!overlaps(guard, e.box)) continue;
+      // Fling it back — toward the nearest foe if there is one, else the
+      // way it came — now dangerous to enemies, with a little extra bite.
+      const foe = nearestMonster(this.game.world, this.cx, this.cy);
+      const speed = Math.hypot(e.vx, e.vy) || 300;
+      let dx = foe ? foe.cx - e.x : -e.vx;
+      let dy = foe ? foe.cy - e.y : -e.vy;
+      const d = Math.hypot(dx, dy) || 1;
+      e.reflect((dx / d) * speed * 1.15, (dy / d) * speed * 1.15, 2);
+      this.parrySuccess(null);
+    }
+  }
+
+  /** Called by combat when the raised guard turned a blow aside. */
+  onParried(opts: import('@engine/index').StrikeOptions): void {
+    this.parrySuccess((opts.attacker as Actor | null) ?? null);
+  }
+
+  /** The reward: no damage, a stunned attacker, and an empowered counter. */
+  private parrySuccess(attacker: Actor | null): void {
+    const T = PLAYER_TUNING;
+    // Stagger a melee attacker (projectiles have no body to knock).
+    if (attacker && attacker instanceof Monster) {
+      attacker.hitstun = Math.max(attacker.hitstun, T.parryStagger);
+      attacker.flashT = Math.max(attacker.flashT, 0.12);
+      const away = attacker.cx >= this.cx ? 1 : -1;
+      attacker.vx += away * 200 / attacker.mass;
+    }
+    // The fanfare + rewards land once per window (many shots may deflect).
+    this.invulnT = Math.max(this.invulnT, T.parryIFrames);
+    if (this.parriedThisWindow) {
+      this.feel.burst(this.cx + this.facing * 8, this.cy, 5, {
+        color: [COLORS.gold, COLORS.white], speed: 90, life: 0.2, drag: 5,
+      });
+      return;
+    }
+    this.parriedThisWindow = true;
+    this.riposteT = T.riposteTime;
+    this.dashCd = 0; // the counter footwork is free
+    this.airJumps = this.capabilities.modifier('airJumps', 0);
+    this.feel.sfx.play('parry');
+    this.feel.flash(0.14, COLORS.gold);
+    this.feel.shake(0.35);
+    this.feel.slowmo(0.35, 0.12);
+    this.feel.burst(this.cx + this.facing * 8, this.cy - 2, 12, {
+      color: [COLORS.gold, COLORS.white], speed: 150, life: 0.3, drag: 3,
+    });
+    this.feel.text(this.cx, this.y - 6, t('PARRY!'), COLORS.gold, 1);
+  }
+
   beginAttack(): void {
     const w = this.weapon;
     const type = weaponTypeOf(w);
@@ -557,16 +669,25 @@ export class Player extends Actor {
     // Damage/feel come from the equipped weapon; flat bonus from stats;
     // EXECUTIONER (skill tree) boosts the finisher.
     const executioner = this.attackDef.finisher && this.capabilities.has('heavyFinisherBonus') ? 2 : 0;
+    // RIPOSTE: the swing after a parry lands harder and shines gold.
+    const riposte = this.riposteT > 0;
+    if (riposte) this.riposteT = 0;
     this.strike = this.game.combat.strike({
       damage: Math.round(w.baseDamage * this.attackDef.damageScale)
         + Math.round(this.stats.get('attack'))
-        + executioner,
+        + executioner
+        + (riposte ? PLAYER_TUNING.riposteBonus : 0),
       targets: 'enemy',
       attacker: this,
-      strength: this.attackDef.strength,
-      colors: [...w.colors],
+      strength: riposte ? Math.min(1, this.attackDef.strength + 0.35) : this.attackDef.strength,
+      colors: riposte ? [COLORS.gold, COLORS.white] : [...w.colors],
     });
     this.feel.sfx.play('slash');
+    if (riposte) {
+      this.feel.burst(this.cx + this.facing * 10, this.cy, 8, {
+        color: [COLORS.gold, COLORS.white], speed: 120, life: 0.25, drag: 4,
+      });
+    }
   }
 
   attackUpdate(dt: number): string | void {
@@ -752,6 +873,8 @@ export class Player extends Actor {
     this.comboT = Math.max(0, this.comboT - dt);
     this.dashCd = Math.max(0, this.dashCd - dt);
     this.rangedCd = Math.max(0, this.rangedCd - dt);
+    this.parryCd = Math.max(0, this.parryCd - dt);
+    this.riposteT = Math.max(0, this.riposteT - dt);
     this.skills.update(dt);
     this.statuses.update(dt);
     this.squash += (1 - this.squash) * Math.min(1, dt * 10);
@@ -989,6 +1112,12 @@ export class Player extends Actor {
       return { shear: f * 0.26 * k, ox: -f * 2 * k, oy: -k, sx: 1, sy: 1 };
     }
 
+    if (this.fsm.is('parry')) {
+      // A braced guard: weight settled back, blade shoulder forward.
+      const k = clamp(1 - this.fsm.t / (PLAYER_TUNING.parryWindow + PLAYER_TUNING.parryRecovery), 0, 1);
+      return { shear: -f * 0.18 * k, ox: -f * 1.5 * k, oy: 0, sx: 1, sy: 1 };
+    }
+
     // move / air: lean into horizontal motion; stretch on a fast rise,
     // pinch slightly on the fall — a subtle jump arc.
     const shear = -clamp(this.vx / 900, -0.18, 0.18);
@@ -1127,6 +1256,28 @@ export class Player extends Actor {
         },
       });
     }
+
+    // Guard flash: a bright crescent in front while the parry window is
+    // open — the readable "now" of the deflect.
+    if (this.fsm.is('parry') && this.parrying) {
+      const gx = cx + this.facing * 7;
+      const gy = by - dh * 0.5;
+      g.save();
+      g.globalAlpha = 0.5 + 0.3 * Math.sin(this.animT * 40);
+      g.strokeStyle = COLORS.white;
+      g.lineWidth = 1.4;
+      g.beginPath();
+      g.arc(gx, gy, 7, this.facing === 1 ? -1.1 : Math.PI + 1.1, this.facing === 1 ? 1.1 : Math.PI - 1.1);
+      g.stroke();
+      g.globalAlpha = 1;
+      g.restore();
+    }
+    // Riposte charge: a small gold spark orbiting the blade hand.
+    if (this.riposteT > 0 && !this.fsm.is('parry')) {
+      const a = this.animT * 8;
+      g.fillStyle = COLORS.gold;
+      g.fillRect(Math.round(cx + this.facing * 6 + Math.cos(a) * 3), Math.round(by - dh * 0.55 + Math.sin(a) * 3), 1.5, 1.5);
+    }
   }
 
   /** A small charm glint on the chest when a charm is worn. */
@@ -1155,6 +1306,11 @@ const PLAYER_STATES: Record<string, StateDef<Player>> = {
   cast: {
     enter: (p) => p.beginCast(),
     update: (p) => p.castUpdate(),
+  },
+  parry: {
+    enter: (p) => p.beginParry(),
+    update: (p, dt) => p.parryUpdate(dt),
+    exit: (p) => { p.parrying = false; },
   },
   dead: {
     update: (p, dt) => {

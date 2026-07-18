@@ -49,6 +49,10 @@ export abstract class Actor extends Entity implements Body, Rect {
   flashT = 0;
   /** Seconds of remaining invulnerability. */
   invulnT = 0;
+  /** Seconds of remaining stagger: AI is suspended while > 0 (parry, etc.). */
+  hitstun = 0;
+  /** When true, incoming hits are deflected (see Combat.hit + onParried). */
+  parrying = false;
   /** Facing: 1 = right, -1 = left. */
   facing: 1 | -1 = 1;
   /** Animation clock; advance in update, use with gfx/animation. */
@@ -72,10 +76,15 @@ export abstract class Actor extends Entity implements Body, Rect {
     this.animT += dt;
     this.flashT = Math.max(0, this.flashT - dt);
     this.invulnT = Math.max(0, this.invulnT - dt);
+    this.hitstun = Math.max(0, this.hitstun - dt);
   }
 
   /** Hook: called by Combat when this actor takes a hit (after hp change). */
   onHurt(_hit: import('../combat/combat').HitInfo): void {}
+
+  /** Hook: called by Combat instead of a hit when `parrying` deflected it.
+   * The target owns the reaction (feedback, staggering the attacker). */
+  onParried(_opts: import('../combat/combat').StrikeOptions, _combat: import('../combat/combat').Combat): void {}
   /** Hook: called by Combat when hp reaches 0. Default: mark dead. */
   onDeath(_hit: import('../combat/combat').HitInfo): void {
     this.dead = true;

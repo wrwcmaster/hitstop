@@ -45,6 +45,14 @@ export function registerSounds(sfx: Sfx): void {
     s.tone(150, 55, 0.12, 'square', 0.2);
     s.tone(1200, 300, 0.04, 'sawtooth', 0.08);
   });
+  // Guard raised: a short, soft steel whisper.
+  sfx.define('parryReady', (s) => s.tone(520, 700, 0.06, 'triangle', 0.05));
+  // Parry! — a bright ringing clash, high and metallic.
+  sfx.define('parry', (s) => {
+    s.tone(1400, 2100, 0.06, 'square', 0.1);
+    s.tone(2600, 1900, 0.12, 'triangle', 0.09);
+    s.hiss(0.05, 0.06);
+  });
   sfx.define('coin', (s) => {
     s.tone(880, 880, 0.05, 'square', 0.07);
     s.toneAt(60, 1175, 1175, 0.12, 'square', 0.07);
