@@ -2,12 +2,14 @@ import { Registry } from '@engine/index';
 
 /**
  * The portal network. Each key location registers a destination: a room
- * to warp to and where you land in it. A portal pad (a 'portal' trigger)
- * opens a menu of every destination the player has *visited* — the town
- * always among them once the king falls, so you can always get home.
+ * to warp to and where you land in it. A portal pad (a 'portal' trigger,
+ * drawn as a `portal` tile) offers a menu of every destination the player
+ * has *visited* — the town always among them once the king falls, so you
+ * can always get home. The player opens it by pressing interact (E) while
+ * standing on the pad, so it never forces a choice mid-fight.
  *
  * Adding a stop is pure data: register a destination here and drop a
- * 'portal' trigger + a gate visual in that room's JSON.
+ * 'portal' trigger + `portal` tiles in that room's JSON.
  */
 export interface PortalDest {
   /** Room id to warp into. */
