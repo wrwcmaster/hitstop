@@ -140,5 +140,12 @@ defineConversation('grotto-entry', {
   ],
 });
 
+defineConversation('vault-entry', {
+  lines: [
+    { speaker: 'VOICE', text: 'The town vault. The old kings trapped it better than they filled it.' },
+    { speaker: 'VOICE', text: 'Spikes forgive nothing. Levers remember. Plates forget the moment you step off.' },
+  ],
+});
+
 /** Importing this module registers the conversations. */
 export function registerConversations(): void {}

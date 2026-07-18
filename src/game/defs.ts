@@ -101,6 +101,8 @@ export interface GameEvents extends Record<string, unknown> {
   pickup: { id: string };
   /** A level trigger region fired. */
   trigger: { event: string; props?: Record<string, unknown> };
+  /** Set/clear a story flag (levers, plates — PlayScene owns the set). */
+  setFlag: { id: string; on: boolean };
   /** A Devourer got you. */
   playerSwallowed: Record<string, never>;
   /** A shop transaction happened. */

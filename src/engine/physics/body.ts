@@ -13,6 +13,9 @@ export interface CollisionSource {
   /** Fraction (0..1) of a rect covered by water, if this source has any
    * (tilemaps do). Absent = a dry world. */
   submersion?(r: Rect): number;
+  /** Strongest hazard-tile damage under a rect (spikes, lava). Absent =
+   * a harmless world. */
+  hazardAt?(r: Rect): number;
 }
 
 /** A moving AABB. Position is top-left; velocities in px/s. */

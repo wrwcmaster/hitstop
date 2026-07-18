@@ -143,6 +143,22 @@ Details and code samples: `docs/adding-content.md`. The short version —
   breakable treasure chests (monsters with no teeth and rich drops),
   and the tree's tide tier (DEEP LUNGS grants `extraAirSeconds` +
   `swimBoost` capabilities the swim code reads).
+- **Hazard tile**: set `hazard: <hearts>` on a tile def (`spikes` in
+  `content/tiles.ts`) — the tilemap answers `hazardAt(rect)` (strongest
+  overlapped hazard) and the player reacts after her move: damage +
+  i-frames + an upward launch. Dashes and i-frames ignore hazards, so
+  spikes are a route cost, not a wall.
+- **Puzzle gizmo**: the machinery in `actors/gizmos.ts`, all placeables,
+  wired together by *switch flags* (`switch:<id>` — ordinary story flags
+  written via the `setFlag` event, so puzzle state persists in saves).
+  `platform` (sine-glide solid that carries riders; props `w/h/dx/dy/
+  period/phase`), `lever` (interact toggles its `switch` flag, latching),
+  `plate` (holds its flag while stood on; `latch: true` for one-shot),
+  `barrier` (solid while its flag is unset; `linger: <s>` keeps it open a
+  beat after the flag drops — that's the timed-run mechanic). Platforms
+  and barriers dock their `Solid` into `Tilemap.extraSolids`; nothing
+  else in physics changed. The vault (`rooms/vault.json`, door in town)
+  is the reference puzzle room.
 - **Trigger type**: `defineTriggerAction` in `play/trigger-actions.ts`;
   definitions own both `run` and their optional `validateProps`. The
   `portal` trigger opens the portal menu; a `door` trigger reads `flag`
@@ -206,9 +222,16 @@ back every ~2s (`sync` → folded into the guest's autosave), so co-op
 gold/XP/gear go home. Knights are **named** in co-op: a device-level
 name (`name.ts`, edited in the lobby) rides the `hello` and snapshots
 and renders as an overhead tag (`Player.name` — empty in solo, so no
-tag). Known edges: dialogue/shops/pause are host-screen
+tag). Puzzle gizmos cross the wire as
+`giz` snapshot entries (kind + rect + one state bit, drawn with the same
+shared `draw*` functions); the guest docks platform/closed-barrier
+solids into its own tilemap so the predicted knight rides and collides
+correctly. Known edges: dialogue/shops/pause are host-screen
 only (NPCs ignore non-`isLocal` knights); projectiles render as generic
-dots on the guest; strict NATs may fail (STUN only). When touching
+dots on the guest; strict NATs may fail (STUN only); levers answer only the
+host's interact key (`interact` isn't a networked action), while
+pressure plates feel both knights (the guest's is a real Player in the
+host's world). When touching
 multiplayer-adjacent code, keep the single-player path byte-identical —
 `nearestPlayer()` and `isLocal` are the seams that keep both true.
 

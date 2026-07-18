@@ -13,6 +13,9 @@ export interface TileDef {
   /** Swimmable liquid: non-solid, but bodies can query how deep they sit
    * in it (see Tilemap.submersion) for buoyancy/oxygen mechanics. */
   water?: boolean;
+  /** Contact damage dealt to bodies overlapping this tile (spikes, lava).
+   * Non-solid; the game decides who gets hurt and how often. */
+  hazard?: number;
   /** Draw one tile at pixel position (px, py). (tx, ty) are tile coords for variation. */
   draw?(g: CanvasRenderingContext2D, px: number, py: number, size: number, tx: number, ty: number): void;
 }
@@ -90,6 +93,22 @@ export class Tilemap implements CollisionSource {
       }
     }
     return Math.min(1, wet / area);
+  }
+
+  /** Strongest hazard damage among tiles the rect overlaps (0 = safe). */
+  hazardAt(r: Rect): number {
+    const ts = this.tileSize;
+    const x0 = Math.max(0, Math.floor(r.x / ts));
+    const y0 = Math.max(0, Math.floor(r.y / ts));
+    const x1 = Math.min(this.cols - 1, Math.floor((r.x + r.w - 0.001) / ts));
+    const y1 = Math.min(this.rows - 1, Math.floor((r.y + r.h - 0.001) / ts));
+    let worst = 0;
+    for (let ty = y0; ty <= y1; ty++) {
+      for (let tx = x0; tx <= x1; tx++) {
+        worst = Math.max(worst, tiles.get(this.grid[ty][tx]).hazard ?? 0);
+      }
+    }
+    return worst;
   }
 
   *solidsNear(r: Rect): Iterable<Solid> {

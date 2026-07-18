@@ -3,6 +3,7 @@ import { KEYMAP, type Action, type ActionGame } from '../defs';
 import { Player } from '../actors/player';
 import { Monster } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
+import { isGizmo } from '../actors/gizmos';
 import { restorePlayer, snapshotPlayer, type SaveData } from '../save';
 import { cleanName } from '../name';
 import { NET_ACTIONS, SNAP_HZ, parseMsg, type SnapMsg } from './protocol';
@@ -111,6 +112,7 @@ export class CoopHost {
       mobs: [],
       picks: [],
       shots: [],
+      giz: [],
       hud: {
         hp: g?.hp ?? 0, maxHp: g?.maxHp ?? 1, mp: g?.mp ?? 0, maxMp: g?.maxMp ?? 1,
         gold: g?.gold ?? 0, level: g?.progression.level ?? 1, score: view.score,
@@ -134,6 +136,9 @@ export class CoopHost {
         snap.picks.push({ id: this.id(e), item: e.itemId, x: r(e.x), y: r(e.y) });
       } else if (e instanceof Projectile) {
         snap.shots.push({ x: r(e.x), y: r(e.y), w: e.w, h: e.h });
+      } else if (isGizmo(e)) {
+        const s = e.gizmoSnap();
+        snap.giz.push({ id: this.id(e), ...s, x: r(s.x), y: r(s.y) });
       }
     }
     return snap;
