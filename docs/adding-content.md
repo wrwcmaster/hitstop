@@ -404,6 +404,16 @@ defineClass('mage', {
 
 Class change is free from the SKILL TREE screen (up to the class tabs, confirm on another class). It is non-destructive: `Player.setClass` parks the old class's unlocked nodes, strips every effect it granted (tree stat mods, class mods, capabilities, skills), and replays the new class's base kit + remembered nodes — the same idempotent replay saves use. Skill points are one shared pool; each class spends into its own tree. Saves carry `classId` + per-class `trees` (old flat-tree saves migrate by dealing nodes to the class whose grid holds them).
 
+## Parrying & deflection (engine hooks)
+
+The parry is a game mechanic built on three small engine seams on `Actor`:
+
+- `parrying` — while true, `Combat.hit` deflects any incoming blow (unless `pierceInvuln`) and calls the target's `onParried(opts, combat)` instead of dealing damage. The target owns the reaction.
+- `hitstun` — a timer (ticked in `tickTimers`) that suspends AI; `Monster.update` freezes the brain while it's > 0, so a parried attacker staggers.
+- `Projectile.reflect(vx, vy, damageBonus)` + `Strike.retarget(team, bonus)` — flip a shot to the opposite team and send it back; `Projectile.targetTeam` reads who it currently threatens.
+
+The knight's parry lives in `player.ts` (`beginParry`/`parryUpdate`/`parrySuccess`): a short `parry` FSM state opens a guard window that reflects player-bound projectiles in a front arc, and `onParried` staggers melee attackers. A hit inside the window grants i-frames + a `riposteT` window whose next swing lands harder (see `beginAttack`). The `parry` action is bound in `defs.ts` (keyboard F/H, gamepad RT, touch shield button) and rides `NET_ACTIONS` so co-op guests parry too.
+
 ## A new player attack state
 
 Model it like the existing attack (see `Player.beginAttack`):

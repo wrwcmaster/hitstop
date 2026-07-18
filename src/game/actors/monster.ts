@@ -120,8 +120,11 @@ export class Monster extends Actor {
     this.tickTimers(dt);
     this.statuses.update(dt);
     // A halting status (frozen, stunned) stops the brain but not physics —
-    // a frozen bat still falls out of the sky.
-    if (this.statuses.halted) {
+    // a frozen bat still falls out of the sky. A parry-stagger (hitstun)
+    // likewise suspends the AI while knockback carries and bleeds off.
+    if (this.hitstun > 0) {
+      this.vx *= Math.pow(0.02, dt);
+    } else if (this.statuses.halted) {
       this.vx = 0;
     } else {
       this.def.update?.(this, dt);

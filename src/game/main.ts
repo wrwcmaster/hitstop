@@ -84,6 +84,7 @@ bind('bA', 'attack', 'confirm');
 bind('bD', 'dash', 'down');
 bind('bI', 'interact'); // talk to NPCs / use, the touch equivalent of E
 bind('bF', 'skill3'); // ice shard
+bind('bP', 'parry'); // deflect + riposte
 bind('bM', 'menu'); // Esc: opens the system menu (and closes it — pause consumes 'menu')
 
 // Taps on the canvas count as "any key" (start/restart on mobile) and, in

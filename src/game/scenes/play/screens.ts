@@ -73,7 +73,7 @@ export class TitleScreen {
     this.menu.render(g, gm.width / 2 - 24, COARSE_POINTER ? 148 : 150, { lineHeight: menuLine(13), width: 60 });
     if (!COARSE_POINTER) {
       drawText(g, t('Move: Arrows / WASD - Jump: Space'), gm.width / 2, 232, COLORS.steelDark, 1, 'center');
-      drawText(g, t('Attack: Z - Dash: X - Skill: C - Menu: Esc'), gm.width / 2, 242, COLORS.steelDark, 1, 'center');
+      drawText(g, t('Attack: Z - Dash: X - Parry: F - Skill: C'), gm.width / 2, 242, COLORS.steelDark, 1, 'center');
       drawText(g, t('Z or Enter to select'), gm.width / 2, 254, COLORS.gold, 1, 'center');
     }
     // Small build version, tucked in the corner.

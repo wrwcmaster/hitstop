@@ -12,7 +12,7 @@ import type { GizmoSnap } from '../actors/gizmos';
 /** Gameplay actions a guest may drive remotely. Menu/interact stay local:
  * dialogue, shops, and pause live on the host's screen only. */
 export const NET_ACTIONS: readonly Action[] = [
-  'left', 'right', 'up', 'down', 'jump', 'attack', 'dash', 'skill', 'skill2', 'skill3',
+  'left', 'right', 'up', 'down', 'jump', 'attack', 'dash', 'skill', 'skill2', 'skill3', 'parry',
 ];
 
 /** Snapshots per second (every 3rd fixed step). */
