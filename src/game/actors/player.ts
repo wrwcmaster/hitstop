@@ -13,6 +13,7 @@ import {
   overlaps,
   expand,
   chance,
+  drawText,
   type Input,
   type StateDef,
   type CollisionSource,
@@ -311,6 +312,10 @@ export class Player extends Actor {
     if (m) effect?.onRelease?.(m, this, burst);
     return this.hp <= 0 ? 'dead' : 'move';
   }
+
+  /** Shown as a floating tag over the knight — set only in multiplayer,
+   * so solo play stays clean. */
+  name = '';
 
   /** Input driving this knight. Defaults to the local device; a net
    * session substitutes a remote-fed Input for the guest's knight. */
@@ -684,6 +689,9 @@ export class Player extends Actor {
   }
 
   render(g: CanvasRenderingContext2D): void {
+    // Name tag (multiplayer): who is this knight. Drawn before the
+    // i-frame blink so the tag holds steady while the body strobes.
+    if (this.name) drawText(g, this.name, this.cx, this.y - 4, COLORS.steel, 1, 'center');
     // I-frame blink (god mode holds i-frames but shouldn't strobe).
     if (this.invulnT > 0 && !this.godMode && !this.fsm.is('dead') && Math.floor(this.invulnT * 20) % 2) return;
 

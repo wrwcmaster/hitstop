@@ -9,14 +9,19 @@ import {
 } from '@engine/index';
 import type { ActionGame } from '../defs';
 import { COLORS } from '../content/palette';
-import { ROOMS } from '../content/rooms';
+import { ROOMS, START_ROOM } from '../content/rooms';
 import { Player } from '../actors/player';
 import { Monster, monsters } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
 import { Background } from '../scenes/background';
 import { Hud } from '../scenes/play/hud';
 import type { PlayHost } from '../scenes/play/host';
-import { NET_ACTIONS, parseMsg, type SnapMsg } from './protocol';
+import { saveStore, newestSave, restorePlayer, type SaveData } from '../save';
+import { displayName } from '../name';
+import { NET_ACTIONS, parseMsg, type SnapMsg, type KnightSnap } from './protocol';
+
+/** Beyond this far from the server's word, stop gliding and snap. */
+const SNAP_DIST = 48;
 
 /** A puppet: a real actor rendered with real code but never simulated —
  * each snapshot repositions it, and we glide between snapshots. */
@@ -27,10 +32,13 @@ interface Puppet {
 }
 
 /**
- * The guest side of a co-op session: a renderer for the host's world.
- * Holds no game state of its own — it streams held actions to the host
- * and draws the latest snapshot with real actor render code (so poses,
- * gear, and boss bars look right), gliding actors between snapshots.
+ * The guest side of a co-op session: the host's world, rendered — plus
+ * one locally *predicted* actor: your own knight. It runs real physics
+ * against the same tilemap with your live input, so movement feels
+ * instant; the host's authoritative position is folded back in as a
+ * gentle correction (a snap when badly wrong). Everything else is a
+ * puppet driven by 20Hz snapshots. Your saved knight travels with you:
+ * a hello carries it in, periodic syncs carry its progress home.
  */
 export class CoopGuestScene implements Scene {
   private tilemap: Tilemap | null = null;
@@ -40,7 +48,11 @@ export class CoopGuestScene implements Scene {
   private hudHost: { game: ActionGame; player: Player | null };
   private roomId = '';
   private puppets = new Map<number, Puppet>();
-  private youId = 0;
+  /** The locally simulated knight (prediction) + the server's last word. */
+  private me: Player | null = null;
+  private serverMe: KnightSnap | null = null;
+  /** The saved knight we brought along (drives local gear visuals too). */
+  private profile: SaveData['player'] | undefined;
   private banner: string | null = null;
   private snap: SnapMsg | null = null;
   private uiT = 0;
@@ -51,15 +63,35 @@ export class CoopGuestScene implements Scene {
     private link: PeerLink,
   ) {
     this.bg = new Background(game.width, game.height);
-    // The Hud reads host.game + host.player — a puppet works fine.
+    // The Hud reads host.game + host.player — our predicted knight fits.
     this.hudHost = { game, player: null };
     this.hud = new Hud(this.hudHost as PlayHost);
+    this.profile = newestSave()?.player;
     link.onMessage = (raw) => {
       const m = parseMsg(raw);
       if (m?.t === 'snap') this.apply(m);
+      if (m?.t === 'sync') this.persist(m.player);
       if (m?.t === 'bye') this.drop();
     };
     link.onClose = () => this.drop();
+    // Bring my knight: name for the tag, snapshot for the host's copy.
+    link.send(JSON.stringify({ t: 'hello', name: displayName('guest'), player: this.profile }));
+  }
+
+  /** Fold the host's word on my knight into my own save, so co-op gold,
+   * XP, and gear survive the session. Creates a save if I had none. */
+  private persist(player: SaveData['player']): void {
+    const cur = saveStore.load();
+    if (cur) {
+      cur.player = player;
+      cur.savedAt = Date.now();
+      saveStore.save(cur);
+    } else {
+      saveStore.save({
+        roomId: START_ROOM, best: 0, savedAt: Date.now(),
+        flags: [], firedTriggers: {}, player,
+      });
+    }
   }
 
   private drop(): void {
@@ -70,16 +102,22 @@ export class CoopGuestScene implements Scene {
 
   private apply(s: SnapMsg): void {
     this.snap = s;
-    this.youId = s.you;
     this.banner = s.banner;
     if (s.room !== this.roomId) this.enterRoom(s.room);
     const seen = new Set<number>();
     for (const k of s.knights) {
+      // My own knight is predicted locally, not puppeted — remember the
+      // server's word for the correction pass in update().
+      if (k.id === s.you) {
+        this.serverMe = k;
+        continue;
+      }
       seen.add(k.id);
       const p = this.puppet(k.id, () => new Player(this.game, this.tilemap!, k.x, k.y));
       const knight = p.actor as Player;
       p.tx = k.x;
       p.ty = k.y;
+      knight.name = k.name ?? '';
       knight.facing = k.facing as 1 | -1;
       knight.hp = k.hp;
       knight.maxHp = k.maxHp;
@@ -109,16 +147,16 @@ export class CoopGuestScene implements Scene {
     }
     for (const id of this.puppets.keys()) if (!seen.has(id)) this.puppets.delete(id);
 
-    // Your knight carries the authoritative HUD numbers.
-    const you = this.you();
-    if (you) {
-      you.hp = s.hud.hp;
-      you.maxHp = s.hud.maxHp;
-      you.mp = s.hud.mp;
-      you.mpCap = s.hud.maxMp;
-      you.gold = s.hud.gold;
-      you.progression.restore({ xp: 0, level: s.hud.level, skillPoints: 0 });
-      this.hudHost.player = you;
+    // The predicted knight carries the authoritative HUD numbers.
+    const me = this.me;
+    if (me) {
+      me.hp = s.hud.hp;
+      me.maxHp = s.hud.maxHp;
+      me.mp = s.hud.mp;
+      me.mpCap = s.hud.maxMp;
+      me.gold = s.hud.gold;
+      me.progression.restore({ xp: 0, level: s.hud.level, skillPoints: 0 });
+      this.hudHost.player = me;
     }
   }
 
@@ -138,21 +176,24 @@ export class CoopGuestScene implements Scene {
     return p;
   }
 
-  private you(): Player | null {
-    const p = this.puppets.get(this.youId)?.actor;
-    return p instanceof Player ? p : null;
-  }
-
   private enterRoom(id: string): void {
     this.roomId = id;
     this.puppets.clear();
-    this.hudHost.player = null;
+    this.serverMe = null;
     const room = ROOMS[id];
     if (!room) return;
     this.tilemap = buildTilemap(room);
     this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
     this.game.camera.setBounds(0, -30, this.tilemap.worldW, this.tilemap.worldH - 16);
     this.game.music.play((room.props?.music as string) ?? 'depths');
+    // Respawn the predicted knight on the new ground. It lives in the
+    // (otherwise empty) local world so real physics can drive it.
+    this.game.world.clear();
+    this.me = new Player(this.game, this.tilemap, room.playerSpawn.x, room.playerSpawn.y);
+    this.me.name = displayName('guest');
+    if (this.profile) restorePlayer(this.me, this.profile); // my gear, my look
+    this.game.world.spawn(this.me);
+    this.hudHost.player = this.me;
   }
 
   /* ---------------- update / render ---------------- */
@@ -173,6 +214,30 @@ export class CoopGuestScene implements Scene {
     // Stream what's held right now; the host turns it into edges.
     this.link.send(JSON.stringify({ t: 'in', held: NET_ACTIONS.filter((a) => this.game.input.held(a)) }));
 
+    // Prediction: my knight runs real physics with my live input — zero
+    // felt latency — then the server's word pulls it into line.
+    this.game.world.update(dt);
+    const me = this.me;
+    const sv = this.serverMe;
+    if (me && sv) {
+      const dx = sv.x - me.x;
+      const dy = sv.y - me.y;
+      if (Math.hypot(dx, dy) > SNAP_DIST) {
+        me.x = sv.x;
+        me.y = sv.y;
+      } else {
+        const pull = Math.min(1, dt * 4);
+        me.x += dx * pull;
+        me.y += dy * pull;
+      }
+      // Life-or-death states are the host's call, not a prediction.
+      const grim = sv.state === 'dead' || sv.state === 'swallowed';
+      const meGrim = me.fsm.is('dead', 'swallowed');
+      if (grim !== meGrim) {
+        try { me.fsm.set(grim ? sv.state : 'move'); } catch { /* keep pose */ }
+      }
+    }
+
     // Glide puppets toward their snapshot targets (~2 snapshots of travel),
     // and keep animation clocks ticking between snapshots.
     const blend = Math.min(1, dt * 12);
@@ -182,11 +247,10 @@ export class CoopGuestScene implements Scene {
       if (p.actor instanceof Player || p.actor instanceof Monster) p.actor.animT += dt;
       if (p.actor instanceof Player) p.actor.fsm.t += dt;
     }
-    const you = this.you();
-    if (you && this.game.camera) {
+    if (me) {
       const cam = this.game.camera;
-      const tx = you.cx - cam.viewW / 2 + you.facing * 18;
-      const ty = you.cy - cam.viewH * 0.62;
+      const tx = me.cx - cam.viewW / 2 + me.facing * 18 + me.vx * 0.1;
+      const ty = me.cy - cam.viewH * 0.62 + me.vy * 0.05;
       cam.follow(tx, ty, dt);
       cam.x = clamp(cam.x, 0, Math.max(0, (this.tilemap?.worldW ?? cam.viewW) - cam.viewW));
     }
@@ -200,6 +264,7 @@ export class CoopGuestScene implements Scene {
       this.tilemap.render(g, gm.camera.x, gm.camera.y, gm.camera.viewW, gm.camera.viewH);
       const sorted = [...this.puppets.values()].sort((a, b) => a.actor.layer - b.actor.layer);
       for (const p of sorted) p.actor.render(g);
+      this.me?.render(g); // the predicted knight, on top of the puppets
       // Projectiles come across as plain rects; draw them as glow dots.
       for (const s of this.snap?.shots ?? []) {
         g.fillStyle = COLORS.gold;
@@ -233,7 +298,11 @@ export class CoopGuestScene implements Scene {
   }
 
   private leave(): void {
-    this.link.close();
+    // Keep the channel up a beat so the host's final sync can land
+    // (persist() still runs until the close fires).
+    const link = this.link;
+    setTimeout(() => link.close(), 500);
+    this.game.world.clear();
     // Import here would be circular; the scene that started us handles return.
     this.onLeave?.();
   }

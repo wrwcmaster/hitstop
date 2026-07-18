@@ -166,10 +166,20 @@ strict NATs may fail (STUN only, no TURN). The guest
 (`net/guest.ts`) renders snapshots through **puppet actors** — real
 `Player`/`Monster`/`Pickup` instances that are positioned and posed
 (`fsm.set`) but never simulated, so poses, gear, trails, and the boss
-bar come from the same render code. Known v1 edges: guest inputs feel
-one RTT late (no prediction); dialogue/shops/pause are host-screen only
-(NPCs ignore non-`isLocal` knights); the guest knight is ephemeral (not
-saved); projectiles render as generic dots on the guest. When touching
+bar come from the same render code — except the guest's **own** knight,
+which is *predicted*: a real Player simulated locally (same tilemap,
+live input) so movement feels instant, with the host's authoritative
+position folded back in as a gentle correction (snap past 48px) and
+dead/swallowed forced from the server. The guest's knight is also
+**persistent**: a `hello` carries their saved player in
+(`restorePlayer` on the host's copy), and the host syncs the knight
+back every ~2s (`sync` → folded into the guest's autosave), so co-op
+gold/XP/gear go home. Knights are **named** in co-op: a device-level
+name (`name.ts`, edited in the lobby) rides the `hello` and snapshots
+and renders as an overhead tag (`Player.name` — empty in solo, so no
+tag). Known edges: dialogue/shops/pause are host-screen
+only (NPCs ignore non-`isLocal` knights); projectiles render as generic
+dots on the guest; strict NATs may fail (STUN only). When touching
 multiplayer-adjacent code, keep the single-player path byte-identical —
 `nearestPlayer()` and `isLocal` are the seams that keep both true.
 

@@ -1,6 +1,7 @@
 import { type Scene, PeerLink, drawText } from '@engine/index';
 import { COLORS } from '../content/palette';
 import type { ActionGame } from '../defs';
+import { NAME_MAX, playerName, setPlayerName } from '../name';
 
 /**
  * Co-op lobby: the copy-paste handshake. WebRTC needs an offer/answer
@@ -128,6 +129,14 @@ export class CoopScene implements Scene {
     const box = this.panel();
     this.el(box, 'div', 'CO-OP', 'font-size:18px;color:#ffd166;margin-bottom:4px;');
     this.note(box, 'Two players, one world, no server: you and a friend swap two codes over any chat, then the browsers connect directly.');
+    this.note(box, "Your knight's name (floats overhead in co-op):");
+    const name = this.el(box, 'input', '',
+      'width:100%;margin:2px 0 8px;padding:6px;background:#07070d;color:#ffd166;' +
+      'border:1px solid #3b4a6b;font-family:monospace;font-size:13px;');
+    name.maxLength = NAME_MAX;
+    name.placeholder = 'e.g. Sir Bonk';
+    name.value = playerName();
+    name.oninput = () => setPlayerName(name.value);
     this.button(box, 'HOST GAME', () => void this.buildHost());
     this.button(box, 'JOIN GAME', () => this.buildJoin());
     this.button(box, 'BACK', () => this.close());
