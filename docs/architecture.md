@@ -38,6 +38,8 @@
 | `core/events.ts` | Typed pub/sub | Systems communicate through events (`hit`, `kill`, `waveStart`) so scoring/UI/AI can react without coupling. |
 | `core/registry.ts` | Named content registries | The backbone of data-driven content; tools enumerate these to build their palettes. |
 | `core/scene.ts` | Top-level game states on a **stack** | Only the top scene updates; every scene renders. Push a pause menu or dialogue and the frozen world stays visible under it — pausing falls out of the architecture instead of needing a flag. |
+| `core/storage.ts` | `JsonStore` (versioned localStorage), `SlotVault` (autosave + N slots + newest), swappable backing | The backing swap (`sandboxStorage`) is what lets a replay viewer load a recording's saves without touching the player's real ones. |
+| `replay/` | Deterministic record/replay: seeded boot, per-run input tapes, stepped time control for agents, the in-browser viewer | The engine owns the **mechanism**; the game supplies a small adapter (state extractor, run starter, action list). A run = seed + storage + input tape, because fixed steps + seeded gameplay RNG + action-only input make the sim a pure function of those three. |
 | `input/input.ts` | Action-based input + `Buffer` | Gameplay reads *actions*, never keys. `Buffer` implements input buffering / coyote time — core feel tools. |
 | `gfx/` | Pixel canvas, text-grid sprites, animation, 3×5 font, camera | Sprites are authored as text + palette: diffable, hand-editable, tool-friendly. Flip/tint/white-flash variants are cached. |
 | `feel/` | **The selling point.** Particles, floating text, and `Feel` — hitstop, slowmo, flash, shake, kick, and the composed `impact()` | One `strength` knob (0..1) scales the whole bundle so feedback stays coherent. |
@@ -45,7 +47,7 @@
 | `status/` | `StatusDef` registry + per-actor `Statuses` bag | Buffs/debuffs are content: duration, stat mods (auto-applied via sourced modifiers), periodic ticks, apply/expire hooks. |
 | `progression/` | `Progression` (XP ledger with pluggable curve, skill points) + `TreeNodeDef` registry + `SkillTree` runtime | Tree effects are stat mods and/or unlock hooks; `restore()` re-applies everything from a save without re-spending points. |
 | `physics/body.ts` | AABB bodies, gravity, axis-separated collide vs solids + one-way platforms | Deliberately simple platformer physics — predictable and tunable beats realistic. |
-| `world/` | `Entity`/`Actor` base classes, `World` with deferred spawn/remove and pluggable systems | Classic entities, not ECS (see below). `Actor` carries the shared timers — `flashT`, `invulnT`, plus `hitstun` (AI suspended while > 0) and a `parrying` flag. |
+| `world/` | `Entity`/`Actor` base classes, `World` with deferred spawn/remove and pluggable systems, `WaveRunner` | Classic entities, not ECS (see below). `Actor` carries the shared timers — `flashT`, `invulnT`, plus `hitstun` (AI suspended while > 0) and a `parrying` flag. `WaveRunner` sequences wave combat (queue → telegraphs → clear → breather → goal) over game-supplied compose/place/spawn callbacks. |
 | `math/` | Vectors/rects/util + `ballistics.ts` (aim solvers) | `ballisticVelocity` solves a launch angle for a fixed muzzle speed under gravity (null when out of range); `ballisticLob` is the always-solvable mortar arc. Player bows and monster archers aim through the same pure functions. |
 | `combat/combat.ts` | `Strike` (hitbox + damage + once-per-target tracking), hit application, and **parry deflection** | **Feedback is applied inside the combat resolver.** A `parrying` target has its hit deflected to `onParried` (no damage) instead; `Strike.retarget` flips a strike to the other team (the parry's projectile reflection). |
 | `combat/projectile.ts` | Bullets/bolts/arrows: a moving hitbox carrying a Strike, with optional gravity | Projectiles produce the same feedback bundle as melee. Gravity makes arrows arc and bullets drop; `reflect(vx,vy,bonus)` turns a shot back on the other team (parry). |
@@ -55,6 +57,32 @@
 | `skills/` | `SkillDef` registry + `SkillBook` (cooldowns, resource gating) | The resource (mana/stamina/ammo) is abstracted behind two callbacks; casts usually fire Strikes/Projectiles so feedback comes free. |
 | `ui/` | `drawPanel`/`Menu` widgets, `DialogueScene` (typewriter + choices), `Minimap` (baked tiles + live markers) | Conversations are data in a registry; menus are the same widget everywhere. |
 | `debug/overlay.ts` | Hurtboxes, counts, time scale (`` ` `` key) | The fastest tuning loop is seeing the numbers live. |
+
+## Mechanism in the engine, meaning in the game
+
+The layering rule ("the engine doesn't know what a knight is") has a
+constructive reading: when a *game system* turns out to be a general
+*mechanism*, split it along that line instead of leaving it in game code.
+The engine gets a small component parameterized by callbacks/config; the
+game keeps a thin adapter that supplies content and presentation. Three
+worked examples:
+
+- **Wave combat** — `engine/world/waves.ts` owns the sequencing (spawn
+  queue, telegraph timers, clear detection, breather, goal); the game's
+  `WaveDirector` supplies wave composition from its tables, spawn
+  placement, monster creation, and the banners/gate-key theatrics.
+- **Record/replay** — `engine/replay/replay.ts` owns tapes, seeding,
+  playback, and the viewer; the game's `test/harness.ts` supplies the
+  action list, a state extractor, and how a run begins.
+- **Saves** — `SlotVault` owns the autosave + N slots + newest-wins
+  shape; the game owns what a save *contains* and how a player is
+  snapshotted/restored.
+
+The test for "does this belong in the engine?": could a different game on
+this engine use it unchanged by swapping the callbacks? If the answer
+needs an `if` about knights or slimes, it stays in the game (or becomes a
+registry). Prefer extracting the mechanism over widening `PlayHost` or
+growing `play.ts`.
 
 ## Why entities + registries, not a full ECS
 

@@ -48,6 +48,44 @@ export function snapshotStorage(prefix: string): Record<string, string> {
   return backing.snapshot(prefix);
 }
 
+/**
+ * An autosave plus N manual slots over JsonStores — the standard save-
+ * slot shape. Slot 0 is the autosave at `key`; slots 1..N live at
+ * `key.slot<i>`. `newest()` picks the most recent by the game-supplied
+ * timestamp (for a CONTINUE entry).
+ */
+export class SlotVault<T> {
+  private stores: JsonStore<T>[];
+
+  constructor(
+    key: string,
+    version: number,
+    /** Manual slots (the vault holds this + 1 counting the autosave). */
+    readonly slots: number,
+    private stampOf: (data: T) => number,
+  ) {
+    this.stores = [
+      new JsonStore<T>(key, version),
+      ...Array.from({ length: slots }, (_, i) => new JsonStore<T>(`${key}.slot${i + 1}`, version)),
+    ];
+  }
+
+  /** Store for a slot: 0 = autosave, 1..slots = manual. */
+  store(slot: number): JsonStore<T> {
+    return this.stores[slot];
+  }
+
+  /** The most recent save across the autosave and every slot. */
+  newest(): T | null {
+    let best: T | null = null;
+    for (const s of this.stores) {
+      const d = s.load();
+      if (d && (!best || this.stampOf(d) > this.stampOf(best))) best = d;
+    }
+    return best;
+  }
+}
+
 export class JsonStore<T> {
   constructor(
     private key: string,

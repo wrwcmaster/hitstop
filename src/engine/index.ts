@@ -8,8 +8,18 @@ export { Game, type GameOptions } from './core/game';
 export { Loop, STEP, type LoopHooks } from './core/loop';
 export { EventBus, type Unsubscribe } from './core/events';
 export { Registry } from './core/registry';
-export { JsonStore, sandboxStorage, snapshotStorage } from './core/storage';
+export { JsonStore, SlotVault, sandboxStorage, snapshotStorage } from './core/storage';
 export { SceneManager, type Scene } from './core/scene';
+export { WaveRunner, type WaveRunnerConfig, type Telegraph } from './world/waves';
+export {
+  Replay,
+  bootReplay,
+  pickReplayFile,
+  type Recording,
+  type TapeEvent,
+  type ReplayBoot,
+  type ReplayConfig,
+} from './replay/replay';
 
 export * from './math/util';
 export * from './math/ballistics';

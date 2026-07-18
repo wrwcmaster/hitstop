@@ -1,4 +1,4 @@
-import { JsonStore, t, type ItemStack } from '@engine/index';
+import { SlotVault, t, type JsonStore, type ItemStack } from '@engine/index';
 import type { Player } from './actors/player';
 import { classOfNode, DEFAULT_CLASS } from './content/classes';
 
@@ -39,19 +39,16 @@ export interface SaveData {
   };
 }
 
-/** The autosave (checkpoints). Slot 0 in the slots UI. */
-export const saveStore = new JsonStore<SaveData>('hitstop.save', 3);
-
-/** Manual save slots (multi-slot saves; the town made saving a habit). */
+/** Autosave + manual slots (the town made saving a habit). */
 export const SAVE_SLOT_COUNT = 3;
-const slotStores = Array.from(
-  { length: SAVE_SLOT_COUNT },
-  (_, i) => new JsonStore<SaveData>(`hitstop.save.slot${i + 1}`, 3),
-);
+const vault = new SlotVault<SaveData>('hitstop.save', 3, SAVE_SLOT_COUNT, (d) => d.savedAt ?? 0);
+
+/** The autosave (checkpoints). Slot 0 in the slots UI. */
+export const saveStore = vault.store(0);
 
 /** Store for a slot: 0 = autosave, 1..SAVE_SLOT_COUNT = manual slots. */
 export function slotStore(slot: number): JsonStore<SaveData> {
-  return slot === 0 ? saveStore : slotStores[slot - 1];
+  return vault.store(slot);
 }
 
 /** One line per slot for the save/load UI. */
@@ -64,12 +61,7 @@ export function slotSummary(slot: number): string {
 
 /** The most recent save across autosave + slots (for CONTINUE). */
 export function newestSave(): SaveData | null {
-  let best: SaveData | null = null;
-  for (let s = 0; s <= SAVE_SLOT_COUNT; s++) {
-    const d = slotStore(s).load();
-    if (d && (!best || (d.savedAt ?? 0) > (best.savedAt ?? 0))) best = d;
-  }
-  return best;
+  return vault.newest();
 }
 
 export function snapshotPlayer(p: Player): SaveData['player'] {

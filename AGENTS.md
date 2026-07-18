@@ -27,7 +27,11 @@ npm run agent-play     # HTTP bridge for turn-based (LLM-agent) play
 1. **Engine/game layering is strict.** `src/engine/` never imports from
    `src/game/`. The engine has no idea what a knight or a slime is. If a
    feature needs engine support, add a general mechanism (module,
-   registry, hook) and drive it with game data.
+   registry, hook) and drive it with game data. When a game system turns
+   out to be a general mechanism, extract it: engine component +
+   callbacks, thin game adapter (see "Mechanism in the engine, meaning
+   in the game" in docs/architecture.md; WaveRunner and replay/ are the
+   worked examples).
 2. **Content is data in registries, not special cases in code.** Items,
    monsters, NPCs, tiles, rooms, skills, statuses, conversations, shops,
    songs, SFX, wave tables, gear visuals, trigger actions, quests, portal
@@ -57,8 +61,10 @@ npm run agent-play     # HTTP bridge for turn-based (LLM-agent) play
 ## Architecture map
 
 ```
-src/engine/   core (loop/scenes/events), gfx, feel, audio, physics,
-              combat, FSM, input, items/stats, level, ui, debug,
+src/engine/   core (loop/scenes/events/storage), gfx, feel, audio,
+              physics, combat, FSM, input, items/stats, level, ui, debug,
+              replay (deterministic record/replay — game supplies an
+              adapter), world (entities + WaveRunner),
               net (PeerLink: WebRTC DataChannel + copy-paste signaling)
 src/game/
   defs.ts     actions, keymap/gamepad map, VIEW_W/H, ActionGame type
@@ -89,7 +95,7 @@ see the scene only through the narrow **`PlayHost`** seam (`play/host.ts`):
 
 | Module | Owns |
 | --- | --- |
-| `play/waves.ts` | WaveDirector: spawning, WAVE banners, `waveGoal` → gate-key drop |
+| `play/waves.ts` | WaveDirector: composition/placement/banners over the engine's `WaveRunner`; `waveGoal` → gate-key drop |
 | `play/trigger-actions.ts` | What trigger events mean (`talk`, `door` + key lock) — a registry |
 | `play/hud.ts` | All in-game screen-space drawing + the gate marker (pure rendering) |
 | `play/screens.ts` | Title screen + game-over overlay |

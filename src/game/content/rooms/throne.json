@@ -105,5 +105,7 @@
    "props": {}
   }
  ],
- "props": {}
+ "props": {
+  "music": "depths"
+ }
 }

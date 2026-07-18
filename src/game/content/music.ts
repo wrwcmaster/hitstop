@@ -245,4 +245,8 @@ defineSong('boss', {
 });
 
 /** Importing this module registers the soundtrack. */
+/** What plays when a room's props name no song. Rooms opt out of this
+ * via `props.music` in their JSON — never a code-side per-room map. */
+export const DEFAULT_SONG = 'overworld';
+
 export function registerSongs(): void {}

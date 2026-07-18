@@ -111,6 +111,16 @@ export class Tilemap implements CollisionSource {
     return worst;
   }
 
+  /** Top of the first solid tile scanning down column `x` (spawn placement). */
+  groundY(x: number): number {
+    const ts = this.tileSize;
+    const tx = Math.min(Math.max(Math.floor(x / ts), 0), this.cols - 1);
+    for (let ty = 0; ty < this.rows; ty++) {
+      if (tiles.get(this.grid[ty][tx]).solid) return ty * ts;
+    }
+    return this.worldH - ts;
+  }
+
   *solidsNear(r: Rect): Iterable<Solid> {
     const ts = this.tileSize;
     const x0 = Math.max(0, Math.floor(r.x / ts) - 1);
