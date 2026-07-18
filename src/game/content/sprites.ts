@@ -3,6 +3,8 @@ import { PAL } from './palette';
 import knightJson from './sprites/knight.json';
 import slimeJson from './sprites/slime.json';
 import batJson from './sprites/bat.json';
+import pikeJson from './sprites/pike.json';
+import chestJson from './sprites/chest.json';
 import merchantJson from './sprites/merchant.json';
 import iconsJson from './sprites/icons.json';
 import hudJson from './sprites/hud.json';
@@ -40,6 +42,13 @@ export async function loadKnightSheet(imageUrl: string, desc: SheetDescriptor): 
 export const slimeSprite = load(slimeJson);
 export const SLIME1 = slimeSprite.frame('idle', 0);
 export const SLIME2 = slimeSprite.frame('idle', 1);
+
+export const pikeSprite = load(pikeJson);
+export const PIKE1 = pikeSprite.frame('swim', 0);
+export const PIKE2 = pikeSprite.frame('swim', 1);
+
+export const chestSprite = load(chestJson);
+export const CHEST = chestSprite.frame('idle', 0);
 
 export const batSprite = load(batJson);
 export const BAT1 = batSprite.frame('fly', 0);

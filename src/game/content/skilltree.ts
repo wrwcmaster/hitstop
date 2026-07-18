@@ -20,9 +20,9 @@ export const BRANCH_NAMES = ['WARRIOR', 'VITALITY', 'MAGIC'];
 
 /** Grid for the tree UI: TREE_GRID[branch][tier] = node id. */
 export const TREE_GRID: string[][] = [
-  ['w1', 'w2', 'w3', 'w4'],
-  ['v1', 'v2', 'v3', 'v4'],
-  ['m1', 'm2', 'm3', 'm4'],
+  ['w1', 'w2', 'w3', 'w4', 'w5'],
+  ['v1', 'v2', 'v3', 'v4', 'v5'],
+  ['m1', 'm2', 'm3', 'm4', 'm5'],
 ];
 
 /* ---- WARRIOR ---- */
@@ -127,6 +127,32 @@ defineTreeNode<TreeCtx>('m4', {
   onUnlock({ player }) {
     player.capabilities.enable('pyre');
   },
+});
+
+/* ---- THE TIDE TIER (the grotto's rewards) ---- */
+
+defineTreeNode<TreeCtx>('w5', {
+  name: 'TIDE BREAKER',
+  desc: '+2 attack on every swing',
+  cost: 3, branch: 0, tier: 4, requires: ['w4'],
+  mods: { add: { attack: 2 } },
+});
+
+defineTreeNode<TreeCtx>('v5', {
+  name: 'DEEP LUNGS',
+  desc: 'Much longer breath, stronger strokes',
+  cost: 2, branch: 1, tier: 4, requires: ['v4'],
+  onUnlock({ player }) {
+    player.capabilities.setModifier('extraAirSeconds', 6);
+    player.capabilities.setModifier('swimBoost', 0.5);
+  },
+});
+
+defineTreeNode<TreeCtx>('m5', {
+  name: 'ABYSSAL WELL',
+  desc: '+1 max MP from the deep',
+  cost: 3, branch: 2, tier: 4, requires: ['m4'],
+  mods: { add: { maxMp: 1 } },
 });
 
 /** Importing this module registers the tree. */

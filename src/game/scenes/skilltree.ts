@@ -2,6 +2,7 @@ import {
   type Scene,
   drawPanel,
   drawText,
+  t,
   treeNodeDef,
   clamp,
 } from '@engine/index';
@@ -39,7 +40,7 @@ export class SkillTreeScene implements Scene {
   private layout() {
     const gm = this.game;
     const bw = 280;
-    const bh = 200;
+    const bh = 232; // five tiers now (the tide tier joined the grid)
     const x = (gm.width - bw) / 2;
     const y = (gm.height - bh) / 2;
     const colW = bw / 3;
@@ -136,13 +137,13 @@ export class SkillTreeScene implements Scene {
     TREE_GRID.forEach((branchNodes, b) => {
       const cx = x + colW * b + colW / 2;
       drawText(g, BRANCH_NAMES[b], cx, y + 22, COLORS.steelDark, 1, 'center');
-      branchNodes.forEach((id, t) => {
+      branchNodes.forEach((id, tier) => {
         const def = treeNodeDef(id);
-        const { x: nx, y: ny } = this.nodeRect(b, t);
+        const { x: nx, y: ny } = this.nodeRect(b, tier);
 
         // Connector to the node above.
-        if (t > 0) {
-          const owned = p.tree.has(branchNodes[t - 1]);
+        if (tier > 0) {
+          const owned = p.tree.has(branchNodes[tier - 1]);
           g.strokeStyle = owned ? COLORS.gold : COLORS.navyLight;
           g.beginPath();
           g.moveTo(cx, ny - gapY + nodeH);
@@ -163,11 +164,11 @@ export class SkillTreeScene implements Scene {
         g.strokeRect(nx + 0.5, ny + 0.5, nodeW - 1, nodeH - 1);
 
         const textColor = owned ? '#07070d' : canBuy ? COLORS.white : reachable ? COLORS.steel : COLORS.steelDark;
-        drawText(g, def.name, cx, ny + 4, textColor, 1, 'center');
+        drawText(g, t(def.name), cx, ny + 4, textColor, 1, 'center');
         drawText(g, owned ? 'OWNED' : `${def.cost} SP`, cx, ny + 12, owned ? '#07070d' : COLORS.steelDark, 1, 'center');
 
         // Selection cursor.
-        if (b === this.branch && t === this.tier && Math.floor(this.blinkT * 4) % 2 === 0) {
+        if (b === this.branch && tier === this.tier && Math.floor(this.blinkT * 4) % 2 === 0) {
           g.strokeStyle = COLORS.gold;
           g.strokeRect(nx - 2.5, ny - 2.5, nodeW + 5, nodeH + 5);
         }
@@ -185,7 +186,7 @@ export class SkillTreeScene implements Scene {
     if (this.messageT > 0) {
       drawText(g, this.message, gm.width / 2, descY, COLORS.gold, 1, 'center');
     } else {
-      drawText(g, sel.desc, gm.width / 2, descY, COLORS.steel, 1, 'center');
+      drawText(g, t(sel.desc), gm.width / 2, descY, COLORS.steel, 1, 'center');
     }
     drawText(g, 'Z: learn - Esc: back', gm.width / 2, y + bh - 11, COLORS.steelDark, 1, 'center');
   }

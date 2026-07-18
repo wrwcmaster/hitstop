@@ -1,0 +1,23 @@
+{
+  "hd": true,
+  "w": 12,
+  "h": 9,
+  "anims": {
+    "idle": {
+      "fps": 1,
+      "frames": [
+        [
+          ".OOOOOOOOOO.",
+          "OYYYYYYYYYYO",
+          "OYSYYYYYYSYO",
+          "OOOOOOOOOOOO",
+          "OYYYYWWYYYYO",
+          "OYSYYWWYYSYO",
+          "OYYYYYYYYYYO",
+          "OYYYYYYYYYYO",
+          ".OOOOOOOOOO."
+        ]
+      ]
+    }
+  }
+}
