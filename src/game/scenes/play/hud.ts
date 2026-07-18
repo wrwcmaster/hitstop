@@ -71,8 +71,9 @@ export class Hud {
       // Purse.
       blit(g, ICON_COIN, 6, 23);
       drawText(g, String(p.gold), 14, 24, COLORS.gold);
-      // Level + XP bar (+ a nudge when skill points are waiting).
+      // Level + class + XP bar (+ a nudge when skill points are waiting).
       drawText(g, t('LV {n}', { n: p.progression.level }), 6, 33, COLORS.white);
+      drawText(g, t(p.classDef.name), 6, 42, p.classDef.color);
       g.fillStyle = '#07070d';
       g.fillRect(28, 34, 32, 3);
       g.fillStyle = COLORS.gold;
@@ -81,7 +82,8 @@ export class Hud {
         drawText(g, `${p.progression.skillPoints} SP - ESC`, 64, 33, COLORS.gold);
       }
       // Active buffs/debuffs: chip + remaining-time sliver.
-      let by = 42;
+      let by = 51; // below the class tag
+
       // Breath: air bubbles appear only while the meter is in play.
       if (p.air < 1) {
         for (let i = 0; i < 6; i++) {

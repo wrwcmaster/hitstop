@@ -2,7 +2,6 @@ import { defineSkill } from '@engine/index';
 import { COLORS } from './palette';
 import type { ActionGame } from '../defs';
 import type { Player } from '../actors/player';
-import type { Action } from '../defs';
 import { Monster } from '../actors/monster';
 
 /** Context handed to skill casts. */
@@ -11,12 +10,8 @@ export interface SkillCtx {
   player: Player;
 }
 
-/** Input-to-skill mapping. Player dispatches this table without knowing skill ids. */
-export const DEFAULT_SKILL_LOADOUT: readonly { action: Action; skillId: string; startsKnown?: boolean }[] = [
-  { action: 'skill', skillId: 'fireball', startsKnown: true },
-  { action: 'skill2', skillId: 'nova' },
-  { action: 'skill3', skillId: 'ice-shard', startsKnown: true },
-];
+// Input-to-skill mapping now lives per class: see content/classes.ts
+// (each ClassDef carries its own loadout table).
 
 /**
  * Skills, including magic. A cast typically fires a Projectile or a

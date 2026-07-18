@@ -41,7 +41,8 @@ import {
   type WeaponDef,
 } from '../content/weapons';
 import { drawHeldWeapon, drawWeaponTrail } from '../content/weapon-visuals';
-import { DEFAULT_SKILL_LOADOUT, type SkillCtx } from '../content/skills';
+import { type SkillCtx } from '../content/skills';
+import { classes, DEFAULT_CLASS } from '../content/classes';
 import { Monster } from './monster';
 import { PlayerCapabilities } from './player-capabilities';
 import { QuestLog } from '../content/quests';
@@ -147,6 +148,11 @@ export class Player extends Actor {
   );
   tree = new SkillTree<TreeCtx>({ stats: this.stats, syncStats: () => this.syncStats() });
   capabilities = new PlayerCapabilities();
+  /** Active class (see content/classes.ts). */
+  classId = DEFAULT_CLASS;
+  /** Dormant classes' unlocked nodes, by class id (persisted). The
+   * active class's nodes live in `tree` and are parked here on change. */
+  private ownedByClass: Record<string, string[]> = {};
   /** Accepted/completed quests (persisted; see content/quests.ts). */
   quests = new QuestLog();
   /** Blacksmith weapon upgrades: each level adds +1 attack (persisted). */
@@ -216,17 +222,73 @@ export class Player extends Actor {
     this.x = x;
     this.y = y;
     this.layer = 10;
-    // Starting kit: a weapon in hand, a potion in the bag, one spell known.
+    // Starting kit: a weapon in hand, a potion in the bag, and the
+    // starting class's base modifiers + known spells.
     this.inventory.add('rusty-sword');
     this.equipment.equip('rusty-sword');
     this.inventory.add('potion');
-    for (const slot of DEFAULT_SKILL_LOADOUT) {
-      if (slot.startsKnown) this.skills.learn(slot.skillId);
-    }
+    this.applyClass();
     this.syncStats();
     this.hp = this.maxHp;
     this.mp = this.maxMp;
     this.fsm = new FSM<Player>(this, PLAYER_STATES, 'move');
+  }
+
+  /** The active class's definition (loadout, tree grid, colors). */
+  get classDef() {
+    return classes.get(this.classId);
+  }
+
+  /** Apply the active class's base mods + starting skills (idempotent). */
+  private applyClass(): void {
+    const def = this.classDef;
+    if (def.mods) this.stats.setSource(`class:${this.classId}`, def.mods);
+    for (const slot of def.loadout) {
+      if (slot.startsKnown) this.skills.learn(slot.skillId);
+    }
+  }
+
+  /**
+   * Change class. Non-destructive: the old class parks its unlocked
+   * nodes (and keeps them for a return trip), every effect it granted is
+   * stripped — tree stat mods, class mods, capabilities, skills — and
+   * the new class's base kit + remembered nodes are replayed, exactly
+   * like a save restore. Skill points are a shared pool, untouched.
+   */
+  setClass(id: string): boolean {
+    if (id === this.classId || !classes.has(id)) return false;
+    this.ownedByClass[this.classId] = this.tree.ownedIds();
+    for (const nid of this.tree.ownedIds()) this.stats.removeSource(`tree:${nid}`);
+    this.stats.removeSource(`class:${this.classId}`);
+    this.capabilities.reset();
+    this.skills.known.length = 0;
+    this.classId = id;
+    this.applyClass();
+    this.tree = new SkillTree<TreeCtx>({ stats: this.stats, syncStats: () => this.syncStats() });
+    this.tree.restore(this.ownedByClass[id] ?? [], { game: this.game, player: this });
+    this.syncStats();
+    this.mp = Math.min(this.mp, this.maxMp);
+    return true;
+  }
+
+  /** Restore class + all class trees from a save (active tree replays). */
+  restoreClasses(classId: string, trees: Record<string, string[]>): void {
+    this.ownedByClass = { ...trees };
+    if (classId !== this.classId && classes.has(classId)) {
+      // setClass parks the constructor class's (empty) live tree over the
+      // saved list — remember the saved one and put it back after.
+      const prev = this.classId;
+      const saved = this.ownedByClass[prev] ?? [];
+      this.setClass(classId);
+      this.ownedByClass[prev] = saved;
+    } else {
+      this.tree.restore(this.ownedByClass[this.classId] ?? [], { game: this.game, player: this });
+    }
+  }
+
+  /** Every class's unlocked nodes (for save files), active class current. */
+  snapshotTrees(): Record<string, string[]> {
+    return { ...this.ownedByClass, [this.classId]: this.tree.ownedIds() };
   }
 
   /** Project the forge upgrades into stats (call after forgeLevel changes). */
@@ -389,7 +451,7 @@ export class Player extends Actor {
     }
     if (this.input.consumePress('dash') && this.dashCd <= 0) return 'dash';
     // Shooting is a real action: enter `cast` so the body recoils.
-    for (const slot of DEFAULT_SKILL_LOADOUT) {
+    for (const slot of this.classDef.loadout) {
       if (this.input.consumePress(slot.action) && this.skills.ready(slot.skillId)) {
         this.pendingSkill = slot.skillId;
         return 'cast';
@@ -504,7 +566,8 @@ export class Player extends Actor {
 
   beginDash(): void {
     const T = PLAYER_TUNING;
-    this.dashCd = T.dashCooldown;
+    // GALE DASH (tidecaller) shortens the wait between dashes.
+    this.dashCd = T.dashCooldown * this.capabilities.modifier('dashCooldownScale', 1);
     this.invulnT = Math.max(this.invulnT, T.dashInvuln);
     this.squash = 0.6;
     this.feel.sfx.play('dash');

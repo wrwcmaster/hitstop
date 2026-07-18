@@ -357,9 +357,28 @@ defineTreeNode<TreeCtx>('w5', {
 });
 ```
 
-Add the id to `TREE_GRID` so the tree screen shows it. Use declarative stat mods for stats, named capabilities/modifiers for mechanics, and imperative unlocks such as `player.skills.learn('nova')` for catalog entries. `onUnlock` re-runs during save restore, so runtime code depends on semantic capability names rather than tree node ids.
+Add the id to a class's `grid` in `content/classes.ts` so the tree screen shows it (keep `requires` chains within one class's grid). Use declarative stat mods for stats, named capabilities/modifiers for mechanics, and imperative unlocks such as `player.skills.learn('nova')` for catalog entries. `onUnlock` re-runs during save restore *and* on every class change, so runtime code depends on semantic capability names rather than tree node ids.
 
 XP itself: monsters grant `def.xp ?? score/20` on kill; the curve lives in the Player's `Progression` constructor (40 XP for level 2, +25 per level after); each level awards a skill point, fully heals, and autosaves.
+
+## A class
+
+In `src/game/content/classes.ts`. A class is a lens on the same knight: base stat mods (stats source `class:<id>`), a skill loadout (which action slots exist, what starts known), and a small tree grid of node ids:
+
+```ts
+defineClass('mage', {
+  name: 'MAGE', desc: 'The arcane path...', color: '#b46ee6',
+  mods: { add: { maxMp: 2 } },
+  loadout: [
+    { action: 'skill', skillId: 'fireball', startsKnown: true },
+    { action: 'skill2', skillId: 'nova' },        // learned via the tree
+  ],
+  branchNames: ['ARCANA', 'FROST'],
+  grid: [['m1', 'm2', 'm3', 'm4', 'm5'], ['g1', 'g2', 'g3']],
+});
+```
+
+Class change is free from the SKILL TREE screen (up to the class tabs, confirm on another class). It is non-destructive: `Player.setClass` parks the old class's unlocked nodes, strips every effect it granted (tree stat mods, class mods, capabilities, skills), and replays the new class's base kit + remembered nodes — the same idempotent replay saves use. Skill points are one shared pool; each class spends into its own tree. Saves carry `classId` + per-class `trees` (old flat-tree saves migrate by dealing nodes to the class whose grid holds them).
 
 ## A new player attack state
 

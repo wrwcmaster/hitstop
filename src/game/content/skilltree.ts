@@ -9,23 +9,20 @@ export interface TreeCtx {
 }
 
 /**
- * The knight's skill tree: three branches, three tiers. Effects are
- * either declarative stat mods (applied while owned, restored with saves)
- * or onUnlock hooks. Mechanics grant named player capabilities/modifiers,
- * so runtime code never depends on tree node ids; active skills are
- * learned through the same hook.
+ * The skill tree nodes. Effects are either declarative stat mods
+ * (applied while owned, restored with saves) or onUnlock hooks.
+ * Mechanics grant named player capabilities/modifiers, so runtime code
+ * never depends on tree node ids; active skills are learned through the
+ * same hook.
+ *
+ * Nodes are grouped into per-class trees — the grids live in
+ * content/classes.ts, and `requires` chains stay within one class's
+ * grid. The `branch`/`tier` fields mirror the grid position.
  */
 
-export const BRANCH_NAMES = ['WARRIOR', 'VITALITY', 'MAGIC'];
+/* ================ KNIGHT ================ */
 
-/** Grid for the tree UI: TREE_GRID[branch][tier] = node id. */
-export const TREE_GRID: string[][] = [
-  ['w1', 'w2', 'w3', 'w4', 'w5'],
-  ['v1', 'v2', 'v3', 'v4', 'v5'],
-  ['m1', 'm2', 'm3', 'm4', 'm5'],
-];
-
-/* ---- WARRIOR ---- */
+/* ---- STEEL ---- */
 
 defineTreeNode<TreeCtx>('w1', {
   name: 'SHARP STEEL',
@@ -59,7 +56,7 @@ defineTreeNode<TreeCtx>('w4', {
   },
 });
 
-/* ---- VITALITY ---- */
+/* ---- VALOR ---- */
 
 defineTreeNode<TreeCtx>('v1', {
   name: 'TOUGH SKIN',
@@ -84,16 +81,16 @@ defineTreeNode<TreeCtx>('v3', {
   },
 });
 
-defineTreeNode<TreeCtx>('v4', {
-  name: 'SKY DANCER',
-  desc: 'Double jump: press jump again in the air',
+defineTreeNode<TreeCtx>('k1', {
+  name: 'COLOSSUS',
+  desc: '+2 max HP and +1 attack',
   cost: 3, branch: 1, tier: 3, requires: ['v3'],
-  onUnlock({ player }) {
-    player.capabilities.setModifier('airJumps', 1);
-  },
+  mods: { add: { maxHp: 2, attack: 1 } },
 });
 
-/* ---- MAGIC ---- */
+/* ================ MAGE ================ */
+
+/* ---- ARCANA ---- */
 
 defineTreeNode<TreeCtx>('m1', {
   name: 'DEEP WELL',
@@ -129,30 +126,92 @@ defineTreeNode<TreeCtx>('m4', {
   },
 });
 
-/* ---- THE TIDE TIER (the grotto's rewards) ---- */
+defineTreeNode<TreeCtx>('m5', {
+  name: 'ABYSSAL WELL',
+  desc: '+1 max MP from the deep',
+  cost: 3, branch: 0, tier: 4, requires: ['m4'],
+  mods: { add: { maxMp: 1 } },
+});
 
-defineTreeNode<TreeCtx>('w5', {
-  name: 'TIDE BREAKER',
-  desc: '+2 attack on every swing',
-  cost: 3, branch: 0, tier: 4, requires: ['w4'],
-  mods: { add: { attack: 2 } },
+/* ---- FROST ---- */
+
+defineTreeNode<TreeCtx>('g1', {
+  name: 'RIME WELL',
+  desc: '+1 max MP',
+  cost: 1, branch: 1, tier: 0,
+  mods: { add: { maxMp: 1 } },
+});
+
+defineTreeNode<TreeCtx>('g2', {
+  name: 'GLACIAL SKIN',
+  desc: '+1 max HP',
+  cost: 1, branch: 1, tier: 1, requires: ['g1'],
+  mods: { add: { maxHp: 1 } },
+});
+
+defineTreeNode<TreeCtx>('g3', {
+  name: "WINTER'S EDGE",
+  desc: '+1 attack, frost-sharpened',
+  cost: 2, branch: 1, tier: 2, requires: ['g2'],
+  mods: { add: { attack: 1 } },
+});
+
+/* ================ TIDECALLER ================ */
+
+/* ---- TIDE ---- */
+
+defineTreeNode<TreeCtx>('t1', {
+  name: 'OTTER BLOOD',
+  desc: '+1 max HP, stronger strokes',
+  cost: 1, branch: 0, tier: 0,
+  mods: { add: { maxHp: 1 } },
+  onUnlock({ player }) {
+    player.capabilities.setModifier('swimBoost', 0.25);
+  },
 });
 
 defineTreeNode<TreeCtx>('v5', {
   name: 'DEEP LUNGS',
   desc: 'Much longer breath, stronger strokes',
-  cost: 2, branch: 1, tier: 4, requires: ['v4'],
+  cost: 2, branch: 0, tier: 1, requires: ['t1'],
   onUnlock({ player }) {
     player.capabilities.setModifier('extraAirSeconds', 6);
     player.capabilities.setModifier('swimBoost', 0.5);
   },
 });
 
-defineTreeNode<TreeCtx>('m5', {
-  name: 'ABYSSAL WELL',
-  desc: '+1 max MP from the deep',
-  cost: 3, branch: 2, tier: 4, requires: ['m4'],
-  mods: { add: { maxMp: 1 } },
+defineTreeNode<TreeCtx>('w5', {
+  name: 'TIDE BREAKER',
+  desc: '+2 attack on every swing',
+  cost: 3, branch: 0, tier: 2, requires: ['v5'],
+  mods: { add: { attack: 2 } },
+});
+
+/* ---- WIND ---- */
+
+defineTreeNode<TreeCtx>('s1', {
+  name: 'FLEET FOOT',
+  desc: 'Run 15% faster',
+  cost: 1, branch: 1, tier: 0,
+  mods: { mult: { speed: 1.15 } },
+});
+
+defineTreeNode<TreeCtx>('v4', {
+  name: 'SKY DANCER',
+  desc: 'Double jump: press jump again in the air',
+  cost: 3, branch: 1, tier: 1, requires: ['s1'],
+  onUnlock({ player }) {
+    player.capabilities.setModifier('airJumps', 1);
+  },
+});
+
+defineTreeNode<TreeCtx>('s2', {
+  name: 'GALE DASH',
+  desc: 'Dash cooldown nearly halved',
+  cost: 2, branch: 1, tier: 2, requires: ['v4'],
+  onUnlock({ player }) {
+    player.capabilities.setModifier('dashCooldownScale', 0.55);
+  },
 });
 
 /** Importing this module registers the tree. */

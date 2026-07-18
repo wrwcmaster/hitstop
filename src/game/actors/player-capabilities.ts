@@ -19,4 +19,10 @@ export class PlayerCapabilities {
   modifier(id: string, fallback: number): number {
     return this.modifiers.get(id) ?? fallback;
   }
+
+  /** Wipe everything (class change strips and replays all grants). */
+  reset(): void {
+    this.enabled.clear();
+    this.modifiers.clear();
+  }
 }
