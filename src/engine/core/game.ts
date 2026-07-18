@@ -49,10 +49,29 @@ export class Game<A extends string = string, E extends Record<string, unknown> =
   readonly events = new EventBus<E & CombatEvents>();
 
   private frameHooks: ((realDt: number) => void)[] = [];
+  private stepHooks: ((step: number) => void)[] = [];
+
+  /**
+   * Completed fixed simulation steps since boot. The sim clock: input
+   * recordings tag events with it, replays advance until it matches.
+   */
+  steps = 0;
 
   /** Run `fn` every rendered frame (real time) — gamepad polling, debug HUDs. */
   onFrame(fn: (realDt: number) => void): void {
     this.frameHooks.push(fn);
+  }
+
+  /** Run `fn` after every fixed simulation step — recorders, periodic checks. */
+  onStep(fn: (step: number) => void): void {
+    this.stepHooks.push(fn);
+  }
+
+  private overlayHooks: ((ctx: CanvasRenderingContext2D) => void)[] = [];
+
+  /** Draw on top of everything, after the scene render — replay HUDs, debug badges. */
+  onOverlay(fn: (ctx: CanvasRenderingContext2D) => void): void {
+    this.overlayHooks.push(fn);
   }
 
   get width(): number {
@@ -81,10 +100,13 @@ export class Game<A extends string = string, E extends Record<string, unknown> =
         this.scenes.update(dt);
         this.feel.update(dt);
         this.input.endStep();
+        this.steps++;
+        for (const fn of this.stepHooks) fn(this.steps);
       },
       render: () => {
         this.scenes.render(this.ctx);
         this.feel.renderScreen(this.ctx, this.width, this.height);
+        for (const fn of this.overlayHooks) fn(this.ctx);
       },
       frame: (realDt) => {
         for (const fn of this.frameHooks) fn(realDt);

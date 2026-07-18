@@ -20,6 +20,7 @@ export class TitleScreen {
       loadGame(): void;
       coop(): void;
       testRoom(): void;
+      watchReplay(): void;
       options(): void;
     },
   ) {
@@ -38,6 +39,7 @@ export class TitleScreen {
         },
         { label: 'CO-OP', onSelect: actions.coop },
         { label: 'TEST ROOM', onSelect: actions.testRoom },
+        { label: 'WATCH REPLAY', onSelect: actions.watchReplay },
         { label: 'OPTIONS', onSelect: actions.options },
       ],
       { up: 'up', down: 'down', confirm: 'confirm' },
@@ -69,8 +71,9 @@ export class TitleScreen {
     drawText(g, t('Game feel is the foundation'), gm.width / 2, 80, COLORS.steel, 1, 'center');
     // Touch: taller, thumb-sized rows, and no keyboard hints (they'd be
     // wrong — everything here is tappable and the pad has its buttons).
-    // Six entries now — start higher and keep the hints clear below.
-    this.menu.render(g, gm.width / 2 - 24, COARSE_POINTER ? 148 : 150, { lineHeight: menuLine(13), width: 60 });
+    // Seven entries now — tighter rows so the list clears the hints
+    // (desktop) and the screen bottom (touch).
+    this.menu.render(g, gm.width / 2 - 24, COARSE_POINTER ? 140 : 146, { lineHeight: menuLine(12), width: 60 });
     if (!COARSE_POINTER) {
       drawText(g, t('Move: Arrows / WASD - Jump: Space'), gm.width / 2, 232, COLORS.steelDark, 1, 'center');
       drawText(g, t('Attack: Z - Dash: X - Parry: F - Skill: C'), gm.width / 2, 242, COLORS.steelDark, 1, 'center');

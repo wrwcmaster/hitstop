@@ -18,6 +18,8 @@ npm run dev            # dev server (game + tools as separate pages)
 npm run typecheck      # tsc --noEmit — run after every change
 npm run build          # typecheck + multi-page production build
 npm run build:single   # everything → hitstop.html (also copies it to the repo root)
+npm run replay         # replay saved runs, verify each reproduces exactly (regression guard)
+npm run agent-play     # HTTP bridge for turn-based (LLM-agent) play
 ```
 
 ## Hard rules
@@ -302,6 +304,14 @@ a port with `-- --port 5174`), then drive the real game:
   menu button, and TALK.
 - **Watch for regressions**: collect `pageerror`/console errors in every
   script; screenshot and actually look at the result.
+- **Record/replay harness**: `npm run replay` re-runs every recording in
+  `tools/agent-play/recordings/` and fails on any divergence — run it
+  after gameplay changes (a diverging recording is either a regression or
+  an intended change; re-record if intended). To play the game turn-based
+  yourself (no real-time pressure) use the HTTP bridge:
+  `npm run agent-play` — see `tools/agent-play/README.md`. Gameplay
+  randomness must use the engine `rand/randInt/pick/chance` helpers
+  (seeded, replayable), never `Math.random` (visual-only stream).
 
 ## Git & PR workflow
 

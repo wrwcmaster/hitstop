@@ -14,7 +14,7 @@ import {
   clamp,
   t,
 } from '@engine/index';
-import { menuLine, type ActionGame, type Action } from '../defs';
+import { menuLine, type ActionGame, type Action, type RunStart } from '../defs';
 import { Player } from '../actors/player';
 import { Monster, monsters } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
@@ -33,6 +33,7 @@ import { triggerActions } from './play/trigger-actions';
 import { Hud, type GateMarker } from './play/hud';
 import { TitleScreen, renderGameOver } from './play/screens';
 import { CHEATS, cheatFor } from './play/cheats';
+import { pickReplayFile } from '../test/harness';
 import { CoopHost } from '../net/host';
 import { CoopGuestScene } from '../net/guest';
 import { CoopScene } from './coop';
@@ -136,11 +137,11 @@ export class PlayScene implements Scene {
     this.waves = new WaveDirector(this.host);
     this.hud = new Hud(this.host);
     this.title = new TitleScreen(game, {
-      newGame: () => this.startRun(null),
-      continueRun: () => this.startRun(newestSave()),
+      newGame: () => this.beginRun({ kind: 'new' }),
+      continueRun: () => this.beginRun({ kind: 'continue' }),
       loadGame: () => {
         game.sfx.play('menuSelect');
-        game.scenes.push(new SaveSlotsScene(game, 'load', { loadFrom: (slot) => this.loadSlot(slot) }));
+        game.scenes.push(new SaveSlotsScene(game, 'load', { loadFrom: (slot) => this.beginRun({ kind: 'slot', slot }) }));
       },
       coop: () => {
         game.sfx.play('menuSelect');
@@ -149,7 +150,11 @@ export class PlayScene implements Scene {
           guestStart: (link) => this.startCoopGuest(link),
         }));
       },
-      testRoom: () => this.startTestRoom(),
+      testRoom: () => this.beginRun({ kind: 'testroom' }),
+      watchReplay: () => {
+        game.sfx.play('menuSelect');
+        pickReplayFile();
+      },
       options: () => {
         game.sfx.play('menuSelect');
         game.scenes.push(new OptionsScene(game));
@@ -252,7 +257,7 @@ export class PlayScene implements Scene {
     }));
 
     on(game.input.onAnyPress(() => {
-      if (this.phase === 'over' && this.overT <= 0) this.startRun(saveStore.load());
+      if (this.phase === 'over' && this.overT <= 0) this.beginRun({ kind: 'autosave' });
     }));
   }
 
@@ -279,6 +284,34 @@ export class PlayScene implements Scene {
   }
 
   /* ---------------- runs & rooms ---------------- */
+
+  /** A run start waiting for the next update tick (see beginRun). */
+  private pendingStart: RunStart | null = null;
+
+  /**
+   * Every way a solo run begins funnels through here — title menu,
+   * game-over restart, pause restart/load, and replays. The start is
+   * DEFERRED to the top of the next update so it lands on a step
+   * boundary no matter where it was requested from (menu callback,
+   * any-key handler, replay driver) — that's what keeps recorded runs
+   * and their replays tick-identical. The dispatch emits `runStart`
+   * first, so the replay recorder can reseed the gameplay RNG and cut a
+   * fresh per-run tape before the starter draws a single random number.
+   */
+  beginRun(start: RunStart): void {
+    this.pendingStart = start;
+  }
+
+  private dispatchStart(start: RunStart): void {
+    this.game.events.emit('runStart', start);
+    switch (start.kind) {
+      case 'new': return this.startRun(null);
+      case 'continue': return this.startRun(newestSave());
+      case 'autosave': return this.startRun(saveStore.load());
+      case 'slot': return this.loadSlot(start.slot);
+      case 'testroom': return this.startTestRoom();
+    }
+  }
 
   /** Begin hosting: the run starts from the newest save with the guest's
    * knight alongside — a real Player fed by the remote action stream. */
@@ -565,6 +598,16 @@ export class PlayScene implements Scene {
     const g = this.game;
     this.uiT += dt;
 
+    // A queued run start lands here, on a step boundary, and takes the
+    // whole tick (the world's first sim step is the NEXT update) — the
+    // same shape as a title-phase tick, so replays line up exactly.
+    if (this.pendingStart) {
+      const start = this.pendingStart;
+      this.pendingStart = null;
+      this.dispatchStart(start);
+      return;
+    }
+
     if (this.phase === 'title') {
       this.title.update(g.input);
       return;
@@ -584,9 +627,9 @@ export class PlayScene implements Scene {
 
     if (this.phase === 'play' && this.player && g.input.consumePress('menu')) {
       g.scenes.push(new PauseScene(g, this.player, {
-        onRestart: () => this.startRun(saveStore.load()),
+        onRestart: () => this.beginRun({ kind: 'autosave' }),
         onSaveSlot: (slot) => this.saveToSlot(slot),
-        onLoadSlot: (slot) => this.loadSlot(slot),
+        onLoadSlot: (slot) => this.beginRun({ kind: 'slot', slot }),
       }));
       return;
     }

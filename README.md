@@ -18,6 +18,8 @@ npm run dev          # game:          http://localhost:5173/
                      # sheet slicer:  http://localhost:5173/tools/sheet-slicer.html
 npm run build        # typecheck + production build to dist/
 npm run build:single # compile everything into hitstop.html (one file, no server)
+npm run replay       # replay every saved run and verify it reproduces exactly
+npm run agent-play   # HTTP bridge for turn-based (LLM-agent) play
 ```
 
 No setup at all? Open **[`hitstop.html`](hitstop.html)** — the whole game compiled into a single self-contained file (committed for convenience; regenerate with `npm run build:single` after changes).
@@ -42,6 +44,8 @@ Beat the **Slime King** and the road to **Haven** opens — a town with a healer
 
 **Online co-op, no server:** pick **CO-OP** on the title screen. The host sends an invite code to a friend over any chat; the friend replies with their code; paste it back and the two browsers connect *directly* (WebRTC peer-to-peer). The guest **brings their own saved knight** — gear, gold, forge levels — fights in the host's world with **client-side prediction** (movement feels instant, the host stays authoritative), and takes their co-op loot and XP home to their own save. Name your knight in the lobby — names float above each knight so you always know who's who. Copy-paste signaling means zero infrastructure, though very strict NATs may fail to connect (there's no relay server, by design).
 
+**Replays:** every run is recorded as it's played — the run's seed and its input tape, nothing more. Pause and pick **SAVE REPLAY** to download the current run (~1 KB), then **WATCH REPLAY** on the title screen to play any saved file back at full speed in a sandboxed viewer (your own saves stay untouched). Because the simulation is deterministic — fixed 1/60s timestep, seeded gameplay RNG, input the only thing that reaches it — the same tape always reproduces the same run, so a saved playthrough doubles as a self-verifying regression test (`npm run replay`). The same machinery lets an LLM agent play the game turn-based, with the clock stopped between decisions ([tools/agent-play](tools/agent-play/README.md)).
+
 `demo.html` is the original single-file proof of concept — zero dependencies, open it directly in a browser. Everything else in this repo is that POC grown into a real architecture.
 
 ## What's here
@@ -50,7 +54,7 @@ Beat the **Slime King** and the road to **Haven** opens — a town with a healer
 | --- | --- |
 | `src/engine/` | The engine: loop, events, input, graphics, **feel**, audio, physics, world, combat (strikes + parry + ballistic projectiles), FSM, levels + triggers (solid/water/hazard tiles), items/equipment/stats, skills, progression + skill trees, UI (menus, dialogue, minimap), net (P2P co-op). No game knowledge. |
 | `src/game/` | The game built on it: player (with classes, contextual attacks, parry/riposte, swimming), melee + ranged weapons, spells, enemies + shooters, two bosses (Slime King, Duelist), drops, conversations, town + NPCs (healer, quest elder, blacksmith), quests, puzzle gizmos, a portal network, multi-slot saves, pause menu, HUD — mostly *content definitions*, not engine plumbing. |
-| `tools/` | Browser-based design tools: level editor and sprite editor, sharing the game's registries ([guide](docs/design-tools.md)). |
+| `tools/` | Browser-based design tools: level editor and sprite editor, sharing the game's registries ([guide](docs/design-tools.md)); and [agent-play](tools/agent-play/README.md), the record/replay + turn-based-agent harness. |
 | `docs/` | Architecture, game-feel guide, content cookbook, design-tools guide, and a game-dev primer for software engineers. |
 
 ## The pitch, in code
@@ -70,5 +74,6 @@ A complete new enemy is ~20 lines of data + behavior (see `src/game/actors/enemi
 - [docs/game-feel.md](docs/game-feel.md) — the feel system: what each primitive does and how to tune it
 - [docs/adding-content.md](docs/adding-content.md) — cookbook: new enemies, tiles, rooms, sounds, skills
 - [docs/design-tools.md](docs/design-tools.md) — the level editor, sprite editor, and PNG sheet slicer: controls, formats, and shipping your work
+- [tools/agent-play/README.md](tools/agent-play/README.md) — record/replay: saving and watching runs, deterministic replay verification, and turn-based LLM play
 - [docs/game-dev-primer.md](docs/game-dev-primer.md) — game-dev concepts for software engineers, mapped to this codebase
 - [AGENTS.md](AGENTS.md) — contributor guide for AI agents: hard rules, content recipes, verification playbook, PR workflow

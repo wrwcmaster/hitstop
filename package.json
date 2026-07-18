@@ -8,7 +8,9 @@
     "build": "tsc --noEmit && vite build",
     "build:single": "tsc --noEmit && vite build -c vite.config.single.ts && node -e \"require('fs').copyFileSync('dist-single/index.html', 'hitstop.html')\"",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "replay": "node tools/agent-play/replay.mjs",
+    "agent-play": "node tools/agent-play/server.mjs"
   },
   "devDependencies": {
     "playwright": "^1.61.1",
