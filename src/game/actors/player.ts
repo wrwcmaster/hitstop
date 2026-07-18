@@ -70,7 +70,7 @@ export function nearestPlayer(world: World, x: number, y: number): Player | null
  * then a heart per `drownEvery` until you surface.
  */
 const SWIM = {
-  buoyancy: 1.35, // × gravity at full submersion (net upward force)
+  buoyancy: 1.5, // × gravity at full submersion; floats at ~2/3 depth so a resting head can breathe
   tuckBuoyancy: 0.35, // holding down tucks: buoyancy loses, you sink
   dragY: 0.08, // per-second velocity keep factors (heavy water)
   dragX: 0.4,
@@ -348,6 +348,10 @@ export class Player extends Actor {
   private drownT = SWIM.drownEvery;
   private wasWet = false;
 
+  /** Which move the next/current attack is: the grounded combo chain or
+   * a contextual strike (set right before entering the attack state). */
+  private attackContext: 'ground' | 'aerial' | 'plunge' | 'upper' | 'dash' = 'ground';
+
   /** Input driving this knight. Defaults to the local device; a net
    * session substitutes a remote-fed Input for the guest's knight. */
   source: Input<Action> | null = null;
@@ -370,7 +374,19 @@ export class Player extends Actor {
 
   moveUpdate(dt: number): string | void {
     this.runControls(dt);
-    if (this.atkBuf.consume()) return 'attack';
+    if (this.atkBuf.consume()) {
+      // Context picks the move: airborne+down plunges, up-held swings
+      // overhead, airborne swipes aerial, grounded runs the combo chain.
+      // Not in water, though: tucking down there is how you hold depth,
+      // so a submerged swing stays a swipe at what's beside you.
+      const type = weaponTypeOf(this.weapon);
+      const dry = this.submersion <= 0.2;
+      if (!this.onGround && dry && this.input.held('down') && type.plunge) this.attackContext = 'plunge';
+      else if (this.input.held('up') && type.upper) this.attackContext = 'upper';
+      else if (!this.onGround && type.aerial) this.attackContext = 'aerial';
+      else this.attackContext = 'ground';
+      return 'attack';
+    }
     if (this.input.consumePress('dash') && this.dashCd <= 0) return 'dash';
     // Shooting is a real action: enter `cast` so the body recoils.
     for (const slot of DEFAULT_SKILL_LOADOUT) {
@@ -403,18 +419,32 @@ export class Player extends Actor {
   beginAttack(): void {
     const w = this.weapon;
     const type = weaponTypeOf(w);
-    const continues = this.comboT > 0 && this.comboWeaponId === w.id;
-    this.attackIndex = continues ? (this.attackIndex + 1) % type.attacks.length : 0;
+    const ctx = this.attackContext;
+    if (ctx === 'ground') {
+      const continues = this.comboT > 0 && this.comboWeaponId === w.id;
+      this.attackIndex = continues ? (this.attackIndex + 1) % type.attacks.length : 0;
+      this.attackDef = type.attacks[this.attackIndex];
+    } else {
+      // Contextual moves sit outside the combo chain (and never advance it).
+      const table = { aerial: type.aerial, plunge: type.plunge, upper: type.upper, dash: type.dashAttack };
+      this.attackDef = table[ctx] ?? type.attacks[0];
+      this.attackIndex = 0;
+    }
     this.comboT = 0;
-    this.attackDef = type.attacks[this.attackIndex];
     this.attackDur = this.attackDef.duration;
     // The lunge follows intent: full step when holding toward the target,
     // a nudge when neutral, NONE when holding away — so you can poke a
     // dangerous boss without being carried into his contact damage.
+    // (A dash attack always commits the full lunge — that's the point.)
     const held = this.input.axis('left', 'right');
     const base = this.attackDef.lunge;
-    const lunge = held === this.facing ? base : held === 0 ? base * 0.05 : 0;
+    const lunge = ctx === 'dash' ? base : held === this.facing ? base : held === 0 ? base * 0.05 : 0;
     this.vx += this.facing * lunge;
+    if (ctx === 'plunge') {
+      // Point the steel down and commit: the fall is the weapon.
+      this.vy = Math.max(this.vy, 240);
+      this.vx *= 0.4;
+    }
     // Damage/feel come from the equipped weapon; flat bonus from stats;
     // EXECUTIONER (skill tree) boosts the finisher.
     const executioner = this.attackDef.finisher && this.capabilities.has('heavyFinisherBonus') ? 2 : 0;
@@ -435,11 +465,39 @@ export class Player extends Actor {
     if (!attack) return 'move';
     this.vx *= friction(attack.movementKeep, dt);
     const prog = this.fsm.t / this.attackDur;
-    if (prog > attack.active[0] && prog < attack.active[1]) this.strike?.apply(this.attackBox());
+    if (prog > attack.active[0] && prog < attack.active[1]) {
+      const hits = this.strike?.apply(this.attackBox()) ?? [];
+      // Pogo: a landed down-strike bounces the knight off her target and
+      // refreshes the air — chain plunges Hollow Knight style.
+      if (hits.length && attack.pogo && !this.onGround) {
+        this.vy = -attack.pogo;
+        this.airJumps = this.capabilities.modifier('airJumps', 0);
+        this.dashCd = 0;
+        this.squash = 1.35;
+        this.feel.burst(this.cx, this.y + this.h, 8, {
+          color: [COLORS.white, COLORS.gold], speed: 60, life: 0.3,
+          angle: Math.PI / 2, spread: 2, drag: 3,
+        });
+        return 'move';
+      }
+    }
+    // A plunge rides gravity down; the landing is the finish (with a thud).
+    if (attack.aim === 'down' && this.onGround && this.fsm.t > 0.06) {
+      this.feel.shake(0.2);
+      this.feel.sfx.play('land');
+      this.feel.burst(this.cx, this.y + this.h, 10, {
+        color: [COLORS.steel, COLORS.white], speed: 70, life: 0.3,
+        angle: -Math.PI / 2, spread: 2.6, drag: 4,
+      });
+      return 'move';
+    }
     if (prog >= 1) {
-      const weapon = this.weapon;
-      this.comboT = weaponTypeOf(weapon).comboWindow;
-      this.comboWeaponId = weapon.id;
+      // Only grounded swings feed the combo chain.
+      if (this.attackContext === 'ground') {
+        const weapon = this.weapon;
+        this.comboT = weaponTypeOf(weapon).comboWindow;
+        this.comboWeaponId = weapon.id;
+      }
       return 'move';
     }
   }
@@ -468,6 +526,12 @@ export class Player extends Actor {
   dashUpdate(): string | void {
     this.vx = this.facing * PLAYER_TUNING.dashSpeed;
     this.vy = 0;
+    // Dash attack: steel follows speed — attack mid-dash converts the
+    // dash into a thrusting strike that keeps the momentum.
+    if (this.atkBuf.consume() && weaponTypeOf(this.weapon).dashAttack) {
+      this.attackContext = 'dash';
+      return 'attack';
+    }
     this.dashStrike?.apply(this);
     if (Math.floor(this.fsm.t * 60) % 2 === 0) {
       this.feel.particles.spawn({
@@ -488,6 +552,15 @@ export class Player extends Actor {
   attackBox(): Rect {
     const hitbox = this.attackDef?.hitbox;
     if (!hitbox) return { x: this.x, y: this.y, w: 0, h: 0 };
+    // Vertical aims center on the body; `forward` becomes the gap from
+    // the feet (down) or the head (up).
+    const aim = this.attackDef?.aim ?? 'forward';
+    if (aim === 'down') {
+      return { x: this.cx - hitbox.w / 2, y: this.y + this.h + hitbox.forward, w: hitbox.w, h: hitbox.h };
+    }
+    if (aim === 'up') {
+      return { x: this.cx - hitbox.w / 2, y: this.y - hitbox.forward - hitbox.h, w: hitbox.w, h: hitbox.h };
+    }
     return {
       x: this.facing === 1
         ? this.x + this.w + hitbox.forward

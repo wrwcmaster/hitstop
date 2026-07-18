@@ -22,7 +22,7 @@ npm run build:single # compile everything into hitstop.html (one file, no server
 
 No setup at all? Open **[`hitstop.html`](hitstop.html)** — the whole game compiled into a single self-contained file (committed for convenience; regenerate with `npm run build:single` after changes).
 
-In-game: arrows/WASD move, Space jumps, `Z`/`J` attack, `X`/`K` dash, `C`/`L` fireball, `V` nova, `E`/`F` talk to NPCs, `Esc` opens the system menu (inventory, skill tree, options — including **key rebinding** under OPTIONS → CONTROLS), `` ` `` (backquote) toggles the debug overlay. **Gamepads work out of the box** (standard layout: A jump, X attack, B dash, Y interact, LB/RB skills, Start menu).
+In-game: arrows/WASD move, Space jumps, `Z`/`J` attack (**contextual**: attack in the air for an aerial swipe, hold ↓ in the air to plunge — a hit **pogos** you back up, hold ↑ for an anti-air upper, or attack mid-dash for a thrusting dash attack), `X`/`K` dash, `C`/`L` fireball, `V` nova, `E`/`F` talk to NPCs, `Esc` opens the system menu (inventory, skill tree, options — including **key rebinding** under OPTIONS → CONTROLS), `` ` `` (backquote) toggles the debug overlay. **Gamepads work out of the box** (standard layout: A jump, X attack, B dash, Y interact, LB/RB skills, Start menu).
 
 Beat the **Slime King** and the road to **Haven** opens — a town with a healer, a quest-giving elder, and a blacksmith who forges your weapon sharper. A **portal** in town (and at every key location) warps you between anywhere you've visited, so you can always get home. Save into any of three manual slots (or the autosave) from the title or the pause menu.
 
