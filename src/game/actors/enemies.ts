@@ -11,6 +11,21 @@ import { Player } from './player';
  * from main.ts (or see docs/adding-content.md).
  */
 
+/**
+ * Y of a hover point that keeps a flier clear of the water: the surface
+ * just below column `x`, minus the flier's height. Returns Infinity when
+ * there's no water below (so callers can `Math.min` it with a free target).
+ */
+function waterlineAbove(m: Monster, x: number): number {
+  const tm = m.collision as { waterAt?: (x: number, y: number) => boolean };
+  if (!tm.waterAt) return Infinity;
+  const cx = x + m.w / 2;
+  for (let y = m.y; y < m.y + 420; y += 4) {
+    if (tm.waterAt(cx, y)) return y - m.h - 4;
+  }
+  return Infinity;
+}
+
 defineMonster('slime', {
   hp: 3, damage: 1, w: slimeSprite.hitbox.w, h: slimeSprite.hitbox.h, score: 100,
   colors: [COLORS.green, COLORS.greenDark, COLORS.greenLight],
@@ -52,11 +67,18 @@ defineMonster('bat', {
   update(m, dt) {
     const player = m.player;
     if (!player) return;
-    // Weave toward a point bobbing above the player's head.
+    // Weave toward a point bobbing above the player's head — but never
+    // chase below the waterline: a point in water is clamped to just above
+    // the surface, so a swimming knight is safe from bats.
     const tx = player.cx - m.w / 2;
-    const ty = player.y - 14 + Math.sin(m.animT * 4 + (m.state.phase as number)) * 10;
+    let ty = player.y - 14 + Math.sin(m.animT * 4 + (m.state.phase as number)) * 10;
+    ty = Math.min(ty, waterlineAbove(m, tx));
     m.vx += sign(tx - m.x) * 160 * dt;
     m.vy += sign(ty - m.y) * 160 * dt;
+    // If the wings dip in anyway (near the edge), beat hard upward.
+    if ((m.collision.submersion?.({ x: m.x, y: m.y + m.h - 2, w: m.w, h: 2 }) ?? 0) > 0) {
+      m.vy = Math.min(m.vy, -70);
+    }
     const sp = Math.hypot(m.vx, m.vy);
     const max = 85;
     if (sp > max) {

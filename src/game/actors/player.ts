@@ -86,15 +86,16 @@ function nearestMonster(world: World, x: number, y: number): Monster | null {
  * then a heart per `drownEvery` until you surface.
  */
 const SWIM = {
-  buoyancy: 1.5, // × gravity at full submersion; floats at ~2/3 depth so a resting head can breathe
-  tuckBuoyancy: 0.35, // holding down tucks: buoyancy loses, you sink
-  dragY: 0.08, // per-second velocity keep factors (heavy water)
-  dragX: 0.4,
-  maxRise: 110, // lets a stroke's kick actually carry
-  maxSink: 70,
-  stroke: 115, // upward kick per jump press
-  dive: 240, // px/s² while holding down
-  breachDepth: 0.55, // shallower than this, a stroke launches you out
+  buoyancy: 0.82, // < 1× gravity: slightly heavy, so you sink slowly by default
+  dragY: 0.1, // per-second velocity keep factors (heavy water)
+  dragX: 0.5,
+  swimUp: 520, // px/s² upward while holding jump (ascend)
+  dive: 340, // px/s² downward while holding down (dive faster)
+  maxRise: 95, // ascent cap while holding jump
+  driftSink: 30, // gentle sink cap when not diving — "slowly sinking"
+  maxSink: 100, // faster sink cap while holding down
+  swimSpeed: 66, // horizontal cap in water (slower than the land runSpeed)
+  breachDepth: 0.55, // shallower than this, a jump press launches you out
   airSeconds: 8,
   refillSeconds: 2,
   drownEvery: 1,
@@ -898,19 +899,25 @@ export class Player extends Actor {
     if (!this.fsm.is('dash')) {
       applyGravity(this, dt);
       if (swimming) {
-        // Buoyancy overcomes gravity when deep; drag steadies everything.
-        // Tucking (holding down) collapses buoyancy so the dive wins.
-        // DEEP LUNGS (skill tree) boosts stroke power and cruise speed.
+        // Natural buoyancy: a diver is slightly heavy, so you sink slowly
+        // on your own. Hold jump to swim up; hold down to sink faster.
+        // Movement is weightier and slower than on land. DEEP LUNGS boosts
+        // stroke power and cruise speed.
         const boost = 1 + this.capabilities.modifier('swimBoost', 0);
-        const buoy = this.input.held('down') ? SWIM.tuckBuoyancy : SWIM.buoyancy;
-        this.vy -= GRAVITY * sub * buoy * dt; // deep enough, this beats gravity
+        this.vy -= GRAVITY * sub * SWIM.buoyancy * dt;
+        if (this.input.held('jump')) this.vy -= SWIM.swimUp * boost * dt; // ascend
+        if (this.input.held('down')) this.vy += SWIM.dive * dt; // dive faster
         this.vy *= Math.pow(SWIM.dragY, dt);
         this.vx *= Math.pow(SWIM.dragX / boost, dt);
-        this.vy = clamp(this.vy, -SWIM.maxRise * boost, SWIM.maxSink * boost);
+        // Slower than land, and a gentle drift-sink cap unless actively diving.
+        this.vx = clamp(this.vx, -SWIM.swimSpeed * boost, SWIM.swimSpeed * boost);
+        const sinkCap = this.input.held('down') ? SWIM.maxSink : SWIM.driftSink;
+        this.vy = clamp(this.vy, -SWIM.maxRise * boost, sinkCap * boost);
+        // Breach: a jump *press* right at the surface bursts you clear into
+        // a real jump; a press in deep water is absorbed (hold to rise).
         if (this.jumpBuf.active && !this.fsm.is('attack')) {
           this.jumpBuf.consume();
           if (sub < SWIM.breachDepth) {
-            // Breach: a stroke at the surface launches you clear out.
             this.vy = -T.jumpSpeed * 0.85;
             this.squash = 1.3;
             this.feel.sfx.play('jump');
@@ -918,15 +925,8 @@ export class Player extends Actor {
               color: ['#4d7bd6', COLORS.white], speed: 70, life: 0.35,
               angle: -Math.PI / 2, spread: 2.2, drag: 3, grav: 300,
             });
-          } else {
-            this.vy = -SWIM.stroke;
-            this.squash = 1.15;
-            this.feel.burst(this.cx, this.cy, 4, {
-              color: ['#9fd0ff', COLORS.white], speed: 25, life: 0.4, grav: -50, drag: 2,
-            });
           }
         }
-        if (this.input.held('down')) this.vy += SWIM.dive * dt;
       } else if (this.jumpBuf.active && this.coyote.active && !this.fsm.is('dead', 'attack')) {
         this.jumpBuf.consume();
         this.coyote.consume();

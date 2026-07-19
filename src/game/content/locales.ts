@@ -89,6 +89,7 @@ defineLocale('zh', {
     'GEAR FREED!': '装备夺回!',
     'LOCKED': '锁住了',
     'TRAVEL': '传送',
+    'DOOR': '门',
     'THE GATE IS LOCKED': '大门紧锁',
     "SEALED BY THE KING'S POWER": '被国王之力封印',
     'GAME OVER': '游戏结束',
