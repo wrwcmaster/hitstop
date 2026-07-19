@@ -126,7 +126,11 @@ Details and code samples: `docs/adding-content.md`. The short version —
 - **Ranged weapon / ballistic shot**: give a weapon type a `ranged`
   block (`projectile: 'arrow'|'bullet'`, `speed`, `gravity`, `cooldown`,
   `recoil`) — the attack button then shoots instead of swinging (melee
-  lists may be empty; the player braces through the cast state). Shots
+  lists may be empty; the player braces through the cast state). Add
+  `charge: { time, floor, curve? }` and it's *drawn* instead of clicked:
+  hold to charge (the engine `Charge` gesture), release to loose, power
+  scales speed (= range under gravity) + damage + recoil; dash/parry
+  cancels the draw. Omit for press-fire (the flintlock). Shots
   fire through `content/ballistics.ts` (`shootArrow`/`shootBullet`) —
   the same helpers monsters use — and are engine Projectiles with
   gravity, so arrows arc and bullets fly nearly flat. Monster aim uses
