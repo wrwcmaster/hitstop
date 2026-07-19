@@ -15,7 +15,7 @@ import {
   expand,
   chance,
   rand,
-  GRAVITY,
+  swim,
   drawText,
   t,
   type Input,
@@ -899,20 +899,22 @@ export class Player extends Actor {
     if (!this.fsm.is('dash')) {
       applyGravity(this, dt);
       if (swimming) {
-        // Natural buoyancy: a diver is slightly heavy, so you sink slowly
-        // on your own. Hold jump to swim up; hold down to sink faster.
-        // Movement is weightier and slower than on land. DEEP LUNGS boosts
-        // stroke power and cruise speed.
+        // The mechanism (buoyancy, ascend/dive, drag, caps) lives in the
+        // engine; here we supply the tuning. Sink slowly by default, hold
+        // jump to rise, hold down to dive; DEEP LUNGS boosts stroke and
+        // cruise. The breach below is game feel, so it stays.
         const boost = 1 + this.capabilities.modifier('swimBoost', 0);
-        this.vy -= GRAVITY * sub * SWIM.buoyancy * dt;
-        if (this.input.held('jump')) this.vy -= SWIM.swimUp * boost * dt; // ascend
-        if (this.input.held('down')) this.vy += SWIM.dive * dt; // dive faster
-        this.vy *= Math.pow(SWIM.dragY, dt);
-        this.vx *= Math.pow(SWIM.dragX / boost, dt);
-        // Slower than land, and a gentle drift-sink cap unless actively diving.
-        this.vx = clamp(this.vx, -SWIM.swimSpeed * boost, SWIM.swimSpeed * boost);
-        const sinkCap = this.input.held('down') ? SWIM.maxSink : SWIM.driftSink;
-        this.vy = clamp(this.vy, -SWIM.maxRise * boost, sinkCap * boost);
+        swim(this, dt, sub, { ascend: this.input.held('jump'), dive: this.input.held('down') }, {
+          buoyancy: SWIM.buoyancy,
+          ascendAccel: SWIM.swimUp * boost,
+          diveAccel: SWIM.dive,
+          dragX: SWIM.dragX / boost,
+          dragY: SWIM.dragY,
+          maxRise: SWIM.maxRise * boost,
+          driftSink: SWIM.driftSink,
+          maxSink: SWIM.maxSink * boost,
+          maxSpeedX: SWIM.swimSpeed * boost,
+        });
         // Breach: a jump *press* right at the surface bursts you clear into
         // a real jump; a press in deep water is absorbed (hold to rise).
         if (this.jumpBuf.active && !this.fsm.is('attack')) {
