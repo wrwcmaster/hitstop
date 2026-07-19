@@ -3,12 +3,14 @@ import {
   frameAt,
   loadSprite,
   offscreen,
+  whiteOf,
   withFacing,
   type FacingAnimSet,
   type SpriteFile,
 } from '@engine/index';
 import { COLORS, PAL } from './palette';
 import { TEXEL } from './sprites';
+import { drawArrowSprite } from './ballistics';
 import greatSwordJson from './sprites/equipment/great-sword.json';
 import rustySwordJson from './sprites/equipment/rusty-sword.json';
 import type { WeaponAttackDef } from './weapons';
@@ -27,6 +29,10 @@ export interface HeldWeaponCtx {
   bodyW: number;
   bodyH: number;
   attack?: WeaponAttackPose;
+  /** Hold-to-charge progress 0..1 while the wielder is drawing (the
+   * player's `draw` state) — charged visuals pull their string/wind-up
+   * with it. Absent when not charging. */
+  charge?: number;
 }
 
 /** World-space context for the attack trail. */
@@ -48,6 +54,16 @@ export interface WeaponVisual {
 }
 
 export const weaponVisuals = new Registry<WeaponVisual>('weaponVisual');
+
+/**
+ * Where ranged weapons sit, in logical px above the FEET origin the
+ * held-weapon transform uses (negative = up). Chest height on the 18px
+ * knight — held high so the shot leaves at eye-pleasing arc height.
+ * THE contract between art and ballistics: `Player.fireRanged` spawns
+ * arrows/bullets at exactly this line (± the weapon's small `muzzleY`
+ * trim), so if you move the hand, the shots move with it.
+ */
+export const RANGED_HAND_Y = -9.5;
 
 export function defineWeaponVisual(id: string, visual: WeaponVisual): void {
   weaponVisuals.register(id, visual);
@@ -337,37 +353,108 @@ function bakedIcon(paint: (px: (x: number, y: number, w: number, h: number, colo
 const WOOD = '#8a6b3f';
 const WOOD_DARK = '#5d4728';
 
+/**
+ * The bow stave, authored as pixel art like every other sprite in the
+ * game (4x8 logical px, baked once at texel density). Facing +x: the
+ * belly column bows forward, tips taper back at the top and bottom
+ * rows. Only the STRING (and the nocked arrow) is dynamic — pixels
+ * can't bend, but a line can.
+ */
+const STAVE_W = 4;
+const STAVE_H = 8;
+const STAVE = (() => {
+  const [c, g] = offscreen(STAVE_W * TEXEL, STAVE_H * TEXEL);
+  const px = (x: number, y: number, color: string) => {
+    g.fillStyle = color;
+    g.fillRect(x * TEXEL, y * TEXEL, TEXEL, TEXEL);
+  };
+  px(1, 0, WOOD); // top tip — the string anchors here
+  px(2, 1, WOOD);
+  for (let y = 2; y <= 5; y++) {
+    px(3, y, WOOD); // belly
+    px(2, y, WOOD_DARK); // shaded spine, and the grip wrap
+  }
+  px(2, 6, WOOD);
+  px(1, 7, WOOD); // bottom tip
+  return c;
+})();
+const STAVE_FLASH = whiteOf(STAVE);
+
+/** Where the string ties on, in grip-origin coords (art tip centers). */
+const STAVE_TIP = { x: 0.5, y: 3.5 };
+/** How far behind the tips a full draw anchors the nock. */
+const PULL_DEPTH = 4.5;
+
+/** How a bow should look right now — shared by every bow in the game. */
+export interface BowPose {
+  /** String pull-back, 0 (slack) .. 1 (full draw). */
+  pull: number;
+  /** Nock an arrow on the string (shown whenever pulling). */
+  arrow?: boolean;
+  /** Hit-flash: every part of bow and arrow in this color. */
+  tint?: string;
+}
+
+/**
+ * Draw the strung bow at the origin, +x forward — the caller translates
+ * to the hand and mirrors for facing. The stave is the baked pixel
+ * sprite; the string is drawn live — slack between the tips, or bent
+ * into a V whose nock reaches behind the grip at full draw — with the
+ * flying arrow's exact sprite nocked on it. The knight's held bow, the
+ * archer's telegraph, and the item icon all render through here.
+ */
+export function drawBow(g: CanvasRenderingContext2D, pose: BowPose): void {
+  const { pull, tint } = pose;
+  g.drawImage(tint ? STAVE_FLASH : STAVE, -1, -STAVE_H / 2, STAVE_W, STAVE_H);
+
+  const pulling = pull > 0.02;
+  const nockX = STAVE_TIP.x - pull * PULL_DEPTH;
+  g.strokeStyle = tint ?? 'rgba(255,255,255,0.8)';
+  g.lineWidth = 0.6;
+  g.beginPath();
+  g.moveTo(STAVE_TIP.x, -STAVE_TIP.y);
+  if (pulling) g.lineTo(nockX, 0);
+  g.lineTo(STAVE_TIP.x, STAVE_TIP.y);
+  g.stroke();
+
+  if (pulling && pose.arrow) {
+    // The SAME arrow that flies (drawArrowSprite), nock on the string:
+    // the sprite's fletching sits at -5.5 from its origin.
+    g.save();
+    g.translate(nockX + 5.5, 0);
+    drawArrowSprite(g, tint);
+    g.restore();
+  }
+}
+
 // The hunting bow: a strung arc held at the knight's leading hand. The
 // arc leans with the run cycle like the blades do.
 defineWeaponVisual('hunting-bow', {
-  icon: bakedIcon((px) => {
-    px(5, 0, 1, 1, WOOD); px(6, 1, 1, 2, WOOD); px(7, 3, 1, 2, WOOD_DARK);
-    px(6, 5, 1, 2, WOOD); px(5, 7, 1, 1, WOOD);
-    px(5, 0, 1, 1, COLORS.white); // string, straight down the left
-    for (let y = 0; y < 8; y++) px(4, y, 1, 1, y % 2 ? COLORS.steel : COLORS.white);
-  }),
+  // The icon IS the held bow: the same pixel stave + slack string at
+  // 1:1 (the stave is authored 8 tall, exactly the icon frame) —
+  // inventory, pickups, and the knight's hand can never drift apart.
+  icon: (() => {
+    const [icon, g] = offscreen(8 * TEXEL, 8 * TEXEL);
+    g.scale(TEXEL, TEXEL);
+    g.translate(3, 4);
+    drawBow(g, { pull: 0 });
+    return icon;
+  })(),
   drawHeld(g, ctx) {
     const f = ctx.facing;
+    const pull = ctx.charge ?? 0;
     let hx = 2.25;
-    let hy = -4.75;
-    if (ctx.anim === 'run') hy += ctx.frame === 1 ? 0.5 : -0.25;
-    else if (ctx.anim !== 'air') hy += Math.sin(ctx.animT * 4.5) * 0.2;
+    let hy = RANGED_HAND_Y; // grip on the shared hand line — arrows nock here
+    if (pull === 0) {
+      if (ctx.anim === 'run') hy += ctx.frame === 1 ? 0.5 : -0.25;
+      else if (ctx.anim !== 'air') hy += Math.sin(ctx.animT * 4.5) * 0.2;
+    }
     g.save();
     g.translate(hx * f, hy);
     if (f === -1) g.scale(-1, 1);
-    g.strokeStyle = WOOD;
-    g.lineWidth = 1.4;
-    g.beginPath(); // the stave: an arc bowing forward
-    g.arc(0, 0, 5.5, -Math.PI / 2.6, Math.PI / 2.6);
-    g.stroke();
-    g.strokeStyle = 'rgba(255,255,255,0.8)';
-    g.lineWidth = 0.6;
-    const tipY = 5.5 * Math.sin(Math.PI / 2.6);
-    const tipX = 5.5 * Math.cos(Math.PI / 2.6);
-    g.beginPath(); // the string between the stave's tips
-    g.moveTo(tipX, -tipY);
-    g.lineTo(tipX, tipY);
-    g.stroke();
+    // Charging pulls the string back with a nocked arrow riding it —
+    // the pull IS the charge meter.
+    drawBow(g, { pull, arrow: pull > 0 });
     g.restore();
   },
 });
@@ -382,7 +469,7 @@ defineWeaponVisual('flintlock', {
   drawHeld(g, ctx) {
     const f = ctx.facing;
     let hx = 2;
-    let hy = -4.5;
+    let hy = RANGED_HAND_Y; // barrel rides the shared hand line
     if (ctx.anim === 'run') hy += ctx.frame === 1 ? 0.4 : -0.2;
     else if (ctx.anim !== 'air') hy += Math.sin(ctx.animT * 4.5) * 0.2;
     g.save();

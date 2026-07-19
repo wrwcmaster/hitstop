@@ -52,7 +52,7 @@ export interface WeaponAttackDef {
  */
 export interface RangedDef {
   projectile: 'arrow' | 'bullet';
-  /** Muzzle speed, px/s. */
+  /** Muzzle speed at FULL power, px/s. */
   speed: number;
   /** Arc gravity in px/s² (arrows ~420; guns nearly 0). */
   gravity: number;
@@ -60,8 +60,19 @@ export interface RangedDef {
   cooldown: number;
   /** Backward kick on the shooter, px/s. */
   recoil: number;
-  /** Vertical muzzle offset from the shooter's center. */
+  /** Small vertical trim from the shared ranged hand line (see
+   * RANGED_HAND_Y in weapon-visuals.ts) — shots spawn ON the drawn
+   * weapon, this only nudges within it (a barrel above the grip, say). */
   muzzleY?: number;
+  /**
+   * Hold-to-charge (the engine's Charge gesture): holding attack draws
+   * the weapon, releasing looses it. Power scales muzzle speed — which,
+   * under gravity, IS the range — plus damage and recoil. `time` seconds
+   * reaches full draw; a tap fires at `floor` power; `curve` shapes the
+   * ramp (see engine/input/charge.ts). Weapons without this fire on
+   * press, as ever.
+   */
+  charge?: { time: number; floor: number; curve?: number };
 }
 
 /**
@@ -119,6 +130,13 @@ export function defineWeaponType(id: string, def: WeaponTypeDef): void {
     })) finite(value, `weapon type "${id}".ranged.${field}`);
     if (r.speed <= 0 || r.cooldown <= 0 || r.gravity < 0 || r.recoil < 0) {
       throw new Error(`weapon type "${id}".ranged: speed/cooldown must be positive, gravity/recoil non-negative`);
+    }
+    if (r.charge) {
+      finite(r.charge.time, `weapon type "${id}".ranged.charge.time`);
+      finite(r.charge.floor, `weapon type "${id}".ranged.charge.floor`);
+      if (r.charge.time <= 0 || r.charge.floor <= 0 || r.charge.floor > 1) {
+        throw new Error(`weapon type "${id}".ranged.charge: time must be positive, floor in (0..1]`);
+      }
     }
   }
   if (!def.attacks.length && !def.ranged) {
@@ -327,10 +345,17 @@ defineWeaponType('great-sword', {
 
 // The bow: arrows leave at a real muzzle speed and arc under gravity —
 // aim up for distance, or loose flat and let the drop do the work.
+// DRAWN, not clicked: hold attack and the string pulls back — how long
+// you hold decides how fast (and so how far) the arrow flies. A tap is
+// a weak close lob; ~0.8s is a full-power shot at the old fixed speed.
+// The curve back-loads the ramp so the last beat of the draw matters.
 defineWeaponType('bow', {
   comboWindow: 0,
   attacks: [],
-  ranged: { projectile: 'arrow', speed: 330, gravity: 420, cooldown: 0.55, recoil: 30, muzzleY: -2 },
+  ranged: {
+    projectile: 'arrow', speed: 330, gravity: 420, cooldown: 0.55, recoil: 30,
+    charge: { time: 0.8, floor: 0.4, curve: 1.4 },
+  },
 });
 
 // The flintlock: a fast, nearly-flat shot with a real kick. Slow to
@@ -338,7 +363,7 @@ defineWeaponType('bow', {
 defineWeaponType('gun', {
   comboWindow: 0,
   attacks: [],
-  ranged: { projectile: 'bullet', speed: 640, gravity: 30, cooldown: 0.85, recoil: 90, muzzleY: -1 },
+  ranged: { projectile: 'bullet', speed: 640, gravity: 30, cooldown: 0.85, recoil: 90, muzzleY: -0.25 },
 });
 
 defineWeapon('unarmed', {

@@ -32,19 +32,28 @@ export interface ShotOptions {
 export type TaggedProjectile = Projectile & { snapKind?: 'arrow' | 'bullet' };
 
 /** The rotate-to-velocity arrow: shaft, steel head, fletching. */
+/**
+ * THE arrow, drawn at the origin pointing +x (fletching at -5.5, head
+ * tip at +6.5). Flying shots and the arrow nocked on a drawn bow both
+ * render through here, so they are pixel-identical. `tint` overrides
+ * every color (hit-flash white).
+ */
+export function drawArrowSprite(g: CanvasRenderingContext2D, tint?: string): void {
+  g.fillStyle = tint ?? '#8a6b3f'; // shaft
+  g.fillRect(-5, -0.5, 8, 1);
+  g.fillStyle = tint ?? COLORS.steel; // head
+  g.fillRect(3, -1, 3, 2);
+  g.fillStyle = tint ?? COLORS.white;
+  g.fillRect(5, -0.5, 1.5, 1);
+  g.fillStyle = tint ?? COLORS.red; // fletching
+  g.fillRect(-5.5, -1.5, 2, 3);
+}
+
 export function drawArrow(g: CanvasRenderingContext2D, x: number, y: number, vx: number, vy: number): void {
-  const ang = Math.atan2(vy, vx);
   g.save();
   g.translate(x, y);
-  g.rotate(ang);
-  g.fillStyle = '#8a6b3f'; // shaft
-  g.fillRect(-5, -0.5, 8, 1);
-  g.fillStyle = COLORS.steel; // head
-  g.fillRect(3, -1, 3, 2);
-  g.fillStyle = COLORS.white;
-  g.fillRect(5, -0.5, 1.5, 1);
-  g.fillStyle = COLORS.red; // fletching
-  g.fillRect(-5.5, -1.5, 2, 3);
+  g.rotate(Math.atan2(vy, vx));
+  drawArrowSprite(g);
   g.restore();
 }
 

@@ -26,6 +26,7 @@ export * from './math/ballistics';
 export { type Rect, overlaps, containsPoint, centerX, centerY, expand } from './math/rect';
 
 export { Input, Buffer, type RawInputEvent } from './input/input';
+export { Charge, type ChargeParams } from './input/charge';
 export { GamepadInput, type GamepadMapping, type GamepadAxisMapping } from './input/gamepad';
 
 export { createPixelCanvas, offscreen, type PixelCanvas } from './gfx/canvas';

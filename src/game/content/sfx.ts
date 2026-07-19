@@ -39,6 +39,10 @@ export function registerSounds(sfx: Sfx): void {
     s.tone(880, 240, 0.07, 'triangle', 0.11);
     s.hiss(0.09, 0.05);
   });
+  // The string pulling back: a low creak rising as the draw begins.
+  sfx.define('bowdraw', (s) => {
+    s.tone(140, 320, 0.12, 'triangle', 0.05);
+  });
   // Gunshot: a hard crack over a low powder thump.
   sfx.define('gun', (s) => {
     s.hiss(0.09, 0.3);

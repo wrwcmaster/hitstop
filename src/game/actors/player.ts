@@ -2,6 +2,7 @@ import {
   Actor,
   FSM,
   Buffer,
+  Charge,
   Strike,
   Projectile,
   applyGravity,
@@ -42,7 +43,7 @@ import {
   type WeaponAttackDef,
   type WeaponDef,
 } from '../content/weapons';
-import { drawHeldWeapon, drawWeaponTrail } from '../content/weapon-visuals';
+import { drawHeldWeapon, drawWeaponTrail, RANGED_HAND_Y } from '../content/weapon-visuals';
 import { type SkillCtx } from '../content/skills';
 import { classes, DEFAULT_CLASS } from '../content/classes';
 import { shootArrow, shootBullet, muzzleFlash } from '../content/ballistics';
@@ -121,6 +122,7 @@ export const PLAYER_TUNING = {
   dashInvuln: 0.2,
   castTime: 0.2, // brief commit while a spell leaves the hand
   castRecoil: 40, // backward brace when a spell fires
+  drawMoveMult: 0.45, // drawing a bow you can creep, not sprint
   // Parry: a short deflect window; land a hit inside it and the blow is
   // turned aside, the attacker staggered, and a riposte opened.
   parryWindow: 0.16, // the active guard (hits inside are deflected)
@@ -221,6 +223,10 @@ export class Player extends Actor {
   /** Ranged weapon: a queued shot + the reload clock. */
   private pendingRanged = false;
   private rangedCd = 0;
+  /** Hold-to-charge (the `draw` state): the engine gesture plus the
+   * power the release banked for fireRanged (1 = uncharged weapons). */
+  private charge = new Charge({ time: 1, floor: 1 });
+  private chargePower = 1;
   /** Parry: reload clock between guards, and the empowered-counter window. */
   private parryCd = 0;
   riposteT = 0;
@@ -471,11 +477,14 @@ export class Player extends Actor {
     // Parry is a reaction: raise the guard on demand (ground or air).
     if (this.input.consumePress('parry') && this.parryCd <= 0) return 'parry';
     if (this.atkBuf.consume()) {
-      // Ranged steel shoots instead of swinging: the attack press
-      // queues a shot and enters the cast state for the recoil brace.
+      // Ranged steel shoots instead of swinging. Charged weapons (the
+      // bow) enter the draw state — the shot leaves on RELEASE, at a
+      // power the hold decides. Uncharged ones (the flintlock) fire on
+      // the press as ever, straight into the recoil brace.
       const rangedType = weaponTypeOf(this.weapon);
       if (rangedType.ranged) {
         if (this.rangedCd <= 0) {
+          if (rangedType.ranged.charge) return 'draw';
           this.pendingRanged = true;
           return 'cast';
         }
@@ -527,23 +536,80 @@ export class Player extends Actor {
     if (this.fsm.t >= this.castDur) return 'move';
   }
 
+  /* ---------------- draw (hold-to-charge ranged) ---------------- */
+
+  /** Nock and start pulling: the hold decides the power (see Charge). */
+  beginDraw(): void {
+    const r = weaponTypeOf(this.weapon).ranged!;
+    this.charge.begin(r.charge!);
+    this.squash = 0.95;
+    this.feel.sfx.play('bowdraw');
+  }
+
+  drawUpdate(dt: number): string | void {
+    // Creep while drawing: same controls as running, at drawMoveMult
+    // pace — an archer tracks their target, they don't sprint with a
+    // drawn string. Turning mid-draw re-aims.
+    const T = PLAYER_TUNING;
+    const dir = this.input.axis('left', 'right');
+    if (dir !== 0) {
+      this.facing = dir as 1 | -1;
+      const cap = this.stats.get('speed') * T.drawMoveMult;
+      this.vx = clamp(this.vx + dir * T.runAccel * T.drawMoveMult * dt, -cap, cap);
+    } else {
+      this.vx *= friction(this.onGround ? T.groundFriction : T.airFriction, dt);
+    }
+    // Bail out without loosing: a dash or parry eats the arrow.
+    if (this.input.consumePress('dash') && this.dashCd <= 0) return 'dash';
+    if (this.input.consumePress('parry') && this.parryCd <= 0) return 'parry';
+    // The "fully drawn" click — the last beat of the ramp just landed.
+    const handY = this.y + this.h + RANGED_HAND_Y;
+    if (this.charge.update(dt)) {
+      this.feel.sfx.play('parryReady');
+      this.feel.burst(this.cx + this.facing * 7, handY, 5, {
+        color: [COLORS.gold, COLORS.white], speed: 30, life: 0.2, drag: 6,
+      });
+      this.squash = 0.9;
+    }
+    // Creeping tension: sparks gather at the arrowhead while pulling.
+    if (!this.charge.full && Math.floor(this.fsm.t / 0.15) !== Math.floor((this.fsm.t - dt) / 0.15)) {
+      this.feel.burst(this.cx + this.facing * 7, handY, 1, {
+        color: [COLORS.steel], speed: 14, life: 0.14, drag: 4,
+      });
+    }
+    // Release looses the shot at whatever the hold earned.
+    if (!this.input.held('attack')) {
+      this.chargePower = this.charge.power;
+      this.pendingRanged = true;
+      return 'cast';
+    }
+  }
+
   /** Loose the equipped ranged weapon along the current aim. */
   private fireRanged(): void {
     const w = this.weapon;
     const r = weaponTypeOf(w).ranged!;
+    const power = this.chargePower;
+    this.chargePower = 1;
     this.castDur = 0.16;
     this.rangedCd = r.cooldown;
     // Aim: level by default, 45° up with up held, steep down mid-air.
     let angle = 0;
     if (this.input.held('up')) angle = -Math.PI / 4;
     else if (!this.onGround && this.input.held('down')) angle = Math.PI / 3;
-    const vx = Math.cos(angle) * r.speed * this.facing;
-    const vy = Math.sin(angle) * r.speed;
+    // Power scales the muzzle speed — under gravity, that IS the range —
+    // and the punch and kick with it. Uncharged weapons fire at 1.
+    const speed = r.speed * power;
+    const vx = Math.cos(angle) * speed * this.facing;
+    const vy = Math.sin(angle) * speed;
+    // Spawn ON the weapon: the same feet-relative hand line the held
+    // visual draws at (see RANGED_HAND_Y), plus the weapon's small trim —
+    // never a body-center guess that drifts from the art.
     const mx = this.cx + this.facing * 7;
-    const my = this.cy + (r.muzzleY ?? 0);
+    const my = this.y + this.h + RANGED_HAND_Y + (r.muzzleY ?? 0);
     const shot = {
       x: mx, y: my, vx, vy,
-      damage: Math.round(w.baseDamage + this.stats.get('attack')),
+      damage: Math.max(1, Math.round((w.baseDamage + this.stats.get('attack')) * power)),
       targets: 'enemy' as const,
       attacker: this,
       gravity: r.gravity,
@@ -551,7 +617,7 @@ export class Player extends Actor {
     if (r.projectile === 'arrow') shootArrow(this.game, this.collision, shot);
     else shootBullet(this.game, this.collision, shot);
     muzzleFlash(this.game, mx, my, this.facing, r.projectile);
-    this.vx -= this.facing * r.recoil;
+    this.vx -= this.facing * r.recoil * power;
     this.squash = 0.92;
   }
 
@@ -1240,6 +1306,7 @@ export class Player extends Actor {
               def: this.attackDef!,
             }
           : undefined,
+        charge: this.fsm.is('draw') ? this.charge.progress : undefined,
       });
     }
     g.restore();
@@ -1308,6 +1375,10 @@ const PLAYER_STATES: Record<string, StateDef<Player>> = {
   cast: {
     enter: (p) => p.beginCast(),
     update: (p) => p.castUpdate(),
+  },
+  draw: {
+    enter: (p) => p.beginDraw(),
+    update: (p, dt) => p.drawUpdate(dt),
   },
   parry: {
     enter: (p) => p.beginParry(),

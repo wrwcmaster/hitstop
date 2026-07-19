@@ -189,6 +189,15 @@ defineWeaponType('bow', {
 
 Arrows arc under gravity (hold ↑ to loose at 45°, ↓ mid-air for a steep shot); bullets are fast and nearly flat. Both fire through `content/ballistics.ts` — `shootArrow`/`shootBullet` wrap `game.combat.shoot` with the shared visuals, feel, and a `snapKind` tag that co-op guests use to draw the real silhouette.
 
+**Hold-to-charge**: add a `charge` block and the weapon is *drawn* instead of clicked — holding attack pulls the string (the player enters the `draw` state; dash or parry cancels without loosing), and releasing fires at a power the hold earned. Power multiplies muzzle speed — which under gravity IS the range — plus damage and recoil. The gesture itself is the engine's `Charge` (`engine/input/charge.ts`): `time` seconds to full draw, an instant tap fires at `floor` power, `curve` shapes the ramp:
+
+```ts
+ranged: {
+  projectile: 'arrow', speed: 330, gravity: 420, cooldown: 0.55, recoil: 30,
+  charge: { time: 0.8, floor: 0.4, curve: 1.4 }, // omit = fire on press (the gun)
+},
+```
+
 Monsters aim with the engine solvers from `math/ballistics.ts`:
 
 ```ts
