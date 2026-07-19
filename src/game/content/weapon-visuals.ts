@@ -410,12 +410,17 @@ export function drawBow(g: CanvasRenderingContext2D, pose: BowPose): void {
 // The hunting bow: a strung arc held at the knight's leading hand. The
 // arc leans with the run cycle like the blades do.
 defineWeaponVisual('hunting-bow', {
-  icon: bakedIcon((px) => {
-    px(5, 0, 1, 1, WOOD); px(6, 1, 1, 2, WOOD); px(7, 3, 1, 2, WOOD_DARK);
-    px(6, 5, 1, 2, WOOD); px(5, 7, 1, 1, WOOD);
-    px(5, 0, 1, 1, COLORS.white); // string, straight down the left
-    for (let y = 0; y < 8; y++) px(4, y, 1, 1, y % 2 ? COLORS.steel : COLORS.white);
-  }),
+  // The icon IS the held bow: same drawBow renderer, slack string,
+  // scaled into the 8x8 icon frame — inventory, pickups, and the
+  // knight's hand can never drift apart.
+  icon: (() => {
+    const [icon, g] = offscreen(8 * TEXEL, 8 * TEXEL);
+    g.scale(TEXEL, TEXEL);
+    g.translate(1.45, 4);
+    g.scale(0.62, 0.62);
+    drawBow(g, { radius: 5.5, spread: Math.PI / 2.6, pull: 0 });
+    return icon;
+  })(),
   drawHeld(g, ctx) {
     const f = ctx.facing;
     const pull = ctx.charge ?? 0;
