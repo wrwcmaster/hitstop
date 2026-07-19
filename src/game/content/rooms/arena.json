@@ -50,6 +50,7 @@
  },
  "entities": [],
  "props": {
+  "music": "overworld",
   "waves": "default",
   "waveGoal": 5,
   "gateKey": "gate-key"

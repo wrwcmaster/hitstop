@@ -89,8 +89,10 @@ hitstop freezes the world, so game feel itself is assertable.
   divergence — either nondeterminism or a real gameplay change (i.e. a
   regression the recording caught).
 
-In-page pieces live in `src/game/test/harness.ts` (`window.__replay`
-always; `window.__harness` step/playback API under `?harness=1`).
+In-page pieces: the mechanism is the engine's `src/engine/replay/replay.ts`
+(tapes, seeding, playback, the viewer, `window.__replay`/`__harness`);
+`src/game/test/harness.ts` is the game adapter (action list, state
+extractor, how a run begins).
 
 ## Environment knobs
 

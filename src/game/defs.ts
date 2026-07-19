@@ -92,6 +92,13 @@ export function prettyButton(index: number): string {
   return named[index] ?? `B${index}`;
 }
 
+/** localStorage prefix for saves/settings — also scopes what the replay
+ * recorder snapshots at run start. */
+export const STORAGE_PREFIX = 'hitstop';
+
+/** sessionStorage key that hands a recording across the WATCH REPLAY reload. */
+export const REPLAY_PENDING_KEY = `${STORAGE_PREFIX}.replay.pending`;
+
 /**
  * How a run began. Every run start funnels through PlayScene.beginRun
  * with one of these, so the replay recorder can cut a per-run tape and

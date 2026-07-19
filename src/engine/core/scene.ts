@@ -32,6 +32,11 @@ export class SceneManager {
     return this.stack.length;
   }
 
+  /** The stack, bottom → top (read-only: overlays, debug HUDs, replay state). */
+  all(): readonly Scene[] {
+    return this.stack;
+  }
+
   /** Replace the entire stack (hard transition). */
   switch(scene: Scene): void {
     for (let i = this.stack.length - 1; i >= 0; i--) this.stack[i].exit?.();

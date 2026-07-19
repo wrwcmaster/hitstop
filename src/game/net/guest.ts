@@ -12,6 +12,7 @@ import {
 import type { ActionGame } from '../defs';
 import { COLORS } from '../content/palette';
 import { ROOMS, START_ROOM } from '../content/rooms';
+import { DEFAULT_SONG } from '../content/music';
 import { Player } from '../actors/player';
 import { Monster, monsters } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
@@ -237,7 +238,7 @@ export class CoopGuestScene implements Scene {
     this.tilemap = buildTilemap(room);
     this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
     this.game.camera.setBounds(0, -30, this.tilemap.worldW, this.tilemap.worldH - 16);
-    this.game.music.play((room.props?.music as string) ?? 'depths');
+    this.game.music.play((room.props?.music as string) ?? DEFAULT_SONG);
     // Respawn the predicted knight on the new ground. It lives in the
     // (otherwise empty) local world so real physics can drive it.
     this.game.world.clear();

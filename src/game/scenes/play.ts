@@ -15,7 +15,7 @@ import {
   overlaps,
   t,
 } from '@engine/index';
-import { menuLine, prettyCode, prettyButton, type ActionGame, type Action, type RunStart } from '../defs';
+import { menuLine, prettyCode, prettyButton, REPLAY_PENDING_KEY, type ActionGame, type Action, type RunStart } from '../defs';
 import { Player } from '../actors/player';
 import { Monster, monsters } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
@@ -27,6 +27,7 @@ import { SaveSlotsScene } from './saveslots';
 import { Background } from './background';
 import { COLORS } from '../content/palette';
 import { ROOMS, START_ROOM } from '../content/rooms';
+import { DEFAULT_SONG } from '../content/music';
 import { saveStore, slotStore, newestSave, snapshotPlayer, restorePlayer, type SaveData } from '../save';
 import type { PlayHost } from './play/host';
 import { WaveDirector } from './play/waves';
@@ -35,19 +36,12 @@ import { PortalScene } from './portal';
 import { Hud, type GateMarker } from './play/hud';
 import { TitleScreen, renderGameOver } from './play/screens';
 import { CHEATS, cheatFor } from './play/cheats';
-import { pickReplayFile } from '../test/harness';
+import { pickReplayFile } from '@engine/index';
 import { CoopHost } from '../net/host';
 import { CoopGuestScene } from '../net/guest';
 import { CoopScene } from './coop';
 import { displayName } from '../name';
 import type { PeerLink } from '@engine/index';
-
-/** Fallback music per room (rooms can override via props.music). */
-const ROOM_MUSIC: Record<string, string> = {
-  arena: 'overworld',
-  cavern: 'depths',
-  throne: 'depths',
-};
 
 /** A door transition in progress: fade out, swap rooms, fade in. */
 interface Transition {
@@ -160,7 +154,7 @@ export class PlayScene implements Scene {
       testRoom: () => this.beginRun({ kind: 'testroom' }),
       watchReplay: () => {
         game.sfx.play('menuSelect');
-        pickReplayFile();
+        pickReplayFile(REPLAY_PENDING_KEY);
       },
       options: () => {
         game.sfx.play('menuSelect');
@@ -318,6 +312,17 @@ export class PlayScene implements Scene {
       case 'slot': return this.loadSlot(start.slot);
       case 'testroom': return this.startTestRoom();
     }
+  }
+
+  /** A serializable snapshot for the replay recorder (the engine hashes
+   * it for divergence checks; agents read it to decide their next move). */
+  replayState(): { phase: string; roomId: string; score: number; wave: { n: number; queued: number; pending: number } } {
+    return {
+      phase: this.phase,
+      roomId: this.roomId,
+      score: this.score,
+      wave: { n: this.waves.wave, queued: this.waves.queued, pending: this.waves.telegraphs },
+    };
   }
 
   /** Begin hosting: the run starts from the newest save with the guest's
@@ -507,8 +512,7 @@ export class PlayScene implements Scene {
       this.game.music.play('boss');
       return;
     }
-    const song = (this.room.props?.music as string) ?? ROOM_MUSIC[this.roomId] ?? 'overworld';
-    this.game.music.play(song);
+    this.game.music.play((this.room.props?.music as string) ?? DEFAULT_SONG);
   }
 
   /** The current run as save data (null on test rooms / no player). */
