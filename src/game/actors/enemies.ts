@@ -457,10 +457,7 @@ defineMonster('archer', {
     g.save();
     g.translate(bx, y + 9);
     if (f === -1) g.scale(-1, 1);
-    drawBow(g, {
-      radius: 5, spread: Math.PI / 2.4, pull, arrow: aim > 0, woodWidth: 1.2,
-      ...(flash && { tint: '#ffffff' }),
-    });
+    drawBow(g, { pull, arrow: aim > 0, ...(flash && { tint: '#ffffff' }) });
     g.restore();
   },
 });

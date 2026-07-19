@@ -3,6 +3,7 @@ import {
   frameAt,
   loadSprite,
   offscreen,
+  whiteOf,
   withFacing,
   type FacingAnimSet,
   type SpriteFile,
@@ -352,49 +353,68 @@ function bakedIcon(paint: (px: (x: number, y: number, w: number, h: number, colo
 const WOOD = '#8a6b3f';
 const WOOD_DARK = '#5d4728';
 
+/**
+ * The bow stave, authored as pixel art like every other sprite in the
+ * game (4x8 logical px, baked once at texel density). Facing +x: the
+ * belly column bows forward, tips taper back at the top and bottom
+ * rows. Only the STRING (and the nocked arrow) is dynamic — pixels
+ * can't bend, but a line can.
+ */
+const STAVE_W = 4;
+const STAVE_H = 8;
+const STAVE = (() => {
+  const [c, g] = offscreen(STAVE_W * TEXEL, STAVE_H * TEXEL);
+  const px = (x: number, y: number, color: string) => {
+    g.fillStyle = color;
+    g.fillRect(x * TEXEL, y * TEXEL, TEXEL, TEXEL);
+  };
+  px(1, 0, WOOD); // top tip — the string anchors here
+  px(2, 1, WOOD);
+  for (let y = 2; y <= 5; y++) {
+    px(3, y, WOOD); // belly
+    px(2, y, WOOD_DARK); // shaded spine, and the grip wrap
+  }
+  px(2, 6, WOOD);
+  px(1, 7, WOOD); // bottom tip
+  return c;
+})();
+const STAVE_FLASH = whiteOf(STAVE);
+
+/** Where the string ties on, in grip-origin coords (art tip centers). */
+const STAVE_TIP = { x: 0.5, y: 3.5 };
+/** How far behind the tips a full draw anchors the nock. */
+const PULL_DEPTH = 4.5;
+
 /** How a bow should look right now — shared by every bow in the game. */
 export interface BowPose {
-  /** Stave radius: grip → tip distance. */
-  radius: number;
-  /** Half-angle of the stave arc. */
-  spread: number;
   /** String pull-back, 0 (slack) .. 1 (full draw). */
   pull: number;
   /** Nock an arrow on the string (shown whenever pulling). */
   arrow?: boolean;
-  /** Stave stroke width (the knight's bow is chunkier than the archer's). */
-  woodWidth?: number;
   /** Hit-flash: every part of bow and arrow in this color. */
   tint?: string;
 }
 
 /**
- * Draw a strung bow at the origin, +x forward — the caller translates
- * to the hand and mirrors for facing. Pulling bends the string into a
- * V back to the nock (a full draw reaches behind the grip, like a real
- * anchor) and lays a nocked arrow along the aim line, head past the
- * stave. The knight's held bow and the archer's telegraph both render
- * through here, so "drawn bow" looks like one thing everywhere.
+ * Draw the strung bow at the origin, +x forward — the caller translates
+ * to the hand and mirrors for facing. The stave is the baked pixel
+ * sprite; the string is drawn live — slack between the tips, or bent
+ * into a V whose nock reaches behind the grip at full draw — with the
+ * flying arrow's exact sprite nocked on it. The knight's held bow, the
+ * archer's telegraph, and the item icon all render through here.
  */
 export function drawBow(g: CanvasRenderingContext2D, pose: BowPose): void {
-  const { radius, spread, pull, tint } = pose;
-  const tipX = radius * Math.cos(spread);
-  const tipY = radius * Math.sin(spread);
-
-  g.strokeStyle = tint ?? WOOD;
-  g.lineWidth = pose.woodWidth ?? 1.4;
-  g.beginPath(); // the stave: an arc bowing forward
-  g.arc(0, 0, radius, -spread, spread);
-  g.stroke();
+  const { pull, tint } = pose;
+  g.drawImage(tint ? STAVE_FLASH : STAVE, -1, -STAVE_H / 2, STAVE_W, STAVE_H);
 
   const pulling = pull > 0.02;
-  const nockX = tipX - pull * radius; // full draw anchors behind the grip
+  const nockX = STAVE_TIP.x - pull * PULL_DEPTH;
   g.strokeStyle = tint ?? 'rgba(255,255,255,0.8)';
   g.lineWidth = 0.6;
   g.beginPath();
-  g.moveTo(tipX, -tipY);
+  g.moveTo(STAVE_TIP.x, -STAVE_TIP.y);
   if (pulling) g.lineTo(nockX, 0);
-  g.lineTo(tipX, tipY);
+  g.lineTo(STAVE_TIP.x, STAVE_TIP.y);
   g.stroke();
 
   if (pulling && pose.arrow) {
@@ -410,15 +430,14 @@ export function drawBow(g: CanvasRenderingContext2D, pose: BowPose): void {
 // The hunting bow: a strung arc held at the knight's leading hand. The
 // arc leans with the run cycle like the blades do.
 defineWeaponVisual('hunting-bow', {
-  // The icon IS the held bow: same drawBow renderer, slack string,
-  // scaled into the 8x8 icon frame — inventory, pickups, and the
-  // knight's hand can never drift apart.
+  // The icon IS the held bow: the same pixel stave + slack string at
+  // 1:1 (the stave is authored 8 tall, exactly the icon frame) —
+  // inventory, pickups, and the knight's hand can never drift apart.
   icon: (() => {
     const [icon, g] = offscreen(8 * TEXEL, 8 * TEXEL);
     g.scale(TEXEL, TEXEL);
-    g.translate(1.45, 4);
-    g.scale(0.62, 0.62);
-    drawBow(g, { radius: 5.5, spread: Math.PI / 2.6, pull: 0 });
+    g.translate(3, 4);
+    drawBow(g, { pull: 0 });
     return icon;
   })(),
   drawHeld(g, ctx) {
@@ -435,7 +454,7 @@ defineWeaponVisual('hunting-bow', {
     if (f === -1) g.scale(-1, 1);
     // Charging pulls the string back with a nocked arrow riding it —
     // the pull IS the charge meter.
-    drawBow(g, { radius: 5.5, spread: Math.PI / 2.6, pull, arrow: pull > 0 });
+    drawBow(g, { pull, arrow: pull > 0 });
     g.restore();
   },
 });
