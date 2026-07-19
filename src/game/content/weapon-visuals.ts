@@ -27,6 +27,10 @@ export interface HeldWeaponCtx {
   bodyW: number;
   bodyH: number;
   attack?: WeaponAttackPose;
+  /** Hold-to-charge progress 0..1 while the wielder is drawing (the
+   * player's `draw` state) — charged visuals pull their string/wind-up
+   * with it. Absent when not charging. */
+  charge?: number;
 }
 
 /** World-space context for the attack trail. */
@@ -347,6 +351,73 @@ function bakedIcon(paint: (px: (x: number, y: number, w: number, h: number, colo
 const WOOD = '#8a6b3f';
 const WOOD_DARK = '#5d4728';
 
+/** How a bow should look right now — shared by every bow in the game. */
+export interface BowPose {
+  /** Stave radius: grip → tip distance. */
+  radius: number;
+  /** Half-angle of the stave arc. */
+  spread: number;
+  /** String pull-back, 0 (slack) .. 1 (full draw). */
+  pull: number;
+  /** Nock an arrow on the string (shown whenever pulling). */
+  arrow?: boolean;
+  wood?: string;
+  string?: string;
+  /** Stave stroke width (the knight's bow is chunkier than the archer's). */
+  woodWidth?: number;
+}
+
+/**
+ * Draw a strung bow at the origin, +x forward — the caller translates
+ * to the hand and mirrors for facing. Pulling bends the string into a
+ * V back to the nock (a full draw reaches behind the grip, like a real
+ * anchor) and lays a nocked arrow along the aim line, head past the
+ * stave. The knight's held bow and the archer's telegraph both render
+ * through here, so "drawn bow" looks like one thing everywhere.
+ */
+export function drawBow(g: CanvasRenderingContext2D, pose: BowPose): void {
+  const { radius, spread, pull } = pose;
+  const wood = pose.wood ?? WOOD;
+  const string = pose.string ?? 'rgba(255,255,255,0.8)';
+  const tipX = radius * Math.cos(spread);
+  const tipY = radius * Math.sin(spread);
+
+  g.strokeStyle = wood;
+  g.lineWidth = pose.woodWidth ?? 1.4;
+  g.beginPath(); // the stave: an arc bowing forward
+  g.arc(0, 0, radius, -spread, spread);
+  g.stroke();
+
+  const pulling = pull > 0.02;
+  const nockX = tipX - pull * radius; // full draw anchors behind the grip
+  g.strokeStyle = string;
+  g.lineWidth = 0.6;
+  g.beginPath();
+  g.moveTo(tipX, -tipY);
+  if (pulling) g.lineTo(nockX, 0);
+  g.lineTo(tipX, tipY);
+  g.stroke();
+
+  if (pulling && pose.arrow) {
+    const headX = nockX + radius + 4; // head pokes past the stave
+    g.strokeStyle = wood;
+    g.lineWidth = 1;
+    g.beginPath(); // shaft, riding the aim line
+    g.moveTo(nockX, 0);
+    g.lineTo(headX, 0);
+    g.stroke();
+    g.fillStyle = COLORS.white;
+    g.fillRect(headX - 0.4, -0.9, 1.6, 1.8); // head
+    g.strokeStyle = string;
+    g.lineWidth = 0.6;
+    g.beginPath(); // fletching ticks at the nock
+    g.moveTo(nockX - 1.2, -1.4);
+    g.lineTo(nockX + 0.4, 0);
+    g.lineTo(nockX - 1.2, 1.4);
+    g.stroke();
+  }
+}
+
 // The hunting bow: a strung arc held at the knight's leading hand. The
 // arc leans with the run cycle like the blades do.
 defineWeaponVisual('hunting-bow', {
@@ -358,26 +429,19 @@ defineWeaponVisual('hunting-bow', {
   }),
   drawHeld(g, ctx) {
     const f = ctx.facing;
+    const pull = ctx.charge ?? 0;
     let hx = 2.25;
     let hy = RANGED_HAND_Y; // grip on the shared hand line — arrows nock here
-    if (ctx.anim === 'run') hy += ctx.frame === 1 ? 0.5 : -0.25;
-    else if (ctx.anim !== 'air') hy += Math.sin(ctx.animT * 4.5) * 0.2;
+    if (pull === 0) {
+      if (ctx.anim === 'run') hy += ctx.frame === 1 ? 0.5 : -0.25;
+      else if (ctx.anim !== 'air') hy += Math.sin(ctx.animT * 4.5) * 0.2;
+    }
     g.save();
     g.translate(hx * f, hy);
     if (f === -1) g.scale(-1, 1);
-    g.strokeStyle = WOOD;
-    g.lineWidth = 1.4;
-    g.beginPath(); // the stave: an arc bowing forward
-    g.arc(0, 0, 5.5, -Math.PI / 2.6, Math.PI / 2.6);
-    g.stroke();
-    g.strokeStyle = 'rgba(255,255,255,0.8)';
-    g.lineWidth = 0.6;
-    const tipY = 5.5 * Math.sin(Math.PI / 2.6);
-    const tipX = 5.5 * Math.cos(Math.PI / 2.6);
-    g.beginPath(); // the string between the stave's tips
-    g.moveTo(tipX, -tipY);
-    g.lineTo(tipX, tipY);
-    g.stroke();
+    // Charging pulls the string back with a nocked arrow riding it —
+    // the pull IS the charge meter.
+    drawBow(g, { radius: 5.5, spread: Math.PI / 2.6, pull, arrow: pull > 0 });
     g.restore();
   },
 });

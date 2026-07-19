@@ -1297,6 +1297,7 @@ export class Player extends Actor {
               def: this.attackDef!,
             }
           : undefined,
+        charge: this.fsm.is('draw') ? this.charge.progress : undefined,
       });
     }
     g.restore();

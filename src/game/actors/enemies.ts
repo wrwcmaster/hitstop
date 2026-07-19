@@ -1,6 +1,7 @@
 import { rand, sign, tintOf, itemDef, ballisticVelocity, ballisticLob } from '@engine/index';
 import { defineMonster, Monster } from './monster';
 import { shootArrow, shootBullet, muzzleFlash, ARROW_GRAVITY, BULLET_GRAVITY } from '../content/ballistics';
+import { drawBow } from '../content/weapon-visuals';
 import { SLIME1, SLIME2, BAT1, BAT2, PIKE1, PIKE2, CHEST, TEXEL, blit, slimeSprite, batSprite, pikeSprite, chestSprite } from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { Player } from './player';
@@ -376,6 +377,10 @@ const CLOAK = '#3f5e3a';
 const CLOAK_DARK = '#2a4027';
 const WOOD = '#8a6b3f';
 
+/** Seconds the archer holds its draw before loosing — the telegraph
+ * window, and what the bow's visible pull-back is measured against. */
+const ARCHER_AIM = 0.45;
+
 /**
  * The archer: keeps its distance and lobs real ballistic arrows — the
  * same solver-aimed, gravity-arced shots the player's bow fires, aimed
@@ -425,7 +430,7 @@ defineMonster('archer', {
     else if (dist < 90) m.vx -= m.facing * 110 * dt;
     else m.vx *= 0.85;
     m.vx = Math.max(-40, Math.min(40, m.vx));
-    if ((m.state.cd as number) <= 0 && dist < 300) m.state.aim = 0.45;
+    if ((m.state.cd as number) <= 0 && dist < 300) m.state.aim = ARCHER_AIM;
   },
   draw(g, m) {
     const f = m.facing;
@@ -443,27 +448,20 @@ defineMonster('archer', {
     g.fillRect(x + 3 + sway, y + 8, 7, 8); // chest wrap
     g.fillStyle = '#0e0e16';
     g.fillRect(x + (f === 1 ? 6 : 2), y + 4, 4, 2); // hood shadow (eyes)
-    // The bow, held forward; drawn back while aiming.
-    const aiming = (m.state.aim as number) > 0;
+    // The bow — the same shared renderer the knight's bow uses. Aiming
+    // pulls the string back over the telegraph window, arrow nocked, so
+    // "a bow being drawn" reads identically friend or foe.
+    const aim = m.state.aim as number;
+    const pull = aim > 0 ? 1 - aim / ARCHER_AIM : 0;
     const bx = x + (f === 1 ? 11 : 1);
-    g.strokeStyle = flash ? '#ffffff' : WOOD;
-    g.lineWidth = 1.2;
-    g.beginPath();
-    g.arc(bx, y + 9, 5, -Math.PI / 2.4, Math.PI / 2.4);
-    g.stroke();
-    g.strokeStyle = 'rgba(255,255,255,0.75)';
-    g.lineWidth = 0.6;
-    const t = 5 * Math.sin(Math.PI / 2.4);
-    const stringX = aiming ? bx - f * 3 : bx + 5 * Math.cos(Math.PI / 2.4) * (f === 1 ? 1 : -1);
-    g.beginPath();
-    g.moveTo(bx, y + 9 - t);
-    g.lineTo(stringX, y + 9);
-    g.lineTo(bx, y + 9 + t);
-    g.stroke();
-    if (aiming) {
-      g.fillStyle = flash ? '#ffffff' : COLORS.steel;
-      g.fillRect(Math.min(bx, stringX), y + 8.5, Math.abs(bx - stringX) + 3, 1); // nocked arrow
-    }
+    g.save();
+    g.translate(bx, y + 9);
+    if (f === -1) g.scale(-1, 1);
+    drawBow(g, {
+      radius: 5, spread: Math.PI / 2.4, pull, arrow: aim > 0, woodWidth: 1.2,
+      ...(flash && { wood: '#ffffff', string: '#ffffff' }),
+    });
+    g.restore();
   },
 });
 
