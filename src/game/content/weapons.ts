@@ -60,7 +60,9 @@ export interface RangedDef {
   cooldown: number;
   /** Backward kick on the shooter, px/s. */
   recoil: number;
-  /** Vertical muzzle offset from the shooter's center. */
+  /** Small vertical trim from the shared ranged hand line (see
+   * RANGED_HAND_Y in weapon-visuals.ts) — shots spawn ON the drawn
+   * weapon, this only nudges within it (a barrel above the grip, say). */
   muzzleY?: number;
   /**
    * Hold-to-charge (the engine's Charge gesture): holding attack draws
@@ -351,7 +353,7 @@ defineWeaponType('bow', {
   comboWindow: 0,
   attacks: [],
   ranged: {
-    projectile: 'arrow', speed: 330, gravity: 420, cooldown: 0.55, recoil: 30, muzzleY: -2,
+    projectile: 'arrow', speed: 330, gravity: 420, cooldown: 0.55, recoil: 30,
     charge: { time: 0.8, floor: 0.4, curve: 1.4 },
   },
 });
@@ -361,7 +363,7 @@ defineWeaponType('bow', {
 defineWeaponType('gun', {
   comboWindow: 0,
   attacks: [],
-  ranged: { projectile: 'bullet', speed: 640, gravity: 30, cooldown: 0.85, recoil: 90, muzzleY: -1 },
+  ranged: { projectile: 'bullet', speed: 640, gravity: 30, cooldown: 0.85, recoil: 90, muzzleY: -0.25 },
 });
 
 defineWeapon('unarmed', {

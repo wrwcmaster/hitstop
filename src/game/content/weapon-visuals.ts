@@ -49,6 +49,16 @@ export interface WeaponVisual {
 
 export const weaponVisuals = new Registry<WeaponVisual>('weaponVisual');
 
+/**
+ * Where ranged weapons sit, in logical px above the FEET origin the
+ * held-weapon transform uses (negative = up). Chest height on the 18px
+ * knight — held high so the shot leaves at eye-pleasing arc height.
+ * THE contract between art and ballistics: `Player.fireRanged` spawns
+ * arrows/bullets at exactly this line (± the weapon's small `muzzleY`
+ * trim), so if you move the hand, the shots move with it.
+ */
+export const RANGED_HAND_Y = -9.5;
+
 export function defineWeaponVisual(id: string, visual: WeaponVisual): void {
   weaponVisuals.register(id, visual);
 }
@@ -349,7 +359,7 @@ defineWeaponVisual('hunting-bow', {
   drawHeld(g, ctx) {
     const f = ctx.facing;
     let hx = 2.25;
-    let hy = -4.75;
+    let hy = RANGED_HAND_Y; // grip on the shared hand line — arrows nock here
     if (ctx.anim === 'run') hy += ctx.frame === 1 ? 0.5 : -0.25;
     else if (ctx.anim !== 'air') hy += Math.sin(ctx.animT * 4.5) * 0.2;
     g.save();
@@ -382,7 +392,7 @@ defineWeaponVisual('flintlock', {
   drawHeld(g, ctx) {
     const f = ctx.facing;
     let hx = 2;
-    let hy = -4.5;
+    let hy = RANGED_HAND_Y; // barrel rides the shared hand line
     if (ctx.anim === 'run') hy += ctx.frame === 1 ? 0.4 : -0.2;
     else if (ctx.anim !== 'air') hy += Math.sin(ctx.animT * 4.5) * 0.2;
     g.save();

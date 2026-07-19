@@ -43,7 +43,7 @@ import {
   type WeaponAttackDef,
   type WeaponDef,
 } from '../content/weapons';
-import { drawHeldWeapon, drawWeaponTrail } from '../content/weapon-visuals';
+import { drawHeldWeapon, drawWeaponTrail, RANGED_HAND_Y } from '../content/weapon-visuals';
 import { type SkillCtx } from '../content/skills';
 import { classes, DEFAULT_CLASS } from '../content/classes';
 import { shootArrow, shootBullet, muzzleFlash } from '../content/ballistics';
@@ -554,16 +554,17 @@ export class Player extends Actor {
     if (this.input.consumePress('dash') && this.dashCd <= 0) return 'dash';
     if (this.input.consumePress('parry') && this.parryCd <= 0) return 'parry';
     // The "fully drawn" click — the last beat of the ramp just landed.
+    const handY = this.y + this.h + RANGED_HAND_Y;
     if (this.charge.update(dt)) {
       this.feel.sfx.play('parryReady');
-      this.feel.burst(this.cx + this.facing * 7, this.cy - 1, 5, {
+      this.feel.burst(this.cx + this.facing * 7, handY, 5, {
         color: [COLORS.gold, COLORS.white], speed: 30, life: 0.2, drag: 6,
       });
       this.squash = 0.9;
     }
     // Creeping tension: sparks gather at the arrowhead while pulling.
     if (!this.charge.full && Math.floor(this.fsm.t / 0.15) !== Math.floor((this.fsm.t - dt) / 0.15)) {
-      this.feel.burst(this.cx + this.facing * 7, this.cy - 1, 1, {
+      this.feel.burst(this.cx + this.facing * 7, handY, 1, {
         color: [COLORS.steel], speed: 14, life: 0.14, drag: 4,
       });
     }
@@ -592,8 +593,11 @@ export class Player extends Actor {
     const speed = r.speed * power;
     const vx = Math.cos(angle) * speed * this.facing;
     const vy = Math.sin(angle) * speed;
+    // Spawn ON the weapon: the same feet-relative hand line the held
+    // visual draws at (see RANGED_HAND_Y), plus the weapon's small trim —
+    // never a body-center guess that drifts from the art.
     const mx = this.cx + this.facing * 7;
-    const my = this.cy + (r.muzzleY ?? 0);
+    const my = this.y + this.h + RANGED_HAND_Y + (r.muzzleY ?? 0);
     const shot = {
       x: mx, y: my, vx, vy,
       damage: Math.max(1, Math.round((w.baseDamage + this.stats.get('attack')) * power)),
