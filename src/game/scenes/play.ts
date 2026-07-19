@@ -642,9 +642,24 @@ export class PlayScene implements Scene {
         g,
         this.roomId,
         (room) => this.roomId === room || this.flags.has(`visited:${room}`),
-        (dest) => this.goToRoom(dest.room, dest.x, dest.y),
+        (dest) => {
+          // Step out of the destination's portal pad, not a fixed offset —
+          // you should appear where the portal is. (Safe now that pads are
+          // interact-only and won't re-open on contact.)
+          const land = this.portalLanding(dest.room);
+          this.goToRoom(dest.room, land?.x ?? dest.x, land?.y ?? dest.y);
+        },
       ),
     );
+  }
+
+  /** Where to arrive when warping into `roomId`: centered on its portal
+   * pad so the traveller emerges from the portal. Null if it has none. */
+  private portalLanding(roomId: string): { x: number; y: number } | null {
+    const pad = ROOMS[roomId]?.triggers?.find((tr) => tr.event === 'portal');
+    if (!pad) return null;
+    const pw = this.player?.w ?? 14;
+    return { x: pad.x + pad.w / 2 - pw / 2, y: pad.y };
   }
 
   private openConversation(id: string): void {

@@ -38,6 +38,9 @@ export interface KnightSnap {
   animT: number;
   hp: number;
   maxHp: number;
+  /** Worn gear as [slot, itemId] pairs, so a puppet renders the same
+   * weapon and armor the real knight carries. Omitted = bare. */
+  gear?: [string, string][];
 }
 
 export interface MobSnap {

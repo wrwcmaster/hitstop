@@ -28,6 +28,20 @@ import { NET_ACTIONS, parseMsg, type SnapMsg, type KnightSnap } from './protocol
 /** Beyond this far from the server's word, stop gliding and snap. */
 const SNAP_DIST = 48;
 
+/** Mirror a puppet knight's worn gear onto its Equipment (so it renders
+ * the same weapon and armor as the real knight). Only rewears when the
+ * set actually changed — equip() is cheap but this avoids churning every
+ * snapshot for gear that rarely moves. */
+function applyGear(knight: Player, gear?: [string, string][]): void {
+  const want = gear ?? [];
+  const have = knight.equipment.slots();
+  if (have.length === want.length && have.every(([s, id], i) => want[i]?.[0] === s && want[i]?.[1] === id)) {
+    return;
+  }
+  knight.equipment.clear();
+  for (const [, id] of want) knight.equipment.equip(id);
+}
+
 /** A puppet: a real actor rendered with real code but never simulated —
  * each snapshot repositions it, and we glide between snapshots. */
 interface Puppet {
@@ -142,6 +156,7 @@ export class CoopGuestScene implements Scene {
       knight.hp = k.hp;
       knight.maxHp = k.maxHp;
       knight.animT = k.animT;
+      applyGear(knight, k.gear);
       if (knight.fsm.state !== k.state) {
         try { knight.fsm.set(k.state); } catch { /* unknown state: keep pose */ }
       }

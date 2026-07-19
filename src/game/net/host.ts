@@ -142,7 +142,7 @@ export class CoopHost {
         snap.knights.push({
           id: this.id(e), name: e.name, x: r(e.x), y: r(e.y), facing: e.facing,
           state: e.fsm.state, st: r(e.fsm.t), animT: r(e.animT),
-          hp: e.hp, maxHp: e.maxHp,
+          hp: e.hp, maxHp: e.maxHp, gear: e.equipment.slots(),
         });
       } else if (e instanceof Monster) {
         snap.mobs.push({
