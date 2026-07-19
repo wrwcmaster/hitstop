@@ -122,6 +122,7 @@ export const PLAYER_TUNING = {
   dashInvuln: 0.2,
   castTime: 0.2, // brief commit while a spell leaves the hand
   castRecoil: 40, // backward brace when a spell fires
+  drawMoveMult: 0.45, // drawing a bow you can creep, not sprint
   // Parry: a short deflect window; land a hit inside it and the blow is
   // turned aside, the attacker staggered, and a riposte opened.
   parryWindow: 0.16, // the active guard (hits inside are deflected)
@@ -546,10 +547,18 @@ export class Player extends Actor {
   }
 
   drawUpdate(dt: number): string | void {
-    this.vx *= 0.86; // planted draw stance — the string is the focus
-    // The aim can turn mid-draw: face where you're held.
-    const held = this.input.axis('left', 'right');
-    if (held !== 0) this.facing = held as 1 | -1;
+    // Creep while drawing: same controls as running, at drawMoveMult
+    // pace — an archer tracks their target, they don't sprint with a
+    // drawn string. Turning mid-draw re-aims.
+    const T = PLAYER_TUNING;
+    const dir = this.input.axis('left', 'right');
+    if (dir !== 0) {
+      this.facing = dir as 1 | -1;
+      const cap = this.stats.get('speed') * T.drawMoveMult;
+      this.vx = clamp(this.vx + dir * T.runAccel * T.drawMoveMult * dt, -cap, cap);
+    } else {
+      this.vx *= friction(this.onGround ? T.groundFriction : T.airFriction, dt);
+    }
     // Bail out without loosing: a dash or parry eats the arrow.
     if (this.input.consumePress('dash') && this.dashCd <= 0) return 'dash';
     if (this.input.consumePress('parry') && this.parryCd <= 0) return 'parry';

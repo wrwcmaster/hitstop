@@ -9,6 +9,7 @@ import {
 } from '@engine/index';
 import { COLORS, PAL } from './palette';
 import { TEXEL } from './sprites';
+import { drawArrowSprite } from './ballistics';
 import greatSwordJson from './sprites/equipment/great-sword.json';
 import rustySwordJson from './sprites/equipment/rusty-sword.json';
 import type { WeaponAttackDef } from './weapons';
@@ -361,10 +362,10 @@ export interface BowPose {
   pull: number;
   /** Nock an arrow on the string (shown whenever pulling). */
   arrow?: boolean;
-  wood?: string;
-  string?: string;
   /** Stave stroke width (the knight's bow is chunkier than the archer's). */
   woodWidth?: number;
+  /** Hit-flash: every part of bow and arrow in this color. */
+  tint?: string;
 }
 
 /**
@@ -376,13 +377,11 @@ export interface BowPose {
  * through here, so "drawn bow" looks like one thing everywhere.
  */
 export function drawBow(g: CanvasRenderingContext2D, pose: BowPose): void {
-  const { radius, spread, pull } = pose;
-  const wood = pose.wood ?? WOOD;
-  const string = pose.string ?? 'rgba(255,255,255,0.8)';
+  const { radius, spread, pull, tint } = pose;
   const tipX = radius * Math.cos(spread);
   const tipY = radius * Math.sin(spread);
 
-  g.strokeStyle = wood;
+  g.strokeStyle = tint ?? WOOD;
   g.lineWidth = pose.woodWidth ?? 1.4;
   g.beginPath(); // the stave: an arc bowing forward
   g.arc(0, 0, radius, -spread, spread);
@@ -390,7 +389,7 @@ export function drawBow(g: CanvasRenderingContext2D, pose: BowPose): void {
 
   const pulling = pull > 0.02;
   const nockX = tipX - pull * radius; // full draw anchors behind the grip
-  g.strokeStyle = string;
+  g.strokeStyle = tint ?? 'rgba(255,255,255,0.8)';
   g.lineWidth = 0.6;
   g.beginPath();
   g.moveTo(tipX, -tipY);
@@ -399,22 +398,12 @@ export function drawBow(g: CanvasRenderingContext2D, pose: BowPose): void {
   g.stroke();
 
   if (pulling && pose.arrow) {
-    const headX = nockX + radius + 4; // head pokes past the stave
-    g.strokeStyle = wood;
-    g.lineWidth = 1;
-    g.beginPath(); // shaft, riding the aim line
-    g.moveTo(nockX, 0);
-    g.lineTo(headX, 0);
-    g.stroke();
-    g.fillStyle = COLORS.white;
-    g.fillRect(headX - 0.4, -0.9, 1.6, 1.8); // head
-    g.strokeStyle = string;
-    g.lineWidth = 0.6;
-    g.beginPath(); // fletching ticks at the nock
-    g.moveTo(nockX - 1.2, -1.4);
-    g.lineTo(nockX + 0.4, 0);
-    g.lineTo(nockX - 1.2, 1.4);
-    g.stroke();
+    // The SAME arrow that flies (drawArrowSprite), nock on the string:
+    // the sprite's fletching sits at -5.5 from its origin.
+    g.save();
+    g.translate(nockX + 5.5, 0);
+    drawArrowSprite(g, tint);
+    g.restore();
   }
 }
 
