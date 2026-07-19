@@ -29,9 +29,9 @@ export function definePortal(id: string, def: PortalDest): void {
   portals.register(id, def);
 }
 
-// Arrival coords land a short walk from each room's portal pad, so
-// warping in never drops you onto the pad's trigger (which would reopen
-// the menu on the spot).
+// You now arrive standing on the destination room's portal pad (PlayScene
+// computes the spot), so you step out of the portal you travelled to. The
+// x/y below are only a fallback for a room with no portal trigger.
 definePortal('arena', {
   room: 'arena',
   label: 'Greenwood - the arena gate',
