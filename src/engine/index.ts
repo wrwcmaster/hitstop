@@ -79,6 +79,7 @@ export {
   type Solid,
   type CollisionSource,
 } from './physics/body';
+export { swim, type SwimParams, type SwimIntent } from './physics/swim';
 
 export { Entity, Actor, type Team } from './world/entity';
 export { World, type System } from './world/world';

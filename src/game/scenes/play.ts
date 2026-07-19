@@ -101,11 +101,11 @@ export class PlayScene implements Scene {
   private uiT = 0;
   /** A keyed door in the current room, for the floating gate marker. */
   private gateMarker: GateMarker | null = null;
-  /** Portal pads in the current room (from `portal` triggers). Stepping on
-   * one and pressing interact opens the destination menu — no auto-fire. */
-  private portalZones: TriggerDef[] = [];
-  /** The portal pad the player is standing on, for the travel prompt. */
-  private nearPortal: TriggerDef | null = null;
+  /** Doors and portals in the current room. Both are interaction zones:
+   * stand on one and press interact (E) — no auto-fire on contact. */
+  private interactZones: TriggerDef[] = [];
+  /** The door/portal the player is standing on, for the prompt. */
+  private nearInteract: TriggerDef | null = null;
 
   private host: PlayHost;
   private waves: WaveDirector;
@@ -431,9 +431,11 @@ export class PlayScene implements Scene {
         break;
       }
     }
-    // Portal pads → interaction zones (press E to travel), not auto-menus.
-    this.portalZones = (this.room.triggers ?? []).filter((t) => t.event === 'portal');
-    this.nearPortal = null;
+    // Doors and portals are interaction zones (press E), not auto-fires.
+    this.interactZones = (this.room.triggers ?? []).filter(
+      (t) => t.event === 'door' || t.event === 'portal',
+    );
+    this.nearInteract = null;
 
     // Snap the camera so the new room doesn't smear in; with no player
     // yet (title screen), aim at the spawn point.
@@ -591,15 +593,32 @@ export class PlayScene implements Scene {
     // Always on the bus (custom events, ad-hoc listeners), then routed to
     // whatever registered action gives the event its meaning.
     this.game.events.emit('trigger', { event: def.event, props: def.props });
+    // Doors and portals don't fire on contact — they wait for interact
+    // (see useInteract). Everything else runs its action on entry.
+    if (def.event === 'door' || def.event === 'portal') return;
     if (triggerActions.has(def.event)) triggerActions.get(def.event).run(def, this.host);
   }
 
-  /** Floating "TRAVEL" prompt over the portal pad the player is on. */
-  private renderPortalPrompt(ctx: CanvasRenderingContext2D, z: TriggerDef): void {
+  /** Use the door/portal the player is standing on (interact pressed). */
+  private useInteract(def: TriggerDef): void {
+    if (def.event === 'portal') this.openPortal();
+    else triggerActions.get('door').run(def, this.host); // traverse / lock feedback
+  }
+
+  /** A door/portal's floating prompt: where a door leads, or "TRAVEL". */
+  private renderInteractPrompt(ctx: CanvasRenderingContext2D, z: TriggerDef): void {
     const key = this.interactKeyLabel();
-    const label = key ? `${key}  ${t('TRAVEL')}` : t('TRAVEL');
+    const dest = z.event === 'portal' ? t('TRAVEL') : this.doorLabel(z);
+    const label = key ? `${key}  ${dest}` : dest;
     const bob = Math.sin(this.uiT * 4) * 1.5;
     drawText(ctx, label, z.x + z.w / 2, z.y - 6 + bob, COLORS.gold, 1, 'center');
+  }
+
+  /** The place a door leads, for its prompt (localized room name). */
+  private doorLabel(z: TriggerDef): string {
+    const dest = z.props?.room as string | undefined;
+    const name = dest ? ROOMS[dest]?.name : undefined;
+    return name ? t(name.toUpperCase()) : t('DOOR');
   }
 
   /** Device-aware interact label (pad button / key), '' on touch. */
@@ -693,13 +712,13 @@ export class PlayScene implements Scene {
     if (this.comboT <= 0) this.combo = 0;
     if (this.phase === 'play' && this.player && this.player.hp > 0) {
       this.triggers.update(this.player, (f) => this.handleTrigger(f.def));
-      // Portal pads: stand on one and press interact to open the menu.
-      // Checked after the world step so an NPC in range wins the key first.
+      // Doors & portals: stand on one and press interact to use it. Checked
+      // after the world step so an NPC in range wins the key first.
       const p = this.player;
-      this.nearPortal = this.portalZones.find((z) => overlaps(p, z)) ?? null;
-      if (this.nearPortal && g.input.consumePress('interact')) this.openPortal();
+      this.nearInteract = this.interactZones.find((z) => overlaps(p, z)) ?? null;
+      if (this.nearInteract && g.input.consumePress('interact')) this.useInteract(this.nearInteract);
     } else {
-      this.nearPortal = null;
+      this.nearInteract = null;
     }
     if (this.victoryT > 0) {
       this.victoryT -= dt;
@@ -747,7 +766,7 @@ export class PlayScene implements Scene {
     this.waves.renderMarkers(ctx);
     g.world.render(ctx);
     if (this.phase === 'play') this.hud.renderGateMarker(ctx, this.gateMarker, this.uiT);
-    if (this.phase === 'play' && this.nearPortal) this.renderPortalPrompt(ctx, this.nearPortal);
+    if (this.phase === 'play' && this.nearInteract) this.renderInteractPrompt(ctx, this.nearInteract);
     g.feel.renderWorld(ctx);
     this.debug.renderWorld(ctx);
     g.camera.end(ctx);
