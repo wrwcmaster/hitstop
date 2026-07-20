@@ -55,6 +55,12 @@ export class Tilemap implements CollisionSource {
     return this.rows * this.tileSize;
   }
 
+  /** The level's extent — what physics keeps bodies inside, and what
+   * departing things (projectiles) measure themselves against. */
+  get bounds(): Rect {
+    return { x: 0, y: 0, w: this.worldW, h: this.worldH };
+  }
+
   tileAt(tx: number, ty: number): string {
     if (tx < 0 || ty < 0 || tx >= this.cols || ty >= this.rows) return '';
     return this.grid[ty][tx];

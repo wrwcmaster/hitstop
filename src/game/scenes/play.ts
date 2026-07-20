@@ -288,6 +288,14 @@ export class PlayScene implements Scene {
 
   /* ---------------- runs & rooms ---------------- */
 
+  /** Leave the current run for the title screen. A fresh PlayScene boots
+   * at the title; `switch` runs this scene's exit() (disposers, co-op
+   * teardown). Progress is whatever the autosave last checkpointed —
+   * the same contract as closing the tab, so no separate confirm. */
+  private returnToTitle(): void {
+    this.game.scenes.switch(new PlayScene(this.game));
+  }
+
   /** A run start waiting for the next update tick (see beginRun). */
   private pendingStart: RunStart | null = null;
 
@@ -761,6 +769,7 @@ export class PlayScene implements Scene {
     if (this.phase === 'play' && this.player && g.input.consumePress('menu')) {
       g.scenes.push(new PauseScene(g, this.player, {
         onRestart: () => this.beginRun({ kind: 'autosave' }),
+        onTitle: () => this.returnToTitle(),
         onSaveSlot: (slot) => this.saveToSlot(slot),
         onLoadSlot: (slot) => this.beginRun({ kind: 'slot', slot }),
       }));

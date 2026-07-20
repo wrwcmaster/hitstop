@@ -359,6 +359,13 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
     game.input.notifyTap = (x, y) => { if (applying) rawTap(x, y); };
 
     game.onStep((step) => {
+      // Ended: freeze on the final frame — the world must NOT keep
+      // simulating behind the "REPLAY ENDED" banner. (Also covers a
+      // second runStart, e.g. a replayed run that loads a save.)
+      if (this.viewerEnded) {
+        game.loop.stop();
+        return;
+      }
       // Let boot settle a few steps, then start the run exactly as recorded.
       if (!this.viewerStarted && step >= 5) {
         this.viewerStarted = true;
@@ -366,7 +373,7 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
         return;
       }
       const p = this.playback;
-      if (!p || !p.armed || this.viewerEnded) return;
+      if (!p || !p.armed) return;
       applying = true;
       this.applyDue();
       applying = false;
@@ -375,7 +382,13 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
         const [at, expected] = rec.checks[this.viewerCheckAt++];
         if (at === rel && this.hashNow() !== expected && !this.viewerDiverged) this.viewerDiverged = rel;
       }
-      if (rel >= rec.end) this.viewerEnded = true;
+      // Reached the end: mark it and halt now, so this very frame — the
+      // recording's final state, with the banner — is the one left on
+      // screen, with no extra simulated step after it.
+      if (rel >= rec.end) {
+        this.viewerEnded = true;
+        game.loop.stop();
+      }
     });
 
     game.onOverlay((g) => {
@@ -395,7 +408,7 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
       g.fillRect(0, h - 12, rec.end ? (rel / rec.end) * w : 0, 1);
       drawText(g, ended ? (diverged ? 'REPLAY ENDED - DIVERGED' : 'REPLAY ENDED') : `REPLAY ${pct}%`, 6, h - 9, ended ? '#e8c170' : '#8fb8de', 1);
       if (diverged) drawText(g, `DIVERGED AT ${(diverged / 60).toFixed(1)}s (older build?)`, w / 2, h - 9, '#e05f5f', 1, 'center');
-      drawText(g, ended ? 'ESC OR TAP: EXIT' : 'ESC: EXIT', w - 6, h - 9, '#8b93a2', 1, 'right');
+      drawText(g, ended ? 'ESC OR TAP: TITLE' : 'ESC: TITLE', w - 6, h - 9, '#8b93a2', 1, 'right');
     });
 
     const exit = (): void => {

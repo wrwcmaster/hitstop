@@ -33,6 +33,8 @@ export class PauseScene implements Scene {
     private player: Player,
     private hooks: {
       onRestart(): void;
+      /** Leave the run for the title screen (progress is checkpoint-saved). */
+      onTitle(): void;
       /** Persist the current run into a manual slot (1-based). */
       onSaveSlot?(slot: number): void;
       /** Resume a run from a slot (0 = autosave). */
@@ -96,6 +98,13 @@ export class PauseScene implements Scene {
           onSelect: () => {
             this.close();
             this.hooks.onRestart();
+          },
+        },
+        {
+          label: 'RETURN TO TITLE',
+          onSelect: () => {
+            this.game.sfx.play('menuClose');
+            this.hooks.onTitle(); // switches the scene; no close() needed
           },
         },
       ],

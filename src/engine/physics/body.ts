@@ -8,8 +8,14 @@ export interface Solid extends Rect {
 /** Anything that can report solids near a rect (tilemaps, rect lists...). */
 export interface CollisionSource {
   solidsNear(r: Rect): Iterable<Solid>;
-  /** Horizontal world extent, used to clamp bodies inside the room. */
-  worldW: number;
+  /**
+   * The level's extent, if it has one. Solid tiles do the real
+   * containment work; this is what "inside the level" means for the
+   * things that need to know — bodies are kept within it, and things
+   * that travel out of it (projectiles) use it to tell they're gone.
+   * Omit it for an unbounded world and nothing is clamped.
+   */
+  bounds?: Rect;
   /** Fraction (0..1) of a rect covered by water, if this source has any
    * (tilemaps do). Absent = a dry world. */
   submersion?(r: Rect): number;
@@ -23,7 +29,9 @@ export interface Body extends Rect {
   vx: number;
   vy: number;
   onGround: boolean;
-  /** Flying bodies skip gravity and horizontal wall pushes (bats, ghosts). */
+  /** Flying bodies skip gravity (bats, ghosts). They still collide with
+   * solids on both axes — flying means ignoring the ground, not phasing
+   * through rock. */
   flies?: boolean;
 }
 
@@ -48,16 +56,16 @@ export function moveAndCollide(
   world: CollisionSource,
   opts: { ignoreOneWay?: boolean; dropThrough?: boolean } = {},
 ): void {
-  // X axis
+  // X axis. Fliers collide here too: letting them drift into rock left
+  // them embedded in a wall, and the Y pass below would then "land" them
+  // on top of the topmost wall tile — outside the room entirely.
   b.x += b.vx * dt;
-  if (!b.flies) {
-    for (const s of world.solidsNear(b)) {
-      if (s.oneWay) continue;
-      if (b.x < s.x + s.w && b.x + b.w > s.x && b.y < s.y + s.h && b.y + b.h > s.y) {
-        if (b.vx > 0) b.x = s.x - b.w;
-        else if (b.vx < 0) b.x = s.x + s.w;
-        b.vx = 0;
-      }
+  for (const s of world.solidsNear(b)) {
+    if (s.oneWay) continue;
+    if (b.x < s.x + s.w && b.x + b.w > s.x && b.y < s.y + s.h && b.y + b.h > s.y) {
+      if (b.vx > 0) b.x = s.x - b.w;
+      else if (b.vx < 0) b.x = s.x + s.w;
+      b.vx = 0;
     }
   }
 
@@ -86,13 +94,26 @@ export function moveAndCollide(
     }
   }
 
-  // Keep bodies inside the room horizontally.
-  if (b.x < 0) {
-    b.x = 0;
-    if (b.vx < 0) b.vx = 0;
-  }
-  if (b.x + b.w > world.worldW) {
-    b.x = world.worldW - b.w;
-    if (b.vx > 0) b.vx = 0;
+  // Backstop: keep the body inside the level's extent. Solids do the real
+  // containment (a room walls itself in with tiles); this catches anything
+  // that ends up outside them — and an unbounded source clamps nothing.
+  const lvl = world.bounds;
+  if (lvl) {
+    if (b.x < lvl.x) {
+      b.x = lvl.x;
+      if (b.vx < 0) b.vx = 0;
+    }
+    if (b.x + b.w > lvl.x + lvl.w) {
+      b.x = lvl.x + lvl.w - b.w;
+      if (b.vx > 0) b.vx = 0;
+    }
+    if (b.y < lvl.y) {
+      b.y = lvl.y;
+      if (b.vy < 0) b.vy = 0;
+    }
+    if (b.y + b.h > lvl.y + lvl.h) {
+      b.y = lvl.y + lvl.h - b.h;
+      if (b.vy > 0) b.vy = 0;
+    }
   }
 }
