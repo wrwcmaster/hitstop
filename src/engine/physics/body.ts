@@ -10,6 +10,8 @@ export interface CollisionSource {
   solidsNear(r: Rect): Iterable<Solid>;
   /** Horizontal world extent, used to clamp bodies inside the room. */
   worldW: number;
+  /** Vertical world extent, used to clamp bodies inside the room. */
+  worldH: number;
   /** Fraction (0..1) of a rect covered by water, if this source has any
    * (tilemaps do). Absent = a dry world. */
   submersion?(r: Rect): number;
@@ -23,7 +25,9 @@ export interface Body extends Rect {
   vx: number;
   vy: number;
   onGround: boolean;
-  /** Flying bodies skip gravity and horizontal wall pushes (bats, ghosts). */
+  /** Flying bodies skip gravity (bats, ghosts). They still collide with
+   * solids on both axes — flying means ignoring the ground, not phasing
+   * through rock. */
   flies?: boolean;
 }
 
@@ -48,16 +52,16 @@ export function moveAndCollide(
   world: CollisionSource,
   opts: { ignoreOneWay?: boolean; dropThrough?: boolean } = {},
 ): void {
-  // X axis
+  // X axis. Fliers collide here too: letting them drift into rock left
+  // them embedded in a wall, and the Y pass below would then "land" them
+  // on top of the topmost wall tile — outside the room entirely.
   b.x += b.vx * dt;
-  if (!b.flies) {
-    for (const s of world.solidsNear(b)) {
-      if (s.oneWay) continue;
-      if (b.x < s.x + s.w && b.x + b.w > s.x && b.y < s.y + s.h && b.y + b.h > s.y) {
-        if (b.vx > 0) b.x = s.x - b.w;
-        else if (b.vx < 0) b.x = s.x + s.w;
-        b.vx = 0;
-      }
+  for (const s of world.solidsNear(b)) {
+    if (s.oneWay) continue;
+    if (b.x < s.x + s.w && b.x + b.w > s.x && b.y < s.y + s.h && b.y + b.h > s.y) {
+      if (b.vx > 0) b.x = s.x - b.w;
+      else if (b.vx < 0) b.x = s.x + s.w;
+      b.vx = 0;
     }
   }
 
@@ -86,7 +90,9 @@ export function moveAndCollide(
     }
   }
 
-  // Keep bodies inside the room horizontally.
+  // Keep bodies inside the room, both axes — nothing should ever end up
+  // outside the level (a flier ejected off the top of a boundary wall
+  // used to perch above the ceiling, in open sky).
   if (b.x < 0) {
     b.x = 0;
     if (b.vx < 0) b.vx = 0;
@@ -94,5 +100,13 @@ export function moveAndCollide(
   if (b.x + b.w > world.worldW) {
     b.x = world.worldW - b.w;
     if (b.vx > 0) b.vx = 0;
+  }
+  if (b.y < 0) {
+    b.y = 0;
+    if (b.vy < 0) b.vy = 0;
+  }
+  if (b.y + b.h > world.worldH) {
+    b.y = world.worldH - b.h;
+    if (b.vy > 0) b.vy = 0;
   }
 }
