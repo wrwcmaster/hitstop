@@ -408,7 +408,7 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
       g.fillRect(0, h - 12, rec.end ? (rel / rec.end) * w : 0, 1);
       drawText(g, ended ? (diverged ? 'REPLAY ENDED - DIVERGED' : 'REPLAY ENDED') : `REPLAY ${pct}%`, 6, h - 9, ended ? '#e8c170' : '#8fb8de', 1);
       if (diverged) drawText(g, `DIVERGED AT ${(diverged / 60).toFixed(1)}s (older build?)`, w / 2, h - 9, '#e05f5f', 1, 'center');
-      drawText(g, ended ? 'ESC OR TAP: EXIT' : 'ESC: EXIT', w - 6, h - 9, '#8b93a2', 1, 'right');
+      drawText(g, ended ? 'ESC OR TAP: TITLE' : 'ESC: TITLE', w - 6, h - 9, '#8b93a2', 1, 'right');
     });
 
     const exit = (): void => {
