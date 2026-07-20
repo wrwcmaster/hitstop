@@ -12,7 +12,11 @@ export type Action =
 export const KEYMAP: Record<string, Action | Action[]> = {
   ArrowLeft: 'left', KeyA: 'left',
   ArrowRight: 'right', KeyD: 'right',
-  ArrowUp: ['jump', 'up'], KeyW: ['jump', 'up'],
+  // The Up ARROW is purely directional (menu nav, aim up, look up) — it
+  // is NOT a jump. Jump is Space (as the title screen says) or WASD's W,
+  // which keeps swim-ascend/breach on the jump key: you rise and leap
+  // out of water with jump, never with the up arrow.
+  ArrowUp: 'up', KeyW: ['jump', 'up'],
   ArrowDown: 'down', KeyS: 'down',
   Space: 'jump',
   KeyZ: ['attack', 'confirm'], KeyJ: ['attack', 'confirm'], Enter: 'confirm',
