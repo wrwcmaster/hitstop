@@ -8,10 +8,14 @@ export interface Solid extends Rect {
 /** Anything that can report solids near a rect (tilemaps, rect lists...). */
 export interface CollisionSource {
   solidsNear(r: Rect): Iterable<Solid>;
-  /** Horizontal world extent, used to clamp bodies inside the room. */
-  worldW: number;
-  /** Vertical world extent, used to clamp bodies inside the room. */
-  worldH: number;
+  /**
+   * The level's extent, if it has one. Solid tiles do the real
+   * containment work; this is what "inside the level" means for the
+   * things that need to know — bodies are kept within it, and things
+   * that travel out of it (projectiles) use it to tell they're gone.
+   * Omit it for an unbounded world and nothing is clamped.
+   */
+  bounds?: Rect;
   /** Fraction (0..1) of a rect covered by water, if this source has any
    * (tilemaps do). Absent = a dry world. */
   submersion?(r: Rect): number;
@@ -90,23 +94,26 @@ export function moveAndCollide(
     }
   }
 
-  // Keep bodies inside the room, both axes — nothing should ever end up
-  // outside the level (a flier ejected off the top of a boundary wall
-  // used to perch above the ceiling, in open sky).
-  if (b.x < 0) {
-    b.x = 0;
-    if (b.vx < 0) b.vx = 0;
-  }
-  if (b.x + b.w > world.worldW) {
-    b.x = world.worldW - b.w;
-    if (b.vx > 0) b.vx = 0;
-  }
-  if (b.y < 0) {
-    b.y = 0;
-    if (b.vy < 0) b.vy = 0;
-  }
-  if (b.y + b.h > world.worldH) {
-    b.y = world.worldH - b.h;
-    if (b.vy > 0) b.vy = 0;
+  // Backstop: keep the body inside the level's extent. Solids do the real
+  // containment (a room walls itself in with tiles); this catches anything
+  // that ends up outside them — and an unbounded source clamps nothing.
+  const lvl = world.bounds;
+  if (lvl) {
+    if (b.x < lvl.x) {
+      b.x = lvl.x;
+      if (b.vx < 0) b.vx = 0;
+    }
+    if (b.x + b.w > lvl.x + lvl.w) {
+      b.x = lvl.x + lvl.w - b.w;
+      if (b.vx > 0) b.vx = 0;
+    }
+    if (b.y < lvl.y) {
+      b.y = lvl.y;
+      if (b.vy < 0) b.vy = 0;
+    }
+    if (b.y + b.h > lvl.y + lvl.h) {
+      b.y = lvl.y + lvl.h - b.h;
+      if (b.vy > 0) b.vy = 0;
+    }
   }
 }

@@ -124,7 +124,9 @@ export class Projectile extends Entity {
         }
       }
     }
-    if (this.x < -20 || this.x > this.collision.worldW + 20) return this.expire();
+    // Gone: travelled clear of the level (a margin past its edge).
+    const lvl = this.collision.bounds;
+    if (lvl && (this.x < lvl.x - 20 || this.x > lvl.x + lvl.w + 20)) return this.expire();
 
     // Targets — the strike brings the full feedback bundle with it.
     const hits = this.strike.apply(this.box);
