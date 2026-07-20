@@ -240,8 +240,8 @@ export class PlayScene implements Scene {
       // SECOND WIND (skill tree): every cleared wave knits a wound.
       const p = this.player;
       if (p && p.hp > 0 && p.capabilities.has('secondWind') && p.hp < p.maxHp) {
-        p.heal(1);
-        game.feel.text(p.cx, p.y - 10, '+1 HP', COLORS.red);
+        p.heal(20);
+        game.feel.text(p.cx, p.y - 10, '+20 HP', COLORS.red);
         game.feel.sfx.play('heal');
       }
     }));

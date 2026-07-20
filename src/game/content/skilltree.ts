@@ -28,14 +28,14 @@ defineTreeNode<TreeCtx>('w1', {
   name: 'SHARP STEEL',
   desc: '+1 attack on every swing',
   cost: 1, branch: 0, tier: 0,
-  mods: { add: { attack: 1 } },
+  mods: { add: { attack: 20 } },
 });
 
 defineTreeNode<TreeCtx>('w2', {
   name: 'HEAVY HANDS',
   desc: '+1 more attack',
   cost: 1, branch: 0, tier: 1, requires: ['w1'],
-  mods: { add: { attack: 1 } },
+  mods: { add: { attack: 20 } },
 });
 
 defineTreeNode<TreeCtx>('w3', {
@@ -62,14 +62,14 @@ defineTreeNode<TreeCtx>('v1', {
   name: 'TOUGH SKIN',
   desc: '+1 max HP',
   cost: 1, branch: 1, tier: 0,
-  mods: { add: { maxHp: 1 } },
+  mods: { add: { maxHp: 20 } },
 });
 
 defineTreeNode<TreeCtx>('v2', {
   name: 'STOUT HEART',
   desc: '+2 max HP',
   cost: 1, branch: 1, tier: 1, requires: ['v1'],
-  mods: { add: { maxHp: 2 } },
+  mods: { add: { maxHp: 40 } },
 });
 
 defineTreeNode<TreeCtx>('v3', {
@@ -85,7 +85,7 @@ defineTreeNode<TreeCtx>('k1', {
   name: 'COLOSSUS',
   desc: '+2 max HP and +1 attack',
   cost: 3, branch: 1, tier: 3, requires: ['v3'],
-  mods: { add: { maxHp: 2, attack: 1 } },
+  mods: { add: { maxHp: 40, attack: 20 } },
 });
 
 /* ================ MAGE ================ */
@@ -96,7 +96,7 @@ defineTreeNode<TreeCtx>('m1', {
   name: 'DEEP WELL',
   desc: '+1 max MP',
   cost: 1, branch: 2, tier: 0,
-  mods: { add: { maxMp: 1 } },
+  mods: { add: { maxMp: 20 } },
 });
 
 defineTreeNode<TreeCtx>('m2', {
@@ -130,7 +130,7 @@ defineTreeNode<TreeCtx>('m5', {
   name: 'ABYSSAL WELL',
   desc: '+1 max MP from the deep',
   cost: 3, branch: 0, tier: 4, requires: ['m4'],
-  mods: { add: { maxMp: 1 } },
+  mods: { add: { maxMp: 20 } },
 });
 
 /* ---- FROST ---- */
@@ -139,21 +139,21 @@ defineTreeNode<TreeCtx>('g1', {
   name: 'RIME WELL',
   desc: '+1 max MP',
   cost: 1, branch: 1, tier: 0,
-  mods: { add: { maxMp: 1 } },
+  mods: { add: { maxMp: 20 } },
 });
 
 defineTreeNode<TreeCtx>('g2', {
   name: 'GLACIAL SKIN',
   desc: '+1 max HP',
   cost: 1, branch: 1, tier: 1, requires: ['g1'],
-  mods: { add: { maxHp: 1 } },
+  mods: { add: { maxHp: 20 } },
 });
 
 defineTreeNode<TreeCtx>('g3', {
   name: "WINTER'S EDGE",
   desc: '+1 attack, frost-sharpened',
   cost: 2, branch: 1, tier: 2, requires: ['g2'],
-  mods: { add: { attack: 1 } },
+  mods: { add: { attack: 20 } },
 });
 
 /* ================ TIDECALLER ================ */
@@ -164,7 +164,7 @@ defineTreeNode<TreeCtx>('t1', {
   name: 'OTTER BLOOD',
   desc: '+1 max HP, stronger strokes',
   cost: 1, branch: 0, tier: 0,
-  mods: { add: { maxHp: 1 } },
+  mods: { add: { maxHp: 20 } },
   onUnlock({ player }) {
     player.capabilities.setModifier('swimBoost', 0.25);
   },
@@ -184,7 +184,7 @@ defineTreeNode<TreeCtx>('w5', {
   name: 'TIDE BREAKER',
   desc: '+2 attack on every swing',
   cost: 3, branch: 0, tier: 2, requires: ['v5'],
-  mods: { add: { attack: 2 } },
+  mods: { add: { attack: 40 } },
 });
 
 /* ---- WIND ---- */

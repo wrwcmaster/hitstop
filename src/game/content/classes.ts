@@ -53,7 +53,7 @@ defineClass('knight', {
   name: 'KNIGHT',
   desc: 'Steel and stubbornness. Hits harder, stands longer.',
   color: COLORS.gold,
-  mods: { add: { maxHp: 1 } },
+  mods: { add: { maxHp: 20 } },
   // The classic kit: fire in one hand, frost in the other.
   loadout: [
     { action: 'skill', skillId: 'fireball', startsKnown: true },
@@ -70,7 +70,7 @@ defineClass('mage', {
   name: 'MAGE',
   desc: 'The arcane path. Deep mana, learned nova, thin armor.',
   color: '#b46ee6',
-  mods: { add: { maxMp: 2 } },
+  mods: { add: { maxMp: 40 } },
   loadout: [
     { action: 'skill', skillId: 'fireball', startsKnown: true },
     { action: 'skill2', skillId: 'nova' }, // learned at NOVA (m3)

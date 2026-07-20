@@ -4,6 +4,7 @@ import {
   drawPanel,
   drawText,
   itemDef,
+  formatAmount,
   t,
 } from '@engine/index';
 import { menuLine, type ActionGame, type Action } from '../defs';
@@ -215,8 +216,8 @@ export class PauseScene implements Scene {
       g.moveTo(x + 8, statY - 5);
       g.lineTo(x + bw - 8, statY - 5);
       g.stroke();
-      drawText(g, `HP ${p.hp}/${p.maxHp}`, x + 12, statY, COLORS.red);
-      drawText(g, `MP ${p.mp}/${p.maxMp}`, x + 70, statY, COLORS.blue);
+      drawText(g, `HP ${formatAmount(p.hp)}/${p.maxHp}`, x + 12, statY, COLORS.red);
+      drawText(g, `MP ${formatAmount(p.mp)}/${p.maxMp}`, x + 70, statY, COLORS.blue);
       drawText(g, `ATK +${Math.round(p.stats.get('attack'))}`, x + 124, statY, COLORS.white);
       const weapon = p.equipment.get('weapon');
       drawText(g, weapon ? t(itemDef(weapon).name) : t('Bare hands'), x + 12, statY + 9, COLORS.steel);

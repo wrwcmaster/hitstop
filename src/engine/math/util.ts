@@ -77,3 +77,10 @@ export function pick<T>(arr: readonly T[]): T {
 export function chance(p: number): boolean {
   return random() < p;
 }
+
+/** A quantity for display: whole numbers stay bare ("3"), fractions get
+ * exactly one decimal ("1.5") — for damage numbers, HP/MP readouts, any
+ * amount that might not land on a whole unit. */
+export function formatAmount(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+}

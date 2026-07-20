@@ -73,7 +73,7 @@ defineStatus('burning', {
     const m = a as Monster;
     if (m.dead || m.hp <= 0) return;
     m.game.combat.hit(m, {
-      damage: 1, targets: 'enemy', strength: 0.12, colors: [COLORS.red, COLORS.gold],
+      damage: 20, targets: 'enemy', strength: 0.12, colors: [COLORS.red, COLORS.gold],
     });
     m.game.feel.burst(m.cx, m.y + m.h * 0.4, 4, {
       color: [COLORS.gold, COLORS.red, '#566c86'],

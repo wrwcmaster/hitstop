@@ -22,7 +22,7 @@ defineSkill<SkillCtx>('fireball', {
   name: 'FIREBALL',
   desc: 'Hurl fire. Pierces two foes.',
   cooldown: 1.1,
-  cost: 1,
+  cost: 20,
   cast({ game, player }) {
     const dir = player.facing;
     game.combat.shoot(
@@ -36,7 +36,7 @@ defineSkill<SkillCtx>('fireball', {
         life: 1.4,
         pierce: 2,
         strike: {
-          damage: 2,
+          damage: 40,
           targets: 'enemy',
           attacker: player,
           strength: 0.7,
@@ -59,7 +59,7 @@ defineSkill<SkillCtx>('fireball', {
           // PYRE (skill tree): the bolt goes out with a bang.
           if (player.capabilities.has('pyre')) {
             const blast = game.combat.strike({
-              damage: 2,
+              damage: 40,
               targets: 'enemy',
               attacker: player,
               strength: 0.8,
@@ -97,7 +97,7 @@ defineSkill<SkillCtx>('ice-shard', {
   name: 'ICE SHARD',
   desc: 'A shard of ice. Freezes its victim solid.',
   cooldown: 1.8,
-  cost: 1,
+  cost: 20,
   cast({ game, player }) {
     const dir = player.facing;
     game.combat.shoot(
@@ -110,7 +110,7 @@ defineSkill<SkillCtx>('ice-shard', {
         h: 6,
         life: 1.2,
         strike: {
-          damage: 1,
+          damage: 20,
           targets: 'enemy',
           attacker: player,
           strength: 0.5,
@@ -156,10 +156,10 @@ defineSkill<SkillCtx>('nova', {
   name: 'NOVA',
   desc: 'A ring of force blasts everything nearby.',
   cooldown: 4,
-  cost: 2,
+  cost: 40,
   cast({ game, player }) {
     const strike = game.combat.strike({
-      damage: 3,
+      damage: 60,
       targets: 'enemy',
       attacker: player,
       strength: 0.9,

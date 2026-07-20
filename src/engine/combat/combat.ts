@@ -4,6 +4,7 @@ import { Feel } from '../feel/feel';
 import { EventBus } from '../core/events';
 import { Projectile, ProjectileOptions } from './projectile';
 import { CollisionSource } from '../physics/body';
+import { formatAmount } from '../math/util';
 
 /**
  * Combat resolution with feedback built in.
@@ -149,8 +150,10 @@ export class Combat {
       colors: opts.colors,
     });
     // Zero-damage hits (slows, knockback-only pushes) skip the number.
+    // Fractional damage (a graze, a DoT tick) shows one decimal so it
+    // reads as "not quite a full hit" rather than getting rounded away.
     if (opts.damage > 0) {
-      this.feel.text(centerX(target.hurtbox), target.hurtbox.y - 4, opts.damage, s > 0.6 ? '#ffcd75' : '#f4f4f4', s > 0.6 ? 2 : 1);
+      this.feel.text(centerX(target.hurtbox), target.hurtbox.y - 4, formatAmount(opts.damage), s > 0.6 ? '#ffcd75' : '#f4f4f4', s > 0.6 ? 2 : 1);
     }
 
     target.onHurt(info);

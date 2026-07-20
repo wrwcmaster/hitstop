@@ -84,7 +84,7 @@ function nearestMonster(world: World, x: number, y: number): Monster | null {
  * bobs to the surface on her own; strokes (jump) kick upward, holding
  * down dives, and a stroke near the surface breaches into a real jump.
  * Armor doesn't rust, but lungs are lungs: `airSeconds` underwater,
- * then a heart per `drownEvery` until you surface.
+ * then `drownDamage` per `drownEvery` until you surface.
  */
 const SWIM = {
   buoyancy: 0.82, // < 1× gravity: slightly heavy, so you sink slowly by default
@@ -100,6 +100,7 @@ const SWIM = {
   airSeconds: 8,
   refillSeconds: 2,
   drownEvery: 1,
+  drownDamage: 20, // per drownEvery tick with empty lungs
 };
 
 export const PLAYER_TUNING = {
@@ -131,10 +132,13 @@ export const PLAYER_TUNING = {
   parryIFrames: 0.4, // grace granted on a successful parry
   parryStagger: 0.55, // how long a parried melee attacker is stunned
   riposteTime: 1.3, // window to cash in the empowered counter
-  riposteBonus: 3, // extra damage on the riposte swing
+  riposteBonus: 60, // extra damage on the riposte swing
   hurtInvuln: 1.1,
-  maxHp: 5,
-  maxMp: 3,
+  // Health and mana are point pools, not icon counts — 100/60 rather
+  // than 5/3 hearts. Big enough that a light graze and a heavy slam can
+  // be different numbers (see the damage spread in actors/enemies.ts).
+  maxHp: 100,
+  maxMp: 60,
 };
 
 /**
@@ -182,7 +186,7 @@ export class Player extends Actor {
   private ownedByClass: Record<string, string[]> = {};
   /** Accepted/completed quests (persisted; see content/quests.ts). */
   quests = new QuestLog();
-  /** Blacksmith weapon upgrades: each level adds +1 attack (persisted). */
+  /** Blacksmith weapon upgrades: each level adds +20 attack (persisted). */
   forgeLevel = 0;
   skills = new SkillBook<SkillCtx>(
     {
@@ -334,7 +338,7 @@ export class Player extends Actor {
 
   /** Project the forge upgrades into stats (call after forgeLevel changes). */
   applyForge(): void {
-    this.stats.setSource('forge', { add: { attack: this.forgeLevel } });
+    this.stats.setSource('forge', { add: { attack: this.forgeLevel * 20 } });
     this.syncStats();
   }
 
@@ -738,7 +742,7 @@ export class Player extends Actor {
     }
     // Damage/feel come from the equipped weapon; flat bonus from stats;
     // EXECUTIONER (skill tree) boosts the finisher.
-    const executioner = this.attackDef.finisher && this.capabilities.has('heavyFinisherBonus') ? 2 : 0;
+    const executioner = this.attackDef.finisher && this.capabilities.has('heavyFinisherBonus') ? 40 : 0;
     // RIPOSTE: the swing after a parry lands harder and shines gold.
     const riposte = this.riposteT > 0;
     if (riposte) this.riposteT = 0;
@@ -1047,7 +1051,7 @@ export class Player extends Actor {
     this.wasWet = sub > 0.25;
 
     // Oxygen: the head is what breathes. Depletes underwater, refills
-    // fast in air (surface or an air pocket), drowns a heart at a time.
+    // fast in air (surface or an air pocket), drowns in bites at a time.
     const headWet = (this.collision.submersion?.({ x: this.x, y: this.y, w: this.w, h: 5 }) ?? 0) > 0.5;
     if (headWet && this.hp > 0) {
       // DEEP LUNGS (skill tree) extends how long a breath lasts.
@@ -1062,7 +1066,7 @@ export class Player extends Actor {
         this.drownT -= dt;
         if (this.drownT <= 0) {
           this.drownT = SWIM.drownEvery;
-          this.hp--;
+          this.hp -= SWIM.drownDamage;
           this.feel.flash(0.25, '#2b5aa8');
           this.feel.sfx.play('hurt');
           this.feel.shake(0.3);
@@ -1077,7 +1081,7 @@ export class Player extends Actor {
     const fallSpeed = this.vy;
     moveAndCollide(this, dt, this.collision);
 
-    // Hazard tiles (spikes): a heart and a launch clear of the danger.
+    // Hazard tiles (spikes): a bite of health and a launch clear of the danger.
     // Dashing skims across; i-frames blink through.
     const hazard = this.collision.hazardAt?.(this) ?? 0;
     if (hazard > 0 && this.invulnT <= 0 && !this.godMode && !this.fsm.is('dead', 'dash')) {

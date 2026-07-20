@@ -2,13 +2,28 @@
 
 Everything here follows the same pattern: **register a definition, and the engine + tools pick it up.** No engine edits, no editor edits.
 
+## The damage scale
+
+Health and mana are **point pools**, not icon counts: the knight starts at **100 HP / 60 MP** (before class and skill-tree bonuses), and the HUD draws them as bars. So pick damage numbers on that scale and they'll read distinctly — the bar visibly takes a different bite for each.
+
+Roughly how the built-in bestiary is spread, as a calibration reference:
+
+| Band | Damage | Examples |
+| --- | --- | --- |
+| Chip | 8–12 | bat contact, devourer digest tick |
+| Light | 14–18 | slime contact, pike, archer arrow, duelist saber |
+| Heavy | 22–28 | gunner bullet, brute contact, duelist pistol |
+| Signature | 30 | Slime King's slam, the Duelist's blur |
+
+Player-side, a plain sword swing is ~20 and a `nova` ~60 against monsters in the 40–240 range (bosses 600–900). Nothing is restricted to whole numbers — `damage: 0.5` works fine and the floater/readout format it with one decimal (`formatAmount`) — but with pools this size you rarely need fractions.
+
 ## A new enemy (~20 lines)
 
 Create the definition (in `src/game/actors/enemies.ts`, or a new file you import from `main.ts`):
 
 ```ts
 defineMonster('spitter', {
-  hp: 4, damage: 1, w: 14, h: 10, score: 250,
+  hp: 80, damage: 16, w: 14, h: 10, score: 250,
   colors: [COLORS.gold, COLORS.redDark, COLORS.white],   // gibs, telegraphs, editor chip
   init(m) {
     m.state.cooldown = 1.5;
@@ -63,7 +78,7 @@ In `src/game/content/tiles.ts`:
 ```ts
 tiles.register('spikes', {
   solid: false,          // or solid / oneWay
-  hazard: 1,             // hearts of damage on touch (see the real spikes)
+  hazard: 20,            // damage on touch, on the 100-HP scale (see the real spikes)
   draw(g, px, py, size) {
     g.fillStyle = COLORS.steel;
     for (let i = 0; i < size; i += 4) {
@@ -161,7 +176,7 @@ defineWeaponType('dagger', {
 });
 
 defineWeapon('dagger', {
-  type: 'dagger', visual: 'dagger', baseDamage: 1,
+  type: 'dagger', visual: 'dagger', baseDamage: 20,
   colors: [COLORS.white],
 });
 
@@ -171,7 +186,7 @@ defineItem<ItemCtx>('dagger', {
 });
 ```
 
-No player-code changes: combo length, timing, damage windows, range, lunge, feel strength, body motion, slash colors, held art, and attack trail flow from the registries. Stat bonuses (`mods: { add: { attack: 1 } }`) stack on top. `unarmed` is registered through the same path rather than handled as a fallback special case.
+No player-code changes: combo length, timing, damage windows, range, lunge, feel strength, body motion, slash colors, held art, and attack trail flow from the registries. Stat bonuses (`mods: { add: { attack: 20 } }`) stack on top. `unarmed` is registered through the same path rather than handled as a fallback special case.
 
 For authored art, create a transparent weapon-only JSON sheet with `idle`/`run`/`air` frames aligned to the knight's world origin (optionally add `attack` frames), load it with `loadSprite` + `withFacing`, and register `spriteWeapon({ anims, origin?, anchors? })`. A sheet may be larger than the knight frame so long blades and attack arcs are not clipped. `spriteWeapon` also trims and fits the idle frame into the standard item-icon footprint, so the item can use `weaponIcon(visualId)` instead of duplicating art in `icons.json`. The built-in swords follow this route in `content/sprites/equipment/`; `scripts/generate-weapon-sheets.mjs` is their reproducible source. The sprite editor can refine the sheets, while the origin and anchors provide alignment corrections without adding weapon logic to Player.
 
@@ -203,7 +218,7 @@ Monsters aim with the engine solvers from `math/ballistics.ts`:
 ```ts
 const v = ballisticVelocity(dx, dy, 320, ARROW_GRAVITY) // fixed speed; null if out of range
   ?? ballisticLob(dx, dy, ARROW_GRAVITY, 70);           // mortar-style, always solvable
-shootArrow(m.game, m.collision, { x: m.cx, y: m.y + 4, vx: v.vx, vy: v.vy, damage: 1, targets: 'player', attacker: m });
+shootArrow(m.game, m.collision, { x: m.cx, y: m.y + 4, vx: v.vx, vy: v.vy, damage: 18, targets: 'player', attacker: m });
 ```
 
 See the `archer` (solver-aimed arcing arrows with a draw-back telegraph) and `gunner` (leveled musket, flat crack) in `actors/enemies.ts`.
@@ -220,7 +235,7 @@ defineSkill<SkillCtx>('ice-shard', {
     game.combat.shoot({
       x: player.cx, y: player.cy, vx: player.facing * 300, vy: -20,
       gravity: 200, pierce: 1,
-      strike: { damage: 1, targets: 'enemy', attacker: player, strength: 0.5 },
+      strike: { damage: 20, targets: 'enemy', attacker: player, strength: 0.5 },
       draw(g, p) { g.fillStyle = '#a8dadc'; g.fillRect(p.x - 2, p.y - 2, 4, 4); },
     }, player.collision);
   },
@@ -308,7 +323,7 @@ A boss is a monster with `boss: true`, a `displayName` (drives the HP bar), and 
 
 ```ts
 defineMonster('my-boss', {
-  hp: 45, damage: 1, w: 42, h: 30, score: 5000, mass: 6,
+  hp: 900, damage: 20, w: 42, h: 30, score: 5000, mass: 6,
   boss: true, displayName: 'THE SLIME KING',
   colors: [...], drops: [...],
   init(m) { m.state.fsm = makeFsm(m); },       // states: idle/hop/slam/spit/summon
@@ -383,7 +398,7 @@ In `src/game/content/skilltree.ts`. Nodes are stat mods (auto-applied and save-r
 defineTreeNode<TreeCtx>('w5', {
   name: 'BLOODLUST', desc: 'KILLS RESTORE 1 MP',
   cost: 3, branch: 0, tier: 4, requires: ['w4'],
-  // stat effects: mods: { add: { attack: 1 } }
+  // stat effects: mods: { add: { attack: 20 } }
   onUnlock({ player }) {
     player.capabilities.enable('restoreMpOnKill');
   },
