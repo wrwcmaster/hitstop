@@ -86,6 +86,19 @@ export class Hud {
       // Purse.
       blit(g, ICON_COIN, 6, 23);
       drawText(g, String(p.gold), 14, 24, COLORS.gold);
+      // Armor: a plain number, not a bar — it's a flat soak, not a pool.
+      // It turns red as the most worn piece nears breaking, so the warning
+      // arrives before the gear does.
+      const armor = p.armorRating;
+      if (armor > 0) {
+        const pieces = p.armorPieces();
+        const worst = pieces.reduce(
+          (lo, q) => (q.max > 0 ? Math.min(lo, q.wear / q.max) : lo),
+          1,
+        );
+        drawText(g, t('DEF'), 52, 24, COLORS.steelDark);
+        drawText(g, String(armor), 68, 24, worst <= 0.25 ? COLORS.red : COLORS.white);
+      }
       // Level + class + XP bar (+ a nudge when skill points are waiting).
       drawText(g, t('LV {n}', { n: p.progression.level }), 6, 33, COLORS.white);
       drawText(g, t(p.classDef.name), 6, 42, p.classDef.color);

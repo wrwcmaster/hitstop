@@ -17,6 +17,28 @@ Roughly how the built-in bestiary is spread, as a calibration reference:
 
 Player-side, a plain sword swing is ~20 and a `nova` ~60 against monsters in the 40–240 range (bosses 600–900). Nothing is restricted to whole numbers — `damage: 0.5` works fine and the floater/readout format it with one decimal (`formatAmount`) — but with pools this size you rarely need fractions.
 
+## Armor that soaks (and wears out)
+
+Armor is a **flat soak**, not extra health: give an equipment item an `armor` stat and a `durability` prop.
+
+```ts
+defineItem<ItemCtx>('iron-helmet', {
+  name: 'IRON HELMET', desc: 'Soaks 4 damage a blow. Dents until it splits.',
+  icon: MY_ICON, kind: 'equipment', slot: 'helmet',
+  mods: { add: { armor: 4 } },     // subtracted from each incoming blow
+  props: { durability: 200 },      // total soaking before it breaks for good
+});
+```
+
+Two rules keep this from trivialising combat, both in `Player.mitigate`:
+
+1. **A soak is capped at half of the incoming blow** (`ARMOR_MAX_SOAK`). Flat reduction alone would make a well-armored knight *immune* to chip damage and would flatten the damage spread — with the cap, a bat's 10 still stings and a boss's 30 still hurts more than an archer's 18.
+2. **Soaking consumes durability**, split across the pieces in proportion to what each absorbed. At zero the piece is destroyed — unequipped *and* removed from the bag. Armor is a resource you spend, not a permanent upgrade.
+
+Measured with the shipped values (helmet 4 + plate 8, on a 120 HP knight): survivability goes ×2.00 against chip damage but only ×1.75 against a boss slam, and the full set lasts ~67 soaked blows. That's deliberately close to the old "+100 max HP" armor it replaced — comparable power, but now shaped (better against small hits) and temporary.
+
+Any actor can mitigate: the engine hook is `Actor.mitigate(damage, opts)` (default: unchanged), so monster armor or elemental resistances are the same mechanism.
+
 ## A new enemy (~20 lines)
 
 Create the definition (in `src/game/actors/enemies.ts`, or a new file you import from `main.ts`):
