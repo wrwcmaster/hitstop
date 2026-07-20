@@ -66,6 +66,26 @@ Edge-triggered actions (attack, confirm, jump) fire on the press edge, so
 Actions: `left right up down jump attack dash skill skill2 skill3 parry
 interact confirm cancel menu`.
 
+### Scenario setup (skip the menu, arrange a test)
+
+Instead of clicking through the title into a run, drop straight into a
+declarative **test scenario** — a room, a kitted-out knight, and monsters
+where you want them:
+
+```bash
+curl -X POST localhost:8791/scenario -d '{
+  "room": "arena",
+  "player": { "x": 200, "y": 180, "give": ["hunting-bow"], "equip": ["hunting-bow"], "gold": 500 },
+  "spawn": [ { "type": "archer", "x": 120, "y": 170 }, { "type": "slime", "x": 320 } ]
+}'
+```
+
+Or pass `scenario` on `POST /session` to do it in one call. Fields:
+`room` (a registered id) or `roomDef` (a full inline RoomDef);
+`player.{x,y,give,equip,gold,hp}`; `spawn: [{type,x,y,props}]`. Unknown
+item/monster ids are skipped, not fatal. A scenario is a normal run — it
+records and `npm run replay`s exactly like any other.
+
 State is JSON: scene stack, `dialogue` flag (keep tapping confirm while
 true; one intro line offers up/down choices), phase, wave, score, player
 (pos/vel/hp/gold), monsters (type/pos/hp), and `timeScale` — 0 while

@@ -133,8 +133,23 @@ function testRoom() {
   return undefined;
 }
 
-game.scenes.switch(new PlayScene(game, testRoom()));
+const play = new PlayScene(game, testRoom());
+game.scenes.switch(play);
 game.start();
+
+// Test scenario without the bridge: write a TestScenario to
+// localStorage['hitstop.scenario'] and open ?scenario=local (the level
+// editor and hand-testing use this, as ?room=local does for rooms).
+if (new URLSearchParams(location.search).get('scenario') === 'local') {
+  const raw = localStorage.getItem('hitstop.scenario');
+  if (raw) {
+    try {
+      play.beginRun({ kind: 'scenario', scenario: JSON.parse(raw) });
+    } catch (err) {
+      console.error('bad scenario in localStorage, ignoring', err);
+    }
+  }
+}
 
 // Handy for poking at the game from the console / bug reports.
 declare global {

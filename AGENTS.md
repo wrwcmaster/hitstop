@@ -309,6 +309,16 @@ a port with `-- --port 5174`), then drive the real game:
   world becomes that one room. Perfect for placing one NPC/door/monster
   next to spawn. (The title's TEST ROOM entry loads
   `content/rooms/test_room.json`.)
+- **Test scenarios (declarative)**: a `TestScenario` (see `defs.ts`) is
+  JSON — `{ room | roomDef, player: { x, y, give, equip, gold, hp },
+  spawn: [{type, x, y}] }` — that kits the knight out and drops monsters
+  in any room, with no code. Drive it three ways: the agent-play bridge
+  (`POST /scenario {...}`, or `scenario` on `POST /session`);
+  `window.__harness.beginRun({kind:'scenario', scenario})` in-page; or
+  `localStorage['hitstop.scenario']` + `/?scenario=local` for hand-
+  testing / the editor. It runs through `beginRun`, so a scenario is a
+  `RunStart` kind and **replays exactly** (the whole scenario rides the
+  recording). Unknown item/monster ids are skipped, not fatal.
 - **Mobile**: emulate with `devices['Pixel 7'] + hasTouch`; touch
   controls appear only on coarse-pointer devices. Verify taps, the ☰
   menu button, and TALK.

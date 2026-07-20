@@ -42,7 +42,26 @@ async function handle(req, res, body) {
       if (session) await session.context.close().catch(() => {});
       const seed = Number(body.seed ?? 1) >>> 0 || 1;
       session = await openSession(browser, seed);
+      // Optionally drop straight into a test scenario (room + loadout +
+      // monsters) instead of the title screen — see POST /scenario.
+      if (body.scenario) {
+        const st = await session.page.evaluate(
+          (sc) => window.__harness.beginRun({ kind: 'scenario', scenario: sc }),
+          body.scenario,
+        );
+        return { seed, state: st };
+      }
       return { seed, state: await state(session.page) };
+    }
+    case 'POST /scenario': {
+      const s = await ensureSession();
+      // The body IS the scenario: { room?, roomDef?, player?, spawn? }.
+      const st = await s.page.evaluate(
+        (sc) => window.__harness.beginRun({ kind: 'scenario', scenario: sc }),
+        body,
+      );
+      if (s.errors.length) st.pageErrors = s.errors.splice(0);
+      return st;
     }
     case 'POST /step': {
       const s = await ensureSession();

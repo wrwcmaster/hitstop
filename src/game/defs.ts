@@ -12,7 +12,11 @@ export type Action =
 export const KEYMAP: Record<string, Action | Action[]> = {
   ArrowLeft: 'left', KeyA: 'left',
   ArrowRight: 'right', KeyD: 'right',
-  ArrowUp: ['jump', 'up'], KeyW: ['jump', 'up'],
+  // The Up ARROW is purely directional (menu nav, aim up, look up) — it
+  // is NOT a jump. Jump is Space (as the title screen says) or WASD's W,
+  // which keeps swim-ascend/breach on the jump key: you rise and leap
+  // out of water with jump, never with the up arrow.
+  ArrowUp: 'up', KeyW: ['jump', 'up'],
   ArrowDown: 'down', KeyS: 'down',
   Space: 'jump',
   KeyZ: ['attack', 'confirm'], KeyJ: ['attack', 'confirm'], Enter: 'confirm',
@@ -100,6 +104,35 @@ export const STORAGE_PREFIX = 'hitstop';
 export const REPLAY_PENDING_KEY = `${STORAGE_PREFIX}.replay.pending`;
 
 /**
+ * A declarative test scenario: which room, what the player carries, and
+ * which monsters to drop where. Everything is data, so an agent (or the
+ * level editor, or a human via ?scenario=local) can set up an arbitrary
+ * situation — "a bow-armed knight in the flooded grotto with two
+ * archers" — as one JSON blob, with no code. Unknown ids are skipped
+ * rather than crashing, so a typo in an agent's request is survivable.
+ */
+export interface TestScenario {
+  /** A registered room id (e.g. 'grotto', 'arena'). Ignored if `roomDef` is set. */
+  room?: string;
+  /** A full inline RoomDef, for a room that isn't registered. */
+  roomDef?: unknown;
+  /** The knight's starting kit. */
+  player?: {
+    x?: number;
+    y?: number;
+    /** Items to drop into the inventory. */
+    give?: string[];
+    /** Equipment ids to wear (auto-added to inventory first). */
+    equip?: string[];
+    gold?: number;
+    /** Starting hearts (clamped to max). */
+    hp?: number;
+  };
+  /** Extra monsters/placeables to spawn, on top of the room's own. */
+  spawn?: { type: string; x: number; y?: number; props?: Record<string, unknown> }[];
+}
+
+/**
  * How a run began. Every run start funnels through PlayScene.beginRun
  * with one of these, so the replay recorder can cut a per-run tape and
  * a replay can start the run the exact same way.
@@ -109,7 +142,8 @@ export type RunStart =
   | { kind: 'continue' }
   | { kind: 'autosave' }
   | { kind: 'testroom' }
-  | { kind: 'slot'; slot: number };
+  | { kind: 'slot'; slot: number }
+  | { kind: 'scenario'; scenario: TestScenario };
 
 /** Game-level events (combat events come from the engine). */
 export interface GameEvents extends Record<string, unknown> {

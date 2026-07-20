@@ -323,6 +323,16 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
       step: step as (down?: string[], frames?: number) => unknown,
       state: () => this.config.state(),
       hashNow: () => this.hashNow(),
+      // Begin a run of the game's choosing (e.g. a test scenario). The
+      // start is opaque to the engine and rides the recording, so a
+      // scenario replays like any other run. Deferred to the next step,
+      // so advance a couple frames afterward before reading state.
+      beginRun: (start) => {
+        this.config.beginRun(start as Start);
+        game.loop.advance(STEP);
+        game.loop.advance(STEP);
+        return this.config.state();
+      },
       replayRun: (rec) => {
         this.startPlayback(rec as Recording<A, Start>);
         return this.config.state();
@@ -437,6 +447,7 @@ declare global {
       step(down?: string[], frames?: number): unknown;
       state(): unknown;
       hashNow(): number;
+      beginRun(start: unknown): unknown;
       replayRun(rec: Recording): unknown;
       runTo(target: number): unknown;
       recording(): Recording | null;
