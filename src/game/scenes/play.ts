@@ -10,12 +10,14 @@ import {
   DialogueScene,
   Minimap,
   itemDef,
+  items,
+  validateRoom,
   chance,
   clamp,
   overlaps,
   t,
 } from '@engine/index';
-import { menuLine, prettyCode, prettyButton, REPLAY_PENDING_KEY, type ActionGame, type Action, type RunStart } from '../defs';
+import { menuLine, prettyCode, prettyButton, REPLAY_PENDING_KEY, type ActionGame, type Action, type RunStart, type TestScenario } from '../defs';
 import { Player } from '../actors/player';
 import { Monster, monsters } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
@@ -311,6 +313,7 @@ export class PlayScene implements Scene {
       case 'autosave': return this.startRun(saveStore.load());
       case 'slot': return this.loadSlot(start.slot);
       case 'testroom': return this.startTestRoom();
+      case 'scenario': return this.startScenario(start.scenario);
     }
   }
 
@@ -395,6 +398,54 @@ export class PlayScene implements Scene {
     this.phase = 'play';
     this.setRoom('test_room');
     this.game.sfx.play('menuSelect');
+  }
+
+  /**
+   * Start a declarative test scenario (see TestScenario) — the
+   * agent/editor-friendly test room. Loads the named/inline room, kits
+   * the knight out, and drops the requested monsters. Runs through the
+   * same beginRun funnel, so a scenario replays exactly (the whole
+   * scenario rides the recording's runStart).
+   */
+  private startScenario(s: TestScenario): void {
+    const g = this.game;
+    g.world.clear();
+    g.feel.reset();
+    this.player = new Player(g, this.tilemap, 0, 0); // positioned by setRoom
+    g.world.spawn(this.player);
+
+    const pl = s.player ?? {};
+    this.player.gold = pl.gold ?? 999;
+    for (const id of pl.give ?? []) if (items.has(id)) this.player.inventory.add(id);
+    for (const id of pl.equip ?? []) {
+      if (!items.has(id)) continue;
+      if (!this.player.inventory.has(id)) this.player.inventory.add(id);
+      this.player.equipment.equip(id);
+    }
+    this.player.syncStats();
+    if (pl.hp != null) this.player.hp = clamp(pl.hp, 1, this.player.maxHp);
+
+    this.flags.clear();
+    this.firedTriggers = {};
+    this.score = 0;
+    this.combo = 0;
+    this.comboT = 0;
+    this.victoryT = 0;
+    this.phase = 'play';
+
+    // Inline RoomDef rides the existing 'test' slot; else a registered id.
+    this.testRoom = s.roomDef ? validateRoom(s.roomDef) : this.testRoom;
+    const roomId = s.roomDef ? 'test' : (s.room && ROOMS[s.room] ? s.room : 'test_room');
+    this.setRoom(roomId, pl.x, pl.y);
+
+    // Requested monsters, spawned through the same placeables catalog as
+    // a room's own entities — unknown types are skipped, not fatal.
+    const ctx: PlaceableCtx = { game: g, tilemap: this.tilemap, flags: this.flags };
+    for (const e of s.spawn ?? []) {
+      if (!placeables.has(e.type)) continue;
+      placeables.get(e.type).spawn(ctx, { type: e.type, x: e.x, y: e.y ?? 0, props: e.props });
+    }
+    g.sfx.play('menuSelect');
   }
 
   /**

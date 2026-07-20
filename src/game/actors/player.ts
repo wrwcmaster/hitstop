@@ -204,6 +204,9 @@ export class Player extends Actor {
   }
 
   private jumpBuf = new Buffer(PLAYER_TUNING.jumpBufferTime);
+  /** Latched while surfacing so one held jump breaches once, not every
+   * frame; re-arms when the body is clear of the water. */
+  private breached = false;
   private atkBuf = new Buffer(PLAYER_TUNING.attackBufferTime);
   private coyote = new Buffer(PLAYER_TUNING.coyoteTime);
   private comboT = 0;
@@ -960,6 +963,7 @@ export class Player extends Actor {
     // Water: how deep the body sits decides which physics rules apply.
     const sub = this.collision.submersion?.(this) ?? 0;
     const swimming = sub > 0.2 && !this.fsm.is('dead');
+    if (!swimming) this.breached = false; // re-arm the breach once clear of water
 
     // Gravity + jump physics (dash overrides velocity; the dead still fall).
     if (!this.fsm.is('dash')) {
@@ -981,11 +985,16 @@ export class Player extends Actor {
           maxSink: SWIM.maxSink * boost,
           maxSpeedX: SWIM.swimSpeed * boost,
         });
-        // Breach: a jump *press* right at the surface bursts you clear into
-        // a real jump; a press in deep water is absorbed (hold to rise).
-        if (this.jumpBuf.active && !this.fsm.is('attack')) {
-          this.jumpBuf.consume();
-          if (sub < SWIM.breachDepth) {
+        // Breach: rising to the surface with jump HELD (or a fresh tap
+        // near it) bursts you clear into a real jump — so holding jump to
+        // rise naturally lifts you onto land, no second keypress needed.
+        // Latched by `breached` so a continuous hold pops you out once; a
+        // press in deep water is absorbed (keep holding to rise).
+        const wantJump = this.jumpBuf.active || this.input.held('jump');
+        if (wantJump && !this.fsm.is('attack')) {
+          if (sub < SWIM.breachDepth && !this.breached) {
+            this.jumpBuf.consume();
+            this.breached = true;
             this.vy = -T.jumpSpeed * 0.85;
             this.squash = 1.3;
             this.feel.sfx.play('jump');
@@ -993,6 +1002,8 @@ export class Player extends Actor {
               color: ['#4d7bd6', COLORS.white], speed: 70, life: 0.35,
               angle: -Math.PI / 2, spread: 2.2, drag: 3, grav: 300,
             });
+          } else if (this.jumpBuf.active) {
+            this.jumpBuf.consume(); // deep tap absorbed; don't buffer it out of water
           }
         }
       } else if (this.jumpBuf.active && this.coyote.active && !this.fsm.is('dead', 'attack')) {
