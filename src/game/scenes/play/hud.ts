@@ -1,12 +1,10 @@
-import { drawText, drawMeter, textWidth, Minimap, t } from '@engine/index';
+import { drawText, drawBar, textWidth, formatAmount, Minimap, t } from '@engine/index';
 import { Monster } from '../../actors/monster';
 import { Pickup } from '../../actors/pickup';
 import { COLORS } from '../../content/palette';
 import {
   HEART,
-  HEART_EMPTY,
   MANA_PIP,
-  MANA_PIP_EMPTY,
   ICON_COIN,
   ICON_KEY,
   TEXEL,
@@ -14,6 +12,11 @@ import {
 } from '../../content/sprites';
 import { quests } from '../../content/quests';
 import type { PlayHost } from './host';
+
+/** Width of the HP/MP bars. Wide enough that a 10-point chip off a
+ * 100-point pool is a visible bite, short enough to leave room for the
+ * numeric readout beside it. */
+const BAR_W = 46;
 
 /** A keyed door in the current room, for the floating gate marker. */
 export interface GateMarker {
@@ -52,16 +55,29 @@ export class Hud {
       g.fillRect(0, 0, gm.width, gm.height);
     }
     if (p) {
-      // Each heart/pip can show a PARTIAL fill (see drawMeter) — a hit
-      // that costs less than a full heart still reads as damage taken,
-      // instead of rounding invisibly away or eating a whole heart.
-      drawMeter(g, 6, 6, { full: HEART, empty: HEART_EMPTY }, HEART.width / TEXEL, HEART.height / TEXEL, 9, p.maxHp, p.hp);
-      drawMeter(g, 7, 15, { full: MANA_PIP, empty: MANA_PIP_EMPTY }, MANA_PIP.width / TEXEL, MANA_PIP.height / TEXEL, 7, p.maxMp, p.mp);
-      // Skill readiness: fireball cooldown wedge next to the mana row.
+      // Vitals are BARS, not counted icons: health and mana are point
+      // pools (100/60), so any damage size reads as a distinct bite. The
+      // heart and pip are decoration marking each row, and the numbers
+      // spell out the exact value beside them.
+      const heartW = HEART.width / TEXEL;
+      const pipW = MANA_PIP.width / TEXEL;
+      blit(g, HEART, 6, 6);
+      drawBar(g, 6 + heartW + 3, 7, BAR_W, 5, p.hp / Math.max(1, p.maxHp), {
+        fill: (f) => (f <= 0.25 ? COLORS.redDark : COLORS.red),
+        border: COLORS.navyLight,
+      });
+      drawText(g, `${formatAmount(Math.max(0, p.hp))}/${p.maxHp}`, 6 + heartW + 3 + BAR_W + 4, 6, COLORS.white);
+      blit(g, MANA_PIP, 6 + (heartW - pipW) / 2, 15);
+      drawBar(g, 6 + heartW + 3, 16, BAR_W, 4, p.mp / Math.max(1, p.maxMp), {
+        fill: COLORS.blue,
+        border: COLORS.navyLight,
+      });
+      drawText(g, `${formatAmount(Math.max(0, p.mp))}/${p.maxMp}`, 6 + heartW + 3 + BAR_W + 4, 15, COLORS.white);
+      // Skill readiness: fireball cooldown wedge past the mana readout.
       const cdMax = 1.1;
       const cd = p.skills.cooldownLeft('fireball');
       const ready = p.skills.ready('fireball');
-      const sx = 10 + p.maxMp * 7;
+      const sx = 6 + heartW + 3 + BAR_W + 4 + 30;
       drawText(g, 'C', sx, 15, ready ? COLORS.gold : COLORS.steelDark);
       if (cd > 0) {
         g.fillStyle = COLORS.steelDark;
@@ -146,12 +162,11 @@ export class Hud {
     const x = (gm.width - w) / 2;
     const y = gm.height - 18;
     drawText(g, t(boss.def.displayName ?? 'BOSS'), gm.width / 2, y - 8, COLORS.gold, 1, 'center');
-    g.fillStyle = '#07070d';
-    g.fillRect(x - 1, y - 1, w + 2, 6);
-    g.strokeStyle = COLORS.navyLight;
-    g.strokeRect(x - 1.5, y - 1.5, w + 3, 7);
-    g.fillStyle = boss.hp <= boss.maxHp / 2 ? COLORS.red : COLORS.green;
-    g.fillRect(x, y, Math.round(w * Math.max(0, boss.hp) / boss.maxHp), 4);
+    // Same bar widget as the player's vitals — one way to draw a pool.
+    drawBar(g, x, y, w, 4, boss.hp / Math.max(1, boss.maxHp), {
+      fill: (f) => (f <= 0.5 ? COLORS.red : COLORS.green),
+      border: COLORS.navyLight,
+    });
   }
 
   private renderMinimap(g: CanvasRenderingContext2D, minimap: Minimap): void {

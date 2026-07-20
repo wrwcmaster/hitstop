@@ -28,7 +28,7 @@ function waterlineAbove(m: Monster, x: number): number {
 }
 
 defineMonster('slime', {
-  hp: 3, damage: 1, w: slimeSprite.hitbox.w, h: slimeSprite.hitbox.h, score: 100,
+  hp: 60, damage: 12, w: slimeSprite.hitbox.w, h: slimeSprite.hitbox.h, score: 100,
   colors: [COLORS.green, COLORS.greenDark, COLORS.greenLight],
   drops: [
     { id: 'coin', chance: 0.4 },
@@ -56,7 +56,7 @@ defineMonster('slime', {
 });
 
 defineMonster('bat', {
-  hp: 2, damage: 1, w: batSprite.hitbox.w, h: batSprite.hitbox.h, score: 150, flies: true,
+  hp: 40, damage: 10, w: batSprite.hitbox.w, h: batSprite.hitbox.h, score: 150, flies: true,
   colors: [COLORS.purple, COLORS.purpleLight, COLORS.white],
   drops: [
     { id: 'coin', chance: 0.4 },
@@ -94,7 +94,7 @@ defineMonster('bat', {
 });
 
 defineMonster('brute', {
-  hp: 8, damage: 1, w: 22, h: 13, score: 400, mass: 2.2,
+  hp: 160, damage: 28, w: 22, h: 13, score: 400, mass: 2.2,
   colors: [COLORS.red, COLORS.redDark, COLORS.gold],
   drops: [
     { id: 'potion', chance: 0.45 },
@@ -152,7 +152,7 @@ function ladenDevourer(m: Monster): boolean {
  * kill THAT one to get your gear back.
  */
 defineMonster('devourer', {
-  hp: 12, damage: 1, w: 26, h: 16, score: 600, mass: 3,
+  hp: 240, damage: 22, w: 26, h: 16, score: 600, mass: 3,
   noContactDamage: true, // its "attack" is the swallow, not a touch
   colors: [COLORS.purple, COLORS.purpleLight, COLORS.white],
   drops: [
@@ -183,7 +183,7 @@ defineMonster('devourer', {
       m.game.feel.text(player.cx, player.y - 16, 'WEAPON SWALLOWED!', COLORS.red);
     } else {
       m.game.combat.hit(player, {
-        damage: 1, targets: 'player', attacker: m,
+        damage: 22, targets: 'player', attacker: m,
         strength: 0.5, knockback: m.facing * 120, popY: -100,
         colors: [COLORS.purple, COLORS.white],
       });
@@ -208,7 +208,7 @@ defineMonster('devourer', {
       if ((m.state.biteT as number) <= 0) {
         m.state.biteT = 1.2;
         m.game.combat.hit(player, {
-          damage: 1, targets: 'player', attacker: m,
+          damage: 8, targets: 'player', attacker: m,
           strength: 0.35, knockback: 0, popY: 0,
           colors: [COLORS.purple, COLORS.white],
         });
@@ -298,7 +298,7 @@ defineMonster('devourer', {
  * water you are prey.
  */
 defineMonster('pike', {
-  hp: 3, damage: 1, w: pikeSprite.hitbox.w, h: pikeSprite.hitbox.h, score: 220, xp: 14, flies: true,
+  hp: 60, damage: 16, w: pikeSprite.hitbox.w, h: pikeSprite.hitbox.h, score: 220, xp: 14, flies: true,
   colors: [COLORS.green, COLORS.greenDark, COLORS.white],
   drops: [
     { id: 'coin', chance: 0.6 },
@@ -356,7 +356,7 @@ defineMonster('pike', {
  * monster so strikes, drops, and the placeables palette all come free.
  */
 defineMonster('chest', {
-  hp: 2, damage: 0, w: chestSprite.hitbox.w, h: chestSprite.hitbox.h, score: 50, xp: 0,
+  hp: 40, damage: 0, w: chestSprite.hitbox.w, h: chestSprite.hitbox.h, score: 50, xp: 0,
   noContactDamage: true,
   colors: [COLORS.gold, COLORS.white],
   drops: [
@@ -388,7 +388,7 @@ const ARCHER_AIM = 0.45;
  * telegraph: when the bow comes up, move.
  */
 defineMonster('archer', {
-  hp: 3, damage: 1, w: 12, h: 17, score: 350,
+  hp: 60, damage: 18, w: 12, h: 17, score: 350,
   colors: [CLOAK, CLOAK_DARK, WOOD],
   drops: [
     { id: 'coin', chance: 0.5 },
@@ -418,7 +418,7 @@ defineMonster('archer', {
           ?? ballisticLob(tx, dy, ARROW_GRAVITY, 70);
         shootArrow(m.game, m.collision, {
           x: m.cx + m.facing * 5, y: m.y + 4, vx: v.vx, vy: v.vy,
-          damage: 1, targets: 'player', attacker: m,
+          damage: 18, targets: 'player', attacker: m,
         });
         m.game.feel.sfx.play('bow');
         m.state.cd = rand(2, 2.6);
@@ -468,7 +468,7 @@ defineMonster('archer', {
  * fast, nearly-flat bullet. Long reload — punish it.
  */
 defineMonster('gunner', {
-  hp: 4, damage: 1, w: 13, h: 14, score: 450,
+  hp: 80, damage: 26, w: 13, h: 14, score: 450,
   colors: [COLORS.redDark, COLORS.steel, COLORS.gold],
   drops: [
     { id: 'coin', chance: 0.6 },
@@ -495,7 +495,7 @@ defineMonster('gunner', {
           ?? { vx: m.facing * 620, vy: 0 };
         shootBullet(m.game, m.collision, {
           x: m.cx + m.facing * 8, y: m.cy - 1, vx: v.vx, vy: v.vy,
-          damage: 1, targets: 'player', attacker: m,
+          damage: 26, targets: 'player', attacker: m,
         });
         muzzleFlash(m.game, m.cx + m.facing * 9, m.cy - 1, m.facing, 'bullet');
         m.vx -= m.facing * 60; // the kick

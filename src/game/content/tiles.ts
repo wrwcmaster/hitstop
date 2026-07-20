@@ -134,7 +134,7 @@ tiles.register('waterTop', {
 
 /** Floor spikes: non-solid, but standing in them costs a heart. */
 tiles.register('spikes', {
-  hazard: 1,
+  hazard: 20,
   draw(g, px, py, size, tx) {
     // A row of steel points on a dark base, alternating heights per tile.
     g.fillStyle = COLORS.navyDark;

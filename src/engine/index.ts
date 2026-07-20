@@ -109,13 +109,13 @@ export { skills, defineSkill, skillDef, SkillBook, type SkillDef, type ResourceP
 
 export {
   drawPanel,
-  drawMeter,
+  drawBar,
   Menu,
   DEFAULT_PANEL,
   type MenuEntry,
   type MenuActions,
   type PanelStyle,
-  type MeterIcons,
+  type BarStyle,
 } from './ui/widgets';
 export {
   conversations,

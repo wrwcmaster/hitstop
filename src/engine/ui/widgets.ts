@@ -41,52 +41,46 @@ export function drawPanel(
   }
 }
 
-export interface MeterIcons {
-  full: HTMLCanvasElement;
-  empty: HTMLCanvasElement;
+export interface BarStyle {
+  /** Track (unfilled) color. */
+  bg?: string;
+  /** Fill color — or a function of the 0..1 fraction, for thresholds
+   * (a boss bar going red under half, a poison-tinted health bar...). */
+  fill: string | ((frac: number) => string);
+  /** 1px outline drawn just outside the track. */
+  border?: string;
 }
 
 /**
- * A row of segment icons (hearts, mana pips, ammo, anything counted) where
- * the segment currently being spent renders a PARTIAL fill — clipped to
- * the fractional remainder of `value` — instead of only ever being fully
- * lost. That's what lets two different attacks read as two different
- * amounts of damage: a graze leaves a heart three-quarters full, a solid
- * hit leaves it empty, with no new art needed per fraction.
+ * A value bar: track, proportional fill, optional outline. The standard
+ * readout for a resource too large to count in icons — health, mana,
+ * a boss's life. Because the fill is a fraction of a pixel width rather
+ * than a whole icon, ANY damage value reads distinctly: a 5-point graze
+ * and a 35-point slam visibly take different bites.
  *
- * `value`/`max` are in SEGMENT units (a heart, a pip) — translate your
- * raw hp/mana scale before calling. `w`/`h` are the logical pixel size to
- * draw each icon at (the widget doesn't know about texel density; pass
- * whatever size already reads right for your sprites).
+ * `frac` is clamped to 0..1, and a non-zero fill always paints at least
+ * one pixel — "nearly dead" should never look identical to "dead".
  */
-export function drawMeter(
+export function drawBar(
   g: CanvasRenderingContext2D,
   x: number,
   y: number,
-  icons: MeterIcons,
   w: number,
   h: number,
-  spacing: number,
-  max: number,
-  value: number,
+  frac: number,
+  style: BarStyle,
 ): void {
-  const sy = Math.round(y);
-  for (let i = 0; i < max; i++) {
-    const sx = Math.round(x + i * spacing);
-    g.drawImage(icons.empty, sx, sy, w, h);
-    const frac = Math.max(0, Math.min(1, value - i));
-    if (frac <= 0) continue;
-    if (frac >= 1) {
-      g.drawImage(icons.full, sx, sy, w, h);
-      continue;
-    }
-    g.save();
-    g.beginPath();
-    g.rect(sx, sy, w * frac, h);
-    g.clip();
-    g.drawImage(icons.full, sx, sy, w, h);
-    g.restore();
+  const f = Math.max(0, Math.min(1, frac));
+  if (style.border) {
+    g.strokeStyle = style.border;
+    g.lineWidth = 1;
+    g.strokeRect(x - 0.5, y - 0.5, w + 1, h + 1);
   }
+  g.fillStyle = style.bg ?? '#07070d';
+  g.fillRect(x, y, w, h);
+  if (f <= 0) return;
+  g.fillStyle = typeof style.fill === 'function' ? style.fill(f) : style.fill;
+  g.fillRect(x, y, Math.max(1, Math.round(w * f)), h);
 }
 
 export interface MenuEntry {
