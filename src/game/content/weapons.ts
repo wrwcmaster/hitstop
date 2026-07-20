@@ -16,6 +16,31 @@ export interface WeaponTrailDef {
   endAngle: number;
   radius: number;
   thickness: number;
+  /**
+   * Where along the swept arc the blade is fattest, 0 (tail) to 1
+   * (leading edge). This is what separates a crescent from a smear:
+   * 0.5 is symmetric and reads as a moon — two sharp points with a
+   * heavy belly, right for a committed swing you see complete. Higher
+   * values pile the mass behind the tip so the arc reads as a comet
+   * chasing the blade, right for fast attacks seen mid-sweep.
+   */
+  bias?: number;
+  /**
+   * Width of the soft halo outside the arc, as a multiple of
+   * `thickness`. Nonzero makes the swing glow rather than merely
+   * appear — reserve it for the heavy moves, so brightness stays a
+   * signal that this one hits harder.
+   */
+  glow?: number;
+  /**
+   * Fraction of the attack the arc takes to draw itself, defaulting to
+   * the end of the damage window. Separate from `active` on purpose:
+   * how fast the blade LOOKS like it swept is not how long it can hit.
+   * A plunge needs this — it stays dangerous for its whole descent but
+   * is cut short by landing, so the crescent has to be fully formed in
+   * the first few frames or a short drop never shows one.
+   */
+  sweep?: number;
 }
 
 export interface WeaponAttackDef {
@@ -179,6 +204,15 @@ export function defineWeaponType(id: string, def: WeaponTypeDef): void {
     if (attack.trail.radius <= 0 || attack.trail.thickness <= 0) {
       throw new Error(`${path}.trail: radius and thickness must be positive`);
     }
+    if (attack.trail.bias !== undefined && (attack.trail.bias <= 0 || attack.trail.bias >= 1)) {
+      throw new Error(`${path}.trail.bias: expected a value in (0, 1)`);
+    }
+    if (attack.trail.glow !== undefined && attack.trail.glow < 0) {
+      throw new Error(`${path}.trail.glow: expected a non-negative number`);
+    }
+    if (attack.trail.sweep !== undefined && (attack.trail.sweep <= 0 || attack.trail.sweep > 1)) {
+      throw new Error(`${path}.trail.sweep: expected a value in (0, 1]`);
+    }
     if (attack.pogo !== undefined && (!Number.isFinite(attack.pogo) || attack.pogo <= 0)) {
       throw new Error(`${path}.pogo: expected a positive finite number`);
     }
@@ -245,7 +279,14 @@ const contextuals = (p: { reach: number; arc: number; heft: number }) => ({
     duration: 0.9, active: [0.06, 1], damageScale: 1.3 * p.heft, strength: 0.7 * p.heft, lunge: 0,
     aim: 'down', pogo: 250,
     hitbox: { forward: -3, y: 0, w: p.arc + 6, h: 13 },
-    trail: { startAngle: 0.8, endAngle: 2.3, radius: p.reach * 0.6, thickness: 3.5 },
+    // A moon under her feet: symmetric belly, points at both tips, and
+    // wide enough to span the pogo hitbox. It forms fast (the sweep
+    // eases out) then rides the whole fall, so the shape is legible for
+    // as long as the attack can actually pogo something.
+    trail: {
+      startAngle: 0.45, endAngle: 2.69, radius: p.reach * 0.8, thickness: 5,
+      bias: 0.5, glow: 1.8, sweep: 0.16,
+    },
     movementKeep: 0.35,
     bodyWeight: 1.1,
   }),
@@ -261,7 +302,14 @@ const contextuals = (p: { reach: number; arc: number; heft: number }) => ({
   dashAttack: attack({
     duration: 0.2, active: [0.05, 0.6], damageScale: 1.5 * p.heft, strength: 0.8, lunge: 120,
     hitbox: { forward: 0, y: 0, w: p.reach + 8, h: p.arc - 2 },
-    trail: { startAngle: -0.35, endAngle: 0.35, radius: p.reach * 0.9, thickness: 4 },
+    // The showpiece: a near-half-circle from overhead down past her
+    // feet, thrown in 0.12s. Biased toward the tip so the mass trails
+    // the blade like a comet, and the widest glow in the moveset — this
+    // is the hardest-hitting contextual, and it should look like it.
+    trail: {
+      startAngle: -1.5, endAngle: 1.5, radius: p.reach * 1.15, thickness: 5,
+      bias: 0.72, glow: 2.2,
+    },
     movementKeep: 0.6,
     bodyWeight: 1.2,
   }),

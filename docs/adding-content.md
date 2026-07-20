@@ -210,6 +210,16 @@ defineItem<ItemCtx>('dagger', {
 
 No player-code changes: combo length, timing, damage windows, range, lunge, feel strength, body motion, slash colors, held art, and attack trail flow from the registries. Stat bonuses (`mods: { add: { attack: 20 } }`) stack on top. `unarmed` is registered through the same path rather than handled as a fallback special case.
 
+### Shaping an attack trail
+
+Beyond the four required fields, `trail` takes three optional ones that turn the same renderer into very different swings:
+
+- **`bias`** (0–1, default `0.8`) — where along the arc the band is fattest. `0.5` is symmetric and reads as a crescent moon; higher values pile the mass behind the tip so it reads as a comet chasing the blade.
+- **`glow`** (default `0`) — width of a soft halo outside the arc, as a multiple of `thickness`. Worth reserving for heavy moves, so brightness stays a signal that an attack hits hard.
+- **`sweep`** (0–1, default: the end of `active`) — how much of the attack the arc takes to draw itself.
+
+`sweep` exists because how fast a blade *looks* like it swept is not how long it can hit, and the plunge proves it: the move stays dangerous for its entire descent but is cut short by landing, so with the arc welded to the damage window a short drop only ever showed a sliver. Giving it `sweep: 0.16` forms the full crescent within a few frames, and it then rides beneath the knight for as long as she is falling. The arc holds at full brightness while the attack can still hit and fades once it is spent, so what is on screen matches what the hitbox is doing.
+
 For authored art, create a transparent weapon-only JSON sheet with `idle`/`run`/`air` frames aligned to the knight's world origin (optionally add `attack` frames), load it with `loadSprite` + `withFacing`, and register `spriteWeapon({ anims, origin?, anchors? })`. A sheet may be larger than the knight frame so long blades and attack arcs are not clipped. `spriteWeapon` also trims and fits the idle frame into the standard item-icon footprint, so the item can use `weaponIcon(visualId)` instead of duplicating art in `icons.json`. The built-in swords follow this route in `content/sprites/equipment/`; `scripts/generate-weapon-sheets.mjs` is their reproducible source. The sprite editor can refine the sheets, while the origin and anchors provide alignment corrections without adding weapon logic to Player.
 
 ## A ranged weapon (bow, gun) or ballistic attack
