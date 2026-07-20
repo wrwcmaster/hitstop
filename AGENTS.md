@@ -169,7 +169,7 @@ Details and code samples: `docs/adding-content.md`. The short version —
   breakable treasure chests (monsters with no teeth and rich drops),
   and the tree's tide tier (DEEP LUNGS grants `extraAirSeconds` +
   `swimBoost` capabilities the swim code reads).
-- **Hazard tile**: set `hazard: <hearts>` on a tile def (`spikes` in
+- **Hazard tile**: set `hazard: <damage>` on a tile def (`spikes` in
   `content/tiles.ts`) — the tilemap answers `hazardAt(rect)` (strongest
   overlapped hazard) and the player reacts after her move: damage +
   i-frames + an upward launch. Dashes and i-frames ignore hazards, so

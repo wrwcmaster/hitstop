@@ -41,6 +41,48 @@ export function drawPanel(
   }
 }
 
+export interface BarStyle {
+  /** Track (unfilled) color. */
+  bg?: string;
+  /** Fill color — or a function of the 0..1 fraction, for thresholds
+   * (a boss bar going red under half, a poison-tinted health bar...). */
+  fill: string | ((frac: number) => string);
+  /** 1px outline drawn just outside the track. */
+  border?: string;
+}
+
+/**
+ * A value bar: track, proportional fill, optional outline. The standard
+ * readout for a resource too large to count in icons — health, mana,
+ * a boss's life. Because the fill is a fraction of a pixel width rather
+ * than a whole icon, ANY damage value reads distinctly: a 5-point graze
+ * and a 35-point slam visibly take different bites.
+ *
+ * `frac` is clamped to 0..1, and a non-zero fill always paints at least
+ * one pixel — "nearly dead" should never look identical to "dead".
+ */
+export function drawBar(
+  g: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  frac: number,
+  style: BarStyle,
+): void {
+  const f = Math.max(0, Math.min(1, frac));
+  if (style.border) {
+    g.strokeStyle = style.border;
+    g.lineWidth = 1;
+    g.strokeRect(x - 0.5, y - 0.5, w + 1, h + 1);
+  }
+  g.fillStyle = style.bg ?? '#07070d';
+  g.fillRect(x, y, w, h);
+  if (f <= 0) return;
+  g.fillStyle = typeof style.fill === 'function' ? style.fill(f) : style.fill;
+  g.fillRect(x, y, Math.max(1, Math.round(w * f)), h);
+}
+
 export interface MenuEntry {
   /** Label, or a getter for live values ("VOLUME: 75%"). */
   label: string | (() => string);

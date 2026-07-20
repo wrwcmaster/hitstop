@@ -132,7 +132,7 @@ function makeFsm(m: Monster): FSM<Monster> {
             strength: 0.85, colors: [COLORS.green, COLORS.gold], sfx: 'kill',
           });
           const strike = b.game.combat.strike({
-            damage: 1,
+            damage: 30,
             targets: 'player',
             attacker: b,
             strength: 0.6,
@@ -187,7 +187,7 @@ function makeFsm(m: Monster): FSM<Monster> {
               vx: dx * rand(0.8, 1.3), vy: rand(-260, -180),
               w: 5, h: 5, life: 3, gravity: 420,
               strike: {
-                damage: 1, targets: 'player', attacker: b,
+                damage: 14, targets: 'player', attacker: b,
                 strength: 0.5, colors: [COLORS.green, COLORS.white],
               },
               onHit(t) {
@@ -232,8 +232,8 @@ function makeFsm(m: Monster): FSM<Monster> {
 }
 
 defineMonster('slime-king', {
-  hp: 45,
-  damage: 1,
+  hp: 900,
+  damage: 20,
   w: 42,
   h: 30,
   // His sprite is a rounded blob: brushing the empty AABB corners
@@ -306,7 +306,7 @@ defineMonster('slime-king', {
       if ((m.state.biteT as number) <= 0) {
         m.state.biteT = 1.0; // tick every 1.0s
         m.game.combat.hit(player, {
-          damage: 1, targets: 'player', attacker: m,
+          damage: 8, targets: 'player', attacker: m,
           strength: 0.35, knockback: 0, popY: 0,
           colors: [COLORS.green, COLORS.white],
         });
@@ -393,7 +393,7 @@ function ghost(m: Monster): void {
 /** One saber cut: hitbox in front, spark arc, sound. */
 function saberStrike(m: Monster): void {
   const strike = m.game.combat.strike({
-    damage: 1, targets: 'player', attacker: m,
+    damage: 18, targets: 'player', attacker: m,
     strength: 0.55, knockback: 150,
     colors: [DUEL_TINT_ENRAGED, COLORS.white],
   });
@@ -411,7 +411,7 @@ function pistolShot(m: Monster): void {
   const v = ballisticVelocity(dx, dy, 600, BULLET_GRAVITY) ?? { vx: m.facing * 600, vy: 0 };
   shootBullet(m.game, m.collision, {
     x: m.cx + m.facing * 8, y: m.cy - 2, vx: v.vx, vy: v.vy,
-    damage: 1, targets: 'player', attacker: m,
+    damage: 24, targets: 'player', attacker: m,
   });
   muzzleFlash(m.game, m.cx + m.facing * 9, m.cy - 2, m.facing, 'bullet');
 }
@@ -552,7 +552,7 @@ function makeDuelistFsm(m: Monster): FSM<Monster> {
           // The traveling cut: a moving strike across the dash line.
           if (!(b.state.cutDone as boolean)) {
             const strike = b.game.combat.strike({
-              damage: 1, targets: 'player', attacker: b,
+              damage: 30, targets: 'player', attacker: b,
               strength: 0.6, knockback: 120,
               colors: [DUEL_TINT_ENRAGED, COLORS.white],
             });
@@ -588,7 +588,7 @@ function makeDuelistFsm(m: Monster): FSM<Monster> {
             const ang = base + (fired - 1.5) * 0.16; // the fan
             shootBullet(b.game, b.collision, {
               x: b.cx, y: b.cy, vx: Math.cos(ang) * 560, vy: Math.sin(ang) * 560,
-              damage: 1, targets: 'player', attacker: b,
+              damage: 16, targets: 'player', attacker: b,
             });
             muzzleFlash(b.game, b.cx, b.cy, b.facing, 'bullet');
           }
@@ -603,8 +603,8 @@ function makeDuelistFsm(m: Monster): FSM<Monster> {
 }
 
 defineMonster('duelist', {
-  hp: 30,
-  damage: 1,
+  hp: 600,
+  damage: 18,
   w: duelistSprite.hitbox.w,
   h: duelistSprite.hitbox.h,
   // A fencer wounds with steel and powder, not by being brushed against.

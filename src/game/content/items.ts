@@ -32,7 +32,7 @@ defineItem<ItemCtx>('great-sword', {
   icon: weaponIcon('great-sword'),
   kind: 'equipment',
   slot: 'weapon',
-  mods: { add: { attack: 1 } },
+  mods: { add: { attack: 20 } },
 });
 
 defineItem<ItemCtx>('hunting-bow', {
@@ -57,7 +57,7 @@ defineItem<ItemCtx>('iron-helmet', {
   icon: ICON_CHARM,
   kind: 'equipment',
   slot: 'helmet',
-  mods: { add: { maxHp: 2 } },
+  mods: { add: { maxHp: 40 } },
 });
 
 defineItem<ItemCtx>('potion', {
@@ -68,7 +68,7 @@ defineItem<ItemCtx>('potion', {
   stack: 5,
   use({ game, player }) {
     if (player.hp >= player.maxHp) return false; // don't waste it
-    player.heal(2);
+    player.heal(40);
     game.feel.sfx.play('heal');
     game.feel.burst(player.cx, player.cy, 10, {
       color: [COLORS.red, COLORS.white], speed: 40, life: 0.5, grav: -60, drag: 3,
@@ -82,7 +82,7 @@ defineItem<ItemCtx>('mana-orb', {
   icon: ICON_ORB,
   kind: 'instant',
   onPickup({ game, player }) {
-    player.restoreMp(1);
+    player.restoreMp(20);
     game.feel.burst(player.cx, player.cy - 6, 6, {
       color: [COLORS.blue, COLORS.white], speed: 40, life: 0.4, grav: -40, drag: 3,
     });
@@ -126,7 +126,7 @@ defineItem<ItemCtx>('steel-armor', {
   icon: ICON_CHARM,
   kind: 'equipment',
   slot: 'armor',
-  mods: { add: { maxHp: 3 } },
+  mods: { add: { maxHp: 60 } },
 });
 
 /** Importing this module registers the item catalog. */

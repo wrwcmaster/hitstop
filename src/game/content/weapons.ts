@@ -369,35 +369,35 @@ defineWeaponType('gun', {
 defineWeapon('unarmed', {
   type: 'unarmed',
   visual: 'unarmed',
-  baseDamage: 1,
+  baseDamage: 20,
   colors: [COLORS.white],
 });
 
 defineWeapon('rusty-sword', {
   type: 'sword',
   visual: 'rusty-sword',
-  baseDamage: 1,
+  baseDamage: 20,
   colors: [COLORS.white, COLORS.gold],
 });
 
 defineWeapon('great-sword', {
   type: 'great-sword',
   visual: 'great-sword',
-  baseDamage: 2,
+  baseDamage: 40,
   colors: [COLORS.gold, COLORS.white, COLORS.red],
 });
 
 defineWeapon('hunting-bow', {
   type: 'bow',
   visual: 'hunting-bow',
-  baseDamage: 2,
+  baseDamage: 40,
   colors: ['#8a6b3f', COLORS.steel],
 });
 
 defineWeapon('flintlock', {
   type: 'gun',
   visual: 'flintlock',
-  baseDamage: 3,
+  baseDamage: 60,
   colors: [COLORS.gold, COLORS.steel],
 });
 
