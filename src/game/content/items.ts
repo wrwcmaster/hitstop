@@ -53,16 +53,20 @@ defineItem<ItemCtx>('flintlock', {
 
 defineItem<ItemCtx>('iron-helmet', {
   name: 'IRON HELMET',
-  desc: 'Protects the skull from heavy blows.',
+  desc: 'Soaks 4 damage a blow. Dents until it splits.',
   icon: ICON_CHARM,
   kind: 'equipment',
   slot: 'helmet',
-  mods: { add: { maxHp: 40 } },
+  // Armor SOAKS damage rather than padding the health pool (see
+  // Player.mitigate). `durability` is how much total soaking the piece
+  // survives before it breaks for good (Player.wearArmor).
+  mods: { add: { armor: 4 } },
+  props: { durability: 200 },
 });
 
 defineItem<ItemCtx>('potion', {
   name: 'POTION',
-  desc: 'Restores 2 hearts.',
+  desc: 'Restores 40 health.',
   icon: ICON_POTION,
   kind: 'consumable',
   stack: 5,
@@ -78,7 +82,7 @@ defineItem<ItemCtx>('potion', {
 
 defineItem<ItemCtx>('mana-orb', {
   name: 'MANA ORB',
-  desc: 'Restores 1 mana.',
+  desc: 'Restores 20 mana.',
   icon: ICON_ORB,
   kind: 'instant',
   onPickup({ game, player }) {
@@ -122,11 +126,12 @@ defineItem<ItemCtx>('gate-key', {
 
 defineItem<ItemCtx>('steel-armor', {
   name: 'STEEL ARMOR',
-  desc: 'Heavy plate mail that guards against blows.',
+  desc: 'Heavy plate. Soaks 8 damage a blow, until it gives.',
   icon: ICON_CHARM,
   kind: 'equipment',
   slot: 'armor',
-  mods: { add: { maxHp: 60 } },
+  mods: { add: { armor: 8 } },
+  props: { durability: 400 },
 });
 
 /** Importing this module registers the item catalog. */

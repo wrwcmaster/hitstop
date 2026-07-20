@@ -18,6 +18,8 @@ import {
   rand,
   swim,
   drawText,
+  items,
+  itemDef,
   t,
   type Input,
   type StateDef,
@@ -102,6 +104,16 @@ const SWIM = {
   drownEvery: 1,
   drownDamage: 20, // per drownEvery tick with empty lungs
 };
+
+/**
+ * The most of any single blow armor may soak. Armor is a flat absorb
+ * rating, so without a cap a well-armored knight would be immune to
+ * everything small — chip damage would vanish and the damage spread
+ * (a bat's 10 vs a boss's 30) would stop mattering. Capping the soak at
+ * a fraction of the incoming hit keeps every attack meaningful: heavy
+ * blows still land heavier, and no amount of plate makes you untouchable.
+ */
+const ARMOR_MAX_SOAK = 0.5;
 
 export const PLAYER_TUNING = {
   runSpeed: 110,
@@ -188,6 +200,9 @@ export class Player extends Actor {
   quests = new QuestLog();
   /** Blacksmith weapon upgrades: each level adds +20 attack (persisted). */
   forgeLevel = 0;
+  /** Durability left on worn-down gear, by item id (persisted). Absent =
+   * pristine, so untouched armor costs nothing to track. */
+  armorWear: Record<string, number> = {};
   skills = new SkillBook<SkillCtx>(
     {
       canAfford: (cost) => this.mp >= cost,
@@ -347,6 +362,72 @@ export class Player extends Actor {
     this.maxHp = Math.round(this.stats.get('maxHp'));
     this.hp = Math.min(this.hp, this.maxHp);
     this.mp = Math.min(this.mp, this.maxMp);
+  }
+
+  /* ---------------- armor ---------------- */
+
+  /** Total absorb rating from worn gear (the `armor` stat). */
+  get armorRating(): number {
+    return Math.round(this.stats.get('armor'));
+  }
+
+  /** Worn equipment that soaks damage, with its remaining durability. */
+  armorPieces(): { slot: string; id: string; absorb: number; wear: number; max: number }[] {
+    const out: { slot: string; id: string; absorb: number; wear: number; max: number }[] = [];
+    for (const [slot, id] of this.equipment.slots()) {
+      if (!items.has(id)) continue;
+      const def = itemDef(id);
+      const absorb = def.mods?.add?.armor ?? 0;
+      if (absorb <= 0) continue;
+      const max = Number(def.props?.durability ?? 0);
+      out.push({ slot, id, absorb, wear: this.armorWear[id] ?? max, max });
+    }
+    return out;
+  }
+
+  /**
+   * Armor soaks part of every blow (see Actor.mitigate). The absorb
+   * rating is capped at ARMOR_MAX_SOAK of the incoming hit, so armor
+   * never grants immunity — a chip still chips, and a heavy blow still
+   * lands heavier than a light one even in full plate. Soaking wears the
+   * gear down; a piece that runs out of durability breaks.
+   */
+  mitigate(damage: number): number {
+    const rating = this.armorRating;
+    if (rating <= 0 || damage <= 0) return damage;
+    const soaked = Math.round(Math.min(rating, damage * ARMOR_MAX_SOAK));
+    if (soaked <= 0) return damage;
+    this.wearArmor(soaked);
+    return Math.max(0, damage - soaked);
+  }
+
+  /** Spend durability across the pieces that did the soaking, in
+   * proportion to what each contributed; break anything used up. */
+  private wearArmor(soaked: number): void {
+    const pieces = this.armorPieces();
+    const total = pieces.reduce((s, p) => s + p.absorb, 0);
+    if (total <= 0) return;
+    for (const piece of pieces) {
+      if (piece.max <= 0) continue; // indestructible gear
+      const left = piece.wear - soaked * (piece.absorb / total);
+      if (left > 0) {
+        this.armorWear[piece.id] = left;
+        continue;
+      }
+      this.breakArmor(piece.slot, piece.id);
+    }
+  }
+
+  /** Gear worn through: it's destroyed, not just unequipped. */
+  private breakArmor(slot: string, id: string): void {
+    delete this.armorWear[id];
+    this.equipment.unequip(slot);
+    this.inventory.remove(id, 1);
+    this.syncStats();
+    this.feel.text(this.cx, this.y - 18, t('{n} BROKE!', { n: t(itemDef(id).name) }), COLORS.red, 2);
+    this.feel.sfx.play('denied');
+    this.feel.flash(0.2, COLORS.red);
+    this.feel.shake(0.4);
   }
 
   heal(n: number): void {
