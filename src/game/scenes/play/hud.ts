@@ -1,4 +1,4 @@
-import { drawText, textWidth, Minimap, t } from '@engine/index';
+import { drawText, drawMeter, textWidth, Minimap, t } from '@engine/index';
 import { Monster } from '../../actors/monster';
 import { Pickup } from '../../actors/pickup';
 import { COLORS } from '../../content/palette';
@@ -52,12 +52,11 @@ export class Hud {
       g.fillRect(0, 0, gm.width, gm.height);
     }
     if (p) {
-      for (let i = 0; i < p.maxHp; i++) {
-        blit(g, i < p.hp ? HEART : HEART_EMPTY, 6 + i * 9, 6);
-      }
-      for (let i = 0; i < p.maxMp; i++) {
-        blit(g, i < p.mp ? MANA_PIP : MANA_PIP_EMPTY, 7 + i * 7, 15);
-      }
+      // Each heart/pip can show a PARTIAL fill (see drawMeter) — a hit
+      // that costs less than a full heart still reads as damage taken,
+      // instead of rounding invisibly away or eating a whole heart.
+      drawMeter(g, 6, 6, { full: HEART, empty: HEART_EMPTY }, HEART.width / TEXEL, HEART.height / TEXEL, 9, p.maxHp, p.hp);
+      drawMeter(g, 7, 15, { full: MANA_PIP, empty: MANA_PIP_EMPTY }, MANA_PIP.width / TEXEL, MANA_PIP.height / TEXEL, 7, p.maxMp, p.mp);
       // Skill readiness: fireball cooldown wedge next to the mana row.
       const cdMax = 1.1;
       const cd = p.skills.cooldownLeft('fireball');

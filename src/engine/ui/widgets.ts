@@ -41,6 +41,54 @@ export function drawPanel(
   }
 }
 
+export interface MeterIcons {
+  full: HTMLCanvasElement;
+  empty: HTMLCanvasElement;
+}
+
+/**
+ * A row of segment icons (hearts, mana pips, ammo, anything counted) where
+ * the segment currently being spent renders a PARTIAL fill — clipped to
+ * the fractional remainder of `value` — instead of only ever being fully
+ * lost. That's what lets two different attacks read as two different
+ * amounts of damage: a graze leaves a heart three-quarters full, a solid
+ * hit leaves it empty, with no new art needed per fraction.
+ *
+ * `value`/`max` are in SEGMENT units (a heart, a pip) — translate your
+ * raw hp/mana scale before calling. `w`/`h` are the logical pixel size to
+ * draw each icon at (the widget doesn't know about texel density; pass
+ * whatever size already reads right for your sprites).
+ */
+export function drawMeter(
+  g: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  icons: MeterIcons,
+  w: number,
+  h: number,
+  spacing: number,
+  max: number,
+  value: number,
+): void {
+  const sy = Math.round(y);
+  for (let i = 0; i < max; i++) {
+    const sx = Math.round(x + i * spacing);
+    g.drawImage(icons.empty, sx, sy, w, h);
+    const frac = Math.max(0, Math.min(1, value - i));
+    if (frac <= 0) continue;
+    if (frac >= 1) {
+      g.drawImage(icons.full, sx, sy, w, h);
+      continue;
+    }
+    g.save();
+    g.beginPath();
+    g.rect(sx, sy, w * frac, h);
+    g.clip();
+    g.drawImage(icons.full, sx, sy, w, h);
+    g.restore();
+  }
+}
+
 export interface MenuEntry {
   /** Label, or a getter for live values ("VOLUME: 75%"). */
   label: string | (() => string);

@@ -2,6 +2,10 @@
 
 Everything here follows the same pattern: **register a definition, and the engine + tools pick it up.** No engine edits, no editor edits.
 
+## Damage and mana cost can be fractional
+
+Every `damage:`/`cost:` field (monsters, weapons, skills, hazards) is a plain `number` — it was never restricted to whole hearts/pips, that was just a rendering limit. Hearts and mana pips now show a PARTIAL fill for the segment currently being spent (`drawMeter`, see `docs/architecture.md`'s `ui/` row), so `damage: 0.5` reads as a graze that leaves a heart half-gone instead of rounding invisibly away or costing a whole one. Nothing needs to change to use this — just write the number you mean; the damage floater and the pause menu's `HP`/`MP` line format it with one decimal automatically (`formatAmount`).
+
 ## A new enemy (~20 lines)
 
 Create the definition (in `src/game/actors/enemies.ts`, or a new file you import from `main.ts`):

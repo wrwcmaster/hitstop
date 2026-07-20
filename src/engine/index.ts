@@ -107,7 +107,16 @@ export {
 
 export { skills, defineSkill, skillDef, SkillBook, type SkillDef, type ResourcePool } from './skills/skills';
 
-export { drawPanel, Menu, DEFAULT_PANEL, type MenuEntry, type MenuActions, type PanelStyle } from './ui/widgets';
+export {
+  drawPanel,
+  drawMeter,
+  Menu,
+  DEFAULT_PANEL,
+  type MenuEntry,
+  type MenuActions,
+  type PanelStyle,
+  type MeterIcons,
+} from './ui/widgets';
 export {
   conversations,
   defineConversation,
