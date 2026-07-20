@@ -132,10 +132,17 @@ export class PauseScene implements Scene {
       const def = itemDef<ItemCtx>(s.id);
       return {
         label: `${t(def.name)}${s.count > 1 ? ` x${s.count}` : ''}`,
-        hint: () =>
-          def.kind === 'equipment'
-            ? p.equipment.isEquipped(s.id) ? 'EQUIPPED' : 'EQUIP'
-            : def.kind === 'consumable' ? 'USE' : '',
+        hint: () => {
+          if (def.kind === 'consumable') return 'USE';
+          if (def.kind !== 'equipment') return '';
+          const worn = p.equipment.isEquipped(s.id) ? 'EQUIPPED' : 'EQUIP';
+          // Armor wears out, so its condition belongs where you'd decide
+          // whether to keep wearing it.
+          const max = Number(def.props?.durability ?? 0);
+          if (max <= 0) return worn;
+          const pct = Math.max(0, Math.round(((p.armorWear[s.id] ?? max) / max) * 100));
+          return `${worn} ${pct}%`;
+        },
         onSelect: () => {
           if (def.kind === 'equipment') {
             if (p.equipment.isEquipped(s.id)) {
@@ -219,6 +226,7 @@ export class PauseScene implements Scene {
       drawText(g, `HP ${formatAmount(p.hp)}/${p.maxHp}`, x + 12, statY, COLORS.red);
       drawText(g, `MP ${formatAmount(p.mp)}/${p.maxMp}`, x + 70, statY, COLORS.blue);
       drawText(g, `ATK +${Math.round(p.stats.get('attack'))}`, x + 124, statY, COLORS.white);
+      if (p.armorRating > 0) drawText(g, `DEF ${p.armorRating}`, x + 180, statY, COLORS.steel);
       const weapon = p.equipment.get('weapon');
       drawText(g, weapon ? t(itemDef(weapon).name) : t('Bare hands'), x + 12, statY + 9, COLORS.steel);
       drawText(g, t('Esc: back'), x + bw - 12, statY + 9, COLORS.steelDark, 1, 'right');

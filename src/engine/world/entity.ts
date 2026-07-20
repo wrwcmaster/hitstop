@@ -79,6 +79,17 @@ export abstract class Actor extends Entity implements Body, Rect {
     this.hitstun = Math.max(0, this.hitstun - dt);
   }
 
+  /**
+   * Hook: transform incoming damage before it lands — armor soak,
+   * resistances, a shield eating the blow. Return the damage that should
+   * actually be dealt. Called only for damaging hits, so zero-damage
+   * pushes (slows, knockback) never trigger armor wear. Default: the hit
+   * lands unchanged.
+   */
+  mitigate(damage: number, _opts: import('../combat/combat').StrikeOptions): number {
+    return damage;
+  }
+
   /** Hook: called by Combat when this actor takes a hit (after hp change). */
   onHurt(_hit: import('../combat/combat').HitInfo): void {}
 
