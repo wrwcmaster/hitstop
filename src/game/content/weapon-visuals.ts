@@ -265,21 +265,54 @@ export function proceduralBlade(config: ProceduralBladeConfig): WeaponVisual {
   };
 }
 
+/**
+ * The arc a swing leaves behind, drawn as a tapered crescent band.
+ *
+ * Three things make it read as a slash rather than a colored wedge, and
+ * all three are timing rather than shape. The sweep eases out, so the
+ * blade whips and settles instead of tracking at constant speed. The
+ * finished arc then HOLDS for the tail of the attack before fading —
+ * without that hold the shape never resolves, because a sweep that
+ * vanishes on its last active frame is only ever seen half-drawn. And
+ * the band tapers to points at both ends, so what hangs there is a
+ * crescent with a heavy belly, not a stripe.
+ *
+ * `trail.bias` slides the belly along the arc (0.5 = moon, higher =
+ * comet chasing the tip) and `trail.glow` adds the halo. Both are per
+ * attack, so a heavy plunge and a quick aerial share this renderer
+ * without sharing a look.
+ */
 function drawSlashTrail(g: CanvasRenderingContext2D, ctx: WeaponTrailCtx): void {
   const { attack } = ctx;
   const trail = attack.def.trail;
   const radius = trail.radius;
-  const sweepT = Math.min(1, attack.progress / attack.def.active[1]);
+  const bias = trail.bias ?? 0.8;
+  const glow = trail.glow ?? 0;
+  // Two independent clocks: how fast the arc DRAWS, and how long it
+  // lingers. It stays at full brightness for as long as the attack can
+  // still hit, so what you see on screen is what the hitbox is doing,
+  // then dissolves once the move is spent.
+  const sweepEnd = trail.sweep ?? attack.def.active[1];
+  const hold = attack.def.active[1];
+  const raw = Math.min(1, attack.progress / sweepEnd);
+  const sweepT = 1 - (1 - raw) * (1 - raw);
+  const fade = attack.progress <= hold
+    ? 1
+    : Math.max(0, 1 - (attack.progress - hold) / Math.max(0.001, 1 - hold));
+  if (fade <= 0) return;
   const sweep = trail.startAngle + (trail.endAngle - trail.startAngle) * sweepT;
   const angle = ctx.facing === 1 ? sweep : Math.PI - sweep;
   const start = ctx.facing === 1 ? trail.startAngle : Math.PI - trail.startAngle;
   const q = (value: number) => Math.round(value * TEXEL) / TEXEL;
   const step = 1 / TEXEL;
+  // Outward: halo, steel body, white core. The core is what the eye
+  // actually tracks; the halo just makes it feel hot.
   const layers = [
-    { color: ctx.colors[0] ?? COLORS.steel, thickness: trail.thickness, alpha: 0.4 },
-    { color: COLORS.white, thickness: trail.thickness * 0.45, alpha: 0.8 },
+    ...(glow > 0 ? [{ color: COLORS.white, thickness: trail.thickness * (1 + glow), alpha: 0.12 }] : []),
+    { color: ctx.colors[0] ?? COLORS.steel, thickness: trail.thickness, alpha: 0.42 },
+    { color: COLORS.white, thickness: trail.thickness * 0.4, alpha: 0.9 },
   ];
-  const segments = 24;
+  const segments = 28;
 
   g.save();
   for (const layer of layers) {
@@ -288,9 +321,9 @@ function drawSlashTrail(g: CanvasRenderingContext2D, ctx: WeaponTrailCtx): void 
     for (let i = 0; i <= segments; i++) {
       const t = i / segments;
       const theta = start + (angle - start) * t;
-      const profile = t < 0.8
-        ? Math.sin((t / 0.8) * (Math.PI / 2))
-        : Math.cos(((t - 0.8) / 0.2) * (Math.PI / 2));
+      const profile = t < bias
+        ? Math.sin((t / bias) * (Math.PI / 2))
+        : Math.cos(((t - bias) / (1 - bias)) * (Math.PI / 2));
       const thick = layer.thickness * profile;
       const cos = Math.cos(theta);
       const sin = Math.sin(theta);
@@ -298,7 +331,7 @@ function drawSlashTrail(g: CanvasRenderingContext2D, ctx: WeaponTrailCtx): void 
       inner.push([q(ctx.x + cos * (radius - thick / 2)), q(ctx.y + sin * (radius - thick / 2))]);
     }
     g.fillStyle = layer.color;
-    g.globalAlpha = layer.alpha;
+    g.globalAlpha = layer.alpha * fade;
     g.beginPath();
     g.moveTo(outer[0][0], outer[0][1]);
     for (let i = 1; i <= segments; i++) g.lineTo(outer[i][0], outer[i][1]);
@@ -306,14 +339,18 @@ function drawSlashTrail(g: CanvasRenderingContext2D, ctx: WeaponTrailCtx): void 
     g.closePath();
     g.fill();
   }
-  g.restore();
 
-  const tipX = ctx.x + Math.cos(angle) * radius;
-  const tipY = ctx.y + Math.sin(angle) * radius;
-  g.fillStyle = COLORS.white;
-  g.fillRect(q(tipX - step), q(tipY - step), step * 2, step * 2);
-  g.fillRect(q(tipX - step * 3), q(tipY - step * 0.5), step * 6, step);
-  g.fillRect(q(tipX - step * 0.5), q(tipY - step * 3), step, step * 6);
+  // Spark at the leading tip, while the blade is still travelling.
+  if (raw < 1) {
+    const tipX = ctx.x + Math.cos(angle) * radius;
+    const tipY = ctx.y + Math.sin(angle) * radius;
+    g.globalAlpha = 1;
+    g.fillStyle = COLORS.white;
+    g.fillRect(q(tipX - step), q(tipY - step), step * 2, step * 2);
+    g.fillRect(q(tipX - step * 3), q(tipY - step * 0.5), step * 6, step);
+    g.fillRect(q(tipX - step * 0.5), q(tipY - step * 3), step, step * 6);
+  }
+  g.restore();
 }
 
 function attackFrame(attack: WeaponAttackPose, frameCount: number): number {
