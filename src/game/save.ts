@@ -36,6 +36,8 @@ export interface SaveData {
     quests?: { active: [string, number][]; done: string[] };
     /** Blacksmith weapon upgrade level. */
     forgeLevel?: number;
+    /** Durability left on worn-down gear, by item id (absent = pristine). */
+    armorWear?: Record<string, number>;
   };
 }
 
@@ -76,6 +78,7 @@ export function snapshotPlayer(p: Player): SaveData['player'] {
     trees: p.snapshotTrees(),
     quests: p.quests.snapshot(),
     forgeLevel: p.forgeLevel,
+    armorWear: { ...p.armorWear },
   };
 }
 
@@ -106,6 +109,7 @@ export function restorePlayer(p: Player, data: SaveData['player']): void {
   for (const id of data.skills) p.skills.learn(id);
   p.quests.restore(data.quests);
   p.forgeLevel = data.forgeLevel ?? 0;
+  p.armorWear = { ...(data.armorWear ?? {}) };
   p.applyForge();
   p.syncStats();
   p.hp = p.maxHp;

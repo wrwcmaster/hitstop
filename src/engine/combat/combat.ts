@@ -124,7 +124,12 @@ export class Combat {
     const source = from ?? opts.attacker ?? target;
     const dir = centerX(target.hurtbox) >= centerX(source as Rect) ? 1 : -1;
 
-    target.hp -= opts.damage;
+    // Armor, resistances, shields: the target gets to reduce the blow
+    // before it lands (see Actor.mitigate). Everything downstream — the
+    // damage number, the hit event, whether this was lethal — reports
+    // what ACTUALLY landed, not what was swung.
+    const dealt = opts.damage > 0 ? Math.max(0, target.mitigate(opts.damage, opts)) : opts.damage;
+    target.hp -= dealt;
     target.flashT = 0.12;
 
     const kb = (opts.knockback ?? 90 + s * 160) / target.mass;
@@ -135,7 +140,7 @@ export class Combat {
     const info: HitInfo = {
       attacker: opts.attacker ?? null,
       target,
-      damage: opts.damage,
+      damage: dealt,
       dir,
       strength: s,
       killed,
@@ -149,11 +154,11 @@ export class Combat {
       dir,
       colors: opts.colors,
     });
-    // Zero-damage hits (slows, knockback-only pushes) skip the number.
-    // Fractional damage (a graze, a DoT tick) shows one decimal so it
-    // reads as "not quite a full hit" rather than getting rounded away.
-    if (opts.damage > 0) {
-      this.feel.text(centerX(target.hurtbox), target.hurtbox.y - 4, formatAmount(opts.damage), s > 0.6 ? '#ffcd75' : '#f4f4f4', s > 0.6 ? 2 : 1);
+    // Zero-damage hits (slows, knockback-only pushes) skip the number —
+    // as does a blow fully soaked by armor, which the target's own
+    // mitigate() is expected to announce instead.
+    if (dealt > 0) {
+      this.feel.text(centerX(target.hurtbox), target.hurtbox.y - 4, formatAmount(dealt), s > 0.6 ? '#ffcd75' : '#f4f4f4', s > 0.6 ? 2 : 1);
     }
 
     target.onHurt(info);
