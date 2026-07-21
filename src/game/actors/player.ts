@@ -128,6 +128,8 @@ export const PLAYER_TUNING = {
   doubleJumpSpeed: 370, // SKY DANCER's air jump
   coyoteTime: 0.1,
   jumpBufferTime: 0.12,
+  /** How long a down+jump keeps you falling past one-way platforms. */
+  dropThroughTime: 0.14,
   attackBufferTime: 0.16,
   dashSpeed: 300,
   dashTime: 0.16,
@@ -528,6 +530,9 @@ export class Player extends Actor {
   /** Shown as a floating tag over the knight — set only in multiplayer,
    * so solo play stays clean. */
   name = '';
+
+  /** Seconds left of the down+jump drop-through window (see update). */
+  private dropT = 0;
 
   /** How deep in water the body sits (0 dry .. 1 fully under). */
   submersion = 0;
@@ -1040,7 +1045,16 @@ export class Player extends Actor {
       return;
     }
 
-    if (this.input.pressed('jump')) this.jumpBuf.set();
+    // Down + jump on solid footing is a DROP, not a jump: the standard
+    // way below a one-way ledge, and how you enter the town well, which
+    // has a real floor over it rather than a hole to trip into. Caught
+    // before the jump buffer, or the jump would win and you would hop on
+    // the spot instead.
+    if (this.onGround && this.input.held('down') && this.input.pressed('jump')) {
+      this.dropT = PLAYER_TUNING.dropThroughTime;
+      this.input.consumePress('jump');
+      this.game.sfx.play('step');
+    } else if (this.input.pressed('jump')) this.jumpBuf.set();
     if (this.input.pressed('attack')) this.atkBuf.set();
 
     this.fsm.update(dt);
@@ -1160,7 +1174,8 @@ export class Player extends Actor {
     }
 
     const fallSpeed = this.vy;
-    moveAndCollide(this, dt, this.collision);
+    if (this.dropT > 0) this.dropT -= dt;
+    moveAndCollide(this, dt, this.collision, { dropThrough: this.dropT > 0 });
 
     // Hazard tiles (spikes): a bite of health and a launch clear of the danger.
     // Dashing skims across; i-frames blink through.

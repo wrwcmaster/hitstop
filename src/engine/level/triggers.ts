@@ -47,6 +47,20 @@ export class Triggers {
     });
   }
 
+  /**
+   * Forget that the probe is inside `index`, so the next overlap counts
+   * as a fresh entry.
+   *
+   * For a trigger whose MEANING changed while the probe stood in it: a
+   * sealed door that just unsealed has already had its one entry, and
+   * without this it stays inert until you step out and back — which,
+   * standing in the doorway as the boss dies, reads as the door being
+   * broken.
+   */
+  rearm(index: number): void {
+    this.inside.delete(index);
+  }
+
   /** Forget fired state (new run / room reload). */
   reset(): void {
     this.fired.clear();

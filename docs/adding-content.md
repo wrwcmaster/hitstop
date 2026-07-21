@@ -222,15 +222,63 @@ Beyond the four required fields, `trail` takes three optional ones that turn the
 
 ### Putting a room on the world map
 
-The map screen (M) draws every room that declares a placement, in grid cells:
+The map screen (M) draws every room that declares a placement — the position of its top-left corner, in grid cells:
 
 ```json
-"props": { "map": { "x": 3, "y": 1 } }
+"props": { "map": { "x": 11, "y": 2 } }
 ```
 
-`w`/`h` are optional and default to 1, so a large region can span several cells. A room that omits `map` never appears — which is how the dev test room stays off a player-facing screen without a special case anywhere.
+A room that omits `map` never appears, which is how the dev test room stays off a player-facing screen without a special case anywhere.
+
+**Only the position is authored.** How many cells a room covers is derived from its tile dimensions: one cell is one screenful (30x17 tiles), so a four-screen hall draws four cells wide and the map reads as a floor plan rather than a uniform flowchart. Resize the room and the map follows.
+
+The cost of deriving spans is that growing a room can push it into its neighbour, so overlapping placements throw at boot naming both rooms — the same bargain the rest of the content validation makes.
 
 **Connections are not authored.** Rooms already say how they join through their `door` triggers, so `content/worldmap.ts` derives the links from those: move a door and the map follows, with no second table to forget. Exploration reuses the `visited:<room>` flags the portal menu already sets, so a room appears on the map exactly when you have stood in it.
+
+### Doors join two rooms, not a room and a coordinate
+
+A `door` trigger names only where it leads:
+
+```json
+{ "event": "door", "x": 12, "y": 64, "w": 20, "h": 32, "props": { "room": "cavern" } }
+```
+
+Walking through lands you at the destination's own door **back here** (`PlayScene.doorLanding`), so the two triggers are two sides of one doorway. Turning round and walking back returns you to the spot you left, and neither end can drift from the other, because there is only one definition of where the doorway is. Arrival coordinates are not accepted — that was a second definition waiting to disagree with the first.
+
+You arrive *beside* the far doorway, not inside it, so a walk-through door can't throw you straight back where you came from.
+
+A door whose destination has no door home is a one-way drop; that falls back to the room's `playerSpawn`.
+
+### Which doorways you walk through
+
+An open doorway in a room's **outer wall** is a gap you simply walk into — no key press. Everything else waits for interact:
+
+| doorway | behaviour | looks like |
+| --- | --- | --- |
+| open, in the outer wall | walk through on contact | a gap in the wall |
+| open, in the room's interior | press E | a gap in the wall |
+| locked (`key` or `flag`) | press E, refused with a banner | a banded timber door |
+
+Outer-wall doorways sit **flush with the room boundary** — the outermost tile column — so you cross only when you have actually walked to the edge of the room. Placed even a couple of tiles inboard, the room swaps out while there is still visible floor ahead of you, which reads as the game snatching control rather than you leaving.
+
+The interior exception matters more than it sounds. The shaft down to the grotto and the stair up to the ramparts sit in the middle of floors you have every reason to walk across; firing those on contact means you can no longer cross your own room without being swallowed. Castlevania solves it the same way — doors live at the edges, and the way down is something you choose.
+
+A trigger action decides this for itself via `TriggerAction.autoFire`, asked fresh every time because the answer changes mid-room: a barred door becomes a walk-through gap the instant you pick up its key.
+
+### Sealing a boss in
+
+Give a boss room's doors `"bossSeal": true` and they lock while any boss in the room draws breath, opening the instant he doesn't:
+
+```json
+{ "event": "door", "props": { "room": "corridor", "bossSeal": true } }
+```
+
+This is the only lock that works backwards — every other one opens once you have *earned* something. It asks the world directly rather than raising a flag, so the seal can't be left set: no cleanup path to forget, and it lifts even if the boss dies to something other than you.
+
+One wrinkle worth knowing, since it applies to any lock that opens mid-room: triggers fire on entry, so a doorway that has already refused you won't fire again while you stand in it. Kill the boss with your shoulder against the door and nothing would happen until you stepped away and back. `PlayScene.rearmUnsealedDoors` watches for a doorway relenting and calls `Triggers.rearm` so it opens under you.
+
+Because only locked doorways carry door art, **seeing a door means it wants something from you** — the art is the lock, not decoration every threshold happens to wear.
 
 The map is always scaled to the full extent of the world rather than to the part discovered so far. A map that re-centres itself as you explore is disorienting — a room you have seen should stay where you remember it, and the blank space around it honestly reads as "there is more out there".
 

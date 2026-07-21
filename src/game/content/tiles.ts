@@ -46,13 +46,36 @@ tiles.register('rockTop', {
 });
 
 /** Doorway glow: non-solid, purely visual. Pair with a `door` trigger. */
+/**
+ * A barred door: banded timber filling a one-tile opening.
+ *
+ * Only LOCKED doorways carry this now. An open one is simply a gap in
+ * the wall you walk through, so seeing a door at all means "this one
+ * wants something from you" — the art is the lock, rather than
+ * decoration every threshold happens to wear.
+ *
+ * Drawn to tile vertically down the opening: planks run the full height
+ * and an iron band lands on every other row (`ty`), so a four-tall door
+ * reads as one banded slab rather than four stacked panels.
+ */
 tiles.register('gate', {
-  draw(g, px, py, size) {
-    g.fillStyle = 'rgba(59,93,201,0.25)';
+  draw(g, px, py, size, _tx, ty) {
+    g.fillStyle = COLORS.redDark;
     g.fillRect(px, py, size, size);
-    g.fillStyle = 'rgba(148,176,194,0.5)';
+    // Plank seams.
+    g.fillStyle = COLORS.outline;
+    for (let i = 2; i < size; i += 3) g.fillRect(px + i, py, 1, size);
+    // Frame down both jambs.
+    g.fillStyle = COLORS.steelDark;
     g.fillRect(px, py, 1, size);
     g.fillRect(px + size - 1, py, 1, size);
+    // Iron band every other row, with a rivet at each end.
+    if (ty % 2 === 1) {
+      g.fillRect(px, py + 2, size, 2);
+      g.fillStyle = COLORS.steel;
+      g.fillRect(px + 1, py + 2, 1, 1);
+      g.fillRect(px + size - 2, py + 2, 1, 1);
+    }
   },
 });
 

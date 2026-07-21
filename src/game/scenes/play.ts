@@ -12,6 +12,7 @@ import {
   itemDef,
   items,
   validateRoom,
+  tiles,
   chance,
   clamp,
   overlaps,
@@ -34,7 +35,7 @@ import { DEFAULT_SONG } from '../content/music';
 import { saveStore, slotStore, newestSave, snapshotPlayer, restorePlayer, type SaveData } from '../save';
 import type { PlayHost } from './play/host';
 import { WaveDirector } from './play/waves';
-import { triggerActions } from './play/trigger-actions';
+import { triggerActions, doorLocked } from './play/trigger-actions';
 import { PortalScene } from './portal';
 import { Hud, type GateMarker } from './play/hud';
 import { TitleScreen, renderGameOver } from './play/screens';
@@ -52,9 +53,17 @@ interface Transition {
   roomId: string;
   x: number;
   y: number;
+  /**
+   * A doorway that has to open before the fade starts: seconds left, and
+   * the opening it fills. Absent for a plain gap in the wall, which has
+   * nothing to open.
+   */
+  open?: { left: number; x: number; y: number; w: number; h: number };
 }
 
 const TRANSITION_TIME = 0.6;
+/** How long a door takes to haul itself up out of the way. */
+const DOOR_OPEN_TIME = 0.35;
 
 type Phase = 'title' | 'play' | 'over';
 
@@ -109,6 +118,9 @@ export class PlayScene implements Scene {
   private interactZones: TriggerDef[] = [];
   /** The door/portal the player is standing on, for the prompt. */
   private nearInteract: TriggerDef | null = null;
+  /** Last known locked state per door trigger index, to spot the moment
+   * one relents while the player is standing in it. */
+  private doorWasLocked = new Map<number, boolean>();
 
   private host: PlayHost;
   private waves: WaveDirector;
@@ -543,14 +555,81 @@ export class PlayScene implements Scene {
   }
 
   /** Begin a fade transition into another room (door travel). */
+  /**
+   * Where you come out when you walk through a doorway into `toRoom`:
+   * at that room's own door back here. The two triggers stop being a
+   * warp to authored coordinates and become two sides of one doorway, so
+   * a door leads somewhere consistent, turning round and walking back
+   * returns you to the spot you left, and neither end can drift from the
+   * other. Same bargain portals already make by landing on the pad.
+   *
+   * Safe to land ON the trigger: doors are interact-only and never fire
+   * on contact, so you arrive standing in the doorway, not bounced
+   * straight back.
+   *
+   * Null when the far side has no door home (a one-way drop), leaving
+   * the caller to fall back to the room's own spawn.
+   */
+  private doorLanding(toRoom: string): { x: number; y: number } | null {
+    const dest = ROOMS[toRoom];
+    const back = dest?.triggers?.find(
+      (tr) => tr.event === 'door' && tr.props?.room === this.roomId,
+    );
+    if (!back) return null;
+    const pw = this.player?.w ?? 14;
+    const ph = this.player?.h ?? 18;
+    // Step OUT of the doorway, not into it. Landing on the trigger was
+    // fine while doors waited for interact, but an open doorway now
+    // fires on contact — arriving inside one would throw you straight
+    // back the way you came, forever. Emerging beside it also just reads
+    // better: you walk out of the door into the room.
+    const roomW = Math.max(...dest.tiles.map((r) => r.length)) * dest.tileSize;
+    const outward = back.x + back.w / 2 < roomW / 2 ? 1 : -1;
+    const x = outward === 1 ? back.x + back.w + 2 : back.x - pw - 2;
+    const y = back.y + back.h - ph;
+    // Stepping out sideways assumes a doorway you walk through. A shaft
+    // you FALL down has no beside — the town well is two tiles wide with
+    // rock either side — so check before trusting it and let the caller
+    // fall back to the room's spawn rather than burying you in stone.
+    const map = buildTilemap(dest);
+    for (const s of map.solidsNear({ x, y, w: pw, h: ph })) {
+      if (!s.oneWay && x < s.x + s.w && s.x < x + pw && y < s.y + s.h && s.y < y + ph) return null;
+    }
+    return { x, y };
+  }
+
   private goToRoom(roomId: string, x?: number, y?: number): void {
+    // Explicit coordinates win (portals pick their own pad); otherwise
+    // pair up with the doorway on the far side, then the room's spawn.
+    const land = x === undefined && y === undefined ? this.doorLanding(roomId) : null;
+    const spawn = this.roomById(roomId).playerSpawn;
     this.transition = {
       t: 0,
       roomId,
-      x: x ?? this.roomById(roomId).playerSpawn.x,
-      y: y ?? this.roomById(roomId).playerSpawn.y,
+      x: x ?? land?.x ?? spawn.x,
+      y: y ?? land?.y ?? spawn.y,
+      open: this.doorwayArt(roomId) ?? undefined,
     };
-    this.game.sfx.play('menuOpen');
+    this.game.sfx.play(this.transition.open ? 'unlock' : 'menuOpen');
+  }
+
+  /**
+   * The opening filled by an actual door on the way out to `toRoom`, or
+   * null if this exit is a bare gap. Only a doorway with a door in it has
+   * anything to swing out of the way, which is why walking through most
+   * of them cuts straight to the fade.
+   */
+  private doorwayArt(toRoom: string): { left: number; x: number; y: number; w: number; h: number } | null {
+    const leaving = this.room.triggers?.find(
+      (tr) => tr.event === 'door' && tr.props?.room === toRoom,
+    );
+    if (!leaving) return null;
+    const ts = this.tilemap.tileSize;
+    const col = Math.round(leaving.x / ts);
+    const r0 = Math.floor(leaving.y / ts);
+    const r1 = Math.floor((leaving.y + leaving.h - 1) / ts);
+    if (this.tilemap.tileAt(col, r0) !== 'gate') return null;
+    return { left: DOOR_OPEN_TIME, x: col * ts, y: r0 * ts, w: ts, h: (r1 - r0 + 1) * ts };
   }
 
   /** Boss rooms play the boss theme while the boss lives; otherwise the room's track. */
@@ -653,10 +732,20 @@ export class PlayScene implements Scene {
     // Always on the bus (custom events, ad-hoc listeners), then routed to
     // whatever registered action gives the event its meaning.
     this.game.events.emit('trigger', { event: def.event, props: def.props });
-    // Doors and portals don't fire on contact — they wait for interact
-    // (see useInteract). Everything else runs its action on entry.
-    if (def.event === 'door' || def.event === 'portal') return;
-    if (triggerActions.has(def.event)) triggerActions.get(def.event).run(def, this.host);
+    // An action decides for itself whether touching it is enough (see
+    // TriggerAction.autoFire): an open doorway is, a barred one and a
+    // portal pad are not, and those wait for interact (see useInteract).
+    if (this.firesOnContact(def)) triggerActions.get(def.event).run(def, this.host);
+  }
+
+  /**
+   * Does touching this trigger run it? Anything without an opinion fires
+   * on contact, which is what talk zones and ambushes want.
+   */
+  private firesOnContact(def: TriggerDef): boolean {
+    if (!triggerActions.has(def.event)) return false;
+    const action = triggerActions.get(def.event);
+    return action.autoFire ? action.autoFire(def, this.host) : true;
   }
 
   /** Use the door/portal the player is standing on (interact pressed). */
@@ -666,6 +755,81 @@ export class PlayScene implements Scene {
   }
 
   /** A door/portal's floating prompt: where a door leads, or "TRAVEL". */
+  /**
+   * A standing sign over every doorway naming where it goes.
+   *
+   * This replaced a floating "E CAVERN" that only appeared once you were
+   * already standing in the opening — useless twice over, since by then
+   * you are through, and since walking in no longer needs a key press.
+   * A sign you can read from across the room is what actually helps: you
+   * pick your exit before you commit to walking to it.
+   *
+   * Dimmed rather than hidden at distance, so a room full of doors
+   * doesn't turn into a wall of shouting gold text.
+   */
+  /**
+   * A door that stops being locked while you are standing in it.
+   *
+   * Triggers fire on entry, so a doorway that refused you has had its one
+   * go: kill the boss with your shoulder against his door and nothing
+   * happens until you walk away and back, which reads as the door being
+   * broken. Watch each doorway's locked state and re-arm the trigger the
+   * moment it relents.
+   */
+  private rearmUnsealedDoors(): void {
+    (this.room.triggers ?? []).forEach((def, index) => {
+      if (def.event !== 'door') return;
+      const locked = doorLocked(def, this.host);
+      if (this.doorWasLocked.get(index) && !locked) this.triggers.rearm(index);
+      this.doorWasLocked.set(index, locked);
+    });
+  }
+
+  private renderDoorSigns(ctx: CanvasRenderingContext2D): void {
+    const p = this.player;
+    const worldW = this.tilemap.worldW;
+    for (const z of this.room.triggers ?? []) {
+      if (z.event !== 'door') continue;
+      const doorX = z.x + z.w / 2;
+      // Doorways sit flush with the room edge and the camera stops there,
+      // so a sign centred on one would hang off the side of the screen.
+      // Pull it inboard far enough to read.
+      const textX = Math.min(Math.max(doorX, 26), worldW - 26);
+      const near = p ? Math.abs(p.cx - doorX) < 70 : false;
+      ctx.globalAlpha = near ? 1 : 0.45;
+      drawText(ctx, this.doorLabel(z), textX, z.y - 9, near ? COLORS.gold : COLORS.steel, 1, 'center');
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /**
+   * The door hauling itself up out of the opening, portcullis fashion —
+   * which is what the banded timber already looks like, and reads far
+   * better than sliding two 8px halves apart.
+   *
+   * Drawn over the tilemap's own copy of the door and clipped to the
+   * opening, so the gate disappears into the lintel instead of over the
+   * wall above it.
+   */
+  private renderDoorOpening(ctx: CanvasRenderingContext2D): void {
+    const o = this.transition?.open;
+    if (!o) return;
+    const p = clamp(1 - o.left / DOOR_OPEN_TIME, 0, 1);
+    const ts = this.tilemap.tileSize;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(o.x, o.y, o.w, o.h);
+    ctx.clip();
+    ctx.fillStyle = '#07070d';
+    ctx.fillRect(o.x, o.y, o.w, o.h);
+    const lift = Math.round(p * (o.h + ts));
+    const gate = tiles.get('gate');
+    for (let i = 0; i * ts < o.h + ts; i++) {
+      gate.draw?.(ctx, o.x, o.y + i * ts - lift, ts, 0, i);
+    }
+    ctx.restore();
+  }
+
   private renderInteractPrompt(ctx: CanvasRenderingContext2D, z: TriggerDef): void {
     const key = this.interactKeyLabel();
     const dest = z.event === 'portal' ? t('TRAVEL') : this.doorLabel(z);
@@ -758,6 +922,12 @@ export class PlayScene implements Scene {
     // Door transition: the world holds its breath while the screen fades.
     if (this.transition) {
       const tr = this.transition;
+      // Haul the door up first; the fade waits until it is out of the way,
+      // so you watch it open rather than being yanked through a shut one.
+      if (tr.open && tr.open.left > 0) {
+        tr.open.left -= dt;
+        return;
+      }
       const before = tr.t;
       tr.t += dt;
       if (before < TRANSITION_TIME / 2 && tr.t >= TRANSITION_TIME / 2) {
@@ -766,6 +936,8 @@ export class PlayScene implements Scene {
       if (tr.t >= TRANSITION_TIME) this.transition = null;
       return;
     }
+
+    if (this.phase === 'play') this.rearmUnsealedDoors();
 
     // World map: an overlay, so the run simply freezes behind it.
     if (this.phase === 'play' && this.player && g.input.consumePress('map')) {
@@ -800,7 +972,9 @@ export class PlayScene implements Scene {
       // Doors & portals: stand on one and press interact to use it. Checked
       // after the world step so an NPC in range wins the key first.
       const p = this.player;
-      this.nearInteract = this.interactZones.find((z) => overlaps(p, z)) ?? null;
+      // Only zones still waiting on the key: an unlocked door walks you
+      // through on contact, so prompting for E on it would be a lie.
+      this.nearInteract = this.interactZones.find((z) => overlaps(p, z) && !this.firesOnContact(z)) ?? null;
       if (this.nearInteract && g.input.consumePress('interact')) this.useInteract(this.nearInteract);
     } else {
       this.nearInteract = null;
@@ -851,6 +1025,8 @@ export class PlayScene implements Scene {
     this.waves.renderMarkers(ctx);
     g.world.render(ctx);
     if (this.phase === 'play') this.hud.renderGateMarker(ctx, this.gateMarker, this.uiT);
+    if (this.phase === 'play') this.renderDoorSigns(ctx);
+    this.renderDoorOpening(ctx);
     if (this.phase === 'play' && this.nearInteract) this.renderInteractPrompt(ctx, this.nearInteract);
     g.feel.renderWorld(ctx);
     this.debug.renderWorld(ctx);
