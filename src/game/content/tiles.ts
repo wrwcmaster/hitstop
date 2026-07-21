@@ -79,6 +79,32 @@ tiles.register('gate', {
   },
 });
 
+/**
+ * An open doorway: a timber-framed passage standing open, non-solid.
+ *
+ * Where `gate` says "barred, wants a key", this says "a way through is
+ * here" — a stone jamb down each side framing a warm timber door with
+ * plank seams, so an interior connection (underground ↔ vault) reads as a
+ * real door rather than a bare gap in the rock. Position-independent, so it
+ * tiles cleanly down a multi-row opening the way the gate does.
+ */
+tiles.register('doorway', {
+  draw(g, px, py, size) {
+    // Recessed dark opening with a warm timber interior.
+    g.fillStyle = COLORS.bgDark;
+    g.fillRect(px, py, size, size);
+    g.fillStyle = COLORS.redDark;
+    g.fillRect(px + 2, py, size - 4, size);
+    // Plank seams down the door.
+    g.fillStyle = COLORS.outline;
+    for (let i = 3; i < size - 1; i += 3) g.fillRect(px + i, py, 1, size);
+    // Stone jambs down both sides.
+    g.fillStyle = COLORS.steelDark;
+    g.fillRect(px, py, 2, size);
+    g.fillRect(px + size - 2, py, 2, size);
+  },
+});
+
 /** Portal vortex: non-solid, purely visual. Pair with a `portal` trigger.
  * A swirling violet gate — deliberately unlike the blue rectangular door,
  * so a warp pad never reads as an ordinary locked gate. Magenta and cyan
