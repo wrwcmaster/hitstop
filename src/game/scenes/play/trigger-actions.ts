@@ -55,12 +55,12 @@ defineTriggerAction('door', {
     optionalString(props, 'lockedText', path);
   },
   /**
-   * An open doorway is a gap in the wall: walk into it and you are
-   * through, no key press. A barred one waits for interact instead, so
-   * refusing you is a deliberate act — auto-firing it would howl LOCKED
-   * every frame you stood in the opening.
+   * Walk into a doorway in the outer wall and it answers: through if it
+   * is open, a refusal if it is barred. Neither needs a key press, and a
+   * barred one cannot nag, because triggers are edge-triggered — you get
+   * one refusal per approach, not one per frame.
    */
-  autoFire: (def, host) => !doorLocked(def, host) && inOuterWall(def, host),
+  autoFire: (def, host) => inOuterWall(def, host),
   run(def, host) {
     const props = def.props!;
     if (doorLocked(def, host)) {

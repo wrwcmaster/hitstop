@@ -714,6 +714,35 @@ export class PlayScene implements Scene {
   }
 
   /** A door/portal's floating prompt: where a door leads, or "TRAVEL". */
+  /**
+   * A standing sign over every doorway naming where it goes.
+   *
+   * This replaced a floating "E CAVERN" that only appeared once you were
+   * already standing in the opening — useless twice over, since by then
+   * you are through, and since walking in no longer needs a key press.
+   * A sign you can read from across the room is what actually helps: you
+   * pick your exit before you commit to walking to it.
+   *
+   * Dimmed rather than hidden at distance, so a room full of doors
+   * doesn't turn into a wall of shouting gold text.
+   */
+  private renderDoorSigns(ctx: CanvasRenderingContext2D): void {
+    const p = this.player;
+    const worldW = this.tilemap.worldW;
+    for (const z of this.room.triggers ?? []) {
+      if (z.event !== 'door') continue;
+      const doorX = z.x + z.w / 2;
+      // Doorways sit flush with the room edge and the camera stops there,
+      // so a sign centred on one would hang off the side of the screen.
+      // Pull it inboard far enough to read.
+      const textX = Math.min(Math.max(doorX, 26), worldW - 26);
+      const near = p ? Math.abs(p.cx - doorX) < 70 : false;
+      ctx.globalAlpha = near ? 1 : 0.45;
+      drawText(ctx, this.doorLabel(z), textX, z.y - 9, near ? COLORS.gold : COLORS.steel, 1, 'center');
+      ctx.globalAlpha = 1;
+    }
+  }
+
   private renderInteractPrompt(ctx: CanvasRenderingContext2D, z: TriggerDef): void {
     const key = this.interactKeyLabel();
     const dest = z.event === 'portal' ? t('TRAVEL') : this.doorLabel(z);
@@ -901,6 +930,7 @@ export class PlayScene implements Scene {
     this.waves.renderMarkers(ctx);
     g.world.render(ctx);
     if (this.phase === 'play') this.hud.renderGateMarker(ctx, this.gateMarker, this.uiT);
+    if (this.phase === 'play') this.renderDoorSigns(ctx);
     if (this.phase === 'play' && this.nearInteract) this.renderInteractPrompt(ctx, this.nearInteract);
     g.feel.renderWorld(ctx);
     this.debug.renderWorld(ctx);
