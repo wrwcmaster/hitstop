@@ -13,6 +13,7 @@ import { TEXEL } from './sprites';
 import { drawArrowSprite } from './ballistics';
 import greatSwordJson from './sprites/equipment/great-sword.json';
 import rustySwordJson from './sprites/equipment/rusty-sword.json';
+import slashCrescentJson from './sprites/slash-crescent.json';
 import type { WeaponAttackDef } from './weapons';
 
 export interface WeaponAttackPose {
@@ -54,6 +55,33 @@ export interface WeaponVisual {
 }
 
 export const weaponVisuals = new Registry<WeaponVisual>('weaponVisual');
+
+/**
+ * An authored slash effect: pixel art for the arc itself, played across
+ * the swing instead of the procedural crescent.
+ *
+ * Registered by SHAPE rather than by weapon, because that is how the
+ * art actually varies — a plunge and a dash want different sheets, while
+ * every sword can share one plunge. Weapons opt in per attack via
+ * `trail.sprite`; anything that doesn't falls back to the procedural
+ * arc, so a new weapon still gets a decent slash with no art at all.
+ */
+export interface SlashVisual {
+  /** Pre-mirrored frames, played across the arc's sweep. */
+  frames: { right: HTMLCanvasElement[]; left: HTMLCanvasElement[] };
+  /**
+   * Where the arc's pivot sits inside the sheet, in logical px from its
+   * top-left. This is the point pinned to the wielder's trail origin, so
+   * authored art lines up with the hand exactly like the procedural arc.
+   */
+  origin: { x: number; y: number };
+}
+
+export const slashVisuals = new Registry<SlashVisual>('slashVisual');
+
+export function defineSlashVisual(id: string, visual: SlashVisual): void {
+  slashVisuals.register(id, visual);
+}
 
 /**
  * Where ranged weapons sit, in logical px above the FEET origin the
@@ -282,24 +310,69 @@ export function proceduralBlade(config: ProceduralBladeConfig): WeaponVisual {
  * attack, so a heavy plunge and a quick aerial share this renderer
  * without sharing a look.
  */
+/**
+ * The shared trail clock: how far the arc has drawn itself, and how
+ * bright it still is.
+ *
+ * Two independent timings. `sweep` is how fast the arc DRAWS — eased out,
+ * so the blade whips and settles rather than tracking at constant speed.
+ * The fade is how long it LINGERS: full brightness for as long as the
+ * attack can still hit, so what is on screen matches what the hitbox is
+ * doing, then a dissolve once the move is spent.
+ *
+ * Both the procedural and the authored renderer read this, so pixel-art
+ * frames advance on exactly the same curve the drawn arc sweeps on.
+ */
+function trailClock(attack: WeaponAttackPose, trail: WeaponAttackDef['trail']): {
+  raw: number; sweepT: number; fade: number;
+} {
+  const sweepEnd = trail.sweep ?? attack.def.active[1];
+  const hold = attack.def.active[1];
+  const raw = Math.min(1, attack.progress / sweepEnd);
+  return {
+    raw,
+    sweepT: 1 - (1 - raw) * (1 - raw),
+    fade: attack.progress <= hold
+      ? 1
+      : Math.max(0, 1 - (attack.progress - hold) / Math.max(0.001, 1 - hold)),
+  };
+}
+
+/** Blit an authored slash sheet, pinned to the wielder's trail origin. */
+function drawAuthoredTrail(
+  g: CanvasRenderingContext2D,
+  ctx: WeaponTrailCtx,
+  art: SlashVisual,
+  clock: { sweepT: number; fade: number },
+): void {
+  const frames = ctx.facing === 1 ? art.frames.right : art.frames.left;
+  const image = frames[Math.min(frames.length - 1, Math.floor(clock.sweepT * frames.length))];
+  const w = image.width / TEXEL;
+  const h = image.height / TEXEL;
+  // Mirroring flips the pivot across the sheet along with the art.
+  const ox = ctx.facing === 1 ? art.origin.x : w - art.origin.x;
+  const q = (value: number) => Math.round(value * TEXEL) / TEXEL;
+  g.save();
+  g.globalAlpha = clock.fade;
+  g.drawImage(image, q(ctx.x - ox), q(ctx.y - art.origin.y), w, h);
+  g.restore();
+}
+
 function drawSlashTrail(g: CanvasRenderingContext2D, ctx: WeaponTrailCtx): void {
   const { attack } = ctx;
   const trail = attack.def.trail;
   const radius = trail.radius;
   const bias = trail.bias ?? 0.8;
   const glow = trail.glow ?? 0;
-  // Two independent clocks: how fast the arc DRAWS, and how long it
-  // lingers. It stays at full brightness for as long as the attack can
-  // still hit, so what you see on screen is what the hitbox is doing,
-  // then dissolves once the move is spent.
-  const sweepEnd = trail.sweep ?? attack.def.active[1];
-  const hold = attack.def.active[1];
-  const raw = Math.min(1, attack.progress / sweepEnd);
-  const sweepT = 1 - (1 - raw) * (1 - raw);
-  const fade = attack.progress <= hold
-    ? 1
-    : Math.max(0, 1 - (attack.progress - hold) / Math.max(0.001, 1 - hold));
+  const clock = trailClock(attack, trail);
+  const { raw, sweepT, fade } = clock;
   if (fade <= 0) return;
+  // Authored pixel art wins when the attack names a sheet; everything
+  // else falls through to the procedural arc below.
+  if (trail.sprite) {
+    drawAuthoredTrail(g, ctx, slashVisuals.get(trail.sprite), clock);
+    return;
+  }
   const sweep = trail.startAngle + (trail.endAngle - trail.startAngle) * sweepT;
   const angle = ctx.facing === 1 ? sweep : Math.PI - sweep;
   const start = ctx.facing === 1 ? trail.startAngle : Math.PI - trail.startAngle;
@@ -364,6 +437,21 @@ defineWeaponVisual('unarmed', {
 });
 
 const load = (file: unknown) => loadSprite(file as SpriteFile, PAL);
+
+// The plunge crescent, authored as pixel art. Its geometry was baked
+// from the procedural arc it replaces (same radius, angles and taper),
+// so it drops in without re-tuning — and being ordinary sprite rows, it
+// can now be hand-edited frame by frame like any other art in the repo.
+const slashCrescent = withFacing(load(slashCrescentJson).animSet());
+defineSlashVisual('crescent', {
+  frames: {
+    right: slashCrescent.right.slash.frames,
+    left: slashCrescent.left.slash.frames,
+  },
+  // Arc pivot: 12.5 px across the 26px sheet, 4 px ABOVE its top edge —
+  // the band hangs below the pivot, which is where the hand is.
+  origin: { x: 12.5, y: -4 },
+});
 
 defineWeaponVisual('rusty-sword', spriteWeapon({
   anims: withFacing(load(rustySwordJson).animSet()),
