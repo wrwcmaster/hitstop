@@ -1,6 +1,7 @@
 import { Registry, conversations, items, type TriggerDef } from '@engine/index';
 import { COLORS } from '../../content/palette';
 import type { PlayHost } from './host';
+import { Monster } from '../../actors/monster';
 import { optionalString, rejectUnknownProps, requireString } from '../../content/prop-validation';
 
 /**
@@ -47,7 +48,10 @@ defineTriggerAction('door', {
     // No arrival coordinates: a door lands you at the destination's door
     // back here, so the doorway has one definition instead of two that
     // can disagree. See PlayScene.doorLanding.
-    rejectUnknownProps(props, ['room', 'key', 'flag', 'lockedText'], path);
+    rejectUnknownProps(props, ['room', 'key', 'flag', 'lockedText', 'bossSeal'], path);
+    if (props.bossSeal !== undefined && props.bossSeal !== true) {
+      throw new Error(`${path}.bossSeal: expected true or omitted`);
+    }
     requireString(props, 'room', path);
     const key = optionalString(props, 'key', path);
     if (key && !items.has(key)) throw new Error(`${path}.key: unknown item "${key}"`);
@@ -75,11 +79,6 @@ defineTriggerAction('door', {
 });
 
 /**
- * Is this doorway barred? Two kinds of lock: a key item in the
- * inventory, or a story flag (`props.flag` — 'bossDefeated' seals the
- * town road until then).
- */
-/**
  * Is this doorway in the room's outer wall?
  *
  * Only those walk you through on contact. An INTERIOR passage — the
@@ -101,12 +100,30 @@ function inOuterWall(def: TriggerDef, host: PlayHost): boolean {
   return def.x <= margin || def.x + def.w >= roomW - margin;
 }
 
-function doorLocked(def: TriggerDef, host: PlayHost): boolean {
+/**
+ * Is this doorway barred? Three ways: a key item, a story flag
+ * (`bossDefeated` seals the town road until then), or a boss seal.
+ */
+export function doorLocked(def: TriggerDef, host: PlayHost): boolean {
   const props = def.props!;
   const keyId = props.key as string | undefined;
   const flag = props.flag as string | undefined;
   const p = host.player;
+  if (props.bossSeal === true && bossAlive(host)) return true;
   return !!((keyId && p && !p.inventory.has(keyId)) || (flag && !host.hasFlag(flag)));
+}
+
+/**
+ * A boss seal locks while the boss draws breath, which is the opposite
+ * of every other lock here (those open once you have earned something).
+ * Asking the world directly rather than raising a flag means the seal
+ * cannot be left set: kill the boss and the doors are open on the very
+ * next frame, including if he dies to something other than the player.
+ */
+function bossAlive(host: PlayHost): boolean {
+  return host.game.world
+    .actors('enemy')
+    .some((a) => a instanceof Monster && a.def.boss && a.hp > 0);
 }
 
 defineTriggerAction('portal', {

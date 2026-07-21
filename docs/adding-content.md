@@ -266,6 +266,18 @@ The interior exception matters more than it sounds. The shaft down to the grotto
 
 A trigger action decides this for itself via `TriggerAction.autoFire`, asked fresh every time because the answer changes mid-room: a barred door becomes a walk-through gap the instant you pick up its key.
 
+### Sealing a boss in
+
+Give a boss room's doors `"bossSeal": true` and they lock while any boss in the room draws breath, opening the instant he doesn't:
+
+```json
+{ "event": "door", "props": { "room": "corridor", "bossSeal": true } }
+```
+
+This is the only lock that works backwards — every other one opens once you have *earned* something. It asks the world directly rather than raising a flag, so the seal can't be left set: no cleanup path to forget, and it lifts even if the boss dies to something other than you.
+
+One wrinkle worth knowing, since it applies to any lock that opens mid-room: triggers fire on entry, so a doorway that has already refused you won't fire again while you stand in it. Kill the boss with your shoulder against the door and nothing would happen until you stepped away and back. `PlayScene.rearmUnsealedDoors` watches for a doorway relenting and calls `Triggers.rearm` so it opens under you.
+
 Because only locked doorways carry door art, **seeing a door means it wants something from you** — the art is the lock, not decoration every threshold happens to wear.
 
 The map is always scaled to the full extent of the world rather than to the part discovered so far. A map that re-centres itself as you explore is disorienting — a room you have seen should stay where you remember it, and the blank space around it honestly reads as "there is more out there".
