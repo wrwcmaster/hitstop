@@ -17,6 +17,8 @@ import { registerStatuses } from './content/statuses';
 import { registerConversations } from './content/conversations';
 import { registerShops } from './content/shops';
 import { registerPlaceables } from './content/placeables';
+import { validateRoomContent } from './content/room-features';
+import { ROOMS } from './content/rooms';
 import { registerEffects } from './content/effects';
 import { registerQuests } from './content/quests';
 import { registerPortals } from './content/portals';
@@ -62,6 +64,12 @@ registerPlaceables(); // bridges monsters + NPCs; must come after them
 registerEffects();
 registerQuests();
 registerPortals();
+
+// Every room, not just the one you happen to walk into. Room content is
+// otherwise validated on entry, which is far too late for the failure
+// that matters most: a doorway walled up in solid rock is a room you
+// cannot leave, and you would only find out by being trapped in it.
+for (const [id, room] of Object.entries(ROOMS)) validateRoomContent(room, id);
 registerLocales();
 registerGizmos();
 

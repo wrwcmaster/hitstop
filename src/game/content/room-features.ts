@@ -1,4 +1,4 @@
-import { Registry, items, songs, type RoomDef } from '@engine/index';
+import { Registry, items, songs, tiles, type RoomDef, type TriggerDef } from '@engine/index';
 import { placeables } from './placeables';
 import { waveTables } from './waves';
 import { propsAt, requirePositiveNumber } from './prop-validation';
@@ -66,6 +66,37 @@ defineRoomFeature('map', {
   },
 });
 
+/**
+ * A doorway walled up in solid rock is a room you cannot leave, and it
+ * looks completely fine in the JSON — the trigger is present, points
+ * somewhere real, and validates. Only the tiles underneath say
+ * otherwise.
+ *
+ * This is not hypothetical: moving doorways flush against the room
+ * boundary buried three of them (grotto, ramparts and vault all have a
+ * wall in column 0), sealing off three rooms at once. Nothing caught it
+ * until a boss-seal test had the knight standing still against a door
+ * that was never there.
+ */
+function requireReachable(room: RoomDef, door: TriggerDef, path: string): void {
+  const ts = room.tileSize;
+  const c0 = Math.floor(door.x / ts);
+  const c1 = Math.floor((door.x + door.w - 1) / ts);
+  const r0 = Math.floor(door.y / ts);
+  const r1 = Math.floor((door.y + door.h - 1) / ts);
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      const ch = (room.tiles[r] ?? '')[c] ?? '';
+      const id = room.legend[ch] ?? '';
+      if (!id || !tiles.get(id).solid) return; // somewhere to stand
+    }
+  }
+  throw new Error(
+    `${path}: doorway to "${String(door.props?.room)}" is walled in — `
+    + `every tile in cols ${c0}-${c1}, rows ${r0}-${r1} is solid, so the door cannot be reached`,
+  );
+}
+
 /** Validate open content bags after all game registries have been filled. */
 export function validateRoomContent(room: RoomDef, id = room.name): RoomDef {
   const root = `room "${id}"`;
@@ -85,6 +116,7 @@ export function validateRoomContent(room: RoomDef, id = room.name): RoomDef {
     const path = `${root}.triggers[${index}] (${trigger.event}).props`;
     const props = propsAt(trigger.props, path);
     if (triggerActions.has(trigger.event)) triggerActions.get(trigger.event).validateProps?.(props, path);
+    if (trigger.event === 'door') requireReachable(room, trigger, `${root}.triggers[${index}]`);
   });
   return room;
 }

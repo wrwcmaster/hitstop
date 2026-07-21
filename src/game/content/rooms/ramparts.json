@@ -59,14 +59,15 @@
   },
   "triggers": [
     {
-      "x": 0,
+      "x": 8,
       "y": 176,
       "w": 8,
       "h": 32,
       "event": "door",
       "once": false,
       "props": {
-        "room": "town"
+        "room": "town",
+        "bossSeal": true
       }
     },
     {
