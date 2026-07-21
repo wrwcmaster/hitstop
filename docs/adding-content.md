@@ -260,6 +260,8 @@ An open doorway in a room's **outer wall** is a gap you simply walk into — no 
 | open, in the room's interior | press E | a gap in the wall |
 | locked (`key` or `flag`) | press E, refused with a banner | a banded timber door |
 
+Outer-wall doorways sit **flush with the room boundary** — the outermost tile column — so you cross only when you have actually walked to the edge of the room. Placed even a couple of tiles inboard, the room swaps out while there is still visible floor ahead of you, which reads as the game snatching control rather than you leaving.
+
 The interior exception matters more than it sounds. The shaft down to the grotto and the stair up to the ramparts sit in the middle of floors you have every reason to walk across; firing those on contact means you can no longer cross your own room without being swallowed. Castlevania solves it the same way — doors live at the edges, and the way down is something you choose.
 
 A trigger action decides this for itself via `TriggerAction.autoFire`, asked fresh every time because the answer changes mid-room: a barred door becomes a walk-through gap the instant you pick up its key.
