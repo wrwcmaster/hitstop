@@ -13,6 +13,16 @@ import { optionalString, rejectUnknownProps, requireString } from '../../content
 export interface TriggerAction {
   run(def: TriggerDef, host: PlayHost): void;
   validateProps?(props: Record<string, unknown>, path: string): void;
+  /**
+   * Does this trigger fire the moment the player touches it, or wait for
+   * the interact key? Omit it and the trigger fires on contact, which is
+   * what a talk zone or an ambush wants.
+   *
+   * It is asked EVERY time rather than cached, because the answer can
+   * change mid-room: a barred door starts as an interact prompt and
+   * becomes a walk-through gap the instant you pick up its key.
+   */
+  autoFire?(def: TriggerDef, host: PlayHost): boolean;
 }
 
 export const triggerActions = new Registry<TriggerAction>('triggerAction');
@@ -44,17 +54,17 @@ defineTriggerAction('door', {
     optionalString(props, 'flag', path);
     optionalString(props, 'lockedText', path);
   },
+  /**
+   * An open doorway is a gap in the wall: walk into it and you are
+   * through, no key press. A barred one waits for interact instead, so
+   * refusing you is a deliberate act — auto-firing it would howl LOCKED
+   * every frame you stood in the opening.
+   */
+  autoFire: (def, host) => !doorLocked(def, host) && inOuterWall(def, host),
   run(def, host) {
     const props = def.props!;
-    const p = host.player;
-    // Two kinds of lock: a key item in the inventory, or a story flag
-    // (props.flag — e.g. 'bossDefeated' seals the town road until then).
-    const keyId = props.key as string | undefined;
-    const flag = props.flag as string | undefined;
-    const locked =
-      (keyId && p && !p.inventory.has(keyId)) ||
-      (flag && !host.hasFlag(flag));
-    if (locked) {
+    if (doorLocked(def, host)) {
+      const p = host.player;
       host.banner((props.lockedText as string) ?? 'THE GATE IS LOCKED', 1.2);
       if (p) host.game.feel.text(p.cx, p.y - 8, 'LOCKED', COLORS.red);
       host.game.sfx.play('denied');
@@ -64,10 +74,48 @@ defineTriggerAction('door', {
   },
 });
 
+/**
+ * Is this doorway barred? Two kinds of lock: a key item in the
+ * inventory, or a story flag (`props.flag` — 'bossDefeated' seals the
+ * town road until then).
+ */
+/**
+ * Is this doorway in the room's outer wall?
+ *
+ * Only those walk you through on contact. An INTERIOR passage — the
+ * shaft down to the grotto, the stair up to the ramparts — sits in the
+ * middle of a floor you have every reason to walk across, so making it
+ * fire on touch means you can no longer cross your own room without
+ * being swallowed by it. Those wait for interact, which is also how
+ * Castlevania does it: doors live at the edges, and the way down is
+ * something you choose.
+ *
+ * A regression test caught this rather than playtesting: the bat-bounds
+ * fixture walks east across the cavern and started falling into the
+ * grotto halfway.
+ */
+function inOuterWall(def: TriggerDef, host: PlayHost): boolean {
+  const room = host.room;
+  const roomW = Math.max(...room.tiles.map((r) => r.length)) * room.tileSize;
+  const margin = room.tileSize * 3;
+  return def.x <= margin || def.x + def.w >= roomW - margin;
+}
+
+function doorLocked(def: TriggerDef, host: PlayHost): boolean {
+  const props = def.props!;
+  const keyId = props.key as string | undefined;
+  const flag = props.flag as string | undefined;
+  const p = host.player;
+  return !!((keyId && p && !p.inventory.has(keyId)) || (flag && !host.hasFlag(flag)));
+}
+
 defineTriggerAction('portal', {
   validateProps(props, path) {
     rejectUnknownProps(props, [], path);
   },
+  // Never on contact: a warp menu that opened when you brushed the pad
+  // forced a destination choice mid-fight.
+  autoFire: () => false,
   // A `portal` trigger no longer opens the menu on contact — that forced a
   // destination choice mid-fight. It now marks an interaction zone that
   // PlayScene drives: stand on the pad and press interact (E) to travel.

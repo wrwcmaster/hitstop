@@ -246,9 +246,25 @@ A `door` trigger names only where it leads:
 
 Walking through lands you at the destination's own door **back here** (`PlayScene.doorLanding`), so the two triggers are two sides of one doorway. Turning round and walking back returns you to the spot you left, and neither end can drift from the other, because there is only one definition of where the doorway is. Arrival coordinates are not accepted — that was a second definition waiting to disagree with the first.
 
-Landing on the far trigger is safe: doors are interact-only and never fire on contact, so you arrive standing in the doorway rather than bouncing straight back.
+You arrive *beside* the far doorway, not inside it, so a walk-through door can't throw you straight back where you came from.
 
-A door whose destination has no door home is a one-way drop; that falls back to the room's `playerSpawn`. Locks (`key`, `flag`, `lockedText`) are unchanged.
+A door whose destination has no door home is a one-way drop; that falls back to the room's `playerSpawn`.
+
+### Which doorways you walk through
+
+An open doorway in a room's **outer wall** is a gap you simply walk into — no key press. Everything else waits for interact:
+
+| doorway | behaviour | looks like |
+| --- | --- | --- |
+| open, in the outer wall | walk through on contact | a gap in the wall |
+| open, in the room's interior | press E | a gap in the wall |
+| locked (`key` or `flag`) | press E, refused with a banner | a banded timber door |
+
+The interior exception matters more than it sounds. The shaft down to the grotto and the stair up to the ramparts sit in the middle of floors you have every reason to walk across; firing those on contact means you can no longer cross your own room without being swallowed. Castlevania solves it the same way — doors live at the edges, and the way down is something you choose.
+
+A trigger action decides this for itself via `TriggerAction.autoFire`, asked fresh every time because the answer changes mid-room: a barred door becomes a walk-through gap the instant you pick up its key.
+
+Because only locked doorways carry door art, **seeing a door means it wants something from you** — the art is the lock, not decoration every threshold happens to wear.
 
 The map is always scaled to the full extent of the world rather than to the part discovered so far. A map that re-centres itself as you explore is disorienting — a room you have seen should stay where you remember it, and the blank space around it honestly reads as "there is more out there".
 

@@ -559,13 +559,22 @@ export class PlayScene implements Scene {
    * the caller to fall back to the room's own spawn.
    */
   private doorLanding(toRoom: string): { x: number; y: number } | null {
-    const back = ROOMS[toRoom]?.triggers?.find(
+    const dest = ROOMS[toRoom];
+    const back = dest?.triggers?.find(
       (tr) => tr.event === 'door' && tr.props?.room === this.roomId,
     );
     if (!back) return null;
     const pw = this.player?.w ?? 14;
     const ph = this.player?.h ?? 18;
-    return { x: back.x + back.w / 2 - pw / 2, y: back.y + back.h - ph };
+    // Step OUT of the doorway, not into it. Landing on the trigger was
+    // fine while doors waited for interact, but an open doorway now
+    // fires on contact — arriving inside one would throw you straight
+    // back the way you came, forever. Emerging beside it also just reads
+    // better: you walk out of the door into the room.
+    const roomW = Math.max(...dest.tiles.map((r) => r.length)) * dest.tileSize;
+    const outward = back.x + back.w / 2 < roomW / 2 ? 1 : -1;
+    const x = outward === 1 ? back.x + back.w + 2 : back.x - pw - 2;
+    return { x, y: back.y + back.h - ph };
   }
 
   private goToRoom(roomId: string, x?: number, y?: number): void {
@@ -682,10 +691,20 @@ export class PlayScene implements Scene {
     // Always on the bus (custom events, ad-hoc listeners), then routed to
     // whatever registered action gives the event its meaning.
     this.game.events.emit('trigger', { event: def.event, props: def.props });
-    // Doors and portals don't fire on contact — they wait for interact
-    // (see useInteract). Everything else runs its action on entry.
-    if (def.event === 'door' || def.event === 'portal') return;
-    if (triggerActions.has(def.event)) triggerActions.get(def.event).run(def, this.host);
+    // An action decides for itself whether touching it is enough (see
+    // TriggerAction.autoFire): an open doorway is, a barred one and a
+    // portal pad are not, and those wait for interact (see useInteract).
+    if (this.firesOnContact(def)) triggerActions.get(def.event).run(def, this.host);
+  }
+
+  /**
+   * Does touching this trigger run it? Anything without an opinion fires
+   * on contact, which is what talk zones and ambushes want.
+   */
+  private firesOnContact(def: TriggerDef): boolean {
+    if (!triggerActions.has(def.event)) return false;
+    const action = triggerActions.get(def.event);
+    return action.autoFire ? action.autoFire(def, this.host) : true;
   }
 
   /** Use the door/portal the player is standing on (interact pressed). */
@@ -829,7 +848,9 @@ export class PlayScene implements Scene {
       // Doors & portals: stand on one and press interact to use it. Checked
       // after the world step so an NPC in range wins the key first.
       const p = this.player;
-      this.nearInteract = this.interactZones.find((z) => overlaps(p, z)) ?? null;
+      // Only zones still waiting on the key: an unlocked door walks you
+      // through on contact, so prompting for E on it would be a lie.
+      this.nearInteract = this.interactZones.find((z) => overlaps(p, z) && !this.firesOnContact(z)) ?? null;
       if (this.nearInteract && g.input.consumePress('interact')) this.useInteract(this.nearInteract);
     } else {
       this.nearInteract = null;
