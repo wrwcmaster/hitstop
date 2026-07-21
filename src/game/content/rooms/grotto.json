@@ -1,139 +1,143 @@
 {
- "name": "grotto",
- "tileSize": 8,
- "legend": {
-  "#": "rockTop",
-  "=": "rock",
-  "-": "platform",
-  "D": "gate",
-  "O": "portal",
-  "~": "waterTop",
-  "w": "water"
- },
- "tiles": [
-  "====================================================================================================",
-  "====================================================================================================",
-  "=..................................................................................................=",
-  "=..................................................................................................=",
-  "=..................................................................................................=",
-  "=..................................................................................................=",
-  "=..................................................................................................=",
-  "=..................................................................................................=",
-  "=.DD..........OO...................................................................................=",
-  "=.DD..........OO............................................-------................................=",
-  "=.DD..........OO........................-------....................................................=",
-  "=.DD..........OO...................................................................................=",
-  "=##################................................................................................=",
-  "===================................................................................................=",
-  "=~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwww====wwwwwwwwwww================wwwwwwwwwwwww=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwww====wwwwwwwwwww================wwwwwwwwwwwww=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwww==========www=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwww=........=www=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwww=........=www=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=........=www=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=wwwwwwww=www=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=www=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=www=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=www=",
-  "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=www=",
-  "====================================================================================================",
-  "====================================================================================================",
-  "===================================================================================================="
- ],
- "playerSpawn": {
-  "x": 60,
-  "y": 78
- },
- "entities": [
-  {
-   "type": "bat",
-   "x": 350,
-   "y": 56
+  "name": "grotto",
+  "tileSize": 8,
+  "legend": {
+    "#": "rockTop",
+    "=": "rock",
+    "-": "platform",
+    "D": "gate",
+    "O": "portal",
+    "~": "waterTop",
+    "w": "water"
   },
-  {
-   "type": "bat",
-   "x": 540,
-   "y": 48
+  "tiles": [
+    "====================================================================================================",
+    "====================================================================================================",
+    "=..................................................................................................=",
+    "=..................................................................................................=",
+    "=..................................................................................................=",
+    "=..................................................................................................=",
+    "=..................................................................................................=",
+    "=..................................................................................................=",
+    "=.DD..........OO...................................................................................=",
+    "=.DD..........OO............................................-------................................=",
+    "=.DD..........OO........................-------....................................................=",
+    "=.DD..........OO...................................................................................=",
+    "=##################................................................................................=",
+    "===================................................................................................=",
+    "=~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwww====wwwwwwwwwww================wwwwwwwwwwwww=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwww====wwwwwwwwwww================wwwwwwwwwwwww=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwww==========www=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwww=........=www=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwww=........=www=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=........=www=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=wwwwwwww=www=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=www=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=www=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=www=",
+    "=wwwwwwwwwwwwwwwwwwwwwwwwwwwww====wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=www=",
+    "====================================================================================================",
+    "====================================================================================================",
+    "===================================================================================================="
+  ],
+  "playerSpawn": {
+    "x": 60,
+    "y": 78
   },
-  {
-   "type": "slime",
-   "x": 120,
-   "y": 88
+  "entities": [
+    {
+      "type": "bat",
+      "x": 350,
+      "y": 56
+    },
+    {
+      "type": "bat",
+      "x": 540,
+      "y": 48
+    },
+    {
+      "type": "slime",
+      "x": 120,
+      "y": 88
+    },
+    {
+      "type": "pike",
+      "x": 380,
+      "y": 190
+    },
+    {
+      "type": "pike",
+      "x": 600,
+      "y": 230
+    },
+    {
+      "type": "chest",
+      "x": 250,
+      "y": 284
+    },
+    {
+      "type": "chest",
+      "x": 500,
+      "y": 284
+    },
+    {
+      "type": "chest",
+      "x": 730,
+      "y": 284
+    }
+  ],
+  "props": {
+    "music": "depths",
+    "map": {
+      "x": 1,
+      "y": 2
+    }
   },
-  {
-   "type": "pike",
-   "x": 380,
-   "y": 190
-  },
-  {
-   "type": "pike",
-   "x": 600,
-   "y": 230
-  },
-  {
-   "type": "chest",
-   "x": 250,
-   "y": 284
-  },
-  {
-   "type": "chest",
-   "x": 500,
-   "y": 284
-  },
-  {
-   "type": "chest",
-   "x": 730,
-   "y": 284
-  }
- ],
- "props": {
-  "music": "depths"
- },
- "triggers": [
-  {
-   "x": 12,
-   "y": 64,
-   "w": 20,
-   "h": 32,
-   "event": "door",
-   "once": false,
-   "props": {
-    "room": "cavern",
-    "x": 356,
-    "y": 216
-   }
-  },
-  {
-   "x": 108,
-   "y": 64,
-   "w": 24,
-   "h": 32,
-   "event": "portal",
-   "once": false,
-   "props": {}
-  },
-  {
-   "x": 40,
-   "y": 60,
-   "w": 80,
-   "h": 44,
-   "event": "talk",
-   "once": true,
-   "props": {
-    "conversation": "grotto-entry"
-   }
-  }
- ]
+  "triggers": [
+    {
+      "x": 12,
+      "y": 64,
+      "w": 20,
+      "h": 32,
+      "event": "door",
+      "once": false,
+      "props": {
+        "room": "cavern",
+        "x": 356,
+        "y": 216
+      }
+    },
+    {
+      "x": 108,
+      "y": 64,
+      "w": 24,
+      "h": 32,
+      "event": "portal",
+      "once": false,
+      "props": {}
+    },
+    {
+      "x": 40,
+      "y": 60,
+      "w": 80,
+      "h": 44,
+      "event": "talk",
+      "once": true,
+      "props": {
+        "conversation": "grotto-entry"
+      }
+    }
+  ]
 }

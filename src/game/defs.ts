@@ -6,7 +6,7 @@ export type Action =
   | 'jump' | 'attack' | 'dash' | 'skill' | 'skill2' | 'skill3'
   | 'parry'
   | 'interact'
-  | 'confirm' | 'cancel' | 'menu';
+  | 'confirm' | 'cancel' | 'menu' | 'map';
 
 /** A key may serve several actions (ArrowUp jumps in-game, navigates in menus). */
 export const KEYMAP: Record<string, Action | Action[]> = {
@@ -25,6 +25,7 @@ export const KEYMAP: Record<string, Action | Action[]> = {
   KeyV: 'skill2',
   KeyB: 'skill3',
   KeyE: 'interact',
+  KeyM: 'map', // world map overlay
   KeyF: 'parry', KeyH: 'parry', // deflect + riposte
   Escape: 'menu',
 };
@@ -69,6 +70,7 @@ export const REBINDABLE: { action: Action; label: string; aliases: Action[] }[] 
   { action: 'skill3', label: 'ICE SHARD', aliases: [] },
   { action: 'parry', label: 'PARRY', aliases: [] },
   { action: 'interact', label: 'INTERACT', aliases: [] },
+  { action: 'map', label: 'MAP', aliases: [] },
   { action: 'left', label: 'MOVE LEFT', aliases: [] },
   { action: 'right', label: 'MOVE RIGHT', aliases: [] },
 ];

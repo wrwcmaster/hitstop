@@ -38,6 +38,30 @@ defineRoomFeature('gateKey', {
   },
 });
 
+/**
+ * Where this room sits on the world map, in grid cells: `{ x, y }` plus
+ * an optional `w`/`h` span. A room that declares it appears on the map
+ * screen; one that doesn't, doesn't — which is how the dev test room
+ * stays off a player-facing screen with no special case anywhere.
+ */
+defineRoomFeature('map', {
+  validate(value, _room, path) {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new Error(`${path}: expected an object like { x, y }`);
+    }
+    const cell = value as Record<string, unknown>;
+    for (const key of ['x', 'y']) {
+      if (!Number.isInteger(cell[key])) throw new Error(`${path}.${key}: expected an integer cell coordinate`);
+    }
+    for (const key of ['w', 'h']) {
+      if (cell[key] === undefined) continue;
+      if (!Number.isInteger(cell[key]) || (cell[key] as number) < 1) {
+        throw new Error(`${path}.${key}: expected a positive integer cell span`);
+      }
+    }
+  },
+});
+
 /** Validate open content bags after all game registries have been filled. */
 export function validateRoomContent(room: RoomDef, id = room.name): RoomDef {
   const root = `room "${id}"`;

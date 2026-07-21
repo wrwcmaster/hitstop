@@ -220,6 +220,20 @@ Beyond the four required fields, `trail` takes three optional ones that turn the
 
 `sweep` exists because how fast a blade *looks* like it swept is not how long it can hit, and the plunge proves it: the move stays dangerous for its entire descent but is cut short by landing, so with the arc welded to the damage window a short drop only ever showed a sliver. Giving it `sweep: 0.16` forms the full crescent within a few frames, and it then rides beneath the knight for as long as she is falling. The arc holds at full brightness while the attack can still hit and fades once it is spent, so what is on screen matches what the hitbox is doing.
 
+### Putting a room on the world map
+
+The map screen (M) draws every room that declares a placement, in grid cells:
+
+```json
+"props": { "map": { "x": 3, "y": 1 } }
+```
+
+`w`/`h` are optional and default to 1, so a large region can span several cells. A room that omits `map` never appears — which is how the dev test room stays off a player-facing screen without a special case anywhere.
+
+**Connections are not authored.** Rooms already say how they join through their `door` triggers, so `content/worldmap.ts` derives the links from those: move a door and the map follows, with no second table to forget. Exploration reuses the `visited:<room>` flags the portal menu already sets, so a room appears on the map exactly when you have stood in it.
+
+The map is always scaled to the full extent of the world rather than to the part discovered so far. A map that re-centres itself as you explore is disorienting — a room you have seen should stay where you remember it, and the blank space around it honestly reads as "there is more out there".
+
 ### Pixel art instead of a drawn arc
 
 An attack can play authored frames rather than the procedural crescent. Register the sheet by **shape**, then point an attack at it:

@@ -24,6 +24,7 @@ import { Pickup } from '../actors/pickup';
 import { placeables, type PlaceableCtx } from '../content/placeables';
 import { validateRoomContent } from '../content/room-features';
 import { PauseScene } from './pause';
+import { MapScene } from './map';
 import { OptionsScene } from './options';
 import { SaveSlotsScene } from './saveslots';
 import { Background } from './background';
@@ -763,6 +764,15 @@ export class PlayScene implements Scene {
         this.setRoom(tr.roomId, tr.x, tr.y);
       }
       if (tr.t >= TRANSITION_TIME) this.transition = null;
+      return;
+    }
+
+    // World map: an overlay, so the run simply freezes behind it.
+    if (this.phase === 'play' && this.player && g.input.consumePress('map')) {
+      g.scenes.push(new MapScene(g, {
+        current: this.roomId,
+        explored: (id) => this.flags.has(`visited:${id}`),
+      }));
       return;
     }
 
