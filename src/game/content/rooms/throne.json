@@ -64,9 +64,7 @@
       "event": "door",
       "once": false,
       "props": {
-        "room": "cavern",
-        "x": 744,
-        "y": 200
+        "room": "cavern"
       }
     },
     {
@@ -89,8 +87,6 @@
       "once": false,
       "props": {
         "room": "town",
-        "x": 48,
-        "y": 216,
         "flag": "bossDefeated",
         "lockedText": "SEALED BY THE KING'S POWER"
       }
@@ -108,8 +104,8 @@
   "props": {
     "music": "depths",
     "map": {
-      "x": 2,
-      "y": 1
+      "x": 8,
+      "y": 2
     }
   }
 }

@@ -53,7 +53,7 @@
   "props": {
     "music": "depths",
     "map": {
-      "x": 3,
+      "x": 11,
       "y": 0
     }
   },
@@ -66,9 +66,7 @@
       "event": "door",
       "once": false,
       "props": {
-        "room": "town",
-        "x": 204,
-        "y": 168
+        "room": "town"
       }
     },
     {

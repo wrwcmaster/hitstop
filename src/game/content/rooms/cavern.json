@@ -109,9 +109,7 @@
       "event": "door",
       "once": false,
       "props": {
-        "room": "arena",
-        "x": 900,
-        "y": 200
+        "room": "arena"
       }
     },
     {
@@ -122,9 +120,7 @@
       "event": "door",
       "once": false,
       "props": {
-        "room": "throne",
-        "x": 40,
-        "y": 200
+        "room": "throne"
       }
     },
     {
@@ -155,17 +151,15 @@
       "event": "door",
       "once": false,
       "props": {
-        "room": "grotto",
-        "x": 60,
-        "y": 78
+        "room": "grotto"
       }
     }
   ],
   "props": {
     "music": "depths",
     "map": {
-      "x": 1,
-      "y": 1
+      "x": 4,
+      "y": 2
     }
   }
 }

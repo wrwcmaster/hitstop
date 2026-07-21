@@ -1,7 +1,7 @@
 import { Registry, conversations, items, type TriggerDef } from '@engine/index';
 import { COLORS } from '../../content/palette';
 import type { PlayHost } from './host';
-import { optionalFiniteNumber, optionalString, rejectUnknownProps, requireString } from '../../content/prop-validation';
+import { optionalString, rejectUnknownProps, requireString } from '../../content/prop-validation';
 
 /**
  * What each trigger `event` name means in the game. Room JSON stays pure
@@ -34,14 +34,15 @@ defineTriggerAction('talk', {
 
 defineTriggerAction('door', {
   validateProps(props, path) {
-    rejectUnknownProps(props, ['room', 'x', 'y', 'key', 'flag', 'lockedText'], path);
+    // No arrival coordinates: a door lands you at the destination's door
+    // back here, so the doorway has one definition instead of two that
+    // can disagree. See PlayScene.doorLanding.
+    rejectUnknownProps(props, ['room', 'key', 'flag', 'lockedText'], path);
     requireString(props, 'room', path);
     const key = optionalString(props, 'key', path);
     if (key && !items.has(key)) throw new Error(`${path}.key: unknown item "${key}"`);
     optionalString(props, 'flag', path);
     optionalString(props, 'lockedText', path);
-    optionalFiniteNumber(props, 'x', path);
-    optionalFiniteNumber(props, 'y', path);
   },
   run(def, host) {
     const props = def.props!;
@@ -59,7 +60,7 @@ defineTriggerAction('door', {
       host.game.sfx.play('denied');
       return;
     }
-    host.goToRoom(props.room as string, props.x as number | undefined, props.y as number | undefined);
+    host.goToRoom(props.room as string);
   },
 });
 

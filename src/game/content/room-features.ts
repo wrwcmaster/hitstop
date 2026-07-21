@@ -39,10 +39,15 @@ defineRoomFeature('gateKey', {
 });
 
 /**
- * Where this room sits on the world map, in grid cells: `{ x, y }` plus
- * an optional `w`/`h` span. A room that declares it appears on the map
- * screen; one that doesn't, doesn't — which is how the dev test room
- * stays off a player-facing screen with no special case anywhere.
+ * Where this room's top-left corner sits on the world map, in grid
+ * cells. A room that declares it appears on the map screen; one that
+ * doesn't, doesn't — which is how the dev test room stays off a
+ * player-facing screen with no special case anywhere.
+ *
+ * Only the position is authored. How many cells the room COVERS is
+ * derived from its actual tile dimensions (see content/worldmap.ts), so
+ * a hall that is four screens wide draws four cells wide without anyone
+ * maintaining a second number that could drift from the truth.
  */
 defineRoomFeature('map', {
   validate(value, _room, path) {
@@ -50,14 +55,13 @@ defineRoomFeature('map', {
       throw new Error(`${path}: expected an object like { x, y }`);
     }
     const cell = value as Record<string, unknown>;
+    for (const key of Object.keys(cell)) {
+      if (key !== 'x' && key !== 'y') {
+        throw new Error(`${path}.${key}: unexpected — a room's map span comes from its tile size, only { x, y } is authored`);
+      }
+    }
     for (const key of ['x', 'y']) {
       if (!Number.isInteger(cell[key])) throw new Error(`${path}.${key}: expected an integer cell coordinate`);
-    }
-    for (const key of ['w', 'h']) {
-      if (cell[key] === undefined) continue;
-      if (!Number.isInteger(cell[key]) || (cell[key] as number) < 1) {
-        throw new Error(`${path}.${key}: expected a positive integer cell span`);
-      }
     }
   },
 });

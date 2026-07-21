@@ -222,15 +222,33 @@ Beyond the four required fields, `trail` takes three optional ones that turn the
 
 ### Putting a room on the world map
 
-The map screen (M) draws every room that declares a placement, in grid cells:
+The map screen (M) draws every room that declares a placement — the position of its top-left corner, in grid cells:
 
 ```json
-"props": { "map": { "x": 3, "y": 1 } }
+"props": { "map": { "x": 11, "y": 2 } }
 ```
 
-`w`/`h` are optional and default to 1, so a large region can span several cells. A room that omits `map` never appears — which is how the dev test room stays off a player-facing screen without a special case anywhere.
+A room that omits `map` never appears, which is how the dev test room stays off a player-facing screen without a special case anywhere.
+
+**Only the position is authored.** How many cells a room covers is derived from its tile dimensions: one cell is one screenful (30x17 tiles), so a four-screen hall draws four cells wide and the map reads as a floor plan rather than a uniform flowchart. Resize the room and the map follows.
+
+The cost of deriving spans is that growing a room can push it into its neighbour, so overlapping placements throw at boot naming both rooms — the same bargain the rest of the content validation makes.
 
 **Connections are not authored.** Rooms already say how they join through their `door` triggers, so `content/worldmap.ts` derives the links from those: move a door and the map follows, with no second table to forget. Exploration reuses the `visited:<room>` flags the portal menu already sets, so a room appears on the map exactly when you have stood in it.
+
+### Doors join two rooms, not a room and a coordinate
+
+A `door` trigger names only where it leads:
+
+```json
+{ "event": "door", "x": 12, "y": 64, "w": 20, "h": 32, "props": { "room": "cavern" } }
+```
+
+Walking through lands you at the destination's own door **back here** (`PlayScene.doorLanding`), so the two triggers are two sides of one doorway. Turning round and walking back returns you to the spot you left, and neither end can drift from the other, because there is only one definition of where the doorway is. Arrival coordinates are not accepted — that was a second definition waiting to disagree with the first.
+
+Landing on the far trigger is safe: doors are interact-only and never fire on contact, so you arrive standing in the doorway rather than bouncing straight back.
+
+A door whose destination has no door home is a one-way drop; that falls back to the room's `playerSpawn`. Locks (`key`, `flag`, `lockedText`) are unchanged.
 
 The map is always scaled to the full extent of the world rather than to the part discovered so far. A map that re-centres itself as you explore is disorienting — a room you have seen should stay where you remember it, and the blank space around it honestly reads as "there is more out there".
 

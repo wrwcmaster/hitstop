@@ -543,12 +543,41 @@ export class PlayScene implements Scene {
   }
 
   /** Begin a fade transition into another room (door travel). */
+  /**
+   * Where you come out when you walk through a doorway into `toRoom`:
+   * at that room's own door back here. The two triggers stop being a
+   * warp to authored coordinates and become two sides of one doorway, so
+   * a door leads somewhere consistent, turning round and walking back
+   * returns you to the spot you left, and neither end can drift from the
+   * other. Same bargain portals already make by landing on the pad.
+   *
+   * Safe to land ON the trigger: doors are interact-only and never fire
+   * on contact, so you arrive standing in the doorway, not bounced
+   * straight back.
+   *
+   * Null when the far side has no door home (a one-way drop), leaving
+   * the caller to fall back to the room's own spawn.
+   */
+  private doorLanding(toRoom: string): { x: number; y: number } | null {
+    const back = ROOMS[toRoom]?.triggers?.find(
+      (tr) => tr.event === 'door' && tr.props?.room === this.roomId,
+    );
+    if (!back) return null;
+    const pw = this.player?.w ?? 14;
+    const ph = this.player?.h ?? 18;
+    return { x: back.x + back.w / 2 - pw / 2, y: back.y + back.h - ph };
+  }
+
   private goToRoom(roomId: string, x?: number, y?: number): void {
+    // Explicit coordinates win (portals pick their own pad); otherwise
+    // pair up with the doorway on the far side, then the room's spawn.
+    const land = x === undefined && y === undefined ? this.doorLanding(roomId) : null;
+    const spawn = this.roomById(roomId).playerSpawn;
     this.transition = {
       t: 0,
       roomId,
-      x: x ?? this.roomById(roomId).playerSpawn.x,
-      y: y ?? this.roomById(roomId).playerSpawn.y,
+      x: x ?? land?.x ?? spawn.x,
+      y: y ?? land?.y ?? spawn.y,
     };
     this.game.sfx.play('menuOpen');
   }

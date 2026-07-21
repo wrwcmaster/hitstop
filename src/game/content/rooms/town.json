@@ -73,8 +73,8 @@
   "props": {
     "music": "overworld",
     "map": {
-      "x": 3,
-      "y": 1
+      "x": 11,
+      "y": 2
     }
   },
   "triggers": [
@@ -86,9 +86,7 @@
       "event": "door",
       "once": false,
       "props": {
-        "room": "throne",
-        "x": 560,
-        "y": 216
+        "room": "throne"
       }
     },
     {
@@ -119,9 +117,7 @@
       "event": "door",
       "once": false,
       "props": {
-        "room": "vault",
-        "x": 48,
-        "y": 216
+        "room": "vault"
       }
     },
     {
@@ -132,9 +128,7 @@
       "event": "door",
       "once": false,
       "props": {
-        "room": "ramparts",
-        "x": 48,
-        "y": 170
+        "room": "ramparts"
       }
     }
   ]
