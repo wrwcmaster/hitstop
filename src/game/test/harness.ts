@@ -20,7 +20,7 @@ export const BOOT = bootReplay({ storagePrefix: STORAGE_PREFIX, pendingKey: REPL
 /** Every action an agent may drive (mirrors defs.ts). */
 const ACTIONS = [
   'left', 'right', 'up', 'down', 'jump', 'attack', 'dash',
-  'skill', 'skill2', 'skill3', 'parry', 'interact', 'confirm', 'cancel', 'menu',
+  'skill', 'skill2', 'skill3', 'parry', 'interact', 'confirm', 'cancel', 'menu', 'map',
 ] as const satisfies readonly Action[];
 
 /** What state() reports. Numbers are rounded so hashes are format-stable. */

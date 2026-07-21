@@ -127,6 +127,13 @@ export {
   type DialogueOptions,
 } from './ui/dialogue';
 export { Minimap, type MinimapMarker } from './ui/minimap';
+export {
+  drawWorldMap,
+  DEFAULT_WORLD_MAP_STYLE,
+  type WorldMapCell,
+  type WorldMapStyle,
+  type WorldMapOpts,
+} from './ui/worldmap';
 
 export { DebugOverlay } from './debug/overlay';
 
