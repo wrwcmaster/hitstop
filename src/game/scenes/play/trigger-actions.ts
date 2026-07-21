@@ -48,9 +48,11 @@ defineTriggerAction('door', {
     // No arrival coordinates: a door lands you at the destination's door
     // back here, so the doorway has one definition instead of two that
     // can disagree. See PlayScene.doorLanding.
-    rejectUnknownProps(props, ['room', 'key', 'flag', 'lockedText', 'bossSeal'], path);
-    if (props.bossSeal !== undefined && props.bossSeal !== true) {
-      throw new Error(`${path}.bossSeal: expected true or omitted`);
+    rejectUnknownProps(props, ['room', 'key', 'flag', 'lockedText', 'bossSeal', 'fallIn'], path);
+    for (const key of ['bossSeal', 'fallIn']) {
+      if (props[key] !== undefined && props[key] !== true) {
+        throw new Error(`${path}.${key}: expected true or omitted`);
+      }
     }
     requireString(props, 'room', path);
     const key = optionalString(props, 'key', path);
@@ -64,7 +66,7 @@ defineTriggerAction('door', {
    * barred one cannot nag, because triggers are edge-triggered — you get
    * one refusal per approach, not one per frame.
    */
-  autoFire: (def, host) => inOuterWall(def, host),
+  autoFire: (def, host) => inOuterWall(def, host) || fallingIn(def, host),
   run(def, host) {
     const props = def.props!;
     if (doorLocked(def, host)) {
@@ -98,6 +100,24 @@ function inOuterWall(def: TriggerDef, host: PlayHost): boolean {
   const roomW = Math.max(...room.tiles.map((r) => r.length)) * room.tileSize;
   const margin = room.tileSize * 3;
   return def.x <= margin || def.x + def.w >= roomW - margin;
+}
+
+/** Below this you are settling on a ledge; above it you are falling. */
+const FALLING = 40;
+
+/**
+ * A shaft you drop into — the town well — taken by falling, not by
+ * pressing a key.
+ *
+ * Opt-in per doorway (`fallIn`) rather than a blanket rule for every
+ * interior passage, and gated on actually DESCENDING. Walking over the
+ * mouth of a shaft while grounded leaves you standing on the lip; you go
+ * down it because you jumped in, which is the whole appeal of a well.
+ * The grotto shaft could take the same prop, but that one is a hole you
+ * cross a room past, so it stays a deliberate press for now.
+ */
+function fallingIn(def: TriggerDef, host: PlayHost): boolean {
+  return def.props?.fallIn === true && !!host.player && host.player.vy > FALLING;
 }
 
 /**

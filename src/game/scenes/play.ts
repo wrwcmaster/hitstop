@@ -586,7 +586,16 @@ export class PlayScene implements Scene {
     const roomW = Math.max(...dest.tiles.map((r) => r.length)) * dest.tileSize;
     const outward = back.x + back.w / 2 < roomW / 2 ? 1 : -1;
     const x = outward === 1 ? back.x + back.w + 2 : back.x - pw - 2;
-    return { x, y: back.y + back.h - ph };
+    const y = back.y + back.h - ph;
+    // Stepping out sideways assumes a doorway you walk through. A shaft
+    // you FALL down has no beside — the town well is two tiles wide with
+    // rock either side — so check before trusting it and let the caller
+    // fall back to the room's spawn rather than burying you in stone.
+    const map = buildTilemap(dest);
+    for (const s of map.solidsNear({ x, y, w: pw, h: ph })) {
+      if (!s.oneWay && x < s.x + s.w && s.x < x + pw && y < s.y + s.h && s.y < y + ph) return null;
+    }
+    return { x, y };
   }
 
   private goToRoom(roomId: string, x?: number, y?: number): void {
