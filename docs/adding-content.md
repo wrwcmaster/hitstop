@@ -220,6 +220,27 @@ Beyond the four required fields, `trail` takes three optional ones that turn the
 
 `sweep` exists because how fast a blade *looks* like it swept is not how long it can hit, and the plunge proves it: the move stays dangerous for its entire descent but is cut short by landing, so with the arc welded to the damage window a short drop only ever showed a sliver. Giving it `sweep: 0.16` forms the full crescent within a few frames, and it then rides beneath the knight for as long as she is falling. The arc holds at full brightness while the attack can still hit and fades once it is spent, so what is on screen matches what the hitbox is doing.
 
+### Pixel art instead of a drawn arc
+
+An attack can play authored frames rather than the procedural crescent. Register the sheet by **shape**, then point an attack at it:
+
+```ts
+const crescent = withFacing(load(slashCrescentJson).animSet());
+defineSlashVisual('crescent', {
+  frames: { right: crescent.right.slash.frames, left: crescent.left.slash.frames },
+  origin: { x: 12.5, y: -4 }, // arc pivot inside the sheet, pinned to the hand
+});
+
+// ...then on the attack:
+trail: { /* ...angles, radius, thickness... */ sweep: 0.16, sprite: 'crescent' },
+```
+
+Shape, not weapon, is the right key: a plunge and a dash want different art, while every sword can share one plunge. Mirroring is free (`withFacing` pre-flips, and the pivot flips with it), and frames advance on the same eased clock the procedural arc sweeps on — so `sweep` matters just as much here. A six-frame sheet spread across a plunge that ends on landing would otherwise never get past frame two.
+
+Leaving `sprite` off falls back to the procedural arc, and that fallback is the point: a new weapon looks right before anyone has drawn a single frame for it. Author art for the showpiece moves; let the rest ride the generated crescent.
+
+The committed `slash-crescent.json` was baked from the procedural arc's own geometry (same radius, angles and taper) so it dropped in without re-tuning. It is ordinary sprite rows — hand-edit it frame by frame like any other art here.
+
 For authored art, create a transparent weapon-only JSON sheet with `idle`/`run`/`air` frames aligned to the knight's world origin (optionally add `attack` frames), load it with `loadSprite` + `withFacing`, and register `spriteWeapon({ anims, origin?, anchors? })`. A sheet may be larger than the knight frame so long blades and attack arcs are not clipped. `spriteWeapon` also trims and fits the idle frame into the standard item-icon footprint, so the item can use `weaponIcon(visualId)` instead of duplicating art in `icons.json`. The built-in swords follow this route in `content/sprites/equipment/`; `scripts/generate-weapon-sheets.mjs` is their reproducible source. The sprite editor can refine the sheets, while the origin and anchors provide alignment corrections without adding weapon logic to Player.
 
 ## A ranged weapon (bow, gun) or ballistic attack

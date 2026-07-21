@@ -1,6 +1,6 @@
 import { Registry } from '@engine/index';
 import { COLORS } from './palette';
-import { weaponVisuals } from './weapon-visuals';
+import { weaponVisuals, slashVisuals } from './weapon-visuals';
 
 export interface WeaponHitboxDef {
   /** Gap from the player's front edge; negative values overlap the body. */
@@ -41,6 +41,14 @@ export interface WeaponTrailDef {
    * the first few frames or a short drop never shows one.
    */
   sweep?: number;
+  /**
+   * Id of an authored slash sheet (see `defineSlashVisual`) to play
+   * instead of drawing the arc procedurally. Registered by shape, not by
+   * weapon, so one crescent serves every sword. Omit it and the attack
+   * falls back to the procedural arc — which is why a new weapon still
+   * looks right before anyone has drawn a single frame for it.
+   */
+  sprite?: string;
 }
 
 export interface WeaponAttackDef {
@@ -200,7 +208,13 @@ export function defineWeaponType(id: string, def: WeaponTypeDef): void {
     if (attack.hitbox.w <= 0 || attack.hitbox.h <= 0) {
       throw new Error(`${path}.hitbox: width and height must be positive`);
     }
-    for (const [field, value] of Object.entries(attack.trail)) finite(value, `${path}.trail.${field}`);
+    for (const [field, value] of Object.entries(attack.trail)) {
+      if (field === 'sprite') continue; // the one non-numeric trail field
+      finite(value, `${path}.trail.${field}`);
+    }
+    if (attack.trail.sprite !== undefined && !slashVisuals.has(attack.trail.sprite)) {
+      throw new Error(`${path}.trail.sprite: unknown slash visual "${attack.trail.sprite}"`);
+    }
     if (attack.trail.radius <= 0 || attack.trail.thickness <= 0) {
       throw new Error(`${path}.trail: radius and thickness must be positive`);
     }
@@ -285,7 +299,7 @@ const contextuals = (p: { reach: number; arc: number; heft: number }) => ({
     // as long as the attack can actually pogo something.
     trail: {
       startAngle: 0.45, endAngle: 2.69, radius: p.reach * 0.8, thickness: 5,
-      bias: 0.5, glow: 1.8, sweep: 0.16,
+      bias: 0.5, glow: 1.8, sweep: 0.16, sprite: 'crescent',
     },
     movementKeep: 0.35,
     bodyWeight: 1.1,
