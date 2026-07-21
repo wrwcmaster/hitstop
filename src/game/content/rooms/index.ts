@@ -8,6 +8,8 @@ import vaultJson from './vault.json';
 import rampartsJson from './ramparts.json';
 import testRoomJson from './test_room.json';
 import corridorJson from './corridor.json';
+import mountainJson from './mountain.json';
+import undergroundJson from './underground.json';
 
 /**
  * The world's rooms, by id. Door triggers reference these ids
@@ -23,6 +25,8 @@ export const ROOMS: Record<string, RoomDef> = {
   ramparts: validateRoom(rampartsJson),
   test_room: validateRoom(testRoomJson),
   corridor: validateRoom(corridorJson),
+  mountain: validateRoom(mountainJson),
+  underground: validateRoom(undergroundJson),
 };
 
 export const START_ROOM = 'arena';

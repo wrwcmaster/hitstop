@@ -117,7 +117,7 @@
       "event": "door",
       "once": false,
       "props": {
-        "room": "vault"
+        "room": "mountain"
       }
     },
     {
@@ -128,7 +128,7 @@
       "event": "door",
       "once": false,
       "props": {
-        "room": "ramparts"
+        "room": "underground"
       }
     }
   ]
