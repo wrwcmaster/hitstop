@@ -575,8 +575,7 @@ function renderComposite(t: number): boolean {
   pctx.fillRect(0, fy, VW, 1);
 
   // The full player: everything Player.render owns — body-english,
-  // gear layers, held weapon, trail — posed at this progress. The trail
-  // toggle doesn't apply here; on the real knight the trail IS hers.
+  // gear layers, held weapon, trail — posed at this progress.
   if (bodySel === 'player') {
     const p = getPosePlayer();
     if (p) {
@@ -586,6 +585,7 @@ function renderComposite(t: number): boolean {
       ensureEquipped(p, 'armor', gearOn ? 'steel-armor' : null);
       p.facing = 1;
       p.animT = tIn;
+      p.renderTrail = ($('compTrail') as HTMLInputElement).checked;
       p.poseAttack(pose ? pose.def : null, pose ? pose.progress : 0);
       p.x = fx - p.w / 2;
       p.y = fy - p.h;

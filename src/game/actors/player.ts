@@ -533,6 +533,10 @@ export class Player extends Actor {
 
   /** Seconds left of the down+jump drop-through window (see update). */
   private dropT = 0;
+  /** Tooling knob (the sprite editor's composite preview): draw the
+   * attack trail? The game never clears it — in play the trail is part
+   * of the swing — but a posed knight can hold her art up without it. */
+  renderTrail = true;
 
   /**
    * Tooling seam: pose the knight mid-move without simulating her — the
@@ -1446,7 +1450,7 @@ export class Player extends Actor {
     g.restore();
     g.globalAlpha = 1;
 
-    if (this.fsm.is('attack')) {
+    if (this.fsm.is('attack') && this.renderTrail) {
       const weapon = this.weapon;
       drawWeaponTrail(g, weapon.visual, {
         x: cx,
