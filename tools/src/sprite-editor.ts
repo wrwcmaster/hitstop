@@ -591,7 +591,16 @@ function renderComposite(t: number): boolean {
   const wantKey = ($('compMove') as HTMLSelectElement).value;
   const move = candidates.find((m) => m.key === wantKey) ?? candidates[0];
   const atkDef = move?.def;
-  const moveTag = move ? ` [${move.label}]` : '';
+  // Long moves are time-compressed. The plunge's 0.9s duration is a
+  // MAXIMUM — in play the landing cuts it short — so previewed raw it
+  // is three-quarters of a second of nothing moving. Compression sweeps
+  // the full progress on a shorter wall clock; every trail and pose
+  // clock is a fraction of progress, so the whole move scales together.
+  // The label owns up to it with an xN tag.
+  const ATTACK_PREVIEW_CAP = 0.5;
+  const realDur = atkDef?.duration ?? 0;
+  const speedup = realDur > ATTACK_PREVIEW_CAP ? realDur / ATTACK_PREVIEW_CAP : 1;
+  const moveTag = move ? ` [${move.label}${speedup > 1 ? ` x${speedup.toFixed(1)}` : ''}]` : '';
   // When the previewed anim isn't one this weapon attacks WITH, say
   // where the attack lives instead of only that it's absent.
   const noAttackHint = atkDef
@@ -600,7 +609,7 @@ function renderComposite(t: number): boolean {
 
   const fps = a.fps || 1;
   const animCycle = a.frames.length / fps;
-  const dur = atkDef?.duration ?? 0;
+  const dur = Math.min(realDur, ATTACK_PREVIEW_CAP);
   const cycle = Math.max(animCycle, dur + 0.35);
   const tIn = t % cycle;
   const pose = atkDef && tIn <= dur
