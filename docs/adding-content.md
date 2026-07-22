@@ -277,7 +277,9 @@ A pair of doors can join two rooms **vertically** — the town well over the und
 { "event": "door", "x": 40, "y": 0, "w": 24, "h": 8, "props": { "room": "town", "leapUp": true } }
 ```
 
-Both fire only on genuine motion through them — falling for `fallIn`, rising for `leapUp` — and the landing rules change: you arrive **in** the far opening rather than beside it, and your velocity carries across the transition. Drop down the well and you emerge under the far ceiling still falling, to land on whatever the room put beneath the gap; jump up through the gap and the same jump lifts you out of the well's mouth. The room swap is a splice in one continuous arc, which is what makes the two rooms read as one place. Variable jump height carries too: release jump mid-seam and you get the short hop you asked for.
+Both fire only on genuine motion through them — falling for `fallIn`, rising for `leapUp` — and the landing rules change: you arrive **in** the far opening rather than beside it, and your velocity carries across the transition. Drop down the well and you emerge under the far ceiling still falling, to land on whatever the room put beneath the gap; jump up through the gap and the same jump lifts you out of the well's mouth. The room swap is a splice in one continuous arc, which is what makes the two rooms read as one place.
+
+An **upward** arc is not merely carried — it is guaranteed (`Player.launch`): vy is floored at full jump speed and the variable-jump cut stays off until the rise is spent. The seam fires at anything past the motion threshold, but a *tapped* jump crosses already cut to a fraction of full speed; carried faithfully, that remnant would rise a few pixels and drop the player into the well pit — the one spot in the room with no walk-out. However weak the jump that crossed, the exit leap is always a full one.
 
 Keep a `leapUp` trigger **thin** (the top row of the gap). Anything taller reaches down to where the player stands waiting to jump — and since triggers fire on entry, a trigger you are already inside has spent its edge before the jump begins.
 

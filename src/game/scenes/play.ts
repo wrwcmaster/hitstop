@@ -954,10 +954,10 @@ export class PlayScene implements Scene {
         this.setRoom(tr.roomId, tr.x, tr.y);
         // setRoom zeroes velocity for ordinary doors; a vertical seam
         // hands the arc back so the fall (or the jump) simply continues.
-        if (tr.carry && this.player) {
-          this.player.vx = tr.carry.vx;
-          this.player.vy = tr.carry.vy;
-        }
+        // launch() also guarantees an upward arc clears the far shaft —
+        // a tapped jump arrives pre-cut, and carried faithfully it would
+        // strand you in the well pit (see Player.launch).
+        if (tr.carry && this.player) this.player.launch(tr.carry.vx, tr.carry.vy);
       }
       if (tr.t >= TRANSITION_TIME) this.transition = null;
       return;
