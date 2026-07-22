@@ -426,8 +426,22 @@ function drawSlashTrail(g: CanvasRenderingContext2D, ctx: WeaponTrailCtx): void 
   g.restore();
 }
 
+/**
+ * Which authored frame a mid-attack weapon shows.
+ *
+ * Frames ride the same clock the trail draws itself on: a def that
+ * declares `trail.sweep` commits its whole visual early and then HOLDS
+ * the final frame. The plunge is why — its 0.9s duration is a maximum
+ * ended by landing, and spreading the sword's point-down rotation
+ * across it meant a knight falling off the mountain turned her blade
+ * in slow motion. Now the steel is committed within the first sixth,
+ * like the crescent beneath it, and the rest of the fall is the ride.
+ * Defs without `sweep` keep the full-duration mapping unchanged.
+ */
 function attackFrame(attack: WeaponAttackPose, frameCount: number): number {
-  const forward = Math.min(Math.floor(attack.progress * frameCount), frameCount - 1);
+  const sweepEnd = attack.def.trail.sweep ?? 1;
+  const visual = Math.min(1, attack.progress / sweepEnd);
+  const forward = Math.min(Math.floor(visual * frameCount), frameCount - 1);
   return attack.def.frameDirection === 1 ? forward : frameCount - 1 - forward;
 }
 
