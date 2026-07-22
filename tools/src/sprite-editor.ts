@@ -601,10 +601,14 @@ function renderComposite(t: number): boolean {
 
   const wdef = weapons.get(weaponId);
   const moves = movesOf(weaponId);
-  // Only moves whose animation is the one on screen are candidates; the
-  // selector picks among them (the sword's whole moveset shares
-  // 'attack'), and auto means the first — the opening combo swing.
-  const candidates = moves.filter((m) => m.def.animation === animName);
+  // A move is a candidate when its animation is the one on screen — or
+  // when its animation is MISSING from the sheet and the screen shows
+  // 'attack', the pattern it falls back to in game. So the base swing
+  // still previews every un-arted move via the selector, and a move
+  // gains its own art the moment its animation exists.
+  const sheetHas = (name: string) => !!weaponVisuals.get(wdef.visual).animations?.includes(name);
+  const candidates = moves.filter((m) =>
+    m.def.animation === animName || (animName === 'attack' && !sheetHas(m.def.animation)));
   const wantKey = ($('compMove') as HTMLSelectElement).value;
   const move = candidates.find((m) => m.key === wantKey) ?? candidates[0];
   const atkDef = move?.def;

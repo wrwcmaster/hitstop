@@ -133,8 +133,17 @@ export function spriteWeapon(config: SpriteWeaponConfig): WeaponVisual {
     animations: Object.keys(config.anims.right),
     drawHeld(g, ctx) {
       const set = ctx.facing === 1 ? config.anims.right : config.anims.left;
-      const attackAnim = ctx.attack ? set[ctx.attack.def.animation] : undefined;
-      const anim = attackAnim ? ctx.attack!.def.animation : ctx.anim;
+      // A move whose named animation isn't in the sheet falls back to
+      // the normal 'attack' pattern — so a sheet owes nothing beyond its
+      // base swing, and per-move art is pure opt-in. Anchors key off
+      // whichever animation actually drew.
+      let attackName = ctx.attack?.def.animation;
+      let attackAnim = attackName ? set[attackName] : undefined;
+      if (ctx.attack && !attackAnim) {
+        attackName = 'attack';
+        attackAnim = set.attack;
+      }
+      const anim = attackAnim ? attackName! : ctx.anim;
       const frame = attackAnim
         ? attackFrame(ctx.attack!, attackAnim.frames.length)
         : ctx.frame;

@@ -246,8 +246,13 @@ export function defineWeapon(id: string, def: Omit<WeaponDef, 'id'>): void {
   const visualAnimations = weaponVisuals.get(def.visual).animations;
   if (visualAnimations) {
     for (const attack of allAttacks(weaponTypes.get(def.type))) {
-      if (!visualAnimations.includes(attack.animation)) {
-        throw new Error(`weapon "${id}": visual "${def.visual}" has no "${attack.animation}" animation`);
+      // A move's own animation is opt-in art: absent, the visual falls
+      // back to the normal 'attack' pattern (see spriteWeapon), so a
+      // sheet only ever OWES its base swing.
+      if (!visualAnimations.includes(attack.animation) && !visualAnimations.includes('attack')) {
+        throw new Error(
+          `weapon "${id}": visual "${def.visual}" has neither "${attack.animation}" nor a fallback "attack" animation`,
+        );
       }
     }
   }
