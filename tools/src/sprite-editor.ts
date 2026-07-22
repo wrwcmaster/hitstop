@@ -558,11 +558,14 @@ function renderComposite(t: number): boolean {
 
   const bodySel = ($('compBody') as HTMLSelectElement).value;
 
-  // A fixed viewport around the feet origin: wide enough for the dash
-  // trail's full sweep, sized to sit crisply in the side panel.
-  const SCALE = 3;
-  const VW = 80, VH = 64;
-  const fx = VW / 2, fy = 50;
+  // Game parity: the game draws a world pixel at 8 screen px (ZOOM 4 x
+  // WORLD_ZOOM 2), and judging attack art at any other size is judging
+  // different art. The viewport is trimmed to what the widest swing (the
+  // dash trail, ~24px around the origin) actually needs, and the side
+  // panel widens while the composite is active to hold it.
+  const SCALE = 8;
+  const VW = 52, VH = 42;
+  const fx = VW / 2, fy = 34;
   preview.width = VW * SCALE;
   preview.height = VH * SCALE;
   pctx.imageSmoothingEnabled = false;
@@ -680,7 +683,11 @@ function renderPreview(): void {
   const p = pal();
   const t = performance.now() / 1000;
 
-  if (renderComposite(t)) {
+  const composite = renderComposite(t);
+  // Give the game-scale composite the panel width it needs; hand the
+  // space back the moment the weapon is deselected.
+  $('side-right').classList.toggle('wide', composite);
+  if (composite) {
     requestAnimationFrame(renderPreview);
     return;
   }

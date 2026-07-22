@@ -14,6 +14,9 @@
     header h1 { font-size: 14px; margin: 0 12px 0 0; color: #f4f4f4; }
     main { flex: 1; display: flex; min-height: 0; }
     #side-left, #side-right { width: 260px; padding: 10px; background: #101430; overflow-y: auto; flex-shrink: 0; }
+    /* The composite preview renders at the game's on-screen scale (8px
+       per world pixel), which needs more room than a sheet thumbnail. */
+    #side-right.wide { width: 452px; }
     #center { flex: 1; overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 20px; background: #07070d; }
     canvas { image-rendering: pixelated; }
     #grid { cursor: crosshair; border: 1px solid #33447f; }
