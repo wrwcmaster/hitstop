@@ -137,6 +137,7 @@ Pixel art for this game is rarely seen alone — an attack is the knight's body,
 - **body** — the sheet being edited, the raw knight sheet, or **player (full)**: a real `Player` instance posed via `Player.poseAttack`, so the composite is the actual in-game knight — attack body-english (lean, shear), gear layers, held weapon and trail, all from `Player.render` itself. She is constructed against no-op stand-ins for the game and tilemap; posing draws, it never simulates. Loading a weapon sheet (`equipment/*.json`) selects this automatically — the view you want when touching up a sword's attack frames.
 - **gear (helmet + plate)** — equips the iron helmet and steel armor on the full player, so you can check art against the armored silhouette too.
 - **live re-bake** — while a weapon sheet is being edited, every stroke re-bakes it into its registered visual (via `rebuildSpriteWeapon`), so the composite shows your edits in the knight's hand as you paint. The art swaps; the origins and anchors stay.
+- **attack hitbox** — draws the move's hit region, placed by the same rules as Player.attackBox: a dim outline while merely placed, red while the active window makes it able to hit. The one view where art, trail and hitbox can disagree in front of you.
 - **attack trail** — toggles the slash effect, on the full player too (a tooling-only knob on Player; the game itself never hides a swing's trail).
 
 Pick `-- no weapon --` to return to the plain preview.

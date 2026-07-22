@@ -571,6 +571,41 @@ function rebuildMoveSelect(weaponId: string): void {
   if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
 }
 
+/**
+ * The attack hitbox overlay: dim while the box is merely placed, red
+ * while the `active` window makes it real. Placement mirrors
+ * Player.attackBox exactly — forward aims off the body's front edge
+ * (facing right here), down off the feet, up off the head — so what the
+ * panel shows is where the game would actually hit.
+ */
+function drawAttackBox(
+  g: CanvasRenderingContext2D,
+  def: ReturnType<typeof allAttacks>[number],
+  body: { x: number; y: number; w: number; h: number },
+  progress: number,
+): void {
+  const hb = def.hitbox;
+  const aim = def.aim ?? 'forward';
+  const cx = body.x + body.w / 2;
+  const rect = aim === 'down'
+    ? { x: cx - hb.w / 2, y: body.y + body.h + hb.forward, w: hb.w, h: hb.h }
+    : aim === 'up'
+      ? { x: cx - hb.w / 2, y: body.y - hb.forward - hb.h, w: hb.w, h: hb.h }
+      : { x: body.x + body.w + hb.forward, y: body.y + body.h / 2 - hb.h / 2 + hb.y, w: hb.w, h: hb.h };
+  const live = progress > def.active[0] && progress < def.active[1];
+  g.save();
+  g.strokeStyle = live ? '#ff4444' : '#566c86';
+  g.globalAlpha = live ? 0.9 : 0.45;
+  g.lineWidth = 0.5;
+  g.strokeRect(rect.x + 0.25, rect.y + 0.25, rect.w - 0.5, rect.h - 0.5);
+  if (live) {
+    g.fillStyle = '#ff4444';
+    g.globalAlpha = 0.15;
+    g.fillRect(rect.x, rect.y, rect.w, rect.h);
+  }
+  g.restore();
+}
+
 /** Equip exactly `id` in `slot`, adding to the bag on first use. */
 function ensureEquipped(p: Player, slot: string, id: string | null): void {
   if (p.equipment.get(slot) === id) return;
@@ -678,6 +713,10 @@ function renderComposite(t: number): boolean {
       } catch (e) {
         posePlayerError = String(e);
       }
+      // The player's own box math is the truth; draw straight from it.
+      if (pose && ($('compHitbox') as HTMLInputElement).checked) {
+        drawAttackBox(pctx, pose.def, { x: p.x, y: p.y, w: p.w, h: p.h }, pose.progress);
+      }
       pctx.restore();
       pctx.fillStyle = '#ffcd75';
       pctx.font = '11px monospace';
@@ -747,6 +786,11 @@ function renderComposite(t: number): boolean {
         colors: [...wdef.colors], attack: pose,
       });
     } catch { /* ditto */ }
+  }
+  // dw/dh are the sprite's DECLARED physical dims (see above), which is
+  // the body the game's box math would use.
+  if (pose && ($('compHitbox') as HTMLInputElement).checked) {
+    drawAttackBox(pctx, pose.def, { x: fx - dw / 2, y: fy - dh, w: dw, h: dh }, pose.progress);
   }
   pctx.restore();
 
