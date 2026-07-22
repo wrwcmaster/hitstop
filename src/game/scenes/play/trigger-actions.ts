@@ -48,8 +48,8 @@ defineTriggerAction('door', {
     // No arrival coordinates: a door lands you at the destination's door
     // back here, so the doorway has one definition instead of two that
     // can disagree. See PlayScene.doorLanding.
-    rejectUnknownProps(props, ['room', 'key', 'flag', 'lockedText', 'bossSeal', 'fallIn'], path);
-    for (const key of ['bossSeal', 'fallIn']) {
+    rejectUnknownProps(props, ['room', 'key', 'flag', 'lockedText', 'bossSeal', 'fallIn', 'leapUp'], path);
+    for (const key of ['bossSeal', 'fallIn', 'leapUp']) {
       if (props[key] !== undefined && props[key] !== true) {
         throw new Error(`${path}.${key}: expected true or omitted`);
       }
@@ -66,7 +66,7 @@ defineTriggerAction('door', {
    * barred one cannot nag, because triggers are edge-triggered — you get
    * one refusal per approach, not one per frame.
    */
-  autoFire: (def, host) => inOuterWall(def, host) || fallingIn(def, host),
+  autoFire: (def, host) => inOuterWall(def, host) || fallingIn(def, host) || leapingUp(def, host),
   run(def, host) {
     const props = def.props!;
     if (doorLocked(def, host)) {
@@ -118,6 +118,16 @@ const FALLING = 40;
  */
 function fallingIn(def: TriggerDef, host: PlayHost): boolean {
   return def.props?.fallIn === true && !!host.player && host.player.vy > FALLING;
+}
+
+/**
+ * The other half of a vertical seam: a gap in the ceiling you jump up
+ * through — how you leave the underground by the same well you dropped
+ * down. Same shape as `fallIn`, opposite direction, and equally gated on
+ * genuine motion so brushing the opening never counts.
+ */
+function leapingUp(def: TriggerDef, host: PlayHost): boolean {
+  return def.props?.leapUp === true && !!host.player && host.player.vy < -FALLING;
 }
 
 /**

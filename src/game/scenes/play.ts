@@ -59,6 +59,8 @@ interface Transition {
    * nothing to open.
    */
   open?: { left: number; x: number; y: number; w: number; h: number };
+  /** Velocity to restore on arrival — a vertical seam keeps your arc. */
+  carry?: { vx: number; vy: number };
 }
 
 const TRANSITION_TIME = 0.6;
@@ -570,7 +572,7 @@ export class PlayScene implements Scene {
    * Null when the far side has no door home (a one-way drop), leaving
    * the caller to fall back to the room's own spawn.
    */
-  private doorLanding(toRoom: string): { x: number; y: number } | null {
+  private doorLanding(toRoom: string): { x: number; y: number; carry?: boolean } | null {
     const dest = ROOMS[toRoom];
     const back = dest?.triggers?.find(
       (tr) => tr.event === 'door' && tr.props?.room === this.roomId,
@@ -578,6 +580,21 @@ export class PlayScene implements Scene {
     if (!back) return null;
     const pw = this.player?.w ?? 14;
     const ph = this.player?.h ?? 18;
+    // A VERTICAL seam — a shaft marked fallIn/leapUp on the far side —
+    // is entered along its axis, not from beside. You arrive IN the
+    // opening, and `carry` keeps your velocity through the transition:
+    // fall down the well and you emerge under the far ceiling still
+    // falling; jump up it and the same jump lifts you out of the well's
+    // mouth on the other side. The room swap becomes a splice in one
+    // continuous arc, which is what makes it read as one place.
+    if (back.props?.leapUp === true) {
+      // Their ceiling gap: appear just below it, still falling.
+      return { x: back.x + back.w / 2 - pw / 2, y: back.y + back.h, carry: true };
+    }
+    if (back.props?.fallIn === true) {
+      // Their floor shaft: appear at its foot, still rising.
+      return { x: back.x + back.w / 2 - pw / 2, y: back.y + back.h - ph, carry: true };
+    }
     // Step OUT of the doorway, not into it. Landing on the trigger was
     // fine while doors waited for interact, but an open doorway now
     // fires on contact — arriving inside one would throw you straight
@@ -609,6 +626,9 @@ export class PlayScene implements Scene {
       x: x ?? land?.x ?? spawn.x,
       y: y ?? land?.y ?? spawn.y,
       open: this.doorwayArt(roomId) ?? undefined,
+      // Vertical seams splice the player's arc across rooms, so capture
+      // the velocity at the moment of crossing (setRoom zeroes it).
+      carry: land?.carry && this.player ? { vx: this.player.vx, vy: this.player.vy } : undefined,
     };
     this.game.sfx.play(this.transition.open ? 'unlock' : 'menuOpen');
   }
@@ -932,6 +952,12 @@ export class PlayScene implements Scene {
       tr.t += dt;
       if (before < TRANSITION_TIME / 2 && tr.t >= TRANSITION_TIME / 2) {
         this.setRoom(tr.roomId, tr.x, tr.y);
+        // setRoom zeroes velocity for ordinary doors; a vertical seam
+        // hands the arc back so the fall (or the jump) simply continues.
+        if (tr.carry && this.player) {
+          this.player.vx = tr.carry.vx;
+          this.player.vy = tr.carry.vy;
+        }
       }
       if (tr.t >= TRANSITION_TIME) this.transition = null;
       return;

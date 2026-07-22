@@ -266,6 +266,21 @@ The interior exception matters more than it sounds. The shaft down to the grotto
 
 A trigger action decides this for itself via `TriggerAction.autoFire`, asked fresh every time because the answer changes mid-room: a barred door becomes a walk-through gap the instant you pick up its key.
 
+### Vertical seams: wells and ceiling gaps
+
+A pair of doors can join two rooms **vertically** — the town well over the underground's ceiling gap. Mark the floor side `fallIn` and the ceiling side `leapUp`:
+
+```json
+// town: a shaft in the floor
+{ "event": "door", "x": 200, "y": 240, "w": 32, "h": 16, "props": { "room": "underground", "fallIn": true } }
+// underground: the gap in the ceiling above it
+{ "event": "door", "x": 40, "y": 0, "w": 24, "h": 8, "props": { "room": "town", "leapUp": true } }
+```
+
+Both fire only on genuine motion through them — falling for `fallIn`, rising for `leapUp` — and the landing rules change: you arrive **in** the far opening rather than beside it, and your velocity carries across the transition. Drop down the well and you emerge under the far ceiling still falling, to land on whatever the room put beneath the gap; jump up through the gap and the same jump lifts you out of the well's mouth. The room swap is a splice in one continuous arc, which is what makes the two rooms read as one place. Variable jump height carries too: release jump mid-seam and you get the short hop you asked for.
+
+Keep a `leapUp` trigger **thin** (the top row of the gap). Anything taller reaches down to where the player stands waiting to jump — and since triggers fire on entry, a trigger you are already inside has spent its edge before the jump begins.
+
 ### Sealing a boss in
 
 Give a boss room's doors `"bossSeal": true` and they lock while any boss in the room draws breath, opening the instant he doesn't:
