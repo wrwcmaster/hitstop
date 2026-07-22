@@ -280,7 +280,11 @@ const attack = (
  */
 const contextuals = (p: { reach: number; arc: number; heft: number }) => ({
   // Jump attack: a quick mid-air swipe that keeps your momentum.
+  // Every contextual names its OWN animation. Sheets satisfy a slot
+  // with real frames or a one-line alias ("plunge": "attack"), so each
+  // move can grow distinct art without any sheet paying up front.
   aerial: attack({
+    animation: 'aerial',
     duration: 0.15, active: [0.1, 0.55], damageScale: 1, strength: 0.4 * p.heft, lunge: 0,
     hitbox: { forward: -2, y: 0, w: p.reach, h: p.arc },
     trail: { startAngle: -1.2, endAngle: 1.2, radius: p.reach * 0.65, thickness: 3 },
@@ -290,6 +294,7 @@ const contextuals = (p: { reach: number; arc: number; heft: number }) => ({
   // Down attack: point the steel at the ground and ride gravity. A hit
   // pogos the knight back into the air with her dash and jumps refreshed.
   plunge: attack({
+    animation: 'plunge',
     duration: 0.9, active: [0.06, 1], damageScale: 1.3 * p.heft, strength: 0.7 * p.heft, lunge: 0,
     aim: 'down', pogo: 250,
     hitbox: { forward: -3, y: 0, w: p.arc + 6, h: 13 },
@@ -306,6 +311,7 @@ const contextuals = (p: { reach: number; arc: number; heft: number }) => ({
   }),
   // Up attack: the anti-air arc for bats and anything overhead.
   upper: attack({
+    animation: 'upper',
     duration: 0.16, active: [0.1, 0.55], damageScale: 1, strength: 0.45 * p.heft, lunge: 0,
     aim: 'up',
     hitbox: { forward: -3, y: 0, w: p.reach, h: 13 },
@@ -314,6 +320,7 @@ const contextuals = (p: { reach: number; arc: number; heft: number }) => ({
   }),
   // Dash attack: steel follows speed — a committed thrust out of the dash.
   dashAttack: attack({
+    animation: 'dash',
     duration: 0.2, active: [0.05, 0.6], damageScale: 1.5 * p.heft, strength: 0.8, lunge: 120,
     hitbox: { forward: 0, y: 0, w: p.reach + 8, h: p.arc - 2 },
     // The showpiece: a near-half-circle from overhead down past her
@@ -360,6 +367,7 @@ defineWeaponType('sword', {
       trail: { startAngle: -1.3, endAngle: 1.3, radius: 13, thickness: 3.5 },
     }),
     attack({
+      animation: 'attack2',
       duration: 0.17, active: [0.14, 0.56], damageScale: 1, strength: 0.46, lunge: 50,
       hitbox: { forward: -2, y: -1, w: 20, h: 17 },
       trail: { startAngle: 1.3, endAngle: -1.3, radius: 14, thickness: 3.5 },
@@ -367,6 +375,7 @@ defineWeaponType('sword', {
       lift: 3,
     }),
     attack({
+      animation: 'attack3',
       duration: 0.25, active: [0.22, 0.62], damageScale: 2, strength: 0.8, lunge: 110,
       hitbox: { forward: -2, y: -1, w: 26, h: 20 },
       trail: { startAngle: -1.35, endAngle: 1.35, radius: 17, thickness: 5 },
@@ -392,6 +401,7 @@ defineWeaponType('great-sword', {
       movementKeep: 0.0002,
     }),
     attack({
+      animation: 'attack2',
       duration: 0.46, active: [0.38, 0.7], damageScale: 2, strength: 1.15, lunge: 80,
       hitbox: { forward: -3, y: -2, w: 36, h: 27 },
       trail: { startAngle: -1.4, endAngle: 1.35, radius: 24, thickness: 8 },

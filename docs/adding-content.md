@@ -210,6 +210,13 @@ defineItem<ItemCtx>('dagger', {
 
 No player-code changes: combo length, timing, damage windows, range, lunge, feel strength, body motion, slash colors, held art, and attack trail flow from the registries. Stat bonuses (`mods: { add: { attack: 20 } }`) stack on top. `unarmed` is registered through the same path rather than handled as a fallback special case.
 
+### One sprite per move
+
+Every move in a weapon's moveset names its own sheet animation — the combo swings ('attack', 'attack2', 'attack3') and the contextuals ('aerial', 'plunge', 'upper', 'dash'). A sheet satisfies a slot with real frames, or with a one-line **alias**:
+
+\
+Aliases are zero bytes of art and resolve at load (a dangling alias or a cycle throws with the chain spelled out), so a sheet never pays for duplicate frames — each move's art arrives whenever an artist gets to it, and the rusty sword's plunge is the shipped example: a committed point-down thrust instead of a borrowed swing. In the sprite editor an alias shows as  and editing under it edits its target; the composite panel is where per-move art is judged, posed on the full player with the move's own trail.
+
 ### Shaping an attack trail
 
 Beyond the four required fields, `trail` takes three optional ones that turn the same renderer into very different swings:

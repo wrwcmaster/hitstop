@@ -38,7 +38,34 @@ export interface SpriteFile extends SpriteGeometry {
   palette?: Palette;
   /** EPX-upscale twice (4x) at load. Default true. */
   hd?: boolean;
-  anims: Record<string, SpriteAnimData>;
+  /**
+   * An animation is authored frames — or a STRING naming another
+   * animation in this file to borrow wholesale. Aliases are what let a
+   * moveset demand its own animation per move ("plunge", "upper"...)
+   * without every sheet paying for duplicate frames on day one:
+   * `"plunge": "attack"` is one line and zero bytes of art, and a real
+   * `plunge` animation replaces it whenever an artist gets there.
+   */
+  anims: Record<string, SpriteAnimData | string>;
+}
+
+/**
+ * Follow an anim entry to authored frames. A dangling alias or a cycle
+ * is a content bug and throws with the chain spelled out.
+ */
+export function resolveAnim(file: SpriteFile, name: string): SpriteAnimData | undefined {
+  const chain: string[] = [name];
+  let entry = file.anims[name];
+  while (typeof entry === 'string') {
+    chain.push(entry);
+    if (chain.length > 8 || chain.slice(0, -1).includes(entry)) {
+      throw new Error(`sprite anim alias cycle: ${chain.join(' -> ')}`);
+    }
+    const next: SpriteAnimData | string | undefined = file.anims[entry];
+    if (next === undefined) throw new Error(`sprite anim alias to nowhere: ${chain.join(' -> ')}`);
+    entry = next;
+  }
+  return entry;
 }
 
 export interface LoadedSprite {
@@ -103,19 +130,27 @@ export function loadSprite(file: SpriteFile, base: Palette = {}): LoadedSprite {
 
   // `hd: false` means the grid is already authored at the engine's 4x
   // texel density, so its natural logical size is one quarter of the grid.
-  const firstAnim = Object.values(file.anims)[0];
+  const firstAnim = resolveAnim(file, Object.keys(file.anims)[0]);
   const firstFrame = firstAnim?.frames[0] ?? [];
   const cellH = firstFrame.length || 1;
   const cellW = Math.max(1, ...firstFrame.map((row) => row.length));
   const density = file.hd === false ? 4 : 1;
   const geometry = resolveSpriteGeometry(file, cellW / density, cellH / density);
 
+  // Aliases cache under their TARGET's name, so "plunge": "attack"
+  // costs no second bake of the same frames.
   const cache = new Map<string, HTMLCanvasElement[]>();
   const framesOf = (name: string): HTMLCanvasElement[] => {
-    let baked = cache.get(name);
+    let target = name;
+    let entry = file.anims[name];
+    while (typeof entry === 'string') {
+      target = entry;
+      entry = file.anims[entry];
+    }
+    let baked = cache.get(target);
     if (!baked) {
-      baked = (file.anims[name]?.frames ?? []).map(bake);
-      cache.set(name, baked);
+      baked = (resolveAnim(file, name)?.frames ?? []).map(bake);
+      cache.set(target, baked);
     }
     return baked;
   };
@@ -127,7 +162,9 @@ export function loadSprite(file: SpriteFile, base: Palette = {}): LoadedSprite {
     names: () => Object.keys(file.anims),
     animSet: () => {
       const set: AnimSet = {};
-      for (const [name, a] of Object.entries(file.anims)) {
+      for (const name of Object.keys(file.anims)) {
+        const a = resolveAnim(file, name);
+        if (!a) continue;
         set[name] = { frames: framesOf(name), fps: a.fps, loop: a.loop };
       }
       return set;
