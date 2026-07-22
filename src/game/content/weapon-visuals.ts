@@ -426,8 +426,22 @@ function drawSlashTrail(g: CanvasRenderingContext2D, ctx: WeaponTrailCtx): void 
   g.restore();
 }
 
+/**
+ * Which authored frame a mid-attack weapon shows.
+ *
+ * Frames ride the same clock the trail draws itself on: a def that
+ * declares `trail.sweep` commits its whole visual early and then HOLDS
+ * the final frame. The plunge is why — its 0.9s duration is a maximum
+ * ended by landing, and spreading the sword's point-down rotation
+ * across it meant a knight falling off the mountain turned her blade
+ * in slow motion. Now the steel is committed within the first sixth,
+ * like the crescent beneath it, and the rest of the fall is the ride.
+ * Defs without `sweep` keep the full-duration mapping unchanged.
+ */
 function attackFrame(attack: WeaponAttackPose, frameCount: number): number {
-  const forward = Math.min(Math.floor(attack.progress * frameCount), frameCount - 1);
+  const sweepEnd = attack.def.trail.sweep ?? 1;
+  const visual = Math.min(1, attack.progress / sweepEnd);
+  const forward = Math.min(Math.floor(visual * frameCount), frameCount - 1);
   return attack.def.frameDirection === 1 ? forward : frameCount - 1 - forward;
 }
 
@@ -453,15 +467,39 @@ defineSlashVisual('crescent', {
   origin: { x: 12.5, y: -4 },
 });
 
-defineWeaponVisual('rusty-sword', spriteWeapon({
-  anims: withFacing(load(rustySwordJson).animSet()),
-  origin: { x: 16, y: 16 },
-}));
+/**
+ * Sprite-backed weapons register through here so their non-art config
+ * (origins, anchors, trail flag) is kept, which is what lets the sprite
+ * editor re-bake a visual from an edited sheet and see it composited on
+ * the knight immediately — the art swaps, the fit stays.
+ */
+const spriteWeaponConfigs = new Map<string, Omit<SpriteWeaponConfig, 'anims'>>();
 
-defineWeaponVisual('great-sword', spriteWeapon({
-  anims: withFacing(load(greatSwordJson).animSet()),
+function defineSpriteWeapon(id: string, file: unknown, config: Omit<SpriteWeaponConfig, 'anims'>): void {
+  spriteWeaponConfigs.set(id, config);
+  defineWeaponVisual(id, spriteWeapon({ ...config, anims: withFacing(load(file).animSet()) }));
+}
+
+/**
+ * Editor seam: re-bake a sprite weapon's visual from an in-memory sheet
+ * (the sprite editor's working copy). Returns false when `id` isn't a
+ * sprite-backed weapon — procedural visuals have no sheet to swap.
+ * Deliberate override, so it uses the registry's replace().
+ */
+export function rebuildSpriteWeapon(id: string, file: SpriteFile): boolean {
+  const config = spriteWeaponConfigs.get(id);
+  if (!config) return false;
+  weaponVisuals.replace(id, spriteWeapon({ ...config, anims: withFacing(loadSprite(file, PAL).animSet()) }));
+  return true;
+}
+
+defineSpriteWeapon('rusty-sword', rustySwordJson, {
   origin: { x: 16, y: 16 },
-}));
+});
+
+defineSpriteWeapon('great-sword', greatSwordJson, {
+  origin: { x: 16, y: 16 },
+});
 
 /* ---- ranged visuals: procedural bow + flintlock ---- */
 

@@ -2,6 +2,30 @@
 
 import { resolveSpriteGeometry, sprite, epx, type Palette, type SpriteFile } from '@engine/index';
 import { PAL } from '@game/content/palette';
+// Composite preview: the editor borrows the GAME's renderers rather than
+// imitating them, so what you see here — held weapon anchored to the
+// body, slash trail sweeping on the attack clock — is exactly what the
+// game draws. The weapon anchors and the trail are code, not sprites;
+// no sprite-only overlay could show this truthfully.
+import {
+  drawHeldWeapon,
+  drawWeaponTrail,
+  weaponVisuals,
+  rebuildSpriteWeapon,
+} from '@game/content/weapon-visuals';
+import { weapons, weaponTypeOf, allAttacks } from '@game/content/weapons';
+import { KNIGHT_ANIMS, baseKnight } from '@game/content/sprites';
+// The "player (full)" body drives a REAL Player — body-english, gear
+// layers, held weapon and trail all come from Player.render, posed via
+// its poseAttack seam. Content self-registers on import (the game's
+// register*() functions are empty bodies that exist to force imports),
+// so pulling in items and classes here fills every registry the
+// constructor touches.
+import { Player } from '@game/actors/player';
+import '@game/content/items';
+import '@game/content/classes';
+import '@game/content/skills';
+import '@game/content/skilltree';
 
 /**
  * Sprite editor for the engine's per-sprite JSON format
@@ -430,10 +454,303 @@ function redraw(): void {
   }
 }
 
+/* ---------------- composite preview ---------------- */
+
+/**
+ * Bumped whenever `file` changes (paint, undo, load...). The composite
+ * re-bakes an edited weapon sheet into its registered visual lazily —
+ * only when this moves — so painting stays cheap.
+ */
+let editVersion = 0;
+let rebuiltVersion = -1;
+
+function maybeRebakeEditedWeapon(): void {
+  if (rebuiltVersion === editVersion) return;
+  rebuiltVersion = editVersion;
+  // "rusty-sword.json" -> visual id "rusty-sword"; a no-op for sheets
+  // that aren't a registered sprite weapon.
+  rebuildSpriteWeapon(currentFileName.replace(/\.json$/, ''), file);
+}
+
+/**
+ * A knight to pose. She is constructed against no-op stand-ins for the
+ * game and the tilemap: render() and poseAttack() draw and place — they
+ * never simulate — so the only surfaces touched are the ones stubbed.
+ * Built lazily and kept, so equipping gear or swapping weapons persists
+ * between frames like it would in play.
+ */
+let posePlayer: Player | null = null;
+let posePlayerError = '';
+
+function getPosePlayer(): Player | null {
+  if (posePlayer || posePlayerError) return posePlayer;
+  try {
+    const noop = () => {};
+    const stubSfx = { play: noop };
+    const stubGame = {
+      input: { held: () => false, pressed: () => false, consumePress: () => false, axis: () => 0 },
+      sfx: stubSfx,
+      feel: { text: noop, impact: noop, shake: noop, sfx: stubSfx, particles: { burst: noop, clear: noop } },
+      events: { emit: noop, on: () => noop },
+      world: { actors: () => [], all: () => [], spawn: (e: unknown) => e },
+      // beginAttack opens a strike on state entry; a hit-nothing stub.
+      combat: { strike: () => ({ apply: () => [] }), hit: noop },
+      camera: { x: 0, y: 0 },
+    } as unknown as ConstructorParameters<typeof Player>[0];
+    const stubCollision = {
+      tileSize: 8,
+      worldW: 10000,
+      worldH: 10000,
+      bounds: { x: 0, y: 0, w: 10000, h: 10000 },
+      *solidsNear() { /* nothing to collide with */ },
+      waterAt: () => false,
+      submersion: () => 0,
+      hazardAt: () => 0,
+      groundY: () => 10000,
+      tileAt: () => '',
+    } as unknown as ConstructorParameters<typeof Player>[1];
+    posePlayer = new Player(stubGame, stubCollision, 0, 0);
+  } catch (e) {
+    posePlayerError = String(e);
+  }
+  return posePlayer;
+}
+
+/**
+ * A weapon's moveset, labeled the way a player thinks of it. The combo
+ * swings and every contextual move usually share ONE sheet animation
+ * ('attack'), differing in trail, timing, aim and body motion — which is
+ * exactly why the composite needs a selector: the sheet alone cannot say
+ * which move you are looking at.
+ */
+function movesOf(weaponId: string): { key: string; label: string; def: ReturnType<typeof allAttacks>[number] }[] {
+  const type = weaponTypeOf(weapons.get(weaponId));
+  const out: { key: string; label: string; def: ReturnType<typeof allAttacks>[number] }[] = [];
+  type.attacks.forEach((def, i) => out.push({ key: `combo${i}`, label: `combo ${i + 1}`, def }));
+  for (const key of ['aerial', 'plunge', 'upper', 'dashAttack'] as const) {
+    const def = type[key];
+    if (def) out.push({ key, label: key === 'dashAttack' ? 'dash' : key, def });
+  }
+  return out;
+}
+
+/** Refill the move selector for the chosen weapon, keeping a still-valid
+ * selection where possible. */
+function rebuildMoveSelect(weaponId: string): void {
+  const sel = $('compMove') as HTMLSelectElement;
+  const prev = sel.value;
+  sel.innerHTML = '';
+  const auto = document.createElement('option');
+  auto.value = '';
+  auto.textContent = 'move: auto';
+  sel.appendChild(auto);
+  if (!weaponId || !weapons.has(weaponId)) return;
+  for (const m of movesOf(weaponId)) {
+    const o = document.createElement('option');
+    o.value = m.key;
+    o.textContent = `move: ${m.label}`;
+    sel.appendChild(o);
+  }
+  if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
+}
+
+/** Equip exactly `id` in `slot`, adding to the bag on first use. */
+function ensureEquipped(p: Player, slot: string, id: string | null): void {
+  if (p.equipment.get(slot) === id) return;
+  if (id === null) {
+    p.equipment.unequip(slot);
+  } else {
+    if (!p.inventory.has(id)) p.inventory.add(id);
+    p.equipment.equip(id);
+  }
+  p.syncStats();
+}
+
+/**
+ * The joint view: body + held weapon + attack trail on one clock,
+ * drawn by the same code the game uses (see Player.render — body at a
+ * feet origin, weapon inside that transform, trail in world space).
+ *
+ * One cycle = the attack's real duration plus a beat of hold, or the
+ * animation's own length if that is longer, so the trail sweeps at its
+ * true speed and you still get a readable pause between swings.
+ */
+function renderComposite(t: number): boolean {
+  const weaponId = ($('compWeapon') as HTMLSelectElement).value;
+  if (!weaponId || !weapons.has(weaponId)) return false;
+  const a = anim();
+  if (!a || !a.frames.length) return false;
+  maybeRebakeEditedWeapon();
+
+  const wdef = weapons.get(weaponId);
+  const moves = movesOf(weaponId);
+  // Only moves whose animation is the one on screen are candidates; the
+  // selector picks among them (the sword's whole moveset shares
+  // 'attack'), and auto means the first — the opening combo swing.
+  const candidates = moves.filter((m) => m.def.animation === animName);
+  const wantKey = ($('compMove') as HTMLSelectElement).value;
+  const move = candidates.find((m) => m.key === wantKey) ?? candidates[0];
+  const atkDef = move?.def;
+  // Long moves are time-compressed. The plunge's 0.9s duration is a
+  // MAXIMUM — in play the landing cuts it short — so previewed raw it
+  // is three-quarters of a second of nothing moving. Compression sweeps
+  // the full progress on a shorter wall clock; every trail and pose
+  // clock is a fraction of progress, so the whole move scales together.
+  // The label owns up to it with an xN tag.
+  const ATTACK_PREVIEW_CAP = 0.5;
+  const realDur = atkDef?.duration ?? 0;
+  const speedup = realDur > ATTACK_PREVIEW_CAP ? realDur / ATTACK_PREVIEW_CAP : 1;
+  const moveTag = move ? ` [${move.label}${speedup > 1 ? ` x${speedup.toFixed(1)}` : ''}]` : '';
+  // When the previewed anim isn't one this weapon attacks WITH, say
+  // where the attack lives instead of only that it's absent.
+  const noAttackHint = atkDef
+    ? ''
+    : `  (attacks play on: ${[...new Set(moves.map((m) => m.def.animation))].join(', ') || 'none'})`;
+
+  const fps = a.fps || 1;
+  const animCycle = a.frames.length / fps;
+  const dur = Math.min(realDur, ATTACK_PREVIEW_CAP);
+  const cycle = Math.max(animCycle, dur + 0.35);
+  const tIn = t % cycle;
+  const pose = atkDef && tIn <= dur
+    ? { progress: Math.min(1, tIn / dur), def: atkDef }
+    : undefined;
+
+  const bodySel = ($('compBody') as HTMLSelectElement).value;
+
+  // Game parity: the game draws a world pixel at 8 screen px (ZOOM 4 x
+  // WORLD_ZOOM 2), and judging attack art at any other size is judging
+  // different art. The viewport is trimmed to what the widest swing (the
+  // dash trail, ~24px around the origin) actually needs, and the side
+  // panel widens while the composite is active to hold it.
+  const SCALE = 8;
+  const VW = 52, VH = 42;
+  const fx = VW / 2, fy = 34;
+  preview.width = VW * SCALE;
+  preview.height = VH * SCALE;
+  pctx.imageSmoothingEnabled = false;
+  pctx.fillStyle = '#0a0c1c';
+  pctx.fillRect(0, 0, preview.width, preview.height);
+  pctx.save();
+  pctx.scale(SCALE, SCALE);
+  // Ground line, so the feet anchor reads.
+  pctx.fillStyle = '#1f2a57';
+  pctx.fillRect(0, fy, VW, 1);
+
+  // The full player: everything Player.render owns — body-english,
+  // gear layers, held weapon, trail — posed at this progress.
+  if (bodySel === 'player') {
+    const p = getPosePlayer();
+    if (p) {
+      ensureEquipped(p, 'weapon', weaponId);
+      const gearOn = ($('compGear') as HTMLInputElement).checked;
+      ensureEquipped(p, 'helmet', gearOn ? 'iron-helmet' : null);
+      ensureEquipped(p, 'armor', gearOn ? 'steel-armor' : null);
+      p.facing = 1;
+      p.animT = tIn;
+      p.renderTrail = ($('compTrail') as HTMLInputElement).checked;
+      p.poseAttack(pose ? pose.def : null, pose ? pose.progress : 0);
+      p.x = fx - p.w / 2;
+      p.y = fy - p.h;
+      try {
+        p.render(pctx);
+      } catch (e) {
+        posePlayerError = String(e);
+      }
+      pctx.restore();
+      pctx.fillStyle = '#ffcd75';
+      pctx.font = '11px monospace';
+      pctx.fillText(
+        posePlayerError
+          ? 'player render failed: ' + posePlayerError.slice(0, 40)
+          : `${animName}${moveTag} + ${weaponId} (full player)${noAttackHint}`,
+        6, preview.height - 6,
+      );
+      return true;
+    }
+    // Construction failed: fall back to the sheet body, but say why.
+    pctx.restore();
+    pctx.fillStyle = '#b13e53';
+    pctx.font = '11px monospace';
+    pctx.fillText('player unavailable: ' + posePlayerError.slice(0, 44), 6, preview.height - 6);
+    return true;
+  }
+
+  // Body: the sheet being edited, or the registered knight when the
+  // edited sheet is the weapon itself. Draw size comes from the sprite's
+  // DECLARED geometry (knight art is 35x63 cells drawn at 10x18), never
+  // from the baked image — the game scales exactly the same way.
+  let bodyImg: HTMLCanvasElement;
+  let frame: number;
+  let dw: number;
+  let dh: number;
+  if (bodySel === 'knight') {
+    const set = KNIGHT_ANIMS.right;
+    const ka = set[animName] ?? set.idle ?? Object.values(set)[0];
+    frame = ka.loop === false
+      ? Math.min(Math.floor(tIn * ka.fps), ka.frames.length - 1)
+      : Math.floor(tIn * ka.fps) % ka.frames.length;
+    bodyImg = ka.frames[frame];
+    dw = baseKnight.w;
+    dh = baseKnight.h;
+  } else {
+    frame = a.loop === false
+      ? Math.min(Math.floor(tIn * fps), a.frames.length - 1)
+      : Math.floor(tIn * fps) % a.frames.length;
+    const rows = a.frames[frame] ?? [];
+    bodyImg = sprite(file.hd === false ? rows : epx(epx(rows)), pal());
+    const geo = geometryOf(file, rows);
+    dw = geo.w;
+    dh = geo.h;
+  }
+
+  pctx.save();
+  pctx.translate(fx, fy);
+  pctx.drawImage(bodyImg, -dw / 2, -dh, dw, dh);
+  // The weapon draw needs an animation its sheet actually has; outside
+  // an attack pose, fall back to idle rather than throwing mid-paint.
+  const known = weaponVisuals.get(wdef.visual).animations;
+  const weaponAnim = !known || known.includes(animName) ? animName : 'idle';
+  try {
+    drawHeldWeapon(pctx, wdef.visual, {
+      facing: 1, anim: weaponAnim, frame, animT: tIn,
+      bodyW: dw, bodyH: dh, attack: pose,
+    });
+  } catch { /* a half-painted sheet mid-edit; next frame will catch up */ }
+  pctx.restore();
+
+  if (pose && ($('compTrail') as HTMLInputElement).checked) {
+    try {
+      drawWeaponTrail(pctx, wdef.visual, {
+        x: fx, y: fy - dh * 0.45, facing: 1,
+        colors: [...wdef.colors], attack: pose,
+      });
+    } catch { /* ditto */ }
+  }
+  pctx.restore();
+
+  pctx.fillStyle = '#ffcd75';
+  pctx.font = '11px monospace';
+  pctx.fillText(
+    `${animName}${moveTag} + ${weaponId}${noAttackHint}`,
+    6, preview.height - 6,
+  );
+  return true;
+}
+
 function renderPreview(): void {
   const hd = ($('hd') as HTMLInputElement).checked;
   const p = pal();
   const t = performance.now() / 1000;
+
+  const composite = renderComposite(t);
+  // Give the game-scale composite the panel width it needs; hand the
+  // space back the moment the weapon is deselected.
+  $('side-right').classList.toggle('wide', composite);
+  if (composite) {
+    requestAnimationFrame(renderPreview);
+    return;
+  }
 
   const a = anim();
   if (!a || !a.frames.length) {
@@ -542,6 +859,7 @@ $('btnLoad').onclick = () => ($('fileInput') as HTMLInputElement).click();
       frameIdx = 0;
       currentChar = firstPaintChar();
       currentFileName = f.name;
+      editVersion++;
       undoStack.length = 0;
       redoStack.length = 0;
       updateUndoRedoButtons();
@@ -564,9 +882,22 @@ $('selectSprite').onchange = (e) => {
     animName = Object.keys(file.anims)[0];
     frameIdx = 0;
     currentChar = firstPaintChar();
+    editVersion++;
 
     const parts = val.split('/');
     currentFileName = parts[parts.length - 1];
+
+    // Loading a weapon sheet sets the composite up for it: the knight
+    // underneath, this weapon in hand — the view you actually want when
+    // touching up a sword's attack frames.
+    const stem = currentFileName.replace(/\.json$/, '');
+    if (val.includes('equipment/') && weapons.has(stem)) {
+      ($('compWeapon') as HTMLSelectElement).value = stem;
+      ($('compBody') as HTMLSelectElement).value = 'player';
+      // Setting .value programmatically fires no change event, so the
+      // move list must be rebuilt by hand or it stays empty.
+      rebuildMoveSelect(stem);
+    }
 
     undoStack.length = 0;
     redoStack.length = 0;
@@ -707,6 +1038,7 @@ function nudge(dx: number, dy: number): void {
 /* ---------------- history (undo / redo) ---------------- */
 
 function saveHistory(): void {
+  editVersion++; // every mutation funnels through here first
   const stateStr = JSON.stringify(file);
   if (undoStack.length > 0 && undoStack[undoStack.length - 1] === stateStr) {
     return;
@@ -726,6 +1058,7 @@ function undo(): void {
   
   const prevStateStr = undoStack.pop()!;
   file = normalize(JSON.parse(prevStateStr));
+  editVersion++;
   
   if (!file.anims[animName]) {
     animName = Object.keys(file.anims)[0];
@@ -745,6 +1078,7 @@ function redo(): void {
   
   const nextStateStr = redoStack.pop()!;
   file = normalize(JSON.parse(nextStateStr));
+  editVersion++;
   
   if (!file.anims[animName]) {
     animName = Object.keys(file.anims)[0];
@@ -845,4 +1179,29 @@ function refreshUI(): void {
 }
 
 refreshUI();
+// Editor state, surfaced for scripted verification (the same doorway
+// __harness/__replay give the game proper).
+Object.defineProperty(window, '__editor', {
+  value: {
+    get file() { return file; },
+    get currentFileName() { return currentFileName; },
+    get editVersion() { return editVersion; },
+    get rebuiltVersion() { return rebuiltVersion; },
+  },
+});
+
+// Composite weapon picker: every registered weapon except bare hands.
+{
+  const sel = $('compWeapon') as HTMLSelectElement;
+  sel.onchange = () => rebuildMoveSelect(sel.value);
+  for (const id of weapons.ids()) {
+    if (id === 'unarmed') continue;
+    const o = document.createElement('option');
+    o.value = id;
+    o.textContent = id;
+    sel.appendChild(o);
+  }
+}
+
+rebuildMoveSelect(($('compWeapon') as HTMLSelectElement).value);
 renderPreview();

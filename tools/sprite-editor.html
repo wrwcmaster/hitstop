@@ -14,6 +14,9 @@
     header h1 { font-size: 14px; margin: 0 12px 0 0; color: #f4f4f4; }
     main { flex: 1; display: flex; min-height: 0; }
     #side-left, #side-right { width: 260px; padding: 10px; background: #101430; overflow-y: auto; flex-shrink: 0; }
+    /* The composite preview renders at the game's on-screen scale (8px
+       per world pixel), which needs more room than a sheet thumbnail. */
+    #side-right.wide { width: 452px; }
     #center { flex: 1; overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 20px; background: #07070d; }
     canvas { image-rendering: pixelated; }
     #grid { cursor: crosshair; border: 1px solid #33447f; }
@@ -83,6 +86,26 @@
       <label style="display:block; margin-top:6px">
         <input type="checkbox" id="onionSkin"> onion skin (previous frame)
       </label>
+      <h2>composite</h2>
+      <div style="display:flex; flex-direction:column; gap:4px">
+        <select id="compWeapon">
+          <option value="">-- no weapon --</option>
+        </select>
+        <select id="compMove" title="which of the weapon's moves to pose — they share sheet frames but differ in trail, timing and body motion">
+          <option value="">move: auto</option>
+        </select>
+        <select id="compBody">
+          <option value="edited">body: edited sprite</option>
+          <option value="player">body: player (full)</option>
+          <option value="knight">body: knight sheet</option>
+        </select>
+        <label><input type="checkbox" id="compTrail" checked> attack trail</label>
+        <label><input type="checkbox" id="compGear"> gear (helmet + plate)</label>
+      </div>
+      <p class="hint" style="margin:6px 0 0">
+        previews the joint effect with the game's own renderers: body +
+        held weapon + slash. editing a weapon sheet re-bakes it live.
+      </p>
     </div>
 
     <div id="center">

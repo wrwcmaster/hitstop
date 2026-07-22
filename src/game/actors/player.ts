@@ -533,6 +533,33 @@ export class Player extends Actor {
 
   /** Seconds left of the down+jump drop-through window (see update). */
   private dropT = 0;
+  /** Tooling knob (the sprite editor's composite preview): draw the
+   * attack trail? The game never clears it — in play the trail is part
+   * of the swing — but a posed knight can hold her art up without it. */
+  renderTrail = true;
+
+  /**
+   * Tooling seam: pose the knight mid-move without simulating her — the
+   * sprite editor's composite preview drives this to show the REAL
+   * player (body-english, gear layers, held weapon, trail) at an exact
+   * attack and progress. Combat, input and physics never run; the lunge
+   * beginAttack applies on state entry is zeroed so a posed knight
+   * doesn't drift.
+   */
+  poseAttack(def: WeaponAttackDef | null, progress = 0): void {
+    if (!def) {
+      if (this.fsm.is('attack')) this.fsm.set('move');
+      return;
+    }
+    if (!this.fsm.is('attack')) this.fsm.set('attack');
+    // State entry routed through beginAttack and picked its own move;
+    // pin the one being previewed.
+    this.attackDef = def;
+    this.attackDur = def.duration;
+    this.fsm.t = clamp(progress, 0, 1) * def.duration;
+    this.vx = 0;
+    this.vy = 0;
+  }
 
   /** How deep in water the body sits (0 dry .. 1 fully under). */
   submersion = 0;
@@ -1423,7 +1450,7 @@ export class Player extends Actor {
     g.restore();
     g.globalAlpha = 1;
 
-    if (this.fsm.is('attack')) {
+    if (this.fsm.is('attack') && this.renderTrail) {
       const weapon = this.weapon;
       drawWeaponTrail(g, weapon.visual, {
         x: cx,
