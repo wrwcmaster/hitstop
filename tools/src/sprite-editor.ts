@@ -15,6 +15,17 @@ import {
 } from '@game/content/weapon-visuals';
 import { weapons, weaponTypeOf, allAttacks } from '@game/content/weapons';
 import { KNIGHT_ANIMS, baseKnight } from '@game/content/sprites';
+// The "player (full)" body drives a REAL Player — body-english, gear
+// layers, held weapon and trail all come from Player.render, posed via
+// its poseAttack seam. Content self-registers on import (the game's
+// register*() functions are empty bodies that exist to force imports),
+// so pulling in items and classes here fills every registry the
+// constructor touches.
+import { Player } from '@game/actors/player';
+import '@game/content/items';
+import '@game/content/classes';
+import '@game/content/skills';
+import '@game/content/skilltree';
 
 /**
  * Sprite editor for the engine's per-sprite JSON format
@@ -462,6 +473,62 @@ function maybeRebakeEditedWeapon(): void {
 }
 
 /**
+ * A knight to pose. She is constructed against no-op stand-ins for the
+ * game and the tilemap: render() and poseAttack() draw and place — they
+ * never simulate — so the only surfaces touched are the ones stubbed.
+ * Built lazily and kept, so equipping gear or swapping weapons persists
+ * between frames like it would in play.
+ */
+let posePlayer: Player | null = null;
+let posePlayerError = '';
+
+function getPosePlayer(): Player | null {
+  if (posePlayer || posePlayerError) return posePlayer;
+  try {
+    const noop = () => {};
+    const stubSfx = { play: noop };
+    const stubGame = {
+      input: { held: () => false, pressed: () => false, consumePress: () => false, axis: () => 0 },
+      sfx: stubSfx,
+      feel: { text: noop, impact: noop, shake: noop, sfx: stubSfx, particles: { burst: noop, clear: noop } },
+      events: { emit: noop, on: () => noop },
+      world: { actors: () => [], all: () => [], spawn: (e: unknown) => e },
+      // beginAttack opens a strike on state entry; a hit-nothing stub.
+      combat: { strike: () => ({ apply: () => [] }), hit: noop },
+      camera: { x: 0, y: 0 },
+    } as unknown as ConstructorParameters<typeof Player>[0];
+    const stubCollision = {
+      tileSize: 8,
+      worldW: 10000,
+      worldH: 10000,
+      bounds: { x: 0, y: 0, w: 10000, h: 10000 },
+      *solidsNear() { /* nothing to collide with */ },
+      waterAt: () => false,
+      submersion: () => 0,
+      hazardAt: () => 0,
+      groundY: () => 10000,
+      tileAt: () => '',
+    } as unknown as ConstructorParameters<typeof Player>[1];
+    posePlayer = new Player(stubGame, stubCollision, 0, 0);
+  } catch (e) {
+    posePlayerError = String(e);
+  }
+  return posePlayer;
+}
+
+/** Equip exactly `id` in `slot`, adding to the bag on first use. */
+function ensureEquipped(p: Player, slot: string, id: string | null): void {
+  if (p.equipment.get(slot) === id) return;
+  if (id === null) {
+    p.equipment.unequip(slot);
+  } else {
+    if (!p.inventory.has(id)) p.inventory.add(id);
+    p.equipment.equip(id);
+  }
+  p.syncStats();
+}
+
+/**
  * The joint view: body + held weapon + attack trail on one clock,
  * drawn by the same code the game uses (see Player.render — body at a
  * feet origin, weapon inside that transform, trail in world space).
@@ -489,6 +556,63 @@ function renderComposite(t: number): boolean {
     ? { progress: Math.min(1, tIn / dur), def: atkDef }
     : undefined;
 
+  const bodySel = ($('compBody') as HTMLSelectElement).value;
+
+  // A fixed viewport around the feet origin: wide enough for the dash
+  // trail's full sweep, sized to sit crisply in the side panel.
+  const SCALE = 3;
+  const VW = 80, VH = 64;
+  const fx = VW / 2, fy = 50;
+  preview.width = VW * SCALE;
+  preview.height = VH * SCALE;
+  pctx.imageSmoothingEnabled = false;
+  pctx.fillStyle = '#0a0c1c';
+  pctx.fillRect(0, 0, preview.width, preview.height);
+  pctx.save();
+  pctx.scale(SCALE, SCALE);
+  // Ground line, so the feet anchor reads.
+  pctx.fillStyle = '#1f2a57';
+  pctx.fillRect(0, fy, VW, 1);
+
+  // The full player: everything Player.render owns — body-english,
+  // gear layers, held weapon, trail — posed at this progress. The trail
+  // toggle doesn't apply here; on the real knight the trail IS hers.
+  if (bodySel === 'player') {
+    const p = getPosePlayer();
+    if (p) {
+      ensureEquipped(p, 'weapon', weaponId);
+      const gearOn = ($('compGear') as HTMLInputElement).checked;
+      ensureEquipped(p, 'helmet', gearOn ? 'iron-helmet' : null);
+      ensureEquipped(p, 'armor', gearOn ? 'steel-armor' : null);
+      p.facing = 1;
+      p.animT = tIn;
+      p.poseAttack(pose ? pose.def : null, pose ? pose.progress : 0);
+      p.x = fx - p.w / 2;
+      p.y = fy - p.h;
+      try {
+        p.render(pctx);
+      } catch (e) {
+        posePlayerError = String(e);
+      }
+      pctx.restore();
+      pctx.fillStyle = '#ffcd75';
+      pctx.font = '11px monospace';
+      pctx.fillText(
+        posePlayerError
+          ? 'player render failed: ' + posePlayerError.slice(0, 40)
+          : `${animName} + ${weaponId} (full player)${atkDef ? '' : '  (no attack for this anim)'}`,
+        6, preview.height - 6,
+      );
+      return true;
+    }
+    // Construction failed: fall back to the sheet body, but say why.
+    pctx.restore();
+    pctx.fillStyle = '#b13e53';
+    pctx.font = '11px monospace';
+    pctx.fillText('player unavailable: ' + posePlayerError.slice(0, 44), 6, preview.height - 6);
+    return true;
+  }
+
   // Body: the sheet being edited, or the registered knight when the
   // edited sheet is the weapon itself. Draw size comes from the sprite's
   // DECLARED geometry (knight art is 35x63 cells drawn at 10x18), never
@@ -497,7 +621,7 @@ function renderComposite(t: number): boolean {
   let frame: number;
   let dw: number;
   let dh: number;
-  if (($('compBody') as HTMLSelectElement).value === 'knight') {
+  if (bodySel === 'knight') {
     const set = KNIGHT_ANIMS.right;
     const ka = set[animName] ?? set.idle ?? Object.values(set)[0];
     frame = ka.loop === false
@@ -516,23 +640,6 @@ function renderComposite(t: number): boolean {
     dw = geo.w;
     dh = geo.h;
   }
-
-  // A fixed viewport around the feet origin: wide enough for the dash
-  // trail's full sweep, sized to sit crisply in the side panel.
-  const SCALE = 3;
-  const VW = 80, VH = 64;
-  const fx = VW / 2, fy = 50;
-  preview.width = VW * SCALE;
-  preview.height = VH * SCALE;
-  pctx.imageSmoothingEnabled = false;
-  pctx.fillStyle = '#0a0c1c';
-  pctx.fillRect(0, 0, preview.width, preview.height);
-
-  pctx.save();
-  pctx.scale(SCALE, SCALE);
-  // Ground line, so the feet anchor reads.
-  pctx.fillStyle = '#1f2a57';
-  pctx.fillRect(0, fy, VW, 1);
 
   pctx.save();
   pctx.translate(fx, fy);
@@ -719,7 +826,7 @@ $('selectSprite').onchange = (e) => {
     const stem = currentFileName.replace(/\.json$/, '');
     if (val.includes('equipment/') && weapons.has(stem)) {
       ($('compWeapon') as HTMLSelectElement).value = stem;
-      ($('compBody') as HTMLSelectElement).value = 'knight';
+      ($('compBody') as HTMLSelectElement).value = 'player';
     }
 
     undoStack.length = 0;

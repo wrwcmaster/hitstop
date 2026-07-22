@@ -133,7 +133,8 @@ A single static sprite is just one animation with one frame. `loadSprite` (`src/
 Pixel art for this game is rarely seen alone — an attack is the knight's body, the weapon in her hand, and the slash effect sweeping over both. The **composite** panel previews that joint effect, drawn by the game's *own renderers* (`drawHeldWeapon`, `drawWeaponTrail`), not an editor imitation. The weapon's per-frame anchors and the slash trail are code, not sprites, so no sprite-only overlay could show it truthfully.
 
 - **weapon** — any registered weapon; the composite shows the body holding it, and on animations that have an attack (the weapon type's moveset names them), the attack pose and slash trail play on one clock: the attack's real duration plus a beat of hold.
-- **body** — the sheet being edited, or the registered knight. Loading a weapon sheet (`equipment/*.json`) sets this up automatically: knight underneath, that weapon in hand — the view you want when touching up a sword's attack frames.
+- **body** — the sheet being edited, the raw knight sheet, or **player (full)**: a real `Player` instance posed via `Player.poseAttack`, so the composite is the actual in-game knight — attack body-english (lean, shear), gear layers, held weapon and trail, all from `Player.render` itself. She is constructed against no-op stand-ins for the game and tilemap; posing draws, it never simulates. Loading a weapon sheet (`equipment/*.json`) selects this automatically — the view you want when touching up a sword's attack frames.
+- **gear (helmet + plate)** — equips the iron helmet and steel armor on the full player, so you can check art against the armored silhouette too.
 - **live re-bake** — while a weapon sheet is being edited, every stroke re-bakes it into its registered visual (via `rebuildSpriteWeapon`), so the composite shows your edits in the knight's hand as you paint. The art swaps; the origins and anchors stay.
 - **attack trail** — toggles the slash effect.
 
