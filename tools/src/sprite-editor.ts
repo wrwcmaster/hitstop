@@ -545,7 +545,13 @@ function renderComposite(t: number): boolean {
   maybeRebakeEditedWeapon();
 
   const wdef = weapons.get(weaponId);
-  const atkDef = allAttacks(weaponTypeOf(wdef)).find((d) => d.animation === animName);
+  const moveset = allAttacks(weaponTypeOf(wdef));
+  const atkDef = moveset.find((d) => d.animation === animName);
+  // When the previewed anim isn't one this weapon attacks WITH, say
+  // where the attack lives instead of only that it's absent.
+  const noAttackHint = atkDef
+    ? ''
+    : `  (attacks play on: ${[...new Set(moveset.map((d) => d.animation))].join(', ') || 'none'})`;
 
   const fps = a.fps || 1;
   const animCycle = a.frames.length / fps;
@@ -603,7 +609,7 @@ function renderComposite(t: number): boolean {
       pctx.fillText(
         posePlayerError
           ? 'player render failed: ' + posePlayerError.slice(0, 40)
-          : `${animName} + ${weaponId} (full player)${atkDef ? '' : '  (no attack for this anim)'}`,
+          : `${animName} + ${weaponId} (full player)${noAttackHint}`,
         6, preview.height - 6,
       );
       return true;
@@ -672,7 +678,7 @@ function renderComposite(t: number): boolean {
   pctx.fillStyle = '#ffcd75';
   pctx.font = '11px monospace';
   pctx.fillText(
-    `${animName} + ${weaponId}${atkDef ? '' : '  (no attack for this anim)'}`,
+    `${animName} + ${weaponId}${noAttackHint}`,
     6, preview.height - 6,
   );
   return true;
