@@ -27,6 +27,16 @@ export interface WorldMapCell {
   h?: number;
 }
 
+/** A doorway between two regions, at a point in grid-cell coordinates
+ * (fractional). Marked on the map only when both ends are explored. */
+export interface WorldMapDoor {
+  a: string;
+  b: string;
+  /** Position in cell units, from the door's place in its room. */
+  x: number;
+  y: number;
+}
+
 export interface WorldMapStyle {
   /** Fill for a region the player has been to. */
   explored: string;
@@ -35,6 +45,8 @@ export interface WorldMapStyle {
   border: string;
   /** Connections between explored regions. */
   link: string;
+  /** Doorway markers between explored regions. */
+  door?: string;
   /** Faint marker for un-entered regions; omit to hide them entirely. */
   unexplored?: string;
 }
@@ -44,6 +56,7 @@ export const DEFAULT_WORLD_MAP_STYLE: WorldMapStyle = {
   current: '#ffcd75',
   border: '#94b0c2',
   link: '#566c86',
+  door: '#ffcd75',
 };
 
 export interface WorldMapOpts {
@@ -54,6 +67,10 @@ export interface WorldMapOpts {
   current?: string | null;
   /** Region pairs to join with a line, drawn when both ends are explored. */
   links?: readonly (readonly [string, string])[];
+  /** Doorways to mark, drawn when both ends are explored. Preferred over
+   * `links` — a mark at the real door reads better than a line between
+   * region centres crossing the blocks. */
+  doors?: readonly WorldMapDoor[];
   style?: Partial<WorldMapStyle>;
   /** Gap between cells, in screen px (default 1). */
   gap?: number;
@@ -128,6 +145,22 @@ export function drawWorldMap(
       g.strokeStyle = style.border;
       g.lineWidth = 1;
       g.strokeRect(r.x + gap + 0.5, r.y + gap + 0.5, r.w - gap * 2 - 1, r.h - gap * 2 - 1);
+    }
+  }
+
+  // Doorways: a bright pip where two explored regions actually connect —
+  // drawn over the cells, so it reads as the seam you pass through rather
+  // than a line strung between region centres.
+  if (opts.doors?.length) {
+    const door = style.door ?? style.current;
+    for (const d of opts.doors) {
+      if (!opts.explored(d.a) || !opts.explored(d.b)) continue;
+      const mx = Math.round(originX + (d.x - minX) * size);
+      const my = Math.round(originY + (d.y - minY) * size);
+      g.fillStyle = '#07070d';
+      g.fillRect(mx - 2, my - 2, 4, 4);
+      g.fillStyle = door;
+      g.fillRect(mx - 1, my - 1, 2, 2);
     }
   }
   return size;

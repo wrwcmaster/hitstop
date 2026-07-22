@@ -195,6 +195,12 @@ export class Hud {
         .filter((e): e is Pickup => e instanceof Pickup && !e.dead)
         .map((e) => ({ x: e.x, y: e.y, color: COLORS.gold })),
     ];
+    // Exits — doors, portal pads, the well — so you can see at a glance
+    // where a room leads out. Bright cyan, sized up to stand off the walls.
+    for (const tr of this.host.room?.triggers ?? []) {
+      if (tr.event !== 'door' && tr.event !== 'portal') continue;
+      markers.push({ x: tr.x + tr.w / 2, y: tr.y + tr.h / 2, color: '#5bc9ff', size: 2 });
+    }
     if (p && p.hp > 0) {
       markers.push({ x: p.cx, y: p.cy, color: COLORS.green });
     }

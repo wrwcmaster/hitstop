@@ -131,6 +131,7 @@ export {
   drawWorldMap,
   DEFAULT_WORLD_MAP_STYLE,
   type WorldMapCell,
+  type WorldMapDoor,
   type WorldMapStyle,
   type WorldMapOpts,
 } from './ui/worldmap';

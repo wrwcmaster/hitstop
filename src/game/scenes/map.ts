@@ -1,14 +1,14 @@
 import { type Scene, drawPanel, drawText, drawWorldMap, t } from '@engine/index';
 import type { ActionGame } from '../defs';
 import { COLORS } from '../content/palette';
-import { WORLD_MAP_CELLS, WORLD_MAP_LINKS, roomLabel } from '../content/worldmap';
+import { WORLD_MAP_CELLS, WORLD_MAP_DOORS, roomLabel } from '../content/worldmap';
 
 /**
  * The world map: an overlay scene, so the run freezes behind it and
  * nothing has to be torn down to show it. Rooms you have entered are
- * drawn and joined by their doors; the one you are standing in pulses.
- * Everywhere you have not been is simply absent — the blank space is the
- * information.
+ * drawn as blocks, and a pip on a shared edge marks each door between
+ * two explored rooms; the one you are standing in pulses. Everywhere you
+ * have not been is simply absent — the blank space is the information.
  */
 export class MapScene implements Scene {
   /** Free-running clock for the you-are-here pulse. */
@@ -63,12 +63,13 @@ export class MapScene implements Scene {
       box: { x: x + 12, y: y + 26, w: bw - 24, h: bh - 56 },
       explored: (id) => id === this.view.current || this.view.explored(id),
       current: blink ? this.view.current : null,
-      links: WORLD_MAP_LINKS,
+      doors: WORLD_MAP_DOORS,
       style: {
         explored: COLORS.navyLight,
         current: COLORS.gold,
         border: COLORS.steel,
         link: COLORS.steelDark,
+        door: COLORS.gold,
       },
     });
 

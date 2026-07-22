@@ -234,7 +234,7 @@ A room that omits `map` never appears, which is how the dev test room stays off 
 
 The cost of deriving spans is that growing a room can push it into its neighbour, so overlapping placements throw at boot naming both rooms — the same bargain the rest of the content validation makes.
 
-**Connections are not authored.** Rooms already say how they join through their `door` triggers, so `content/worldmap.ts` derives the links from those: move a door and the map follows, with no second table to forget. Exploration reuses the `visited:<room>` flags the portal menu already sets, so a room appears on the map exactly when you have stood in it.
+**Connections are not authored.** Rooms already say how they join through their `door` triggers, so `content/worldmap.ts` derives the door marks from those: each connecting door is placed at its true spot on the shared edge (its position within the room, scaled into the room's cell span), and the map draws a pip there rather than a line between region centres. Move a door and the map follows, with no second table to forget. Exploration reuses the `visited:<room>` flags the portal menu already sets, so a room appears on the map exactly when you have stood in it.
 
 ### Doors join two rooms, not a room and a coordinate
 
