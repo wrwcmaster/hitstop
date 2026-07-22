@@ -516,6 +516,44 @@ function getPosePlayer(): Player | null {
   return posePlayer;
 }
 
+/**
+ * A weapon's moveset, labeled the way a player thinks of it. The combo
+ * swings and every contextual move usually share ONE sheet animation
+ * ('attack'), differing in trail, timing, aim and body motion — which is
+ * exactly why the composite needs a selector: the sheet alone cannot say
+ * which move you are looking at.
+ */
+function movesOf(weaponId: string): { key: string; label: string; def: ReturnType<typeof allAttacks>[number] }[] {
+  const type = weaponTypeOf(weapons.get(weaponId));
+  const out: { key: string; label: string; def: ReturnType<typeof allAttacks>[number] }[] = [];
+  type.attacks.forEach((def, i) => out.push({ key: `combo${i}`, label: `combo ${i + 1}`, def }));
+  for (const key of ['aerial', 'plunge', 'upper', 'dashAttack'] as const) {
+    const def = type[key];
+    if (def) out.push({ key, label: key === 'dashAttack' ? 'dash' : key, def });
+  }
+  return out;
+}
+
+/** Refill the move selector for the chosen weapon, keeping a still-valid
+ * selection where possible. */
+function rebuildMoveSelect(weaponId: string): void {
+  const sel = $('compMove') as HTMLSelectElement;
+  const prev = sel.value;
+  sel.innerHTML = '';
+  const auto = document.createElement('option');
+  auto.value = '';
+  auto.textContent = 'move: auto';
+  sel.appendChild(auto);
+  if (!weaponId || !weapons.has(weaponId)) return;
+  for (const m of movesOf(weaponId)) {
+    const o = document.createElement('option');
+    o.value = m.key;
+    o.textContent = `move: ${m.label}`;
+    sel.appendChild(o);
+  }
+  if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
+}
+
 /** Equip exactly `id` in `slot`, adding to the bag on first use. */
 function ensureEquipped(p: Player, slot: string, id: string | null): void {
   if (p.equipment.get(slot) === id) return;
@@ -545,13 +583,20 @@ function renderComposite(t: number): boolean {
   maybeRebakeEditedWeapon();
 
   const wdef = weapons.get(weaponId);
-  const moveset = allAttacks(weaponTypeOf(wdef));
-  const atkDef = moveset.find((d) => d.animation === animName);
+  const moves = movesOf(weaponId);
+  // Only moves whose animation is the one on screen are candidates; the
+  // selector picks among them (the sword's whole moveset shares
+  // 'attack'), and auto means the first — the opening combo swing.
+  const candidates = moves.filter((m) => m.def.animation === animName);
+  const wantKey = ($('compMove') as HTMLSelectElement).value;
+  const move = candidates.find((m) => m.key === wantKey) ?? candidates[0];
+  const atkDef = move?.def;
+  const moveTag = move ? ` [${move.label}]` : '';
   // When the previewed anim isn't one this weapon attacks WITH, say
   // where the attack lives instead of only that it's absent.
   const noAttackHint = atkDef
     ? ''
-    : `  (attacks play on: ${[...new Set(moveset.map((d) => d.animation))].join(', ') || 'none'})`;
+    : `  (attacks play on: ${[...new Set(moves.map((m) => m.def.animation))].join(', ') || 'none'})`;
 
   const fps = a.fps || 1;
   const animCycle = a.frames.length / fps;
@@ -609,7 +654,7 @@ function renderComposite(t: number): boolean {
       pctx.fillText(
         posePlayerError
           ? 'player render failed: ' + posePlayerError.slice(0, 40)
-          : `${animName} + ${weaponId} (full player)${noAttackHint}`,
+          : `${animName}${moveTag} + ${weaponId} (full player)${noAttackHint}`,
         6, preview.height - 6,
       );
       return true;
@@ -678,7 +723,7 @@ function renderComposite(t: number): boolean {
   pctx.fillStyle = '#ffcd75';
   pctx.font = '11px monospace';
   pctx.fillText(
-    `${animName} + ${weaponId}${noAttackHint}`,
+    `${animName}${moveTag} + ${weaponId}${noAttackHint}`,
     6, preview.height - 6,
   );
   return true;
@@ -840,6 +885,9 @@ $('selectSprite').onchange = (e) => {
     if (val.includes('equipment/') && weapons.has(stem)) {
       ($('compWeapon') as HTMLSelectElement).value = stem;
       ($('compBody') as HTMLSelectElement).value = 'player';
+      // Setting .value programmatically fires no change event, so the
+      // move list must be rebuilt by hand or it stays empty.
+      rebuildMoveSelect(stem);
     }
 
     undoStack.length = 0;
@@ -1136,6 +1184,7 @@ Object.defineProperty(window, '__editor', {
 // Composite weapon picker: every registered weapon except bare hands.
 {
   const sel = $('compWeapon') as HTMLSelectElement;
+  sel.onchange = () => rebuildMoveSelect(sel.value);
   for (const id of weapons.ids()) {
     if (id === 'unarmed') continue;
     const o = document.createElement('option');
@@ -1145,4 +1194,5 @@ Object.defineProperty(window, '__editor', {
   }
 }
 
+rebuildMoveSelect(($('compWeapon') as HTMLSelectElement).value);
 renderPreview();
