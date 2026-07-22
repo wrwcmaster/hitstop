@@ -2,6 +2,19 @@
 
 import { resolveSpriteGeometry, sprite, epx, type Palette, type SpriteFile } from '@engine/index';
 import { PAL } from '@game/content/palette';
+// Composite preview: the editor borrows the GAME's renderers rather than
+// imitating them, so what you see here — held weapon anchored to the
+// body, slash trail sweeping on the attack clock — is exactly what the
+// game draws. The weapon anchors and the trail are code, not sprites;
+// no sprite-only overlay could show this truthfully.
+import {
+  drawHeldWeapon,
+  drawWeaponTrail,
+  weaponVisuals,
+  rebuildSpriteWeapon,
+} from '@game/content/weapon-visuals';
+import { weapons, weaponTypeOf, allAttacks } from '@game/content/weapons';
+import { KNIGHT_ANIMS, baseKnight } from '@game/content/sprites';
 
 /**
  * Sprite editor for the engine's per-sprite JSON format
@@ -430,10 +443,140 @@ function redraw(): void {
   }
 }
 
+/* ---------------- composite preview ---------------- */
+
+/**
+ * Bumped whenever `file` changes (paint, undo, load...). The composite
+ * re-bakes an edited weapon sheet into its registered visual lazily —
+ * only when this moves — so painting stays cheap.
+ */
+let editVersion = 0;
+let rebuiltVersion = -1;
+
+function maybeRebakeEditedWeapon(): void {
+  if (rebuiltVersion === editVersion) return;
+  rebuiltVersion = editVersion;
+  // "rusty-sword.json" -> visual id "rusty-sword"; a no-op for sheets
+  // that aren't a registered sprite weapon.
+  rebuildSpriteWeapon(currentFileName.replace(/\.json$/, ''), file);
+}
+
+/**
+ * The joint view: body + held weapon + attack trail on one clock,
+ * drawn by the same code the game uses (see Player.render — body at a
+ * feet origin, weapon inside that transform, trail in world space).
+ *
+ * One cycle = the attack's real duration plus a beat of hold, or the
+ * animation's own length if that is longer, so the trail sweeps at its
+ * true speed and you still get a readable pause between swings.
+ */
+function renderComposite(t: number): boolean {
+  const weaponId = ($('compWeapon') as HTMLSelectElement).value;
+  if (!weaponId || !weapons.has(weaponId)) return false;
+  const a = anim();
+  if (!a || !a.frames.length) return false;
+  maybeRebakeEditedWeapon();
+
+  const wdef = weapons.get(weaponId);
+  const atkDef = allAttacks(weaponTypeOf(wdef)).find((d) => d.animation === animName);
+
+  const fps = a.fps || 1;
+  const animCycle = a.frames.length / fps;
+  const dur = atkDef?.duration ?? 0;
+  const cycle = Math.max(animCycle, dur + 0.35);
+  const tIn = t % cycle;
+  const pose = atkDef && tIn <= dur
+    ? { progress: Math.min(1, tIn / dur), def: atkDef }
+    : undefined;
+
+  // Body: the sheet being edited, or the registered knight when the
+  // edited sheet is the weapon itself. Draw size comes from the sprite's
+  // DECLARED geometry (knight art is 35x63 cells drawn at 10x18), never
+  // from the baked image — the game scales exactly the same way.
+  let bodyImg: HTMLCanvasElement;
+  let frame: number;
+  let dw: number;
+  let dh: number;
+  if (($('compBody') as HTMLSelectElement).value === 'knight') {
+    const set = KNIGHT_ANIMS.right;
+    const ka = set[animName] ?? set.idle ?? Object.values(set)[0];
+    frame = ka.loop === false
+      ? Math.min(Math.floor(tIn * ka.fps), ka.frames.length - 1)
+      : Math.floor(tIn * ka.fps) % ka.frames.length;
+    bodyImg = ka.frames[frame];
+    dw = baseKnight.w;
+    dh = baseKnight.h;
+  } else {
+    frame = a.loop === false
+      ? Math.min(Math.floor(tIn * fps), a.frames.length - 1)
+      : Math.floor(tIn * fps) % a.frames.length;
+    const rows = a.frames[frame] ?? [];
+    bodyImg = sprite(file.hd === false ? rows : epx(epx(rows)), pal());
+    const geo = geometryOf(file, rows);
+    dw = geo.w;
+    dh = geo.h;
+  }
+
+  // A fixed viewport around the feet origin: wide enough for the dash
+  // trail's full sweep, sized to sit crisply in the side panel.
+  const SCALE = 3;
+  const VW = 80, VH = 64;
+  const fx = VW / 2, fy = 50;
+  preview.width = VW * SCALE;
+  preview.height = VH * SCALE;
+  pctx.imageSmoothingEnabled = false;
+  pctx.fillStyle = '#0a0c1c';
+  pctx.fillRect(0, 0, preview.width, preview.height);
+
+  pctx.save();
+  pctx.scale(SCALE, SCALE);
+  // Ground line, so the feet anchor reads.
+  pctx.fillStyle = '#1f2a57';
+  pctx.fillRect(0, fy, VW, 1);
+
+  pctx.save();
+  pctx.translate(fx, fy);
+  pctx.drawImage(bodyImg, -dw / 2, -dh, dw, dh);
+  // The weapon draw needs an animation its sheet actually has; outside
+  // an attack pose, fall back to idle rather than throwing mid-paint.
+  const known = weaponVisuals.get(wdef.visual).animations;
+  const weaponAnim = !known || known.includes(animName) ? animName : 'idle';
+  try {
+    drawHeldWeapon(pctx, wdef.visual, {
+      facing: 1, anim: weaponAnim, frame, animT: tIn,
+      bodyW: dw, bodyH: dh, attack: pose,
+    });
+  } catch { /* a half-painted sheet mid-edit; next frame will catch up */ }
+  pctx.restore();
+
+  if (pose && ($('compTrail') as HTMLInputElement).checked) {
+    try {
+      drawWeaponTrail(pctx, wdef.visual, {
+        x: fx, y: fy - dh * 0.45, facing: 1,
+        colors: [...wdef.colors], attack: pose,
+      });
+    } catch { /* ditto */ }
+  }
+  pctx.restore();
+
+  pctx.fillStyle = '#ffcd75';
+  pctx.font = '11px monospace';
+  pctx.fillText(
+    `${animName} + ${weaponId}${atkDef ? '' : '  (no attack for this anim)'}`,
+    6, preview.height - 6,
+  );
+  return true;
+}
+
 function renderPreview(): void {
   const hd = ($('hd') as HTMLInputElement).checked;
   const p = pal();
   const t = performance.now() / 1000;
+
+  if (renderComposite(t)) {
+    requestAnimationFrame(renderPreview);
+    return;
+  }
 
   const a = anim();
   if (!a || !a.frames.length) {
@@ -542,6 +685,7 @@ $('btnLoad').onclick = () => ($('fileInput') as HTMLInputElement).click();
       frameIdx = 0;
       currentChar = firstPaintChar();
       currentFileName = f.name;
+      editVersion++;
       undoStack.length = 0;
       redoStack.length = 0;
       updateUndoRedoButtons();
@@ -564,9 +708,19 @@ $('selectSprite').onchange = (e) => {
     animName = Object.keys(file.anims)[0];
     frameIdx = 0;
     currentChar = firstPaintChar();
+    editVersion++;
 
     const parts = val.split('/');
     currentFileName = parts[parts.length - 1];
+
+    // Loading a weapon sheet sets the composite up for it: the knight
+    // underneath, this weapon in hand — the view you actually want when
+    // touching up a sword's attack frames.
+    const stem = currentFileName.replace(/\.json$/, '');
+    if (val.includes('equipment/') && weapons.has(stem)) {
+      ($('compWeapon') as HTMLSelectElement).value = stem;
+      ($('compBody') as HTMLSelectElement).value = 'knight';
+    }
 
     undoStack.length = 0;
     redoStack.length = 0;
@@ -707,6 +861,7 @@ function nudge(dx: number, dy: number): void {
 /* ---------------- history (undo / redo) ---------------- */
 
 function saveHistory(): void {
+  editVersion++; // every mutation funnels through here first
   const stateStr = JSON.stringify(file);
   if (undoStack.length > 0 && undoStack[undoStack.length - 1] === stateStr) {
     return;
@@ -726,6 +881,7 @@ function undo(): void {
   
   const prevStateStr = undoStack.pop()!;
   file = normalize(JSON.parse(prevStateStr));
+  editVersion++;
   
   if (!file.anims[animName]) {
     animName = Object.keys(file.anims)[0];
@@ -745,6 +901,7 @@ function redo(): void {
   
   const nextStateStr = redoStack.pop()!;
   file = normalize(JSON.parse(nextStateStr));
+  editVersion++;
   
   if (!file.anims[animName]) {
     animName = Object.keys(file.anims)[0];
@@ -845,4 +1002,27 @@ function refreshUI(): void {
 }
 
 refreshUI();
+// Editor state, surfaced for scripted verification (the same doorway
+// __harness/__replay give the game proper).
+Object.defineProperty(window, '__editor', {
+  value: {
+    get file() { return file; },
+    get currentFileName() { return currentFileName; },
+    get editVersion() { return editVersion; },
+    get rebuiltVersion() { return rebuiltVersion; },
+  },
+});
+
+// Composite weapon picker: every registered weapon except bare hands.
+{
+  const sel = $('compWeapon') as HTMLSelectElement;
+  for (const id of weapons.ids()) {
+    if (id === 'unarmed') continue;
+    const o = document.createElement('option');
+    o.value = id;
+    o.textContent = id;
+    sel.appendChild(o);
+  }
+}
+
 renderPreview();

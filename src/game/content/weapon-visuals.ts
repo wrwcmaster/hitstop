@@ -453,15 +453,39 @@ defineSlashVisual('crescent', {
   origin: { x: 12.5, y: -4 },
 });
 
-defineWeaponVisual('rusty-sword', spriteWeapon({
-  anims: withFacing(load(rustySwordJson).animSet()),
-  origin: { x: 16, y: 16 },
-}));
+/**
+ * Sprite-backed weapons register through here so their non-art config
+ * (origins, anchors, trail flag) is kept, which is what lets the sprite
+ * editor re-bake a visual from an edited sheet and see it composited on
+ * the knight immediately — the art swaps, the fit stays.
+ */
+const spriteWeaponConfigs = new Map<string, Omit<SpriteWeaponConfig, 'anims'>>();
 
-defineWeaponVisual('great-sword', spriteWeapon({
-  anims: withFacing(load(greatSwordJson).animSet()),
+function defineSpriteWeapon(id: string, file: unknown, config: Omit<SpriteWeaponConfig, 'anims'>): void {
+  spriteWeaponConfigs.set(id, config);
+  defineWeaponVisual(id, spriteWeapon({ ...config, anims: withFacing(load(file).animSet()) }));
+}
+
+/**
+ * Editor seam: re-bake a sprite weapon's visual from an in-memory sheet
+ * (the sprite editor's working copy). Returns false when `id` isn't a
+ * sprite-backed weapon — procedural visuals have no sheet to swap.
+ * Deliberate override, so it uses the registry's replace().
+ */
+export function rebuildSpriteWeapon(id: string, file: SpriteFile): boolean {
+  const config = spriteWeaponConfigs.get(id);
+  if (!config) return false;
+  weaponVisuals.replace(id, spriteWeapon({ ...config, anims: withFacing(loadSprite(file, PAL).animSet()) }));
+  return true;
+}
+
+defineSpriteWeapon('rusty-sword', rustySwordJson, {
   origin: { x: 16, y: 16 },
-}));
+});
+
+defineSpriteWeapon('great-sword', greatSwordJson, {
+  origin: { x: 16, y: 16 },
+});
 
 /* ---- ranged visuals: procedural bow + flintlock ---- */
 

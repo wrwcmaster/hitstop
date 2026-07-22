@@ -83,6 +83,21 @@
       <label style="display:block; margin-top:6px">
         <input type="checkbox" id="onionSkin"> onion skin (previous frame)
       </label>
+      <h2>composite</h2>
+      <div style="display:flex; flex-direction:column; gap:4px">
+        <select id="compWeapon">
+          <option value="">-- no weapon --</option>
+        </select>
+        <select id="compBody">
+          <option value="edited">body: edited sprite</option>
+          <option value="knight">body: knight</option>
+        </select>
+        <label><input type="checkbox" id="compTrail" checked> attack trail</label>
+      </div>
+      <p class="hint" style="margin:6px 0 0">
+        previews the joint effect with the game's own renderers: body +
+        held weapon + slash. editing a weapon sheet re-bakes it live.
+      </p>
     </div>
 
     <div id="center">
