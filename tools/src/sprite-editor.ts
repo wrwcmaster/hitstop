@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import { resolveSpriteGeometry, sprite, epx, type Palette, type SpriteFile } from '@engine/index';
+import { resolveSpriteGeometry, resolveAnim, sprite, epx, type Palette, type SpriteFile, type SpriteAnimData } from '@engine/index';
 import { PAL } from '@game/content/palette';
 // Composite preview: the editor borrows the GAME's renderers rather than
 // imitating them, so what you see here — held weapon anchored to the
@@ -65,7 +65,18 @@ function firstPaintChar(): string {
 }
 
 const pal = (): Palette => file.palette ?? {};
-const anim = () => file.anims[animName];
+/**
+ * The animation being edited, RESOLVED: an alias entry ("plunge":
+ * "attack") has no frames of its own, so selecting one jumps to its
+ * target (see buildAnims) and this accessor follows the chain as a
+ * belt-and-braces. Mutations through it therefore edit the target's
+ * frames, which is the only thing an alias could mean in an editor.
+ */
+const anim = (): SpriteAnimData => resolveAnim(file, animName)!;
+/** Concrete (non-alias) animations — the only ones with frames to edit,
+ * resize, or export as art. */
+const concreteAnims = (): [string, SpriteAnimData][] =>
+  Object.entries(file.anims).filter((e): e is [string, SpriteAnimData] => typeof e[1] !== 'string');
 const cur = () => anim().frames[frameIdx];
 const W = () => cur()[0].length;
 const H = () => cur().length;
@@ -175,8 +186,14 @@ function buildAnims(): void {
   const host = $('anims');
   host.innerHTML = '';
   for (const name of Object.keys(file.anims)) {
+    const entry = file.anims[name];
     const b = document.createElement('button');
-    b.textContent = name;
+    // An alias borrows another animation's frames; label the borrow so
+    // "plunge→attack" reads as "no art of its own yet".
+    b.textContent = typeof entry === 'string' ? `${name}→${entry}` : name;
+    b.title = typeof entry === 'string'
+      ? `alias: edits under this name change "${entry}"`
+      : name;
     b.className = name === animName ? 'active' : '';
     b.style.marginRight = '4px';
     b.onclick = () => {
@@ -349,8 +366,8 @@ $('btnResize').onclick = () => {
   if (!(w >= 1 && h >= 1 && w <= 64 && h <= 64)) return;
   saveHistory();
   // Resize every frame of every animation so the sprite stays uniform.
-  for (const a of Object.values(file.anims)) {
-    a.frames = a.frames.map((f) => {
+  for (const [, a] of concreteAnims()) {
+    a.frames = a.frames.map((f: string[]) => {
       const next: string[] = [];
       for (let y = 0; y < h; y++) next.push((f[y] ?? '').slice(0, w).padEnd(w, '.'));
       return next;
@@ -384,7 +401,7 @@ function redraw(): void {
   // 3. Draw reference sprite if enabled
   const showRef = ($('showRef') as HTMLInputElement)?.checked ?? true;
   if (refFile && showRef) {
-    const refAnim = refFile.anims[animName] ?? Object.values(refFile.anims)[0];
+    const refAnim = resolveAnim(refFile, animName in refFile.anims ? animName : Object.keys(refFile.anims)[0]);
     if (refAnim) {
       const refFrame = refAnim.frames[frameIdx % refAnim.frames.length];
       if (refFrame) {
@@ -554,6 +571,41 @@ function rebuildMoveSelect(weaponId: string): void {
   if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
 }
 
+/**
+ * The attack hitbox overlay: dim while the box is merely placed, red
+ * while the `active` window makes it real. Placement mirrors
+ * Player.attackBox exactly — forward aims off the body's front edge
+ * (facing right here), down off the feet, up off the head — so what the
+ * panel shows is where the game would actually hit.
+ */
+function drawAttackBox(
+  g: CanvasRenderingContext2D,
+  def: ReturnType<typeof allAttacks>[number],
+  body: { x: number; y: number; w: number; h: number },
+  progress: number,
+): void {
+  const hb = def.hitbox;
+  const aim = def.aim ?? 'forward';
+  const cx = body.x + body.w / 2;
+  const rect = aim === 'down'
+    ? { x: cx - hb.w / 2, y: body.y + body.h + hb.forward, w: hb.w, h: hb.h }
+    : aim === 'up'
+      ? { x: cx - hb.w / 2, y: body.y - hb.forward - hb.h, w: hb.w, h: hb.h }
+      : { x: body.x + body.w + hb.forward, y: body.y + body.h / 2 - hb.h / 2 + hb.y, w: hb.w, h: hb.h };
+  const live = progress > def.active[0] && progress < def.active[1];
+  g.save();
+  g.strokeStyle = live ? '#ff4444' : '#566c86';
+  g.globalAlpha = live ? 0.9 : 0.45;
+  g.lineWidth = 0.5;
+  g.strokeRect(rect.x + 0.25, rect.y + 0.25, rect.w - 0.5, rect.h - 0.5);
+  if (live) {
+    g.fillStyle = '#ff4444';
+    g.globalAlpha = 0.15;
+    g.fillRect(rect.x, rect.y, rect.w, rect.h);
+  }
+  g.restore();
+}
+
 /** Equip exactly `id` in `slot`, adding to the bag on first use. */
 function ensureEquipped(p: Player, slot: string, id: string | null): void {
   if (p.equipment.get(slot) === id) return;
@@ -584,10 +636,14 @@ function renderComposite(t: number): boolean {
 
   const wdef = weapons.get(weaponId);
   const moves = movesOf(weaponId);
-  // Only moves whose animation is the one on screen are candidates; the
-  // selector picks among them (the sword's whole moveset shares
-  // 'attack'), and auto means the first — the opening combo swing.
-  const candidates = moves.filter((m) => m.def.animation === animName);
+  // A move is a candidate when its animation is the one on screen — or
+  // when its animation is MISSING from the sheet and the screen shows
+  // 'attack', the pattern it falls back to in game. So the base swing
+  // still previews every un-arted move via the selector, and a move
+  // gains its own art the moment its animation exists.
+  const sheetHas = (name: string) => !!weaponVisuals.get(wdef.visual).animations?.includes(name);
+  const candidates = moves.filter((m) =>
+    m.def.animation === animName || (animName === 'attack' && !sheetHas(m.def.animation)));
   const wantKey = ($('compMove') as HTMLSelectElement).value;
   const move = candidates.find((m) => m.key === wantKey) ?? candidates[0];
   const atkDef = move?.def;
@@ -656,6 +712,10 @@ function renderComposite(t: number): boolean {
         p.render(pctx);
       } catch (e) {
         posePlayerError = String(e);
+      }
+      // The player's own box math is the truth; draw straight from it.
+      if (pose && ($('compHitbox') as HTMLInputElement).checked) {
+        drawAttackBox(pctx, pose.def, { x: p.x, y: p.y, w: p.w, h: p.h }, pose.progress);
       }
       pctx.restore();
       pctx.fillStyle = '#ffcd75';
@@ -727,6 +787,11 @@ function renderComposite(t: number): boolean {
       });
     } catch { /* ditto */ }
   }
+  // dw/dh are the sprite's DECLARED physical dims (see above), which is
+  // the body the game's box math would use.
+  if (pose && ($('compHitbox') as HTMLInputElement).checked) {
+    drawAttackBox(pctx, pose.def, { x: fx - dw / 2, y: fy - dh, w: dw, h: dh }, pose.progress);
+  }
   pctx.restore();
 
   pctx.fillStyle = '#ffcd75';
@@ -788,7 +853,7 @@ function renderPreview(): void {
   // Draw reference sprite behind current frame if enabled
   const showRef = ($('showRef') as HTMLInputElement)?.checked ?? true;
   if (refFile && showRef) {
-    const refAnim = refFile.anims[animName] ?? Object.values(refFile.anims)[0];
+    const refAnim = resolveAnim(refFile, animName in refFile.anims ? animName : Object.keys(refFile.anims)[0]);
     if (refAnim) {
       const refIdx = refAnim.frames.length ? Math.floor(t * (refAnim.fps || 1)) % refAnim.frames.length : 0;
       const refRows = refAnim.frames[refIdx] ?? [];
@@ -943,7 +1008,7 @@ function normalize(raw: unknown): SpriteFile {
     const f = r as unknown as SpriteFile;
     if (!f.anims || !Object.keys(f.anims).length) throw new Error('no animations');
     const normalized = { ...f, hd: f.hd ?? true, palette: f.palette ?? { ...PAL } };
-    geometryOf(normalized, Object.values(normalized.anims)[0].frames[0] ?? []);
+    geometryOf(normalized, resolveAnim(normalized, Object.keys(normalized.anims)[0])?.frames[0] ?? []);
     return normalized;
   }
   if (r && Array.isArray(r.frames)) {
@@ -1063,7 +1128,7 @@ function undo(): void {
   if (!file.anims[animName]) {
     animName = Object.keys(file.anims)[0];
   }
-  const maxIdx = file.anims[animName].frames.length - 1;
+  const maxIdx = anim().frames.length - 1;
   frameIdx = Math.min(frameIdx, maxIdx);
   
   refreshUI();
@@ -1083,7 +1148,7 @@ function redo(): void {
   if (!file.anims[animName]) {
     animName = Object.keys(file.anims)[0];
   }
-  const maxIdx = file.anims[animName].frames.length - 1;
+  const maxIdx = anim().frames.length - 1;
   frameIdx = Math.min(frameIdx, maxIdx);
   
   refreshUI();

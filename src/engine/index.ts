@@ -34,6 +34,7 @@ export { sprite, epx, flipped, whiteOf, tintOf, type Palette, type SpriteData } 
 export { withFacing, frameAt, type Anim, type AnimSet, type FacingAnimSet } from './gfx/animation';
 export {
   loadSprite,
+  resolveAnim,
   resolveSpriteGeometry,
   type SpriteFile,
   type SpriteGeometry,

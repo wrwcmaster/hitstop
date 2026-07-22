@@ -210,6 +210,21 @@ defineItem<ItemCtx>('dagger', {
 
 No player-code changes: combo length, timing, damage windows, range, lunge, feel strength, body motion, slash colors, held art, and attack trail flow from the registries. Stat bonuses (`mods: { add: { attack: 20 } }`) stack on top. `unarmed` is registered through the same path rather than handled as a fallback special case.
 
+### One sprite per move
+
+Every move in a weapon's moveset names its own sheet animation — the combo swings (`attack`, `attack2`, `attack3`) and the contextuals (`aerial`, `plunge`, `upper`, `dash`). **A sheet owes only its base `attack`**: any move whose animation is absent falls back to the normal attack pattern automatically, so per-move art is pure opt-in.
+
+```jsonc
+"anims": {
+  "attack": { "fps": 18, "frames": [ /* the swing every move can borrow */ ] },
+  "plunge": { "fps": 12, "frames": [ /* its own art, whenever it exists */ ] }
+  // upper, dash, aerial, attack2, attack3: nothing to declare — they
+  // fall back to "attack" until someone draws them
+}
+```
+
+The rusty sword's plunge is the shipped example: a committed point-down thrust instead of the borrowed swing. Sheets may also **alias** one animation to another explicitly (`"upper": "aerial"` — a string instead of frames, resolved at load with cycle detection) when a move should borrow something *other* than the default. In the sprite editor an alias shows as `upper→aerial` and editing under it edits its target; the composite panel is where per-move art is judged, posed on the full player with the move's own trail — on the base `attack` animation, its move selector still poses every un-arted move.
+
 ### Shaping an attack trail
 
 Beyond the four required fields, `trail` takes three optional ones that turn the same renderer into very different swings:
