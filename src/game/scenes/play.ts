@@ -805,6 +805,33 @@ export class PlayScene implements Scene {
     });
   }
 
+  /**
+   * Vertical seams fire on their motion CONDITION, not only on entry.
+   *
+   * Entry-edge triggering has a blind spot a shaft walks straight into:
+   * arrive in the town well from below on a jump too weak to clear the
+   * mouth, and you fall back down INSIDE the trigger you were placed in —
+   * there is no entry edge left to fire. The honest outcome of a failed
+   * exit is to fall back through the seam to the room below, so a
+   * fallIn/leapUp door is checked every frame the player overlaps it:
+   * the moment the motion matches (falling for fallIn, rising for
+   * leapUp), through you go. The motion gate itself prevents refiring —
+   * you cannot be both standing still and falling.
+   */
+  private updateVerticalSeams(): void {
+    const p = this.player;
+    if (!p || this.transition) return;
+    for (const def of this.room.triggers ?? []) {
+      if (def.event !== 'door') continue;
+      if (def.props?.fallIn !== true && def.props?.leapUp !== true) continue;
+      if (doorLocked(def, this.host) || !overlaps(p, def)) continue;
+      if (this.firesOnContact(def)) {
+        triggerActions.get('door').run(def, this.host);
+        return;
+      }
+    }
+  }
+
   private renderDoorSigns(ctx: CanvasRenderingContext2D): void {
     const p = this.player;
     const worldW = this.tilemap.worldW;
@@ -953,17 +980,21 @@ export class PlayScene implements Scene {
       if (before < TRANSITION_TIME / 2 && tr.t >= TRANSITION_TIME / 2) {
         this.setRoom(tr.roomId, tr.x, tr.y);
         // setRoom zeroes velocity for ordinary doors; a vertical seam
-        // hands the arc back so the fall (or the jump) simply continues.
-        // launch() also guarantees an upward arc clears the far shaft —
-        // a tapped jump arrives pre-cut, and carried faithfully it would
-        // strand you in the well pit (see Player.launch).
-        if (tr.carry && this.player) this.player.launch(tr.carry.vx, tr.carry.vy);
+        // hands the arc back UNCHANGED, so the fall (or the jump) simply
+        // continues. Deliberately no boost for a weak jump: physics stays
+        // honest, and an arc that cannot clear the far shaft falls back
+        // through the seam to where it came from (see updateVerticalSeams).
+        if (tr.carry && this.player) {
+          this.player.vx = tr.carry.vx;
+          this.player.vy = tr.carry.vy;
+        }
       }
       if (tr.t >= TRANSITION_TIME) this.transition = null;
       return;
     }
 
     if (this.phase === 'play') this.rearmUnsealedDoors();
+    if (this.phase === 'play') this.updateVerticalSeams();
 
     // World map: an overlay, so the run simply freezes behind it.
     if (this.phase === 'play' && this.player && g.input.consumePress('map')) {

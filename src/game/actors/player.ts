@@ -533,29 +533,6 @@ export class Player extends Actor {
 
   /** Seconds left of the down+jump drop-through window (see update). */
   private dropT = 0;
-  /** Mid-launch through a vertical seam: the rise is promised, so the
-   * variable-jump cut stays off it until it is spent (see launch). */
-  private launched = false;
-
-  /**
-   * Fired through a vertical seam (the town well). Restores the arc the
-   * transition interrupted — and for an UPWARD launch, guarantees it:
-   * vy is floored at full jump speed and the variable-jump cut stays
-   * off until the rise is spent.
-   *
-   * Without the guarantee there is a trap. The seam fires at anything
-   * past the motion threshold, but a tapped jump crosses it already cut
-   * to a fraction of full speed; carried faithfully, that remnant rises
-   * a few pixels and drops you into the well pit — the one place in the
-   * room with no walk-out, wearing an E prompt that leads straight back
-   * where you came from. "The same jump carries you out of the well" is
-   * the promise, so the exit leap is always a full one.
-   */
-  launch(vx: number, vy: number): void {
-    this.vx = vx;
-    this.vy = vy < 0 ? Math.min(vy, -PLAYER_TUNING.jumpSpeed) : vy;
-    this.launched = vy < 0;
-  }
 
   /** How deep in water the body sits (0 dry .. 1 fully under). */
   submersion = 0;
@@ -1151,13 +1128,10 @@ export class Player extends Actor {
         });
       }
       // Variable jump height: releasing jump early cuts the ascent.
-      // (Not while swimming — strokes and breaches are fixed impulses,
-      // and not mid seam-launch — that rise is promised, see launch().)
-      if (!swimming && !this.launched && !this.fsm.is('dead') && !this.input.held('jump') && this.vy < -T.jumpCutSpeed) {
+      // (Not while swimming — strokes and breaches are fixed impulses.)
+      if (!swimming && !this.fsm.is('dead') && !this.input.held('jump') && this.vy < -T.jumpCutSpeed) {
         this.vy = -T.jumpCutSpeed;
       }
-      // A launch is spent once the rise is: normal jump rules resume.
-      if (this.launched && (this.vy >= 0 || this.onGround)) this.launched = false;
     }
     // Entry splash: hitting the surface with speed reads as impact.
     this.submersion = sub;
