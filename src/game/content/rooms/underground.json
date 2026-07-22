@@ -41,12 +41,13 @@
   "triggers": [
     {
       "x": 40,
-      "y": 8,
+      "y": 0,
       "w": 24,
-      "h": 32,
+      "h": 8,
       "event": "door",
       "props": {
-        "room": "town"
+        "room": "town",
+        "leapUp": true
       }
     },
     {

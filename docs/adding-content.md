@@ -266,6 +266,25 @@ The interior exception matters more than it sounds. The shaft down to the grotto
 
 A trigger action decides this for itself via `TriggerAction.autoFire`, asked fresh every time because the answer changes mid-room: a barred door becomes a walk-through gap the instant you pick up its key.
 
+### Vertical seams: wells and ceiling gaps
+
+A pair of doors can join two rooms **vertically** — the town well over the underground's ceiling gap. Mark the floor side `fallIn` and the ceiling side `leapUp`:
+
+```json
+// town: a shaft in the floor
+{ "event": "door", "x": 200, "y": 240, "w": 32, "h": 16, "props": { "room": "underground", "fallIn": true } }
+// underground: the gap in the ceiling above it
+{ "event": "door", "x": 40, "y": 0, "w": 24, "h": 8, "props": { "room": "town", "leapUp": true } }
+```
+
+Both fire only on genuine motion through them — falling for `fallIn`, rising for `leapUp` — and the landing rules change: you arrive **in** the far opening rather than beside it, and your velocity carries across the transition. Drop down the well and you emerge under the far ceiling still falling, to land on whatever the room put beneath the gap; jump up through the gap and the same jump lifts you out of the well's mouth. The room swap is a splice in one continuous arc, which is what makes the two rooms read as one place.
+
+The physics stays **honest**: a weak jump gets no boost. A tapped jump can cross the seam and still fail the far mouth — and then it falls back down *inside* the shaft it arrived in, which is a blind spot for entry-edge triggering (there is no entry left to fire). So vertical seams are checked every frame the player overlaps them (`PlayScene.updateVerticalSeams`): the moment the motion matches the door — falling for `fallIn`, rising for `leapUp` — through you go. A failed exit simply returns you to the room below, back on the bar you jumped from; the motion gate itself prevents refiring, since you cannot be both standing and falling.
+
+The corollary is that the seam's difficulty lives in the **room geometry**, not in code: place the bar close enough under the gap, and the far mouth shallow enough, that a full jump clears it with margin. In the shipped well, a held jump crosses with ~50px of rise in hand against a 24px mouth — comfortable; the only jump that bounces back is one deliberately cut short.
+
+Keep a `leapUp` trigger **thin** (the top row of the gap). Anything taller reaches down to where the player stands waiting to jump — and since triggers fire on entry, a trigger you are already inside has spent its edge before the jump begins.
+
 ### Sealing a boss in
 
 Give a boss room's doors `"bossSeal": true` and they lock while any boss in the room draws breath, opening the instant he doesn't:
