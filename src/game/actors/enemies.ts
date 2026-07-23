@@ -1,5 +1,5 @@
 import { rand, sign, tintOf, itemDef, ballisticVelocity, ballisticLob } from '@engine/index';
-import { defineMonster, Monster } from './monster';
+import { defineMonster, Monster, type MonsterDef } from './monster';
 import { shootArrow, shootBullet, muzzleFlash, ARROW_GRAVITY, BULLET_GRAVITY } from '../content/ballistics';
 import { drawBow } from '../content/weapon-visuals';
 import { SLIME1, SLIME2, BAT1, BAT2, PIKE1, PIKE2, CHEST, TEXEL, blit, slimeSprite, batSprite, pikeSprite, chestSprite } from '../content/sprites';
@@ -355,20 +355,39 @@ defineMonster('pike', {
  * crack it open (two hits) and the deep pays out. Registered as a
  * monster so strikes, drops, and the placeables palette all come free.
  */
-defineMonster('chest', {
-  hp: 40, damage: 0, w: chestSprite.hitbox.w, h: chestSprite.hitbox.h, score: 50, xp: 0,
-  noContactDamage: true,
-  colors: [COLORS.gold, COLORS.white],
-  drops: [
+function chestDef(drops: NonNullable<MonsterDef['drops']>, healing = false): MonsterDef {
+  return {
+    hp: 40, damage: 0, w: chestSprite.hitbox.w, h: chestSprite.hitbox.h, score: 50, xp: 0,
+    noContactDamage: true,
+    colors: healing ? [COLORS.red, COLORS.white, COLORS.gold] : [COLORS.gold, COLORS.white],
+    drops,
+    draw(g, m) {
+      blit(g, m.img(CHEST), m.x - chestSprite.hitbox.x, m.y - chestSprite.hitbox.y);
+      if (!healing) return;
+      // A tiny field-medicine cross makes the guaranteed potion cache
+      // readable before the player commits to breaking it open.
+      const x = Math.round(m.x + m.w / 2);
+      const y = Math.round(m.y + m.h / 2);
+      g.fillStyle = COLORS.white;
+      g.fillRect(x - 3, y - 2, 6, 4);
+      g.fillStyle = COLORS.red;
+      g.fillRect(x - 2, y - 1, 4, 2);
+      g.fillRect(x - 1, y - 2, 2, 4);
+    },
+  };
+}
+
+defineMonster('chest', chestDef([
     { id: 'coin', chance: 1 },
     { id: 'coin', chance: 1 },
     { id: 'coin', chance: 0.8 },
     { id: 'potion', chance: 0.5 },
     { id: 'mana-orb', chance: 0.5 },
-  ],
-  draw(g, m) {
-    blit(g, m.img(CHEST), m.x - chestSprite.hitbox.x, m.y - chestSprite.hitbox.y);
-  },
+]));
+
+defineMonster('healing-chest', {
+  ...chestDef([{ id: 'potion', chance: 1 }], true),
+  displayName: 'HEALING CACHE',
 });
 
 /* ---- the ballistic shooters ---- */

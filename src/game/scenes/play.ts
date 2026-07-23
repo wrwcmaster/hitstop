@@ -5,6 +5,7 @@ import {
   buildTilemap,
   Tilemap,
   drawText,
+  textWidth,
   DebugOverlay,
   Triggers,
   DialogueScene,
@@ -61,9 +62,13 @@ interface Transition {
   open?: { left: number; x: number; y: number; w: number; h: number };
   /** Velocity to restore on arrival — a vertical seam keeps your arc. */
   carry?: { vx: number; vy: number };
+  /** Horizontal edge gaps keep the knight walking through the fade. */
+  walk?: { out: -1 | 1; into: -1 | 1 };
 }
 
 const TRANSITION_TIME = 0.6;
+/** Fast enough to clear the threshold before the screen reaches black. */
+const EDGE_WALK_SPEED = 72;
 /** How long a door takes to haul itself up out of the way. */
 const DOOR_OPEN_TIME = 0.35;
 
@@ -476,6 +481,30 @@ export class PlayScene implements Scene {
    * the player, place them, spawn the room's monsters, start waves if the
    * room wants them, and drop a checkpoint save.
    */
+  private cameraTarget(fallbackX: number, fallbackY: number): { x: number; y: number } {
+    const cam = this.game.camera;
+    const p = this.player;
+    if (!p) {
+      return { x: fallbackX - cam.viewW / 2, y: fallbackY - cam.viewH * 0.62 };
+    }
+    let ax = p.cx + p.facing * 18 + p.vx * 0.1;
+    let ay = p.cy + p.vy * 0.05;
+    const knight = this.coop?.guest;
+    if (knight && knight.hp > 0) {
+      ax = (p.cx + knight.cx) / 2;
+      ay = (p.cy + knight.cy) / 2;
+    }
+    return { x: ax - cam.viewW / 2, y: ay - cam.viewH * 0.62 };
+  }
+
+  /** Jump straight to the same clamped target normal follow will use. */
+  private snapCamera(fallbackX: number, fallbackY: number): void {
+    const cam = this.game.camera;
+    const target = this.cameraTarget(fallbackX, fallbackY);
+    cam.x = clamp(target.x, cam.minX, Math.max(cam.minX, cam.maxX - cam.viewW));
+    cam.y = clamp(target.y, cam.minY, Math.max(cam.minY, cam.maxY - cam.viewH));
+  }
+
   private setRoom(id: string, spawnX?: number, spawnY?: number): void {
     const g = this.game;
     this.roomId = id;
@@ -530,8 +559,12 @@ export class PlayScene implements Scene {
       knight.vx = 0;
       knight.vy = 0;
     }
-    g.camera.x = clamp(aimX - g.camera.viewW / 2, 0, Math.max(0, this.tilemap.worldW - g.camera.viewW));
-    g.camera.y = clamp(aimY - g.camera.viewH * 0.62, -30, Math.max(-30, this.tilemap.worldH - g.camera.viewH));
+    // Use the exact target and bounds normal follow uses. Previously this
+    // clamped against worldH instead of camera.maxY (which intentionally
+    // sits 16px higher to show a ground lip), then followed the player's
+    // centre instead of the top-left spawn point. The first live frame
+    // corrected both differences and visibly dropped the whole floor.
+    this.snapCamera(aimX, aimY);
 
     // Pre-placed entities, spawned through the placeables catalog — the
     // same one the level editor and test spawner use. Unknown types are
@@ -626,11 +659,48 @@ export class PlayScene implements Scene {
       x: x ?? land?.x ?? spawn.x,
       y: y ?? land?.y ?? spawn.y,
       open: this.doorwayArt(roomId) ?? undefined,
+      walk: this.edgeWalk(roomId) ?? undefined,
       // Vertical seams splice the player's arc across rooms, so capture
       // the velocity at the moment of crossing (setRoom zeroes it).
       carry: land?.carry && this.player ? { vx: this.player.vx, vy: this.player.vy } : undefined,
     };
     this.game.sfx.play(this.transition.open ? 'unlock' : 'menuOpen');
+  }
+
+  /**
+   * A flush horizontal opening is one continuous threshold. Keep walking
+   * toward the old room's outside, then away from the new room's edge,
+   * instead of freezing as soon as the hitbox touches a trigger.
+   */
+  private edgeWalk(toRoom: string): { out: -1 | 1; into: -1 | 1 } | null {
+    const side = (room: RoomDef, door: TriggerDef): -1 | 1 | null => {
+      if (door.props?.fallIn === true || door.props?.leapUp === true) return null;
+      const width = Math.max(...room.tiles.map((row) => row.length)) * room.tileSize;
+      if (door.x <= 0) return -1;
+      if (door.x + door.w >= width) return 1;
+      return null;
+    };
+    const leaving = this.room.triggers?.find(
+      (tr) => tr.event === 'door' && tr.props?.room === toRoom,
+    );
+    const dest = ROOMS[toRoom];
+    const entering = dest?.triggers?.find(
+      (tr) => tr.event === 'door' && tr.props?.room === this.roomId,
+    );
+    if (!leaving || !entering || !dest) return null;
+    const out = side(this.room, leaving);
+    const farSide = side(dest, entering);
+    if (out === null || farSide === null) return null;
+    return { out, into: farSide === -1 ? 1 : -1 };
+  }
+
+  private walkThroughEdge(direction: -1 | 1, dt: number): void {
+    const p = this.player;
+    if (!p || dt <= 0) return;
+    p.facing = direction;
+    p.vx = direction * EDGE_WALK_SPEED;
+    p.x += p.vx * dt;
+    p.animT += dt;
   }
 
   /**
@@ -835,16 +905,47 @@ export class PlayScene implements Scene {
   private renderDoorSigns(ctx: CanvasRenderingContext2D): void {
     const p = this.player;
     const worldW = this.tilemap.worldW;
+    const viewLeft = this.game.camera.x;
+    const viewRight = viewLeft + this.game.camera.viewW;
     for (const z of this.room.triggers ?? []) {
       if (z.event !== 'door') continue;
       const doorX = z.x + z.w / 2;
-      // Doorways sit flush with the room edge and the camera stops there,
-      // so a sign centred on one would hang off the side of the screen.
-      // Pull it inboard far enough to read.
-      const textX = Math.min(Math.max(doorX, 26), worldW - 26);
+      const label = this.doorLabel(z);
+      const words = label.split(/\s+/);
+      let lines = [label];
+      if (textWidth(label) > 48 && words.length > 1) {
+        let split = 1;
+        let best = Number.POSITIVE_INFINITY;
+        for (let i = 1; i < words.length; i++) {
+          const left = words.slice(0, i).join(' ');
+          const right = words.slice(i).join(' ');
+          const score = Math.max(textWidth(left), textWidth(right));
+          if (score < best) {
+            best = score;
+            split = i;
+          }
+        }
+        lines = [words.slice(0, split).join(' '), words.slice(split).join(' ')];
+      }
+      // Edge doors and scrolling rooms can put the authored door centre
+      // outside the readable viewport. Clamp by the actual widest line,
+      // not a fixed margin, so no destination name can be clipped.
+      const halfWidth = Math.max(...lines.map((line) => textWidth(line))) / 2;
+      const left = Math.max(0, viewLeft) + halfWidth + 2;
+      const right = Math.min(worldW, viewRight) - halfWidth - 2;
+      const textX = left <= right ? clamp(doorX, left, right) : (left + right) / 2;
       const near = p ? Math.abs(p.cx - doorX) < 70 : false;
+      const besidePortal = (this.room.triggers ?? []).some((other) => (
+        other.event === 'portal'
+        && Math.abs((other.x + other.w / 2) - doorX) < 70
+        && Math.abs((other.y + other.h / 2) - (z.y + z.h / 2)) < 70
+      ));
       ctx.globalAlpha = near ? 1 : 0.45;
-      drawText(ctx, this.doorLabel(z), textX, z.y - 9, near ? COLORS.gold : COLORS.steel, 1, 'center');
+      const lineHeight = 8;
+      const textY = z.y - 9 - (lines.length - 1) * lineHeight - (besidePortal ? 14 : 0);
+      lines.forEach((line, index) => {
+        drawText(ctx, line, textX, textY + index * lineHeight, near ? COLORS.gold : COLORS.steel, 1, 'center');
+      });
       ctx.globalAlpha = 1;
     }
   }
@@ -854,9 +955,9 @@ export class PlayScene implements Scene {
    * which is what the banded timber already looks like, and reads far
    * better than sliding two 8px halves apart.
    *
-   * Drawn over the tilemap's own copy of the door and clipped to the
-   * opening, so the gate disappears into the lintel instead of over the
-   * wall above it.
+   * Drawn over the tilemap's own copy of the door, but before actors, and
+   * clipped to the opening. The gate disappears into the lintel while the
+   * player crossing the threshold remains in the foreground.
    */
   private renderDoorOpening(ctx: CanvasRenderingContext2D): void {
     const o = this.transition?.open;
@@ -975,9 +1076,14 @@ export class PlayScene implements Scene {
         tr.open.left -= dt;
         return;
       }
+      const half = TRANSITION_TIME / 2;
       const before = tr.t;
-      tr.t += dt;
-      if (before < TRANSITION_TIME / 2 && tr.t >= TRANSITION_TIME / 2) {
+      const after = Math.min(TRANSITION_TIME, before + dt);
+      const outDt = Math.max(0, Math.min(after, half) - Math.min(before, half));
+      if (tr.walk) this.walkThroughEdge(tr.walk.out, outDt);
+      tr.t = after;
+      if (before < half && after >= half) {
+        if (tr.walk && this.player) this.player.facing = tr.walk.into;
         this.setRoom(tr.roomId, tr.x, tr.y);
         // setRoom zeroes velocity for ordinary doors; a vertical seam
         // hands the arc back UNCHANGED, so the fall (or the jump) simply
@@ -989,7 +1095,12 @@ export class PlayScene implements Scene {
           this.player.vy = tr.carry.vy;
         }
       }
-      if (tr.t >= TRANSITION_TIME) this.transition = null;
+      const inDt = Math.max(0, after - half) - Math.max(0, before - half);
+      if (tr.walk) this.walkThroughEdge(tr.walk.into, inDt);
+      if (tr.t >= TRANSITION_TIME) {
+        if (tr.walk && this.player) this.player.vx = 0;
+        this.transition = null;
+      }
       return;
     }
 
@@ -1047,16 +1158,9 @@ export class PlayScene implements Scene {
       // and (with the zoomed-in view) follows vertically too, biased so
       // more of the world above the knight is visible than below.
       // With a co-op guest alive, aim at the midpoint of the two knights.
-      const p = this.player;
-      const knight = this.coop?.guest;
       const cam = g.camera;
-      let ax = p.cx + p.facing * 18 + p.vx * 0.1;
-      let ay = p.cy + p.vy * 0.05;
-      if (knight && knight.hp > 0) {
-        ax = (p.cx + knight.cx) / 2;
-        ay = (p.cy + knight.cy) / 2;
-      }
-      cam.follow(ax - cam.viewW / 2, ay - cam.viewH * 0.62, dt);
+      const target = this.cameraTarget(this.player.x, this.player.y);
+      cam.follow(target.x, target.y, dt);
     }
   }
 
@@ -1076,14 +1180,20 @@ export class PlayScene implements Scene {
 
   render(ctx: CanvasRenderingContext2D): void {
     const g = this.game;
-    this.bg.render(ctx, g.camera.x);
+    this.bg.render(
+      ctx,
+      g.camera.x,
+      g.camera.y,
+      (this.room.props?.backdrop as string | undefined) ?? 'night',
+      this.uiT,
+    );
     g.camera.begin(ctx);
     this.tilemap.render(ctx, g.camera.x, g.camera.y, g.camera.viewW, g.camera.viewH);
+    this.renderDoorOpening(ctx);
     this.waves.renderMarkers(ctx);
     g.world.render(ctx);
     if (this.phase === 'play') this.hud.renderGateMarker(ctx, this.gateMarker, this.uiT);
     if (this.phase === 'play') this.renderDoorSigns(ctx);
-    this.renderDoorOpening(ctx);
     if (this.phase === 'play' && this.nearInteract) this.renderInteractPrompt(ctx, this.nearInteract);
     g.feel.renderWorld(ctx);
     this.debug.renderWorld(ctx);

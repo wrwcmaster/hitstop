@@ -3,6 +3,7 @@ import { placeables } from './placeables';
 import { waveTables } from './waves';
 import { propsAt, requirePositiveNumber } from './prop-validation';
 import { triggerActions } from '../scenes/play/trigger-actions';
+import { backdrops } from './backdrops';
 
 export interface RoomFeature {
   validate(value: unknown, room: RoomDef, path: string): void;
@@ -17,6 +18,14 @@ export function defineRoomFeature(key: string, feature: RoomFeature): void {
 defineRoomFeature('music', {
   validate(value, _room, path) {
     if (typeof value !== 'string' || !songs.has(value)) throw new Error(`${path}: unknown song "${String(value)}"`);
+  },
+});
+
+defineRoomFeature('backdrop', {
+  validate(value, _room, path) {
+    if (typeof value !== 'string' || !backdrops.has(value)) {
+      throw new Error(`${path}: unknown backdrop "${String(value)}"`);
+    }
   },
 });
 

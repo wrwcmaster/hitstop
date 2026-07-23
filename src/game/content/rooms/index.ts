@@ -9,6 +9,7 @@ import rampartsJson from './ramparts.json';
 import testRoomJson from './test_room.json';
 import corridorJson from './corridor.json';
 import mountainJson from './mountain.json';
+import mountainPassageJson from './mountain_passage.json';
 import undergroundJson from './underground.json';
 
 /**
@@ -26,6 +27,7 @@ export const ROOMS: Record<string, RoomDef> = {
   test_room: validateRoom(testRoomJson),
   corridor: validateRoom(corridorJson),
   mountain: validateRoom(mountainJson),
+  mountain_passage: validateRoom(mountainPassageJson),
   underground: validateRoom(undergroundJson),
 };
 

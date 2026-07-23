@@ -1,0 +1,76 @@
+{
+  "name": "Cliffside Passage",
+  "tileSize": 8,
+  "legend": {
+    "a": "alpineRock",
+    "s": "alpineRockTop",
+    "-": "alpineLedge",
+    "~": "snowTuft",
+    "c": "cairn"
+  },
+  "tiles": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "aaaaa..............................aaaaa",
+    "aaa..................................aaa",
+    "aa....................................aa",
+    "a......................................a",
+    "a......................................a",
+    "a..............aaaaaaaaaa..............a",
+    "a.................aaaa.................a",
+    "a..................aa..................a",
+    "a.............ssssssssssss.............a",
+    "a..................aaaa................a",
+    "........................................",
+    "..........------........------..........",
+    "........................................",
+    "....c..............................~....",
+    "ssssssssssssssssssssssssssssssssssssssss",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ],
+  "playerSpawn": {
+    "x": 24,
+    "y": 110
+  },
+  "entities": [
+    {
+      "type": "healing-chest",
+      "x": 150,
+      "y": 64
+    }
+  ],
+  "triggers": [
+    {
+      "x": 0,
+      "y": 96,
+      "w": 8,
+      "h": 32,
+      "event": "door",
+      "once": false,
+      "props": {
+        "room": "mountain"
+      }
+    },
+    {
+      "x": 312,
+      "y": 96,
+      "w": 8,
+      "h": 32,
+      "event": "door",
+      "once": false,
+      "props": {
+        "room": "ramparts"
+      }
+    }
+  ],
+  "props": {
+    "backdrop": "mountain-pass",
+    "music": "overworld",
+    "map": {
+      "x": 18,
+      "y": 0
+    }
+  }
+}
