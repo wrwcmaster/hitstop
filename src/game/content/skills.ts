@@ -1,12 +1,12 @@
 import { defineSkill } from '@engine/index';
 import { COLORS } from './palette';
-import type { ActionGame } from '../defs';
+import type { ActorHost } from '../defs';
 import type { Player } from '../actors/player';
 import { Monster } from '../actors/monster';
 
 /** Context handed to skill casts. */
 export interface SkillCtx {
-  game: ActionGame;
+  game: ActorHost;
   player: Player;
 }
 

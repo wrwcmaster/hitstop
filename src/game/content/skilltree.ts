@@ -1,10 +1,10 @@
 import { defineTreeNode } from '@engine/index';
-import type { ActionGame } from '../defs';
+import type { ActorHost } from '../defs';
 import type { Player } from '../actors/player';
 
 /** Context handed to tree node unlock hooks. */
 export interface TreeCtx {
-  game: ActionGame;
+  game: ActorHost;
   player: Player;
 }
 

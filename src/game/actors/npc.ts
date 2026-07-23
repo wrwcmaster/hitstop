@@ -14,7 +14,7 @@ import { blit, merchantSprite } from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { ShopScene } from '../scenes/shop';
 import { SpawnerScene } from '../scenes/spawner';
-import { prettyCode, prettyButton, menuLine, type ActionGame, type Action } from '../defs';
+import { prettyCode, prettyButton, menuLine, type ActionGame, type ActorHost, type Action } from '../defs';
 import { Player, nearestPlayer } from './player';
 import { healer, forge, questGiver } from './npc-roles';
 
@@ -23,9 +23,12 @@ import { healer, forge, questGiver } from './npc-roles';
  * conversation, and optionally a shop. Interaction is proximity + the
  * interact key (E/F), with a floating prompt when in range.
  */
-/** What an NPC's hooks get to work with. */
+/** What an NPC's hooks get to work with. The hooks are pure reactions
+ * (heal, upgrade, quest state) so they see the narrow ActorHost; the Npc
+ * itself keeps the full game because opening a shop or spawner pushes a
+ * scene. */
 export interface NpcCtx {
-  game: ActionGame;
+  game: ActorHost;
   player: Player;
   npc: Npc;
 }

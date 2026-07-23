@@ -8,13 +8,13 @@ import {
   ICON_HASTE,
   ICON_KEY,
 } from './sprites';
-import type { ActionGame } from '../defs';
+import type { ActorHost } from '../defs';
 import type { Player } from '../actors/player';
 import { weaponIcon } from './weapon-visuals';
 
 /** Context handed to item use/onPickup hooks. */
 export interface ItemCtx {
-  game: ActionGame;
+  game: ActorHost;
   player: Player;
 }
 

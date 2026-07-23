@@ -104,6 +104,16 @@ see the scene only through the narrow **`PlayHost`** seam (`play/host.ts`):
 Extend by adding to these modules/registries — don't grow `play.ts` back
 into a god class, and don't widen `PlayHost` casually.
 
+Actors and the content callbacks they run (item `use`, skill `cast`, tree
+`onUnlock`, NPC `onChoice`) receive **`ActorHost`** (`defs.ts`), not the
+whole `Game` — the narrow set of services the simulation layer needs
+(`feel`/`combat`/`events`/`sfx`/`world`/`input`/`pad`), with the scene
+stack, camera, music, and loop deliberately out of reach. Pass `game`
+where an `ActorHost` is wanted (a full game satisfies it); don't widen
+`ActorHost` to sneak in `scenes`/`camera` — if an actor truly needs to
+open a scene it's doing flow control, so keep it on the full `ActionGame`
+like `Npc`/`Pickup` do.
+
 ## Content recipes
 
 Details and code samples: `docs/adding-content.md`. The short version —

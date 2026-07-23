@@ -175,6 +175,28 @@ export interface GameEvents extends Record<string, unknown> {
  * controls UI for button rebinding). */
 export type ActionGame = Game<Action, GameEvents> & { pad?: GamepadInput<Action> };
 
+/**
+ * The narrow view of the game the simulation layer is allowed to touch —
+ * actors (player, monsters, gizmos) and the content callbacks they run
+ * (item use, skill cast, tree unlock, NPC choice). It is exactly the
+ * engine services those need: `feel` (juice), `combat` (resolve a hit),
+ * `events` (the bus), `sfx`, `world`, raw `input`, and `pad` for
+ * device-aware prompts.
+ *
+ * It deliberately omits the scene stack, camera, music, and the loop:
+ * flow control and presentation are a scene's job, not an actor's. A full
+ * `ActionGame` satisfies this structurally, so creation sites keep passing
+ * `game` unchanged — the narrowing only constrains the receiver. That
+ * turns "an actor quietly reached for game.scenes.switch()" or
+ * "...game.camera" from a runtime footgun into a compile error, and keeps
+ * the two actors that genuinely open scenes (Npc, Pickup) honest by
+ * leaving them on the full `ActionGame`.
+ */
+export type ActorHost = Pick<
+  ActionGame,
+  'feel' | 'combat' | 'events' | 'sfx' | 'world' | 'input' | 'pad'
+>;
+
 /** Build version, injected from package.json at build time (see vite configs). */
 declare const __APP_VERSION__: string;
 export const VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0';
