@@ -1,6 +1,6 @@
 import type { Actor, CollisionSource, Projectile } from '@engine/index';
 import { COLORS } from './palette';
-import type { ActionGame } from '../defs';
+import type { ActorHost } from '../defs';
 
 /**
  * Ballistic shots — arrows and bullets as one shared vocabulary that
@@ -75,7 +75,7 @@ export function drawBullet(g: CanvasRenderingContext2D, x: number, y: number, vx
 }
 
 /** Loose an arrow: arcs under gravity, sticks a puff of shards on walls. */
-export function shootArrow(game: ActionGame, collision: CollisionSource, o: ShotOptions): TaggedProjectile {
+export function shootArrow(game: ActorHost, collision: CollisionSource, o: ShotOptions): TaggedProjectile {
   const pr = game.combat.shoot(
     {
       x: o.x, y: o.y, vx: o.vx, vy: o.vy,
@@ -107,7 +107,7 @@ export function shootArrow(game: ActionGame, collision: CollisionSource, o: Shot
 }
 
 /** Crack off a bullet: fast, nearly flat, sparks where it lands. */
-export function shootBullet(game: ActionGame, collision: CollisionSource, o: ShotOptions): TaggedProjectile {
+export function shootBullet(game: ActorHost, collision: CollisionSource, o: ShotOptions): TaggedProjectile {
   const pr = game.combat.shoot(
     {
       x: o.x, y: o.y, vx: o.vx, vy: o.vy,
@@ -139,7 +139,7 @@ export function shootBullet(game: ActionGame, collision: CollisionSource, o: Sho
 }
 
 /** Muzzle feedback shared by every shooter: flash, kick particles, sound. */
-export function muzzleFlash(game: ActionGame, x: number, y: number, dir: number, kind: 'arrow' | 'bullet'): void {
+export function muzzleFlash(game: ActorHost, x: number, y: number, dir: number, kind: 'arrow' | 'bullet'): void {
   if (kind === 'bullet') {
     game.feel.sfx.play('gun');
     game.feel.burst(x, y, 7, {

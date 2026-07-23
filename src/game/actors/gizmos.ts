@@ -9,7 +9,7 @@ import {
 import { COLORS } from '../content/palette';
 import { definePlaceable, type PlaceableCtx } from '../content/placeables';
 import { optionalFiniteNumber, rejectUnknownProps, requireString } from '../content/prop-validation';
-import { prettyCode, prettyButton, type ActionGame } from '../defs';
+import { prettyCode, prettyButton, type ActorHost } from '../defs';
 import { Player, nearestPlayer } from './player';
 
 /**
@@ -54,7 +54,7 @@ export class MovingPlatform extends Entity {
   private t: number;
 
   constructor(
-    _game: ActionGame,
+    _game: ActorHost,
     collision: CollisionSource,
     private x0: number,
     private y0: number,
@@ -126,7 +126,7 @@ export class Lever extends Entity {
   private on: boolean;
 
   constructor(
-    private game: ActionGame,
+    private game: ActorHost,
     flags: ReadonlySet<string>,
     private x: number,
     private y: number,
@@ -185,7 +185,7 @@ export function drawLever(g: CanvasRenderingContext2D, x: number, y: number, on:
 }
 
 /** Device-aware interact prompt (same convention as NPCs). */
-function promptLabel(game: ActionGame): string {
+function promptLabel(game: ActorHost): string {
   const pad = game.pad;
   if (pad?.connected) {
     const b = pad.buttonsFor('interact')[0];
@@ -204,7 +204,7 @@ export class PressurePlate extends Entity {
   private pressed = false;
 
   constructor(
-    private game: ActionGame,
+    private game: ActorHost,
     private x: number,
     private y: number,
     private switchId: string,
@@ -254,7 +254,7 @@ export class Barrier extends Entity {
   private lingerT = 0;
 
   constructor(
-    private game: ActionGame,
+    private game: ActorHost,
     private collision: CollisionSource,
     private flags: ReadonlySet<string>,
     private x: number,

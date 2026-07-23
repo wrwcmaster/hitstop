@@ -149,6 +149,8 @@ The second wave of systems keeps the same shape — registries of data + small h
 - **`play/screens.ts`**: the title screen (menu + render) and the game-over overlay.
 - **`play/cheats.ts`**: debug cheats as a data table — the key handler and the on-screen legend both walk it, so a new cheat is one entry.
 
+`PlayHost` narrows what the *scene's* modules see. A parallel seam, **`ActorHost`** (`defs.ts`), narrows what the *simulation layer* sees: actors (player, monsters, gizmos) and the content callbacks they run (item `use`, skill `cast`, tree `onUnlock`, NPC `onChoice`) take an `ActorHost`, not the whole `Game`. It is exactly the services they need — `feel`, `combat`, `events`, `sfx`, `world`, `input`, `pad` — and deliberately omits the scene stack, camera, music, and loop, so an actor reaching for `game.scenes.switch()` or `game.camera` is a compile error, not a latent coupling. A full `ActionGame` satisfies it structurally, so creation sites pass `game` unchanged. The two actors that genuinely open scenes — `Npc` (shop/spawner) and `Pickup` (equip prompt) — keep the full `ActionGame`, which is the honest boundary: opening a scene *is* flow control.
+
 ## The world layer (rooms / boss / saves)
 
 - **Rooms & doors**: the world is a `ROOMS` registry of RoomDefs connected by `door` triggers (`props.room` + spawn point). `PlayScene.setRoom` rebuilds tilemap/minimap/triggers behind a fade, `World.retain` keeps only the player, and waves run only in rooms with `props.waves`. The level editor's trigger mode places doors.
