@@ -45,6 +45,96 @@ tiles.register('rockTop', {
   },
 });
 
+function alpineNoise(tx: number, ty: number, salt: number): number {
+  const n = Math.sin(tx * 91.7 + ty * 47.3 + salt * 113.1) * 43758.5453;
+  return n - Math.floor(n);
+}
+
+/** Cold, fractured cliff stone used by the exposed mountain pass. */
+function drawAlpineRock(
+  g: CanvasRenderingContext2D,
+  px: number,
+  py: number,
+  size: number,
+  tx: number,
+  ty: number,
+): void {
+  g.fillStyle = '#24344a';
+  g.fillRect(px, py, size, size);
+  g.fillStyle = '#18263a';
+  const seam = 2 + Math.floor(alpineNoise(tx, ty, 1) * (size - 3));
+  g.fillRect(px + seam, py, 1, 3);
+  g.fillRect(px + Math.max(1, seam - 2), py + 3, 3, 1);
+  if (alpineNoise(tx, ty, 2) > 0.48) g.fillRect(px + 1, py + size - 2, 3, 1);
+  g.fillStyle = '#3d5669';
+  g.fillRect(px + 1 + Math.floor(alpineNoise(tx, ty, 3) * (size - 3)), py + 1, 2, 1);
+}
+
+tiles.register('alpineRock', {
+  solid: true,
+  draw(g, px, py, size, tx, ty) {
+    drawAlpineRock(g, px, py, size, tx, ty);
+  },
+});
+
+tiles.register('alpineRockTop', {
+  solid: true,
+  draw(g, px, py, size, tx, ty) {
+    drawAlpineRock(g, px, py, size, tx, ty);
+    // Broken snow cap: pale blue shadow under a wind-bright lip.
+    g.fillStyle = '#b8d6d5';
+    g.fillRect(px, py, size, 2);
+    g.fillStyle = '#e8f2ef';
+    g.fillRect(px, py, size - (tx % 3 === 0 ? 2 : 0), 1);
+    if ((tx + ty) % 4 === 0) g.fillRect(px + 1, py + 2, 2, 1);
+  },
+});
+
+/** A narrow natural shelf: jump-through stone with snow and small icicles. */
+tiles.register('alpineLedge', {
+  oneWay: true,
+  draw(g, px, py, size, tx) {
+    g.fillStyle = '#e8f2ef';
+    g.fillRect(px, py, size, 1);
+    g.fillStyle = '#9bbfc2';
+    g.fillRect(px, py + 1, size, 2);
+    g.fillStyle = '#334b60';
+    g.fillRect(px + 1, py + 3, size - 2, 3);
+    g.fillStyle = '#1b2a3e';
+    g.fillRect(px + 2, py + 6, size - 4, 2);
+    if (tx % 3 === 1) {
+      g.fillStyle = '#86aeb5';
+      g.fillRect(px + size - 2, py + 6, 1, 2);
+    }
+  },
+});
+
+/** Non-solid windswept grass/snow tuft, used as a readable ledge accent. */
+tiles.register('snowTuft', {
+  draw(g, px, py, size, tx) {
+    g.fillStyle = '#86aeb5';
+    g.fillRect(px + 1, py + size - 2, size - 2, 2);
+    g.fillStyle = '#d8e9e6';
+    g.fillRect(px + 2, py + size - 4, 1, 3);
+    g.fillRect(px + 4, py + size - 5 - (tx % 2), 1, 4 + (tx % 2));
+    g.fillRect(px + 6, py + size - 3, 1, 2);
+  },
+});
+
+/** A tiny trail cairn: an environmental landmark, not a collision block. */
+tiles.register('cairn', {
+  draw(g, px, py, size) {
+    g.fillStyle = '#18263a';
+    g.fillRect(px + 1, py + 6, 7, 2);
+    g.fillStyle = '#3d5669';
+    g.fillRect(px + 2, py + 4, 5, 2);
+    g.fillStyle = '#587286';
+    g.fillRect(px + 3, py + 2, 3, 2);
+    g.fillStyle = '#b8d6d5';
+    g.fillRect(px + 3, py + 2, 2, 1);
+  },
+});
+
 /** Doorway glow: non-solid, purely visual. Pair with a `door` trigger. */
 /**
  * A barred door: banded timber filling a one-tile opening.

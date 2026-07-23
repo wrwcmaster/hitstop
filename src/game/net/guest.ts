@@ -134,7 +134,8 @@ export class CoopGuestScene implements Scene {
   private apply(s: SnapMsg): void {
     this.snap = s;
     this.banner = s.banner;
-    if (s.room !== this.roomId) this.enterRoom(s.room);
+    const enteredRoom = s.room !== this.roomId;
+    if (enteredRoom) this.enterRoom(s.room);
     const seen = new Set<number>();
     for (const k of s.knights) {
       // My own knight is predicted locally, not puppeted — remember the
@@ -143,7 +144,16 @@ export class CoopGuestScene implements Scene {
       // its own, so this is what keeps two same-named knights distinct.
       if (k.id === s.you) {
         this.serverMe = k;
-        if (this.me && k.name) this.me.name = k.name;
+        if (this.me) {
+          if (k.name) this.me.name = k.name;
+          // Room entry is a discontinuity, not prediction error: begin at
+          // the host's actual doorway landing and frame it immediately.
+          if (enteredRoom) {
+            this.me.x = k.x;
+            this.me.y = k.y;
+            this.me.facing = k.facing as 1 | -1;
+          }
+        }
         continue;
       }
       seen.add(k.id);
@@ -225,6 +235,7 @@ export class CoopGuestScene implements Scene {
       me.progression.restore({ xp: 0, level: s.hud.level, skillPoints: 0 });
       this.hudHost.player = me;
     }
+    if (enteredRoom) this.snapCamera();
   }
 
   private puppet(id: number, make: () => Player | Monster | Pickup): Puppet {
@@ -265,6 +276,24 @@ export class CoopGuestScene implements Scene {
   }
 
   /* ---------------- update / render ---------------- */
+
+  private cameraTarget(): { x: number; y: number } | null {
+    const me = this.me;
+    if (!me) return null;
+    const cam = this.game.camera;
+    return {
+      x: me.cx - cam.viewW / 2 + me.facing * 18 + me.vx * 0.1,
+      y: me.cy - cam.viewH * 0.62 + me.vy * 0.05,
+    };
+  }
+
+  private snapCamera(): void {
+    const target = this.cameraTarget();
+    if (!target) return;
+    const cam = this.game.camera;
+    cam.x = clamp(target.x, cam.minX, Math.max(cam.minX, cam.maxX - cam.viewW));
+    cam.y = clamp(target.y, cam.minY, Math.max(cam.minY, cam.maxY - cam.viewH));
+  }
 
   update(dt: number): void {
     this.uiT += dt;
@@ -336,16 +365,15 @@ export class CoopGuestScene implements Scene {
     }
     if (me) {
       const cam = this.game.camera;
-      const tx = me.cx - cam.viewW / 2 + me.facing * 18 + me.vx * 0.1;
-      const ty = me.cy - cam.viewH * 0.62 + me.vy * 0.05;
-      cam.follow(tx, ty, dt);
-      cam.x = clamp(cam.x, 0, Math.max(0, (this.tilemap?.worldW ?? cam.viewW) - cam.viewW));
+      const target = this.cameraTarget()!;
+      cam.follow(target.x, target.y, dt);
     }
   }
 
   render(g: CanvasRenderingContext2D): void {
     const gm = this.game;
-    this.bg.render(g, gm.camera.x);
+    const backdrop = ROOMS[this.roomId]?.props?.backdrop as string | undefined;
+    this.bg.render(g, gm.camera.x, gm.camera.y, backdrop ?? 'night', this.uiT);
     if (this.tilemap) {
       gm.camera.begin(g);
       this.tilemap.render(g, gm.camera.x, gm.camera.y, gm.camera.viewW, gm.camera.viewH);
