@@ -79,6 +79,9 @@ export {
   MAX_FALL,
   type Body,
   type Solid,
+  type CollisionNormal,
+  type CollisionContact,
+  type CollisionResult,
   type CollisionSource,
 } from './physics/body';
 export { swim, type SwimParams, type SwimIntent } from './physics/swim';

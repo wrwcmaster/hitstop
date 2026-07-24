@@ -50,6 +50,27 @@
       "type": "spawner",
       "x": 260,
       "y": 180
+    },
+    {
+      "type": "platform",
+      "x": 292,
+      "y": 162,
+      "props": {
+        "w": 48,
+        "h": 6,
+        "dy": 20,
+        "period": 3
+      }
+    },
+    {
+      "type": "platform",
+      "x": 356,
+      "y": 176,
+      "props": {
+        "w": 6,
+        "h": 40,
+        "dx": 0
+      }
     }
   ],
   "props": {},

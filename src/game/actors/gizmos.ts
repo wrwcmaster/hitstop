@@ -67,7 +67,7 @@ export class MovingPlatform extends Entity {
   ) {
     super();
     this.t = phase;
-    this.solid = { x: x0, y: y0, w, h };
+    this.solid = { x: x0, y: y0, w, h, dynamic: true };
     solidsOf(collision)?.push(this.solid);
     this.layer = 1;
   }
@@ -265,7 +265,7 @@ export class Barrier extends Entity {
     private linger: number,
   ) {
     super();
-    this.solid = { x, y, w, h };
+    this.solid = { x, y, w, h, dynamic: true };
     solidsOf(collision)?.push(this.solid);
     this.layer = 1;
   }
