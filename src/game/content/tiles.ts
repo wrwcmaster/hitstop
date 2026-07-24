@@ -28,6 +28,7 @@ function drawRock(g: CanvasRenderingContext2D, px: number, py: number, size: num
 /** Solid rock, used below the surface. */
 tiles.register('rock', {
   solid: true,
+  traits: ['resonant'],
   draw(g, px, py, size) {
     drawRock(g, px, py, size);
   },
@@ -36,12 +37,31 @@ tiles.register('rock', {
 /** Solid rock with a grass lip — use for the exposed top row of ground. */
 tiles.register('rockTop', {
   solid: true,
+  traits: ['resonant', 'rebound'],
   draw(g, px, py, size) {
     drawRock(g, px, py, size);
     g.fillStyle = COLORS.green;
     g.fillRect(px, py, size, 3);
     g.fillStyle = COLORS.greenDark;
     g.fillRect(px, py + 3, size, 1);
+  },
+});
+
+/** Weak stone: a real content-defined Impact Drop candidate. The engine
+ * exposes its labels but does not know what breaking or resonance means. */
+tiles.register('crackedRock', {
+  solid: true,
+  traits: ['breakable', 'resonant', 'rebound'],
+  draw(g, px, py, size, tx, ty) {
+    drawRock(g, px, py, size);
+    g.fillStyle = COLORS.steel;
+    const flip = (tx + ty) % 2;
+    g.fillRect(px + 3 + flip, py, 1, 3);
+    g.fillRect(px + 2 + flip, py + 3, 2, 1);
+    g.fillRect(px + 2, py + 4, 1, 2);
+    g.fillRect(px + 1, py + 6, 2, 1);
+    g.fillStyle = COLORS.gold;
+    g.fillRect(px + 3 + flip, py, 1, 1);
   },
 });
 
@@ -72,6 +92,7 @@ function drawAlpineRock(
 
 tiles.register('alpineRock', {
   solid: true,
+  traits: ['resonant'],
   draw(g, px, py, size, tx, ty) {
     drawAlpineRock(g, px, py, size, tx, ty);
   },
@@ -79,6 +100,7 @@ tiles.register('alpineRock', {
 
 tiles.register('alpineRockTop', {
   solid: true,
+  traits: ['resonant', 'rebound'],
   draw(g, px, py, size, tx, ty) {
     drawAlpineRock(g, px, py, size, tx, ty);
     // Broken snow cap: pale blue shadow under a wind-bright lip.
@@ -93,6 +115,7 @@ tiles.register('alpineRockTop', {
 /** A narrow natural shelf: jump-through stone with snow and small icicles. */
 tiles.register('alpineLedge', {
   oneWay: true,
+  traits: ['rebound'],
   draw(g, px, py, size, tx) {
     g.fillStyle = '#e8f2ef';
     g.fillRect(px, py, size, 1);
@@ -228,6 +251,7 @@ tiles.register('portal', {
 /** One-way platform: jump through from below, stand on top. */
 tiles.register('platform', {
   oneWay: true,
+  traits: ['rebound'],
   draw(g, px, py, size) {
     g.fillStyle = COLORS.navyLight;
     g.fillRect(px, py, size, size);

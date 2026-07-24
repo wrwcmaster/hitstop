@@ -94,7 +94,16 @@ export { Projectile, type ProjectileOptions } from './combat/projectile';
 
 export { FSM, type StateDef } from './fsm/fsm';
 
-export { Tilemap, tiles, type TileDef } from './level/tilemap';
+export {
+  Tilemap,
+  tiles,
+  type TileDef,
+  type TileRef,
+  type TileProbeDirection,
+  type SurfaceTraceOptions,
+  type SurfaceTraceResult,
+  type SurfaceTraceStop,
+} from './level/tilemap';
 export { buildTilemap, validateRoom, type RoomDef, type RoomEntity } from './level/room';
 export { Triggers, type TriggerDef, type TriggerFire } from './level/triggers';
 

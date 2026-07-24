@@ -94,16 +94,18 @@ function buildTilePalette(): void {
   host.innerHTML = '';
   for (const id of tiles.ids()) {
     if (id === '') continue;
+    const def = tiles.get(id);
     const row = document.createElement('div');
     row.className = 'swatch';
     // Render one tile as its swatch.
     const chipCanvas = document.createElement('canvas');
     chipCanvas.width = chipCanvas.height = room.tileSize;
     chipCanvas.className = 'chip';
-    tiles.get(id).draw?.(chipCanvas.getContext('2d')!, 0, 0, room.tileSize, 0, 0);
+    def.draw?.(chipCanvas.getContext('2d')!, 0, 0, room.tileSize, 0, 0);
     const b = document.createElement('button');
     const ch = charForTile(id);
     b.textContent = `${id}${ch ? ` (${ch})` : ''}`;
+    b.title = def.traits?.length ? `surface traits: ${def.traits.join(', ')}` : 'surface traits: none';
     b.className = mode === 'tile' && room.legend[tileChar] === id ? 'active' : '';
     b.onclick = () => {
       mode = 'tile';
