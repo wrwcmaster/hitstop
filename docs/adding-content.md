@@ -101,6 +101,7 @@ In `src/game/content/tiles.ts`:
 tiles.register('spikes', {
   solid: false,          // or solid / oneWay
   hazard: 20,            // damage on touch, on the 100-HP scale (see the real spikes)
+  traits: ['metal'],     // optional content-owned physical labels
   draw(g, px, py, size) {
     g.fillStyle = COLORS.steel;
     for (let i = 0; i < size; i += 4) {
@@ -117,6 +118,15 @@ tile hurts on touch: the tilemap answers `hazardAt(rect)` (the strongest
 hazard the rect overlaps) and the player reacts after her move — damage,
 i-frames, and an upward launch. `water: true` marks a tile swimmable
 (see the grotto).
+
+`traits` are generic string labels whose meaning stays in game content:
+`crackedRock`, for example, declares `breakable`, `resonant`, and `rebound`.
+The engine does not recognize those names. Gameplay inspects them through a
+`TileRef`, obtained with `tileAtPoint(x, y)`, `tilesOverlapping(rect)`, or
+`probeTiles(rect, direction, distance)`. Horizontal effects can use
+`traceSurface(start, direction, options)` to follow connected top surfaces;
+step limits and caller predicates decide where that effect stops. Registered
+traits appear in the level-editor tile tooltip automatically.
 
 ## A new room / level
 
