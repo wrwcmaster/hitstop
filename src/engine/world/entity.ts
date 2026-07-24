@@ -1,4 +1,4 @@
-import { Body } from '../physics/body';
+import { Body, type CollisionResult } from '../physics/body';
 import { Rect } from '../math/rect';
 
 /**
@@ -38,6 +38,8 @@ export abstract class Actor extends Entity implements Body, Rect {
   vx = 0;
   vy = 0;
   onGround = false;
+  /** Most recent physics contacts; populated by moveAndCollide. */
+  lastCollision?: CollisionResult;
   flies = false;
   /** Heavier actors take less knockback. */
   mass = 1;

@@ -198,7 +198,13 @@ export class CoopGuestScene implements Scene {
       gizSeen.add(gz.id);
       let p = this.gizmos.get(gz.id);
       if (!p) {
-        p = { snap: gz, x: gz.x, y: gz.y, solid: { x: gz.x, y: gz.y, w: gz.w, h: gz.h }, docked: false };
+        p = {
+          snap: gz,
+          x: gz.x,
+          y: gz.y,
+          solid: { x: gz.x, y: gz.y, w: gz.w, h: gz.h, dynamic: true },
+          docked: false,
+        };
         this.gizmos.set(gz.id, p);
       }
       p.snap = gz;

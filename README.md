@@ -70,6 +70,7 @@ A complete new enemy is ~20 lines of data + behavior (see `src/game/actors/enemi
 
 ## Documentation
 
+- [docs/gameplay-progression.md](docs/gameplay-progression.md) — gameplay-first progression, first-half bosses, and impact-based skills
 - [docs/architecture.md](docs/architecture.md) — how the engine is put together and why
 - [docs/game-feel.md](docs/game-feel.md) — the feel system: what each primitive does and how to tune it
 - [docs/adding-content.md](docs/adding-content.md) — cookbook: new enemies, tiles, rooms, sounds, skills

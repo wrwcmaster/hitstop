@@ -3,6 +3,42 @@ import { Rect } from '../math/rect';
 /** A solid rectangle in the world. `oneWay` = platform you can jump through. */
 export interface Solid extends Rect {
   oneWay?: boolean;
+  /** Runtime-moving/toggling solid (moving platform, barrier...). Static
+   * tile solids omit this. Resolution is identical either way; contact
+   * consumers use the bit to react to the surface appropriately. */
+  dynamic?: boolean;
+}
+
+/** Axis-aligned normal pointing from the contacted solid toward the body. */
+export interface CollisionNormal {
+  x: -1 | 0 | 1;
+  y: -1 | 0 | 1;
+}
+
+/** One surface contact produced while resolving a movement step. */
+export interface CollisionContact {
+  /** Exact object returned by the CollisionSource, preserving the identity
+   * of dynamic solids across frames. */
+  solid: Solid;
+  normal: CollisionNormal;
+  /** Signed velocity on the resolved axis immediately before impact. */
+  impactVelocity: number;
+  oneWay: boolean;
+  dynamic: boolean;
+  /** True for the level-extent backstop rather than an authored solid. */
+  boundary: boolean;
+}
+
+/**
+ * Contacts produced by one move. Direction names describe the BODY side that
+ * was blocked: `right` is a wall against its right side, `ground` its feet.
+ */
+export interface CollisionResult {
+  contacts: CollisionContact[];
+  left: CollisionContact | null;
+  right: CollisionContact | null;
+  ceiling: CollisionContact | null;
+  ground: CollisionContact | null;
 }
 
 /** Anything that can report solids near a rect (tilemaps, rect lists...). */
@@ -29,6 +65,9 @@ export interface Body extends Rect {
   vx: number;
   vy: number;
   onGround: boolean;
+  /** Latest movement contacts. `moveAndCollide` writes this as well as
+   * returning it, so debug tooling and controllers can inspect either seam. */
+  lastCollision?: CollisionResult;
   /** Flying bodies skip gravity (bats, ghosts). They still collide with
    * solids on both axes — flying means ignoring the ground, not phasing
    * through rock. */
@@ -55,7 +94,33 @@ export function moveAndCollide(
   dt: number,
   world: CollisionSource,
   opts: { ignoreOneWay?: boolean; dropThrough?: boolean } = {},
-): void {
+): CollisionResult {
+  const result: CollisionResult = {
+    contacts: [],
+    left: null,
+    right: null,
+    ceiling: null,
+    ground: null,
+  };
+  const addContact = (
+    side: 'left' | 'right' | 'ceiling' | 'ground',
+    solid: Solid,
+    normal: CollisionNormal,
+    impactVelocity: number,
+    boundary = false,
+  ): void => {
+    const contact: CollisionContact = {
+      solid,
+      normal,
+      impactVelocity,
+      oneWay: solid.oneWay === true,
+      dynamic: solid.dynamic === true,
+      boundary,
+    };
+    result.contacts.push(contact);
+    result[side] = contact;
+  };
+
   // X axis. Fliers collide here too: letting them drift into rock left
   // them embedded in a wall, and the Y pass below would then "land" them
   // on top of the topmost wall tile — outside the room entirely.
@@ -63,13 +128,26 @@ export function moveAndCollide(
   for (const s of world.solidsNear(b)) {
     if (s.oneWay) continue;
     if (b.x < s.x + s.w && b.x + b.w > s.x && b.y < s.y + s.h && b.y + b.h > s.y) {
-      if (b.vx > 0) b.x = s.x - b.w;
-      else if (b.vx < 0) b.x = s.x + s.w;
+      const overlapX = Math.min(b.x + b.w, s.x + s.w) - Math.max(b.x, s.x);
+      const overlapY = Math.min(b.y + b.h, s.y + s.h) - Math.max(b.y, s.y);
+      // A moving solid may have entered the body between its updates. When
+      // that intrusion is shallower vertically, leave it for the Y pass;
+      // treating it as a wall would eject a jumper sideways from beneath a
+      // descending platform.
+      if (s.dynamic && overlapY < overlapX) continue;
+      if (b.vx > 0) {
+        addContact('right', s, { x: -1, y: 0 }, b.vx);
+        b.x = s.x - b.w;
+      } else if (b.vx < 0) {
+        addContact('left', s, { x: 1, y: 0 }, b.vx);
+        b.x = s.x + s.w;
+      }
       b.vx = 0;
     }
   }
 
   // Y axis
+  const prevTop = b.y;
   const prevBottom = b.y + b.h;
   b.y += b.vy * dt;
   b.onGround = false;
@@ -78,16 +156,28 @@ export function moveAndCollide(
     if (s.oneWay) {
       const landing = b.vy > 0 && prevBottom <= s.y + 1;
       if (landing && !opts.ignoreOneWay && !opts.dropThrough) {
+        addContact('ground', s, { x: 0, y: -1 }, b.vy);
         b.y = s.y - b.h;
         b.vy = 0;
         b.onGround = true;
       }
     } else {
-      if (b.vy > 0) {
+      const wasOverlapping = prevTop < s.y + s.h && prevBottom > s.y;
+      // If a dynamic solid moved into the body since the previous body
+      // update, velocity alone cannot identify the contacted side. Preserve
+      // the side the body already occupied so a descending platform keeps a
+      // player below it instead of teleporting them onto its top.
+      const dynamicOverlap = s.dynamic === true && wasOverlapping;
+      const resolveGround = dynamicOverlap
+        ? prevTop + b.h / 2 < s.y + s.h / 2
+        : b.vy > 0;
+      if (resolveGround) {
+        addContact('ground', s, { x: 0, y: -1 }, b.vy);
         b.y = s.y - b.h;
         b.vy = 0;
         b.onGround = true;
-      } else if (b.vy < 0) {
+      } else if (b.vy < 0 || dynamicOverlap) {
+        addContact('ceiling', s, { x: 0, y: 1 }, b.vy);
         b.y = s.y + s.h;
         b.vy = 0;
       }
@@ -100,20 +190,50 @@ export function moveAndCollide(
   const lvl = world.bounds;
   if (lvl) {
     if (b.x < lvl.x) {
+      addContact(
+        'left',
+        { x: lvl.x, y: lvl.y, w: 0, h: lvl.h },
+        { x: 1, y: 0 },
+        b.vx,
+        true,
+      );
       b.x = lvl.x;
       if (b.vx < 0) b.vx = 0;
     }
     if (b.x + b.w > lvl.x + lvl.w) {
+      addContact(
+        'right',
+        { x: lvl.x + lvl.w, y: lvl.y, w: 0, h: lvl.h },
+        { x: -1, y: 0 },
+        b.vx,
+        true,
+      );
       b.x = lvl.x + lvl.w - b.w;
       if (b.vx > 0) b.vx = 0;
     }
     if (b.y < lvl.y) {
+      addContact(
+        'ceiling',
+        { x: lvl.x, y: lvl.y, w: lvl.w, h: 0 },
+        { x: 0, y: 1 },
+        b.vy,
+        true,
+      );
       b.y = lvl.y;
       if (b.vy < 0) b.vy = 0;
     }
     if (b.y + b.h > lvl.y + lvl.h) {
+      addContact(
+        'ground',
+        { x: lvl.x, y: lvl.y + lvl.h, w: lvl.w, h: 0 },
+        { x: 0, y: -1 },
+        b.vy,
+        true,
+      );
       b.y = lvl.y + lvl.h - b.h;
       if (b.vy > 0) b.vy = 0;
     }
   }
+  b.lastCollision = result;
+  return result;
 }
