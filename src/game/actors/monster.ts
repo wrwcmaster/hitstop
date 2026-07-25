@@ -52,8 +52,9 @@ export interface MonsterDef {
   /** Conversation played after this boss falls (default 'victory'). */
   epilogue?: string;
   /**
-   * World ability this boss hands over when it dies (an id from
-   * content/abilities.ts). One boss, one verb.
+   * Permanent unlock this boss hands over when it dies (an earnable id
+   * from content/earnables.ts). What it *is* — a traversal verb, a key
+   * item, an off-tree skill — is the catalog's business, not this one's.
    *
    * Declaring the reward on the boss is what keeps `PlayScene` free of a
    * boss-id switch: a fifth reward is this one line plus a catalog entry.

@@ -493,34 +493,53 @@ defineMonster('my-boss', {
 
 The pattern: every attack is a telegraphed FSM state that ends in a `Strike` or `combat.shoot(...)`, so boss damage carries the same feedback as everything else. Phase changes are just a condition read inside states (`hp <= maxHp/2`). The PlayScene shows the HP bar whenever a `boss: true` monster is alive, sets the `bossDefeated` flag on kill (so it stays dead across saves), and plays the `victory` conversation.
 
-## A world ability (boss reward)
+## A permanent unlock (earnable)
 
-A world ability is a **permanent verb earned from a boss** — one boss, one verb (see [gameplay-progression.md](gameplay-progression.md)). Register the ability in `content/abilities.ts`:
+An **earnable** is anything a run wins and keeps for good. Games express that idea differently — a key item you carry, a unique skill sitting off the normal tree, or a bare traversal verb with no inventory presence — and all three are the same bookkeeping, so they share one mechanism. The engine (`EarnedSet` in `progression.ts`) owns the ledger; `kind` is an **opaque label the game gives meaning to**, and `onEarn` is how an unlock manifests.
+
+Register in `content/earnables.ts`:
 
 ```ts
-defineWorldAbility('impact-drop', {
-  name: 'IMPACT DROP',
+// a bare verb: projects nothing, content just asks earned.has(...)
+defineEarnable<EarnCtx>('impact-drop', {
+  name: 'IMPACT DROP', kind: 'ability',
   desc: 'In the air, press down + attack to drive your fall into the ground.',
-  order: 1,
+});
+
+// a KEY ITEM: project into the inventory, and every existing item path
+// (icons, the `props.key` door lock) works unchanged
+defineEarnable<EarnCtx>('morph-ball', {
+  name: 'MORPH BALL', kind: 'keyItem', desc: 'Curl into a sphere.',
+  onEarn: ({ player }) => {
+    if (!player.inventory.count('morph-ball')) player.inventory.add('morph-ball');
+  },
+});
+
+// a UNIQUE SKILL, deliberately off the class tree so a respec can't take it
+defineEarnable<EarnCtx>('tide-call', {
+  name: 'TIDE CALL', kind: 'skill', desc: 'Summon the water to you.',
+  onEarn: ({ player }) => player.skills.learn('tide-call'),
 });
 ```
 
-Then name it on whichever boss hands it over — that one line is the whole wiring:
+> **`onEarn` re-runs on save restore** — same contract as `TreeNodeDef.onUnlock` — because projections into non-persisted state (capabilities, derived flags) would otherwise be lost on load. So it must be idempotent. `SkillBook.learn` already is; `Inventory.add` is **not** (it stacks), which is why the key-item example guards.
+
+Then name it wherever it is handed over. On a boss that's one line:
 
 ```ts
-defineMonster('my-boss', { boss: true, /* ... */ grants: 'impact-drop' });
+defineMonster('my-boss', { boss: true, /* ... */ grants: 'morph-ball' });
 ```
 
-`PlayScene` reads `def.grants` on defeat, so a fifth reward never becomes another boss-id branch. A typo is caught at **boot**, not when the boss dies: `main.ts` checks every `grants` against the catalog at startup.
+`PlayScene` reads `def.grants` on defeat, so a fifth reward never becomes another boss-id branch. A typo is caught at **boot**: `main.ts` checks every `grants` against the catalog at startup.
 
-Ownership lives in `Player.abilities` (a `WorldAbilities` set), **not** in `capabilities`:
+Ownership lives in `Player.earned`, **not** in `capabilities`:
 
-- `capabilities` is the class kit, and `setClass` wipes and replays it — right for a class, wrong for a boss reward. Abilities are untouched by class change, so respeccing never costs you a traversal verb.
-- `abilities.grant(id)` returns `true` only the **first** time. Unlock feedback keys off that return, so re-killing a boss or reloading never re-announces.
-- `abilities.restore(ids)` is the silent path used by saves; unknown ids are dropped, so renamed or removed content can't break an old save.
-- It persists in `SaveData.player.abilities` (absent = owns none, so pre-ability saves load fine). Because the co-op hello/sync profile **is** `SaveData['player']`, a guest carries earned abilities in and home again with no parallel format.
+- `capabilities` is the class kit, and `setClass` wipes and replays it — right for a class, wrong for something you earned once and keep. `earned` is untouched by class change.
+- `earned.grant(id, ctx)` returns `true` only the **first** time. Unlock feedback keys off that return, so re-killing a boss or reloading never re-announces.
+- `earned.restore(ids, ctx)` is the load path: it replays projections but reports nothing. Unknown ids are dropped, so renamed or removed content can't break an old save. It runs *after* the class replay in `restorePlayer`, since that replay clears skills and capabilities.
+- It persists in `SaveData.player.earned` (absent = owns none, so older saves load fine). Because the co-op hello/sync profile **is** `SaveData['player']`, a guest carries what they earned in and home again with no parallel format.
 
-Query it from anywhere holding the player — `player.abilities.has('impact-drop')` — including item/skill/tree/NPC callbacks and trigger actions (via `host.player`). Registering an ability does not implement it: an owned-but-unconsumed ability is simply inert, which is what lets the ownership layer ship before the verbs do.
+Query it from anywhere holding the player — `player.earned.has('impact-drop')` — including item/skill/tree/NPC callbacks and trigger actions (via `host.player`). Registering an earnable does not implement it: an owned-but-unconsumed entry is simply inert, which is what lets the ownership layer ship before the verbs do.
 
 ## Saves
 

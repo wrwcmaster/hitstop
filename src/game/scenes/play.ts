@@ -32,7 +32,7 @@ import { SaveSlotsScene } from './saveslots';
 import { Background } from './background';
 import { COLORS } from '../content/palette';
 import { ROOMS, START_ROOM } from '../content/rooms';
-import { worldAbilities } from '../content/abilities';
+import { earnableDef } from '@engine/index';
 import { DEFAULT_SONG } from '../content/music';
 import { saveStore, slotStore, newestSave, snapshotPlayer, restorePlayer, type SaveData } from '../save';
 import type { PlayHost } from './play/host';
@@ -821,18 +821,19 @@ export class PlayScene implements Scene {
   }
 
   /**
-   * Hand over whatever verb this boss owns. Returns true if something was
-   * actually earned — false covers every "nothing new" case: a boss with
-   * no reward declared, a dead player, and re-killing a boss whose
-   * ability you already hold. Only a genuinely new grant plays the
+   * Hand over whatever this boss owns — a verb, a key item, an off-tree
+   * skill; the catalog decides, and this only reports the news. Returns
+   * true if something was actually earned; false covers every "nothing
+   * new" case: no reward declared, a dead player, and re-killing a boss
+   * whose unlock you already hold. Only a genuinely new grant plays the
    * fanfare, which is what stops a reload or a replay from re-announcing
-   * (restoring a save fills the ability set silently).
+   * (restoring a save fills the set silently).
    */
   private grantBossReward(boss: Monster): boolean {
     const id = boss.def.grants;
     const p = this.player;
-    if (!id || !p || !p.abilities.grant(id)) return false;
-    const def = worldAbilities.get(id);
+    if (!id || !p || !p.earned.grant(id, { game: p.game, player: p })) return false;
+    const def = earnableDef(id);
     this.showBanner(t(def.name), 2.4);
     this.game.feel.text(p.cx, p.y - 12, t('NEW ABILITY'), COLORS.gold, 1);
     this.game.feel.flash(0.5, COLORS.gold);

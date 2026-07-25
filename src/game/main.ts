@@ -22,7 +22,8 @@ import { ROOMS } from './content/rooms';
 import { registerEffects } from './content/effects';
 import { registerQuests } from './content/quests';
 import { registerPortals } from './content/portals';
-import { registerAbilities, worldAbilities } from './content/abilities';
+import { registerEarnables } from './content/earnables';
+import { earnables } from '@engine/index';
 import { monsters } from './actors/monster';
 import { registerLocales } from './content/locales';
 import { registerGizmos } from './actors/gizmos';
@@ -66,16 +67,16 @@ registerPlaceables(); // bridges monsters + NPCs; must come after them
 registerEffects();
 registerQuests();
 registerPortals();
-registerAbilities();
+registerEarnables();
 
-// Every boss reward must name a real ability. Checked here, at boot, for
-// the same reason rooms are: the alternative is finding out from a thrown
+// Every reward must name a real earnable. Checked here, at boot, for the
+// same reason rooms are: the alternative is finding out from a thrown
 // error at the instant a boss dies — after the fight, with the reward
 // lost. A typo in `grants` should never survive startup.
 for (const id of monsters.ids()) {
   const grants = monsters.get(id).grants;
-  if (grants && !worldAbilities.has(grants)) {
-    throw new Error(`monster "${id}".grants: unknown world ability "${grants}"`);
+  if (grants && !earnables.has(grants)) {
+    throw new Error(`monster "${id}".grants: unknown earnable "${grants}"`);
   }
 }
 

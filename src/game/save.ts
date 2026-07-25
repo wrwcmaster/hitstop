@@ -39,13 +39,13 @@ export interface SaveData {
     /** Durability left on worn-down gear, by item id (absent = pristine). */
     armorWear?: Record<string, number>;
     /**
-     * Permanent boss-earned verbs (absent in saves from before world
-     * abilities existed → owns none). This rides in the player blob
-     * rather than beside it so co-op gets it for free: the hello/sync
-     * profile IS `SaveData['player']`, so a guest carries their earned
-     * abilities in and home again with no parallel format.
+     * Permanent unlocks — key items, off-tree skills, bare verbs (absent
+     * in saves from before they existed → owns none). This rides in the
+     * player blob rather than beside it so co-op gets it for free: the
+     * hello/sync profile IS `SaveData['player']`, so a guest carries what
+     * they earned in and home again with no parallel format.
      */
-    abilities?: string[];
+    earned?: string[];
   };
 }
 
@@ -87,7 +87,7 @@ export function snapshotPlayer(p: Player): SaveData['player'] {
     quests: p.quests.snapshot(),
     forgeLevel: p.forgeLevel,
     armorWear: { ...p.armorWear },
-    abilities: p.abilities.list(),
+    earned: p.earned.list(),
   };
 }
 
@@ -109,11 +109,6 @@ export function restorePlayer(p: Player, data: SaveData['player']): void {
   for (const [, id] of data.equipped) p.equipment.equip(id);
   p.gold = data.gold;
   p.progression.restore(data.progression);
-  // Boss-earned verbs, restored BEFORE the class replay below on
-  // purpose: that replay resets capabilities, and abilities surviving it
-  // is exactly the invariant (respeccing never costs you a boss reward).
-  // Silent — the unlock fanfare belongs to the kill, not to loading.
-  p.abilities.restore(data.abilities);
   // Class + trees: re-applies class mods, stat mods, and onUnlock
   // effects (learned skills) without cost. Old flat saves migrate by
   // sorting each node into the class whose grid contains it.
@@ -122,6 +117,12 @@ export function restorePlayer(p: Player, data: SaveData['player']): void {
   // (class change wipes and replays the book, so this must come last).
   for (const id of data.skills) p.skills.learn(id);
   p.quests.restore(data.quests);
+  // Permanent unlocks, replayed AFTER the class settles: an unlock may
+  // project into skills or capabilities, and the class replay above
+  // clears both — restoring earlier would let a class change quietly eat
+  // a boss reward's effect. Silent by design: no unlock fanfare fires on
+  // load, only on the moment it was actually earned.
+  p.earned.restore(data.earned, { game: p.game, player: p });
   p.forgeLevel = data.forgeLevel ?? 0;
   p.armorWear = { ...(data.armorWear ?? {}) };
   p.applyForge();

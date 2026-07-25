@@ -67,9 +67,14 @@ export {
   treeNodes,
   defineTreeNode,
   treeNodeDef,
+  EarnedSet,
+  earnables,
+  defineEarnable,
+  earnableDef,
   type LevelCurve,
   type TreeNodeDef,
   type TreeHost,
+  type EarnableDef,
 } from './progression/progression';
 
 export {

@@ -34,6 +34,7 @@ import {
   Statuses,
   Progression,
   SkillTree,
+  EarnedSet,
 } from '@engine/index';
 import type { TreeCtx } from '../content/skilltree';
 import { KNIGHT_ANIMS, baseKnight } from '../content/sprites';
@@ -51,7 +52,7 @@ import { classes, DEFAULT_CLASS } from '../content/classes';
 import { shootArrow, shootBullet, muzzleFlash } from '../content/ballistics';
 import { Monster } from './monster';
 import { PlayerCapabilities } from './player-capabilities';
-import { WorldAbilities } from './world-abilities';
+import type { EarnCtx } from '../content/earnables';
 import { QuestLog } from '../content/quests';
 import type { World } from '@engine/index';
 import type { ActorHost, Action } from '../defs';
@@ -195,11 +196,12 @@ export class Player extends Actor {
   tree = new SkillTree<TreeCtx>({ stats: this.stats, syncStats: () => this.syncStats() });
   capabilities = new PlayerCapabilities();
   /**
-   * Permanent verbs earned from bosses (persisted). Deliberately NOT in
-   * `capabilities`: that collection is the class kit and `setClass` wipes
-   * it, which would cost you a traversal ability for respeccing.
+   * Permanent unlocks — key items, off-tree skills, bare verbs (persisted).
+   * Deliberately NOT in `capabilities`: that collection is the class kit
+   * and `setClass` wipes it, which would cost you a boss reward for
+   * respeccing. See content/earnables.ts.
    */
-  abilities = new WorldAbilities();
+  earned = new EarnedSet<EarnCtx>();
   /** Active class (see content/classes.ts). */
   classId = DEFAULT_CLASS;
   /** Dormant classes' unlocked nodes, by class id (persisted). The
@@ -335,6 +337,11 @@ export class Player extends Actor {
     this.applyClass();
     this.tree = new SkillTree<TreeCtx>({ stats: this.stats, syncStats: () => this.syncStats() });
     this.tree.restore(this.ownedByClass[id] ?? [], { game: this.game, player: this });
+    // Permanent unlocks outlive the class, but their PROJECTIONS don't:
+    // the wipe above cleared the skill book and capabilities, so a boss
+    // reward that manifests as a skill would go dead until the next load.
+    // Re-project it onto the new kit — ownership never changed.
+    this.earned.reapply({ game: this.game, player: this });
     this.syncStats();
     this.mp = Math.min(this.mp, this.maxMp);
     return true;
