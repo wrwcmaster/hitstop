@@ -76,6 +76,15 @@ export interface WeaponAttackDef {
   /** Landing a hit with this attack while airborne bounces the knight
    * up at this speed (the pogo — refreshes air jumps and the dash). */
   pogo?: number;
+  /**
+   * Absolute damage, ignoring the weapon's base entirely.
+   *
+   * `damageScale` is weapon-RELATIVE, which is the wrong tool for a move
+   * the weapon does not own: scaling a body slam off a flintlock's 60
+   * base made the "weak" fallback hit harder than an authored sword
+   * plunge. A weapon-neutral move states its own number instead.
+   */
+  damage?: number;
 }
 
 /**
@@ -295,12 +304,18 @@ const attack = (
  * Weaker and stubbier than an authored weapon plunge (that is the point —
  * a sword should reward you for bringing it), but it keeps the pogo, so
  * the traversal use is identical whatever you are carrying.
+ *
+ * Its damage is ABSOLUTE rather than scaled: the knight's knees hit just
+ * as hard whether she is carrying a bow or a flintlock, and 14 sits below
+ * the starter sword's authored plunge (26) so bringing steel still pays.
+ * `damageScale` is left at 1 and unused — `damage` wins in `beginAttack`.
  */
 export const IMPACT_DROP_PLUNGE: WeaponAttackDef = attack({
   animation: 'plunge',
   duration: 0.8,
   active: [0.06, 1],
-  damageScale: 0.7,
+  damageScale: 1,
+  damage: 14,
   strength: 0.5,
   lunge: 0,
   aim: 'down',

@@ -105,6 +105,20 @@ export function drawWeaponTrail(g: CanvasRenderingContext2D, id: string | null, 
   if (id) weaponVisuals.get(id).drawTrail?.(g, ctx);
 }
 
+/**
+ * The procedural crescent, drawn for a move the WEAPON does not own.
+ *
+ * Impact Drop's fallback is the case: a bow and a flintlock register no
+ * `drawTrail` at all, so routing that plunge through the equipped visual
+ * drew nothing and the knight fell with an invisible damaging hitbox.
+ * Kept separate from `drawWeaponTrail` rather than made its fallback,
+ * because a visual that sets `trail: false` means it — this is for
+ * attacks that belong to the knight instead.
+ */
+export function drawNeutralTrail(g: CanvasRenderingContext2D, ctx: WeaponTrailCtx): void {
+  drawSlashTrail(g, ctx);
+}
+
 /** Resolve the UI/pickup icon owned by a registered weapon visual. */
 export function weaponIcon(id: string): HTMLCanvasElement {
   const icon = weaponVisuals.get(id).icon;

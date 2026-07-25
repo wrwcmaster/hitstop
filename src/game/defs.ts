@@ -129,6 +129,16 @@ export interface TestScenario {
     gold?: number;
     /** Starting hearts (clamped to max). */
     hp?: number;
+    /**
+     * Permanent unlocks to start with (`content/earnables.ts` ids) —
+     * 'impact-drop', 'air-step', ...
+     *
+     * Without this a scenario cannot reach a boss verb at all, since the
+     * only other way to own one is to kill its boss: exactly the setup a
+     * deterministic recording of that verb needs to skip. Unknown ids are
+     * skipped rather than fatal, like every other id in a scenario.
+     */
+    earned?: string[];
   };
   /** Extra monsters/placeables to spawn, on top of the room's own. */
   spawn?: { type: string; x: number; y?: number; props?: Record<string, unknown> }[];

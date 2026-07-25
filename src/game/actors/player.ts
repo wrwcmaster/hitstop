@@ -47,7 +47,7 @@ import {
   type WeaponAttackDef,
   type WeaponDef,
 } from '../content/weapons';
-import { drawHeldWeapon, drawWeaponTrail, RANGED_HAND_Y } from '../content/weapon-visuals';
+import { drawHeldWeapon, drawWeaponTrail, drawNeutralTrail, RANGED_HAND_Y } from '../content/weapon-visuals';
 import { type SkillCtx } from '../content/skills';
 import { classes, DEFAULT_CLASS } from '../content/classes';
 import { shootArrow, shootBullet, muzzleFlash } from '../content/ballistics';
@@ -913,7 +913,9 @@ export class Player extends Actor {
     const riposte = this.riposteT > 0;
     if (riposte) this.riposteT = 0;
     this.strike = this.game.combat.strike({
-      damage: Math.round(w.baseDamage * this.attackDef.damageScale)
+      // A weapon-neutral move states its own damage; everything else
+      // scales off the steel being swung.
+      damage: (this.attackDef.damage ?? Math.round(w.baseDamage * this.attackDef.damageScale))
         + Math.round(this.stats.get('attack'))
         + executioner
         + (riposte ? PLAYER_TUNING.riposteBonus : 0),
@@ -1505,7 +1507,7 @@ export class Player extends Actor {
 
     if (this.fsm.is('attack') && this.renderTrail) {
       const weapon = this.weapon;
-      drawWeaponTrail(g, weapon.visual, {
+      const trailCtx = {
         x: cx,
         y: by - dh * 0.45,
         facing: this.facing,
@@ -1514,7 +1516,13 @@ export class Player extends Actor {
           progress: Math.min(1, this.fsm.t / this.attackDur),
           def: this.attackDef!,
         },
-      });
+      };
+      // Impact Drop's fallback belongs to the knight, not the steel, so
+      // it draws its own arc — a bow registers no trail, and routing it
+      // through the weapon visual left a damaging plunge with nothing on
+      // screen to read.
+      if (this.attackDef === IMPACT_DROP_PLUNGE) drawNeutralTrail(g, trailCtx);
+      else drawWeaponTrail(g, weapon.visual, trailCtx);
     }
 
     // Guard flash: a bright crescent in front while the parry window is
