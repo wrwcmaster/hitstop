@@ -34,7 +34,7 @@ import { COLORS } from '../content/palette';
 import { ROOMS, START_ROOM } from '../content/rooms';
 import { earnableDef } from '@engine/index';
 import { DEFAULT_SONG } from '../content/music';
-import { saveStore, slotStore, newestSave, snapshotPlayer, restorePlayer, type SaveData } from '../save';
+import { saveStore, slotStore, newestSave, snapshotPlayer, restorePlayer, backfillEarned, type SaveData } from '../save';
 import type { PlayHost } from './play/host';
 import { WaveDirector } from './play/waves';
 import { triggerActions, doorLocked } from './play/trigger-actions';
@@ -393,6 +393,11 @@ export class PlayScene implements Scene {
       if (this.flags.has('bossDefeated') && ![...this.flags].some((f) => f.startsWith('slain:'))) {
         this.flags.add('slain:slime-king');
       }
+      // Saves older than earnables record which bosses fell but own no
+      // rewards, and a felled boss never comes back — so hand over what
+      // their own history already earned. After the slain migration
+      // above, which is where the oldest saves get their flag.
+      backfillEarned(this.player, save.player, this.flags);
       this.firedTriggers = { ...save.firedTriggers };
       this.best = Math.max(this.best, save.best);
       this.pendingWave = save.wave ?? 0; // resume a saved gauntlet mid-run
@@ -823,19 +828,32 @@ export class PlayScene implements Scene {
   /**
    * Hand over whatever this boss owns — a verb, a key item, an off-tree
    * skill; the catalog decides, and this only reports the news. Returns
-   * true if something was actually earned; false covers every "nothing
-   * new" case: no reward declared, a dead player, and re-killing a boss
-   * whose unlock you already hold. Only a genuinely new grant plays the
+   * true if any knight actually earned something; false covers every
+   * "nothing new" case: no reward declared, nobody to receive it, and
+   * re-killing a boss whose unlock is already held. Only a new grant
+   * plays the
    * fanfare, which is what stops a reload or a replay from re-announcing
    * (restoring a save fills the set silently).
    */
   private grantBossReward(boss: Monster): boolean {
     const id = boss.def.grants;
-    const p = this.player;
-    if (!id || !p || !p.earned.grant(id, { game: p.game, player: p })) return false;
+    if (!id) return false;
+    // Every knight who was in the room earns it. In co-op the guest is a
+    // real Player whose progress is synced back to their own save, so
+    // rewarding only the host would quietly write the emptiness home —
+    // both fought the boss, both keep the reward.
+    let fresh = false;
+    for (const p of [this.player, this.coop?.guest ?? null]) {
+      if (p && p.earned.grant(id, { game: p.game, player: p })) fresh = true;
+    }
+    if (!fresh) return false;
     const def = earnableDef(id);
     this.showBanner(t(def.name), 2.4);
-    this.game.feel.text(p.cx, p.y - 12, t('NEW ABILITY'), COLORS.gold, 1);
+    // The floater is anchored on the local knight, who may be gone (a
+    // guest can land the killing blow after the host falls); the banner
+    // and flash still carry the news either way.
+    const p = this.player;
+    if (p) this.game.feel.text(p.cx, p.y - 12, t('NEW ABILITY'), COLORS.gold, 1);
     this.game.feel.flash(0.5, COLORS.gold);
     this.game.sfx.play('unlock');
     return true;

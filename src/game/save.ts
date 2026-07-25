@@ -1,5 +1,6 @@
 import { SlotVault, t, type JsonStore, type ItemStack } from '@engine/index';
 import type { Player } from './actors/player';
+import { monsters } from './actors/monster';
 import { classOfNode, DEFAULT_CLASS } from './content/classes';
 
 /**
@@ -89,6 +90,36 @@ export function snapshotPlayer(p: Player): SaveData['player'] {
     armorWear: { ...p.armorWear },
     earned: p.earned.list(),
   };
+}
+
+/**
+ * Award, once, the rewards of bosses a save had already felled before
+ * earnables existed.
+ *
+ * Without this such a save is a DEAD END, not merely an empty one: a
+ * felled boss never spawns again (placeables suppress `slain:<id>`), so
+ * the reward it declares could never be obtained by that character. The
+ * empty-set-on-old-saves rule is still honoured — this only fills in what
+ * the save's own history says was already won.
+ *
+ * Runs only when `earned` is ABSENT. A modern save that legitimately owns
+ * nothing keeps its empty list, and re-running is harmless anyway because
+ * granting is idempotent.
+ */
+export function backfillEarned(
+  p: Player,
+  data: SaveData['player'],
+  flags: ReadonlySet<string>,
+): void {
+  if (data.earned !== undefined) return;
+  const ctx = { game: p.game, player: p };
+  for (const flag of flags) {
+    if (!flag.startsWith('slain:')) continue;
+    const type = flag.slice('slain:'.length);
+    if (!monsters.has(type)) continue; // boss retired from the game
+    const grants = monsters.get(type).grants;
+    if (grants) p.earned.grant(grants, ctx);
+  }
 }
 
 /** Pre-class saves held one flat node list; deal it out to the class
