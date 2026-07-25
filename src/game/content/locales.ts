@@ -117,17 +117,17 @@ defineLocale('zh', {
     'Spikes forgive nothing. Levers remember. Plates forget the moment you step off.': '尖刺从不留情。拉杆会记住,踏板在你离开的瞬间便已忘却。',
     /* ---- world abilities (boss rewards) ---- */
     'IMPACT DROP': '坠击',
-    'In the air, press down + attack to drive your fall into the ground.':
-      '在空中按下 + 攻击，把坠势砸进地面。',
+    'In the air, {down} + {attack} drives your fall into the ground.':
+      '在空中 {down} + {attack}，把坠势砸进地面。',
     'WALL GRIP': '附壁',
-    'Hold toward a wall in the air to cling to it, then jump to kick away.':
-      '在空中朝墙推即可附着，再按跳跃蹬开。',
+    'Hold toward a wall in the air to cling, then {jump} to kick away.':
+      '在空中朝墙推即可附着，再按 {jump} 蹬开。',
     'AIR STEP': '踏空',
-    'Press jump again in midair to step off the air itself.':
-      '在空中再按一次跳跃，踏空而起。',
+    'Press {jump} again in midair to step off the air itself.':
+      '在空中再按一次 {jump}，踏空而起。',
     'SHOCKWAVE': '震波',
-    'Send one wave of force running away through the ground.':
-      '送出一道沿地面奔涌的力量波。',
+    'On the ground, {down} + {attack} sends a wave through it.':
+      '站在地面 {down} + {attack}，送出一道沿地面奔涌的力量波。',
 
     /* ---- classes & skill tree ---- */
     'KNIGHT': '骑士',

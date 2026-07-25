@@ -34,6 +34,15 @@ export interface HeldWeaponCtx {
    * player's `draw` state) — charged visuals pull their string/wind-up
    * with it. Absent when not charging. */
   charge?: number;
+  /**
+   * A move the WIELDER owns rather than the weapon: Impact Drop's dive
+   * (`'plunge'`) and Shockwave's stomp (`'stomp'`). The weapon is not
+   * being used, it is being carried through something — so a visual that
+   * ignores this still renders sensibly (it just holds its idle pose,
+   * which is what every melee visual already does). Absent the rest of
+   * the time.
+   */
+  carry?: 'plunge' | 'stomp';
 }
 
 /** World-space context for the attack trail. */
@@ -103,6 +112,44 @@ export function drawHeldWeapon(g: CanvasRenderingContext2D, id: string | null, c
 
 export function drawWeaponTrail(g: CanvasRenderingContext2D, id: string | null, ctx: WeaponTrailCtx): void {
   if (id) weaponVisuals.get(id).drawTrail?.(g, ctx);
+}
+
+/**
+ * Carry a weapon through a move it does not own — the held-pose sibling
+ * of `drawNeutralTrail`.
+ *
+ * A visual opts in by wrapping its body in this: the weapon is tucked
+ * back and angled out of the way, so a bow-armed knight diving knees-
+ * first reads as diving rather than as standing still in mid-air. A
+ * visual that never calls it is unchanged, which is why every melee
+ * weapon needed no edit — their `drawHeld` already follows the swing.
+ *
+ * Written as a wrapper rather than a per-weapon pose so the NEXT
+ * knight-owned move costs nothing: one entry here, and every visual that
+ * already opted in carries it too.
+ */
+export function drawCarried(
+  g: CanvasRenderingContext2D,
+  ctx: HeldWeaponCtx,
+  draw: () => void,
+): void {
+  if (!ctx.carry) {
+    draw();
+    return;
+  }
+  g.save();
+  if (ctx.carry === 'plunge') {
+    // Diving: the arm goes back and up, the weapon trails behind her.
+    g.translate(-2.2, -1.2);
+    g.rotate(-0.9);
+  } else {
+    // Planting her feet: braced low and tucked in, out of the way of the
+    // shoulder that is doing the work.
+    g.translate(-1.4, 1.6);
+    g.rotate(0.5);
+  }
+  draw();
+  g.restore();
 }
 
 /**
@@ -640,7 +687,7 @@ defineWeaponVisual('hunting-bow', {
     if (f === -1) g.scale(-1, 1);
     // Charging pulls the string back with a nocked arrow riding it —
     // the pull IS the charge meter.
-    drawBow(g, { pull, arrow: pull > 0 });
+    drawCarried(g, ctx, () => drawBow(g, { pull, arrow: pull > 0 }));
     g.restore();
   },
 });
@@ -661,16 +708,18 @@ defineWeaponVisual('flintlock', {
     g.save();
     g.translate(hx * f, hy);
     if (f === -1) g.scale(-1, 1);
-    g.fillStyle = COLORS.steel;
-    g.fillRect(0, -1, 6, 1.5); // barrel
-    g.fillStyle = COLORS.white;
-    g.fillRect(5.4, -1.4, 0.8, 0.8); // sight
-    g.fillStyle = WOOD;
-    g.fillRect(-1.5, -1, 2.2, 1.6); // stock
-    g.fillStyle = WOOD_DARK;
-    g.fillRect(-1.2, 0.4, 1.2, 2); // grip drops toward the hand
-    g.fillStyle = COLORS.gold;
-    g.fillRect(0.4, 0.5, 0.8, 0.8); // trigger guard
+    drawCarried(g, ctx, () => {
+      g.fillStyle = COLORS.steel;
+      g.fillRect(0, -1, 6, 1.5); // barrel
+      g.fillStyle = COLORS.white;
+      g.fillRect(5.4, -1.4, 0.8, 0.8); // sight
+      g.fillStyle = WOOD;
+      g.fillRect(-1.5, -1, 2.2, 1.6); // stock
+      g.fillStyle = WOOD_DARK;
+      g.fillRect(-1.2, 0.4, 1.2, 2); // grip drops toward the hand
+      g.fillStyle = COLORS.gold;
+      g.fillRect(0.4, 0.5, 0.8, 0.8); // trigger guard
+    });
     g.restore();
   },
 });

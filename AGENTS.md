@@ -49,8 +49,12 @@ npm run agent-play     # HTTP bridge for turn-based (LLM-agent) play
    tap-to-select (`Menu.tapAt` — render once, then taps hit-test), any
    new action needs a touch button in `index.html` + `bind()` in
    `main.ts` and a gamepad binding in `defs.ts`, and on-screen key
-   prompts must be device-aware (see `Npc.promptLabel`), never a
-   hardcoded "E".
+   prompts must be device-aware — route them through `actionLabel(game,
+   action, touchLabel)` in `defs.ts`, never a hardcoded "E". Prose that
+   names an input writes it as a `{token}` (see `abilityHint`) so the
+   string stays translatable and the device resolves it at display time.
+   A **directional** action needs its own touch button: piggybacking
+   `down` on the dash button meant every crouch fired a dash.
 7. **Registering a duplicate id throws.** Content ids are global per
    registry; pick a fresh id, or use `registry.replace()` only for a
    deliberate override.
@@ -60,6 +64,12 @@ npm run agent-play     # HTTP bridge for turn-based (LLM-agent) play
 9. **Saves are not sacred yet.** The game is in **demo phase**, so old
    save data does not constrain design. Do NOT hand-write migration code
    in the game. See "Save compatibility" below before touching `SaveData`.
+10. **Rooms are immutable content.** A `RoomDef` is rebuilt from JSON on
+    every visit, so gameplay must never call `tilemap.setTile` — that
+    edits a copy that is about to be thrown away. Change geometry through
+    `PlayHost.mutateTile`, which also records a room patch, and retire a
+    placed entity by marking its definition `persistent`. See "A tile that
+    breaks (and stays broken)" in docs/adding-content.md.
 
 ## Save compatibility (demo phase)
 
@@ -340,12 +350,26 @@ tag). Puzzle gizmos cross the wire as
 `giz` snapshot entries (kind + rect + one state bit, drawn with the same
 shared `draw*` functions); the guest docks platform/closed-barrier
 solids into its own tilemap so the predicted knight rides and collides
-correctly. Known edges: dialogue/shops/pause are host-screen
+correctly. **Geometry** the world has changed rides as `patch` (a
+`RoomPatch`) — sent on room entry and whenever it changes, never every
+frame — because the guest builds its tilemap from the same immutable
+`RoomDef` and would otherwise stand on a floor the host has smashed;
+`enterRoom` reapplies it after rebuilding. **Surface waves** get their
+own `waves` entry (the crest's tile cells) and the live wave's own
+`drawCrest`, so a remote Shockwave is the same picture rather than a
+generic dot. An effect that a state's `enter` hook spawns must hang off
+a flag the INPUT path set (`pendingSkill`, `pendingShockwave`): a puppet
+is force-posed with `fsm.set` and would otherwise spawn a duplicate for
+every remote knight. **Earned verbs** ride the profile — `hello`/`sync`
+are literally `SaveData['player']` — and `sync` also re-applies them to
+the guest's *predicted* knight, without which a verb won mid-session
+would work on the host's screen and not on the guest's. Known edges: dialogue/shops/pause are host-screen
 only (NPCs ignore non-`isLocal` knights); projectiles render as generic
 dots on the guest; strict NATs may fail (STUN only); levers answer only the
 host's interact key (`interact` isn't a networked action), while
 pressure plates feel both knights (the guest's is a real Player in the
-host's world). When touching
+host's world); the guest predicts its own spells and waves, so a cast
+briefly draws twice (once predicted, once from the snapshot). When touching
 multiplayer-adjacent code, keep the single-player path byte-identical —
 `nearestPlayer()` and `isLocal` are the seams that keep both true.
 
@@ -385,7 +409,9 @@ a port with `-- --port 5174`), then drive the real game:
 - **Record/replay harness**: `npm run replay` re-runs every recording in
   `tools/agent-play/recordings/` and fails on any divergence — run it
   after gameplay changes (a diverging recording is either a regression or
-  an intended change; re-record if intended). To play the game turn-based
+  an intended change; if intended — new content in a room the tape walks
+  through, say — refresh it with
+  `npm run replay -- --rerecord <file>` and say so in the PR). To play the game turn-based
   yourself (no real-time pressure) use the HTTP bridge:
   `npm run agent-play` — see `tools/agent-play/README.md`. Gameplay
   randomness must use the engine `rand/randInt/pick/chance` helpers

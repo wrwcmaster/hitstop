@@ -24,6 +24,18 @@ export function registerSounds(sfx: Sfx): void {
     s.tone(950, 320, 0.1, 'sawtooth', 0.05);
   });
   sfx.define('land', (s) => s.hiss(0.04, 0.09));
+  // The ground taking a blow and answering: a deep thud running out.
+  sfx.define('quake', (s) => {
+    s.tone(150, 40, 0.4, 'sawtooth', 0.22);
+    s.hiss(0.3, 0.16);
+    s.toneAt(60, 90, 200, 0.3, 'triangle', 0.1);
+  });
+  // Stone giving way: the crack, then the rubble falling after it.
+  sfx.define('shatter', (s) => {
+    s.tone(320, 70, 0.14, 'square', 0.2);
+    s.hiss(0.26, 0.3);
+    s.toneAt(70, 140, 50, 0.2, 'sawtooth', 0.12);
+  });
   sfx.define('wave', (s) => {
     s.tone(330, 660, 0.18, 'triangle', 0.12);
     s.toneAt(120, 440, 880, 0.22, 'triangle', 0.12);

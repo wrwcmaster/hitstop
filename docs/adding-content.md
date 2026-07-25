@@ -128,6 +128,56 @@ The engine does not recognize those names. Gameplay inspects them through a
 step limits and caller predicates decide where that effect stops. Registered
 traits appear in the level-editor tile tooltip automatically.
 
+## A tile that breaks (and stays broken)
+
+A `RoomDef` is immutable content, rebuilt from JSON on every visit — so a
+floor you smash grows straight back when you leave. **Room patches** are
+what make a change stick. Never call `tilemap.setTile` from gameplay: that
+edits the throwaway copy you are standing in. Go through the scene:
+
+```ts
+host.mutateTile(tx, ty, '');   // '' clears the tile
+```
+
+`PlayScene.mutateTile` writes the live map *and* records the change against
+the current room, so it is replayed the next time the room is built, and it
+rides along in the save (`SaveData.patches`). The mechanism is generic
+(`RoomPatches` in `engine/level/patches.ts`): tile replacements plus entities
+that must not respawn, keyed by room id, all plain JSON.
+
+What a surface *does* about force is a registry, not a branch. In
+`content/surface-reactions.ts`:
+
+```ts
+defineSurfaceReaction('breakable', {
+  to: ['plunge', 'wave'],          // omit for "all of them"
+  react({ host, tile }) { host.mutateTile(tile.tx, tile.ty, ''); return true; },
+});
+```
+
+Two verbs feed it and neither names a tile id or a trait:
+
+1. `crackedRock` declares `traits: ['breakable', ...]` — a label, not a behavior.
+2. **Impact Drop** emits `plungeLand` with the footprint the knight landed on. She has no idea what stone is.
+3. **Shockwave** emits `surfaceWave` per tile its front crosses.
+4. `PlayScene` turns each into `reactToSurface(host, tile, by)`. Adding a reacting surface is a `defineSurfaceReaction` call plus a trait on a tile — no verb changes.
+
+A placed entity can be retired the same way. Give the definition
+`persistent: true` (see the chest in `actors/enemies.ts`) and killing one
+empties its slot in the room for good — the identity is `entityKey(e)`
+(`type@x,y`), not an array index, so editing the room later cannot
+resurrect the wrong thing. Patches are idempotent, and coordinates or ids
+that no longer exist are skipped rather than throwing.
+
+Two rules the tests enforce: leave a hole a body can fit through (the knight
+is 10px wide, so a break must span at least two 8px tiles — footprint probes
+do this naturally), and don't drop the player anywhere a normal jump can't
+leave.
+
+Sandbox runs (level-editor test rooms, `?scenario=`, the debug test-room
+jump) can break scenery freely; they never write a save, so the rubble stays
+in the sandbox.
+
 ## A new room / level
 
 Use the level editor (`/tools/level-editor.html`): paint tiles, place monsters, set the player spawn, then **test play** (one click, uses `?room=local`) and iterate. When happy, **download** the JSON into `src/game/content/rooms/` and load it in `main.ts`.
@@ -234,6 +284,27 @@ Every move in a weapon's moveset names its own sheet animation — the combo swi
 ```
 
 The rusty sword's plunge is the shipped example: a committed point-down thrust instead of the borrowed swing. Sheets may also **alias** one animation to another explicitly (`"upper": "aerial"` — a string instead of frames, resolved at load with cycle detection) when a move should borrow something *other* than the default. In the sprite editor an alias shows as `upper→aerial` and editing under it edits its target; the composite panel is where per-move art is judged, posed on the full player with the move's own trail — on the base `attack` animation, its move selector still poses every un-arted move.
+
+### Carrying a weapon through a move it doesn't own
+
+Impact Drop and Shockwave belong to the knight, not her steel, so a bow
+has no swing to follow and would otherwise idle through a dive. Wrap a
+`drawHeld` body in `drawCarried` to opt in:
+
+```ts
+drawHeld(g, ctx) {
+  g.save(); g.translate(hx * ctx.facing, hy);
+  drawCarried(g, ctx, () => { /* ...the weapon... */ });
+  g.restore();
+}
+```
+
+`ctx.carry` is `'plunge'`, `'stomp'`, or absent, and the helper applies
+the tuck. A visual that never calls it is unchanged — which is why no
+melee weapon needed an edit: their `drawHeld` already follows the swing.
+It is the held-pose sibling of `drawNeutralTrail`, and written as a
+wrapper so the next knight-owned move costs one entry here rather than a
+pass over every visual.
 
 ### Shaping an attack trail
 
@@ -539,11 +610,18 @@ Ownership lives in `Player.earned`, **not** in `capabilities`:
 - `earned.restore(ids, ctx)` is the load path: it replays projections but reports nothing. Unknown ids are dropped, so renamed or removed content can't break an old save. It runs *after* the class replay in `restorePlayer`, since that replay clears skills and capabilities.
 - It persists in `SaveData.player.earned` (absent = owns none, so older saves load fine). Because the co-op hello/sync profile **is** `SaveData['player']`, a guest carries what they earned in and home again with no parallel format.
 
+An earnable's `desc` is the **usage prompt**, and it names its inputs as
+`{tokens}` — `'On the ground, {down} + {attack} sends a wave through it.'`
+`abilityHint(game, id)` resolves them for whatever device is in hand
+(SPACE / A on a pad / the on-screen glyph on a phone) after translation,
+so the catalog and the locale files stay device-agnostic. `PlayScene`
+shows it under the unlock banner, outlasting the banner itself.
+
 Query it from anywhere holding the player — `player.earned.has('impact-drop')` — including item/skill/tree/NPC callbacks and trigger actions (via `host.player`). Registering an earnable does not implement it: an owned-but-unconsumed entry is simply inert, which is what lets the ownership layer ship before the verbs do.
 
 ## Saves
 
-`src/game/save.ts` defines the save shape: current room, inventory/equipment/skills, story flags, fired one-shot triggers, best score. Checkpoints happen automatically at every room entrance and on boss defeat; death returns you to the last checkpoint at full HP. To persist a new thing, add it to `SaveData` — an optional field (`foo?: T`) just works, since old saves take the default; a change that would strand or corrupt old saves bumps the `SlotVault` version instead, and they invalidate cleanly.
+`src/game/save.ts` defines the save shape: current room, inventory/equipment/skills, story flags, fired one-shot triggers, room patches (geometry the run has changed), best score. Checkpoints happen automatically at every room entrance and on boss defeat; death returns you to the last checkpoint at full HP. To persist a new thing, add it to `SaveData` — an optional field (`foo?: T`) just works, since old saves take the default; a change that would strand or corrupt old saves bumps the `SlotVault` version instead, and they invalidate cleanly.
 
 **The game is in demo phase, so save compatibility is not a design constraint** — do not write in-game migration code that reconstructs state from an older save's contents. A demo save that loads but can't reach some content is a "start a new game". See the *Save compatibility* section in [AGENTS.md](../AGENTS.md); after release this flips to a standalone migration pipeline that lives outside the game.
 

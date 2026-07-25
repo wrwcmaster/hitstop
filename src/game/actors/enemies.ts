@@ -359,6 +359,9 @@ function chestDef(drops: NonNullable<MonsterDef['drops']>, healing = false): Mon
   return {
     hp: 40, damage: 0, w: chestSprite.hitbox.w, h: chestSprite.hitbox.h, score: 50, xp: 0,
     noContactDamage: true,
+    // A cracked-open chest is a change to the room, not a defeated foe:
+    // it stays open when you come back, so the deep pays out once.
+    persistent: true,
     colors: healing ? [COLORS.red, COLORS.white, COLORS.gold] : [COLORS.gold, COLORS.white],
     drops,
     draw(g, m) {

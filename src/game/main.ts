@@ -23,6 +23,7 @@ import { registerEffects } from './content/effects';
 import { registerQuests } from './content/quests';
 import { registerPortals } from './content/portals';
 import { registerEarnables } from './content/earnables';
+import { registerSurfaceReactions } from './content/surface-reactions';
 import { earnables } from '@engine/index';
 import { monsters } from './actors/monster';
 import { registerLocales } from './content/locales';
@@ -68,6 +69,7 @@ registerEffects();
 registerQuests();
 registerPortals();
 registerEarnables();
+registerSurfaceReactions();
 
 // Every reward must name a real earnable. Checked here, at boot, for the
 // same reason rooms are: the alternative is finding out from a thrown
@@ -107,7 +109,11 @@ bind('bL', 'left');
 bind('bR', 'right');
 bind('bJ', 'jump', 'up');
 bind('bA', 'attack', 'confirm');
-bind('bD', 'dash', 'down');
+// Dash no longer doubles as "down": holding it fired a dash you did not
+// ask for every time you wanted to crouch, drop through a platform, or
+// aim an attack downward. Down has its own key (bDn) below.
+bind('bD', 'dash');
+bind('bDn', 'down');
 bind('bI', 'interact'); // talk to NPCs / use, the touch equivalent of E
 bind('bF', 'skill3'); // ice shard
 bind('bP', 'parry'); // deflect + riposte

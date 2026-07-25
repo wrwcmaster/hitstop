@@ -64,6 +64,14 @@ export interface MonsterDef {
   /** Touching this monster doesn't hurt (it attacks some other way). */
   noContactDamage?: boolean;
   /**
+   * Killing this one is a change to the room, not an encounter: it stays
+   * dead across room transitions and saves. For scenery that pays out
+   * once (a chest, a barrel, a cracked pillar) — without it, walking out
+   * and back in refills the loot. Bosses use their own `slain:` flags,
+   * which also gate music and epilogues.
+   */
+  persistent?: boolean;
+  /**
    * Shrink the CONTACT damage box by this many px per side (round
    * sprites whose AABB corners are empty). The hurtbox the player's
    * attacks test against stays full size — forgiving both ways.
@@ -95,6 +103,13 @@ export class Monster extends Actor {
   state: Record<string, unknown> = {};
   /** Elemental debuffs (burning, frozen...) — same system as the player. */
   statuses = new Statuses(this);
+  /**
+   * Which of the room's placed entities this instance came from (see
+   * `entityKey`), or `''` for one spawned by a wave, a scenario, or the
+   * test spawner. Only a monster the ROOM placed can be permanently
+   * removed from it — nothing else has a slot in the room to empty.
+   */
+  origin = '';
 
   constructor(
     public readonly type: string,

@@ -1,5 +1,6 @@
-import { defineEarnable } from '@engine/index';
-import type { ActorHost } from '../defs';
+import { earnableDef, defineEarnable } from '@engine/index';
+import { t } from '@engine/index';
+import { actionLabel, type ActionGame, type ActorHost, type Action } from '../defs';
 import type { Player } from '../actors/player';
 
 /**
@@ -57,27 +58,49 @@ export interface EarnCtx {
  */
 defineEarnable<EarnCtx>('impact-drop', {
   name: 'IMPACT DROP',
-  desc: 'In the air, press down + attack to drive your fall into the ground.',
+  desc: 'In the air, {down} + {attack} drives your fall into the ground.',
   kind: 'ability',
 });
 
 defineEarnable<EarnCtx>('wall-grip', {
   name: 'WALL GRIP',
-  desc: 'Hold toward a wall in the air to cling to it, then jump to kick away.',
+  desc: 'Hold toward a wall in the air to cling, then {jump} to kick away.',
   kind: 'ability',
 });
 
 defineEarnable<EarnCtx>('air-step', {
   name: 'AIR STEP',
-  desc: 'Press jump again in midair to step off the air itself.',
+  desc: 'Press {jump} again in midair to step off the air itself.',
   kind: 'ability',
 });
 
 defineEarnable<EarnCtx>('shockwave', {
   name: 'SHOCKWAVE',
-  desc: 'Send one wave of force running away through the ground.',
+  desc: 'On the ground, {down} + {attack} sends a wave through it.',
   kind: 'ability',
 });
 
 /** Importing this module registers the catalog. */
 export function registerEarnables(): void {}
+
+/**
+ * An earnable's description with its input tokens filled in for whatever
+ * device is in hand — `{jump}` becomes SPACE, or A on a pad, or the
+ * on-screen button's own arrow on a phone. Catalog entries stay device-
+ * agnostic (and translatable) because the substitution happens here, at
+ * the moment something is shown, not where the text is written.
+ */
+export function abilityHint(game: ActionGame, id: string): string {
+  const touch: Partial<Record<Action, string>> = {
+    down: '\u25bc', jump: '\u25b2', attack: '\u2694',
+  };
+  return t(earnableDef(id).desc).replace(/\{(\w+)\}/g, (whole, name: string) => {
+    const action = name as Action;
+    return touch[action] === undefined && !ACTIONS.has(action)
+      ? whole
+      : actionLabel(game, action, touch[action]);
+  });
+}
+
+/** The actions an ability hint may name. Anything else is left alone. */
+const ACTIONS = new Set<Action>(['left', 'right', 'up', 'down', 'jump', 'attack', 'dash', 'parry', 'interact']);

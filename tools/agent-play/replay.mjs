@@ -3,6 +3,13 @@
  *
  *   npm run replay                    # every recording in recordings/
  *   npm run replay -- path/to/run.json [more.json ...]
+ *   npm run replay -- --rerecord path/to/run.json
+ *
+ * `--rerecord` replays the same tape and writes the checkpoint hashes it
+ * produces back into the file. Use it ONLY when a divergence is a change
+ * you meant to make — new content in a room the tape walks through, say.
+ * A divergence you did not intend is a regression the recording caught,
+ * and refreshing the hashes would throw that away.
  *
  * Works on any v2 recording — an agent session from the bridge or a human
  * run saved with `__replay.save()` in the browser console. Each is
@@ -26,7 +33,9 @@ import { launchBrowser, openSession, GAME_URL } from './lib.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..', '..');
 
-let files = process.argv.slice(2);
+const args = process.argv.slice(2);
+const rerecord = args.includes('--rerecord');
+let files = args.filter((a) => a !== '--rerecord');
 if (!files.length) {
   const dir = path.join(here, 'recordings');
   files = fs.existsSync(dir)
@@ -87,11 +96,14 @@ async function replayOne(browser, baseUrl, file) {
   await session.page.evaluate((r) => window.__harness.replayRun(r), rec);
 
   let ok = true;
+  const fresh = [];
   for (const [target, expected] of rec.checks) {
     const got = await session.page.evaluate((t) => {
       window.__harness.runTo(t);
       return window.__harness.hashNow();
     }, target);
+    fresh.push([target, got]);
+    if (rerecord) continue;
     if (got !== expected) {
       ok = false;
       console.error(`  DIVERGED at step ${target} (${(target / 60).toFixed(1)}s): recorded ${expected}, replayed ${got}`);
@@ -103,7 +115,15 @@ async function replayOne(browser, baseUrl, file) {
     ok = false;
     console.error('  page errors during replay:', session.errors);
   }
-  if (ok) {
+  if (ok && rerecord) {
+    const changed = fresh.filter(([t, h], i) => rec.checks[i][0] !== t || rec.checks[i][1] !== h).length;
+    rec.checks = fresh;
+    // Keep the file's own layout: some are pretty-printed by hand, some
+    // came straight out of the browser as one line.
+    const pretty = fs.readFileSync(file, 'utf8').includes('\n  "v"');
+    fs.writeFileSync(file, JSON.stringify(rec, null, pretty ? 2 : 0) + (pretty ? '\n' : ''));
+    console.log(`  RERECORDED — ${changed}/${fresh.length} checkpoint hashes rewritten`);
+  } else if (ok) {
     const final = await session.page.evaluate(() => window.__harness.state());
     console.log(`  PASS — ${rec.checks.length} checkpoints matched; final: score=${final.score} hp=${final.player?.hp} wave=${final.wave?.n}`);
   }

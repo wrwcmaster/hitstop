@@ -21,6 +21,13 @@
     .btn:active { background: rgba(148, 176, 194, 0.3); }
     #bL { left: 16px; bottom: 88px; }
     #bR { left: 84px; bottom: 88px; }
+    /* Down: its own key, not a rider on dash. Holding "down" is a real
+       input now — it drops you through platforms and turns an attack into
+       Impact Drop on the way down or Shockwave with your feet planted —
+       and none of that is reachable if the only way to hold it is to
+       dash first. Sits under the two direction keys, where a thumb
+       already is. */
+    #bDn { left: 50px; bottom: 20px; }
     #bJ { right: 16px; bottom: 150px; }
     #bA { right: 84px; bottom: 88px; }
     #bD { right: 16px; bottom: 88px; }
@@ -43,6 +50,7 @@
     <div class="btn" id="bJ">&#9650;</div>
     <div class="btn" id="bA">&#9876;</div>
     <div class="btn" id="bD">&#9889;</div>
+    <div class="btn" id="bDn" aria-label="down">&#9660;</div>
     <div class="btn" id="bI" aria-label="interact">TALK</div>
     <div class="btn" id="bF" aria-label="ice shard">&#10052;</div>
     <div class="btn" id="bP" aria-label="parry">&#128737;</div>

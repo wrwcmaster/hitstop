@@ -5,8 +5,11 @@ import {
   Charge,
   Strike,
   Projectile,
+  Tilemap,
   applyGravity,
   moveAndCollide,
+  type CollisionResult,
+  type CollisionContact,
   frameAt,
   whiteOf,
   tintOf,
@@ -51,6 +54,7 @@ import { drawHeldWeapon, drawWeaponTrail, drawNeutralTrail, RANGED_HAND_Y } from
 import { type SkillCtx } from '../content/skills';
 import { classes, DEFAULT_CLASS } from '../content/classes';
 import { shootArrow, shootBullet, muzzleFlash } from '../content/ballistics';
+import { Shockwave } from './shockwave';
 import { Monster } from './monster';
 import { PlayerCapabilities } from './player-capabilities';
 import type { EarnCtx } from '../content/earnables';
@@ -150,6 +154,31 @@ export const PLAYER_TUNING = {
   parryStagger: 0.55, // how long a parried melee attacker is stunned
   riposteTime: 1.3, // window to cash in the empowered counter
   riposteBonus: 60, // extra damage on the riposte swing
+  /* ---- Wall Grip ---- */
+  // A slow slide rather than a full stop: the knight is holding on, not
+  // parked, and the drift tells you the grip is a moment you spend
+  // rather than a place you live. No stamina meter — the design brief
+  // asks for forgiving, and gravity already sets the clock.
+  clingSlide: 34,
+  // The kick: horizontal enough to clear the wall and cross a shaft,
+  // vertical enough to gain height on each side of one.
+  wallJumpX: 190,
+  wallJumpY: 300,
+  // Long enough to leave the wall behind while still holding toward it,
+  // short enough that the grab on the FAR side still lands. A narrow
+  // shaft is the binding case: 32px crossed at wallJumpX takes about
+  // 0.17s, so a lock near that swallows the arrival and the climb stalls.
+  regripLock: 0.09,
+  // How long a touched wall is remembered. Long enough to bridge the
+  // frames where resting flush produces no overlap, short enough that
+  // leaving one really does end the grip.
+  wallStick: 0.12,
+  /* ---- Shockwave ---- */
+  // Long enough to read as a commitment (you are planting your feet, not
+  // flicking a wrist), short enough that it opens a fight rather than
+  // ending your turn in one.
+  shockwaveTime: 0.3,
+
   hurtInvuln: 1.1,
   // Health and mana are point pools, not icon counts — 100/60 rather
   // than 5/3 hearts. Big enough that a light graze and a heavy slam can
@@ -163,6 +192,10 @@ export const PLAYER_TUNING = {
  * feel kit — coyote time, jump buffering, jump cut, attack buffering,
  * squash & stretch, dash i-frames, and definition-driven weapon combos.
  */
+/** Which shape a swing takes. A guest's puppet is told this over the
+ * wire so a remote plunge poses like a plunge (see `poseAttackAs`). */
+export type AttackContext = 'ground' | 'aerial' | 'plunge' | 'upper' | 'dash';
+
 export class Player extends Actor {
   team = 'player' as const;
   w = baseKnight.hitbox.w;
@@ -283,6 +316,72 @@ export class Player extends Actor {
   private dashStrike: Strike | null = null;
 
   fsm: FSM<Player>;
+
+  /** Last step's collision contacts — which surfaces were touched, and
+   * from which side. Wall Grip reads it; see the physics step. */
+  private contacts: CollisionResult | null = null;
+  /**
+   * Blocks re-gripping for a moment after kicking off a wall.
+   *
+   * Without it a wall jump that leaves you still holding *toward* the
+   * wall re-grips on the very next frame, and the knight buzzes in place
+   * instead of leaving — the classic wall-jump jitter. One short lockout
+   * is enough, and it is why the kick sets a heading away from the wall
+   * rather than relying on the player to let go of the stick.
+   */
+  private regripT = 0;
+  /** Which wall is being held (-1 left, +1 right); only valid in `cling`. */
+  private clingSide: -1 | 0 | 1 = 0;
+  /**
+   * The wall most recently touched, and how long that memory has left.
+   *
+   * Resting flush against a wall produces NO overlap, so the contact that
+   * proves it exists only on the frames she actually pushes into it — it
+   * flickers on and off. Demanding a live contact every frame to STAY
+   * clinging therefore drops her a frame after she grabs on, and she
+   * oscillates between holding and falling. So the wall is remembered for
+   * a breath, exactly as `coyote` remembers the ground for one.
+   */
+  private wallSeenSide: -1 | 0 | 1 = 0;
+  private wallSeenT = 0;
+
+  /**
+   * Which side has a wall worth gripping: -1 left, +1 right, 0 none.
+   *
+   * Symmetric by construction — it asks the collision result for a
+   * contact on each side rather than probing at hand-tuned offsets, so
+   * left and right cannot drift apart. A grip needs a REAL wall: one-way
+   * platforms are not walls (you are meant to pass through their faces),
+   * and the level-extent backstop is not either, or you could cling to
+   * the sky at the edge of the world.
+   */
+  private grippableSide(): -1 | 0 | 1 {
+    const c = this.contacts;
+    if (!c) return 0;
+    const usable = (hit: CollisionContact | null): boolean =>
+      !!hit && !hit.oneWay && !hit.boundary;
+    if (usable(c.left)) return -1;
+    if (usable(c.right)) return 1;
+    return 0;
+  }
+
+  /**
+   * Is the knight in a position to cling right now?
+   *
+   * Earned first — Wall Grip is a boss verb, so without it every wall is
+   * just a wall. Then: airborne, out of the water (clinging to a wall
+   * while swimming would fight the swim controls), not mid-dash or dead,
+   * off the re-grip lockout, and holding TOWARD the side that has one.
+   */
+  private wallGripSide(): -1 | 0 | 1 {
+    if (!this.earned.has('wall-grip')) return 0;
+    if (this.onGround || this.regripT > 0) return 0;
+    if (this.submersion > 0.2) return 0;
+    if (this.fsm.is('dead', 'dash', 'swallowed')) return 0;
+    const side = this.wallSeenT > 0 ? this.wallSeenSide : this.grippableSide();
+    if (side === 0) return 0;
+    return this.input.axis('left', 'right') === side ? side : 0;
+  }
 
   /**
    * How many midair jumps this knight gets.
@@ -604,7 +703,9 @@ export class Player extends Actor {
 
   /** Which move the next/current attack is: the grounded combo chain or
    * a contextual strike (set right before entering the attack state). */
-  private attackContext: 'ground' | 'aerial' | 'plunge' | 'upper' | 'dash' = 'ground';
+  private attackContext: AttackContext = 'ground';
+  /** Set by the input path; consumed by beginShockwave (see there). */
+  private pendingShockwave = false;
 
   /** Input driving this knight. Defaults to the local device; a net
    * session substitutes a remote-fed Input for the guest's knight. */
@@ -647,6 +748,18 @@ export class Player extends Actor {
         this.attackContext = 'plunge';
         return 'attack';
       }
+      // Shockwave is the same gesture with your feet on the floor, and
+      // that pairing IS the design: down+attack means "send the force
+      // downward" — into the ground beneath you in the air, along the
+      // ground when you are standing on it. It needs no new Action, so
+      // touch, gamepad, rebinding, replay, and the network action list
+      // are untouched by construction, and it sits beside Impact Drop
+      // ahead of the ranged branch for the same reason — a verb the
+      // knight owns, not something her weapon does.
+      if (this.onGround && dry && this.input.held('down') && this.earned.has('shockwave')) {
+        this.pendingShockwave = true;
+        return 'shockwave';
+      }
       // Ranged steel shoots instead of swinging. Charged weapons (the
       // bow) enter the draw state — the shot leaves on RELEASE, at a
       // power the hold decides. Uncharged ones (the flintlock) fire on
@@ -668,6 +781,11 @@ export class Player extends Actor {
       else this.attackContext = 'ground';
       return 'attack';
     }
+    // Wall Grip: catch a wall you are pressing into. After the attack
+    // block so a swing still wins — clinging is a recovery, never
+    // something that eats a deliberate input — and before dash so that
+    // falling into a wall you are holding reads as "grab it".
+    if (this.wallGripSide() !== 0) return 'cling';
     if (this.input.consumePress('dash') && this.dashCd <= 0) return 'dash';
     // Shooting is a real action: enter `cast` so the body recoils.
     for (const slot of this.classDef.loadout) {
@@ -961,6 +1079,10 @@ export class Player extends Actor {
         color: [COLORS.steel, COLORS.white], speed: 70, life: 0.3,
         angle: -Math.PI / 2, spread: 2.6, drag: 4,
       });
+      // Tell the room she hit it. The knight has no opinion about what
+      // the floor is made of — she reports the blow and its footprint,
+      // and the scene decides whether anything down there gives way.
+      this.game.events.emit('plungeLand', { x: this.x, y: this.y, w: this.w, h: this.h });
       return 'move';
     }
     if (prog >= 1) {
@@ -971,6 +1093,139 @@ export class Player extends Actor {
         this.comboWeaponId = weapon.id;
       }
       return 'move';
+    }
+  }
+
+  /**
+   * Slam the ground and send a wave running away through it.
+   *
+   * A short, committed stance rather than a weapon swing: the wave is
+   * the knight's own, so a bow, a flintlock, and a rusty sword all send
+   * exactly the same one. That is the point — no melee and ranged
+   * variants to keep in step, and the verb works with every loadout.
+   *
+   * The wave needs a real tile grid to run along — a knight standing on
+   * some other CollisionSource simply plants her feet and nothing
+   * travels, which is the honest outcome rather than a crash.
+   *
+   * The spawn hangs off a flag the INPUT path sets, not off entering the
+   * state, for the same reason `beginCast` hangs off `pendingSkill`: a
+   * co-op guest force-sets a puppet's FSM state from the host's snapshot,
+   * and a puppet that spawned its own wave would give every remote knight
+   * a duplicate. A puppet never runs `moveUpdate`, so it poses and
+   * nothing else.
+   */
+  beginShockwave(): void {
+    this.vx = 0;
+    this.squash = 1.3;
+    this.feel.shake(0.45);
+    this.feel.sfx.play('quake');
+    this.feel.burst(this.cx, this.y + this.h, 8, {
+      color: [COLORS.gold, COLORS.white], speed: 80, life: 0.3,
+      angle: -Math.PI / 2, spread: 2.4, drag: 3.4, grav: 300,
+    });
+    const cast = this.pendingShockwave;
+    this.pendingShockwave = false;
+    if (cast && this.collision instanceof Tilemap) {
+      this.game.world.spawn(new Shockwave(this.game, this.collision, this, this.facing));
+    }
+  }
+
+  /** Hold the stance briefly, then stand up. */
+  shockwaveUpdate(dt: number): string | void {
+    this.vx *= friction(0.0001, dt);
+    if (this.fsm.t >= PLAYER_TUNING.shockwaveTime) return 'move';
+  }
+
+  /**
+   * Tell a knight which shape her next swing takes, without giving her
+   * the input that would choose it. Only the co-op guest needs this: a
+   * puppet is force-posed with `fsm.set('attack')` and never runs the
+   * input path that sets the context, so without it every remote swing —
+   * a plunge, an uppercut, a dash strike — drew as a plain ground swing.
+   */
+  poseAttackAs(context: AttackContext): void {
+    this.attackContext = context;
+  }
+
+  /** Which shape the current swing is, for the wire. */
+  get attackShape(): AttackContext {
+    return this.attackContext;
+  }
+
+  /** Catch the wall: kill the fall, turn to face out from it. */
+  beginCling(): void {
+    this.clingSide = this.wallGripSide();
+    this.vy = 0;
+    this.vx = 0;
+    // Face AWAY from the wall — she is looking where she will go, and it
+    // makes the kick's direction legible before it happens.
+    //
+    // Only when there IS a wall, though: a co-op guest replays the host's
+    // state name onto a puppet that has no input of its own, so this hook
+    // runs with no side. Forcing a facing there would overwrite the one
+    // the snapshot just delivered and point every remote climber right.
+    if (this.clingSide !== 0) this.facing = this.clingSide === 1 ? -1 : 1;
+    this.squash = 1.15;
+    this.feel.sfx.play('land');
+    this.feel.burst(this.cx + this.clingSide * this.w * 0.4, this.cy, 5, {
+      color: [COLORS.steel, COLORS.white], speed: 40, life: 0.22,
+      angle: this.clingSide === 1 ? Math.PI : 0, spread: 1.4, drag: 4,
+    });
+  }
+
+  /**
+   * Hold the wall, and leave it on your terms.
+   *
+   * Four ways out, in priority order: kick off (jump), drop off (press
+   * away or let go), dash away, or simply run out of wall. The knight
+   * slides down slowly throughout, so doing nothing is also an exit —
+   * which is what keeps this forgiving rather than a perch.
+   */
+  clingUpdate(dt: number): string | void {
+    const T = PLAYER_TUNING;
+    const side = this.clingSide;
+
+    // Air jumps and the dash come back the moment she catches a wall, so
+    // a shaft can be climbed by alternating sides — the same refresh a
+    // pogo grants, for the same reason.
+    this.airJumps = this.maxAirJumps();
+    this.dashCd = 0;
+
+    // Kick off: away from the wall and up, and lock the re-grip so the
+    // held direction cannot immediately drag her back on.
+    if (this.jumpBuf.active) {
+      this.jumpBuf.consume();
+      this.vx = -side * T.wallJumpX;
+      this.vy = -T.wallJumpY;
+      this.facing = -side === 1 ? 1 : -1;
+      this.regripT = T.regripLock;
+      this.squash = 1.4;
+      this.feel.sfx.play('jump');
+      this.feel.burst(this.cx + side * this.w * 0.4, this.cy, 8, {
+        color: [COLORS.white, COLORS.steel], speed: 70, life: 0.3,
+        angle: side === 1 ? Math.PI : 0, spread: 1.8, drag: 3,
+      });
+      return 'move';
+    }
+    if (this.input.consumePress('dash') && this.dashCd <= 0) {
+      this.regripT = T.regripLock; // dashing away shouldn't re-grip either
+      return 'dash';
+    }
+    // Let go: stop holding toward the wall, or hold away from it.
+    if (this.input.axis('left', 'right') !== side) return 'move';
+    // The wall ran out, or the floor arrived.
+    if (this.onGround) return 'move';
+    if (!(this.wallSeenT > 0 && this.wallSeenSide === side)) return 'move';
+    if (this.submersion > 0.2) return 'move';
+
+    // Still holding on: slide, don't hang.
+    this.vx = side * 6; // stay pressed in so the contact survives the step
+    this.vy = Math.min(this.vy, T.clingSlide);
+    if (Math.random() < dt * 8) {
+      this.feel.burst(this.cx + side * this.w * 0.4, this.cy + this.h * 0.3, 1, {
+        color: [COLORS.steelDark], speed: 18, life: 0.25, drag: 4, grav: 120,
+      });
     }
   }
 
@@ -1116,6 +1371,7 @@ export class Player extends Actor {
     this.dashCd = Math.max(0, this.dashCd - dt);
     this.rangedCd = Math.max(0, this.rangedCd - dt);
     this.parryCd = Math.max(0, this.parryCd - dt);
+    this.regripT = Math.max(0, this.regripT - dt);
     this.riposteT = Math.max(0, this.riposteT - dt);
     this.skills.update(dt);
     this.statuses.update(dt);
@@ -1187,7 +1443,14 @@ export class Player extends Actor {
             this.jumpBuf.consume(); // deep tap absorbed; don't buffer it out of water
           }
         }
-      } else if (this.jumpBuf.active && this.coyote.active && !this.fsm.is('dead', 'attack')) {
+      // `cling` and `shockwave` are excluded because they consume the
+      // buffer THEMSELVES, a step later: the state's own update is what
+      // turns it into a wall kick. Letting the generic branches have it
+      // first is a real race — a jump buffered into the step the grab
+      // lands on used to be spent here as a plain air jump, launching
+      // her straight up while still stuck to the wall, and the kick that
+      // should have followed never fired because the buffer was gone.
+      } else if (this.jumpBuf.active && this.coyote.active && !this.fsm.is('dead', 'attack', 'cling', 'shockwave')) {
         this.jumpBuf.consume();
         this.coyote.consume();
         this.vy = -T.jumpSpeed;
@@ -1197,7 +1460,7 @@ export class Player extends Actor {
           color: COLORS.navyLight, speed: 40, life: 0.25,
           angle: Math.PI / 2, spread: 1.5, drag: 3,
         });
-      } else if (this.jumpBuf.active && this.airJumps > 0 && !this.fsm.is('dead', 'attack')) {
+      } else if (this.jumpBuf.active && this.airJumps > 0 && !this.fsm.is('dead', 'attack', 'cling', 'shockwave')) {
         // SKY DANCER (skill tree): kick off the air itself.
         this.jumpBuf.consume();
         this.airJumps--;
@@ -1257,7 +1520,20 @@ export class Player extends Actor {
 
     const fallSpeed = this.vy;
     if (this.dropT > 0) this.dropT -= dt;
-    moveAndCollide(this, dt, this.collision, { dropThrough: this.dropT > 0 });
+    // Keep the contacts: Wall Grip needs to know WHICH side it touched,
+    // not merely that it stopped. They are read on the next frame's FSM
+    // pass, which runs before this one — a frame of lag no one can feel.
+    this.contacts = moveAndCollide(this, dt, this.collision, { dropThrough: this.dropT > 0 });
+    // Remember the wall while it is genuinely there; let the memory lapse
+    // once she is clear of it (see wallSeenSide).
+    const touched = this.grippableSide();
+    if (touched !== 0) {
+      this.wallSeenSide = touched;
+      this.wallSeenT = PLAYER_TUNING.wallStick;
+    } else {
+      this.wallSeenT = Math.max(0, this.wallSeenT - dt);
+      if (this.wallSeenT === 0) this.wallSeenSide = 0;
+    }
 
     // Hazard tiles (spikes): a bite of health and a launch clear of the danger.
     // Dashing skims across; i-frames blink through.
@@ -1311,6 +1587,13 @@ export class Player extends Actor {
   private runControls(dt: number): void {
     const T = PLAYER_TUNING;
     const speed = this.stats.get('speed'); // buffs/debuffs live here
+    // Just kicked off a wall: the stick is almost always still pushed
+    // INTO it, and steering would cancel the kick on the very next frame
+    // — the knight would peel off and slide back down instead of
+    // crossing. So the kick owns her horizontal motion for a moment.
+    // Same window as the re-grip lock: both exist to let a wall jump
+    // actually leave the wall.
+    if (this.regripT > 0 && !this.onGround) return;
     const dir = this.input.axis('left', 'right');
     if (dir !== 0) {
       this.facing = dir as 1 | -1;
@@ -1500,6 +1783,14 @@ export class Player extends Actor {
             }
           : undefined,
         charge: this.fsm.is('draw') ? this.charge.progress : undefined,
+        // The two moves the KNIGHT owns rather than her steel. A weapon
+        // with nothing to say about them keeps its idle pose, which is
+        // exactly what every melee visual already does.
+        carry: this.fsm.is('shockwave')
+          ? 'stomp'
+          : this.fsm.is('attack') && this.attackDef?.aim === 'down'
+            ? 'plunge'
+            : undefined,
       });
     }
     g.restore();
@@ -1566,6 +1857,14 @@ const PLAYER_STATES: Record<string, StateDef<Player>> = {
   attack: {
     enter: (p) => p.beginAttack(),
     update: (p, dt) => p.attackUpdate(dt),
+  },
+  cling: {
+    enter: (p) => p.beginCling(),
+    update: (p, dt) => p.clingUpdate(dt),
+  },
+  shockwave: {
+    enter: (p) => p.beginShockwave(),
+    update: (p, dt) => p.shockwaveUpdate(dt),
   },
   dash: {
     enter: (p) => p.beginDash(),

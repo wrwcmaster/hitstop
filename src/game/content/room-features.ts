@@ -2,11 +2,31 @@ import { Registry, items, songs, tiles, type RoomDef, type TriggerDef } from '@e
 import { placeables } from './placeables';
 import { waveTables } from './waves';
 import { propsAt, requirePositiveNumber } from './prop-validation';
-import { triggerActions } from '../scenes/play/trigger-actions';
 import { backdrops } from './backdrops';
 
 export interface RoomFeature {
   validate(value: unknown, room: RoomDef, path: string): void;
+}
+
+/**
+ * The `validateProps` half of the trigger-action registry — the only
+ * part room validation needs. Declared here structurally rather than
+ * imported, because trigger actions live in the scene layer (their
+ * `run` drives the scene through PlayHost) and content must not depend
+ * on scenes. The scene layer hands its registry over at import time via
+ * `provideTriggerValidators`; `Registry<TriggerAction>` satisfies this
+ * shape as-is.
+ */
+export interface TriggerValidatorSource {
+  has(event: string): boolean;
+  get(event: string): { validateProps?(props: Record<string, unknown>, path: string): void };
+}
+
+let triggerValidators: TriggerValidatorSource | null = null;
+
+/** Called once by scenes/play/trigger-actions.ts when it loads. */
+export function provideTriggerValidators(source: TriggerValidatorSource): void {
+  triggerValidators = source;
 }
 
 export const roomFeatures = new Registry<RoomFeature>('roomFeature');
@@ -122,9 +142,15 @@ export function validateRoomContent(room: RoomDef, id = room.name): RoomDef {
   });
 
   (room.triggers ?? []).forEach((trigger, index) => {
+    // Loud, not silent: a missing provider means the trigger-actions
+    // module never loaded, and skipping validation here would let a
+    // malformed room slide through to fail mid-play instead.
+    if (!triggerValidators) {
+      throw new Error(`${root}: trigger validation unavailable — scenes/play/trigger-actions has not loaded`);
+    }
     const path = `${root}.triggers[${index}] (${trigger.event}).props`;
     const props = propsAt(trigger.props, path);
-    if (triggerActions.has(trigger.event)) triggerActions.get(trigger.event).validateProps?.(props, path);
+    if (triggerValidators.has(trigger.event)) triggerValidators.get(trigger.event).validateProps?.(props, path);
     if (trigger.event === 'door') requireReachable(room, trigger, `${root}.triggers[${index}]`);
   });
   return room;

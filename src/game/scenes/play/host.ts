@@ -25,4 +25,12 @@ export interface PlayHost {
   openConversation(id: string): void;
   /** Read a story flag ('bossDefeated', 'visited:town', ...). */
   hasFlag(id: string): boolean;
+  /**
+   * Change a tile for good ('' clears it). The single way anything alters
+   * a room's geometry: the scene writes the live map AND records a room
+   * patch, so the change survives leaving, saving, and loading. Writing
+   * `tilemap.setTile` directly changes only the copy you are standing in,
+   * and the room grows back the moment you walk out.
+   */
+  mutateTile(tx: number, ty: number, id: string): void;
 }

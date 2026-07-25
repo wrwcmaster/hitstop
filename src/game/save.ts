@@ -1,4 +1,4 @@
-import { SlotVault, t, type JsonStore, type ItemStack } from '@engine/index';
+import { SlotVault, t, type JsonStore, type ItemStack, type RoomPatchSet } from '@engine/index';
 import type { Player } from './actors/player';
 import { DEFAULT_CLASS } from './content/classes';
 
@@ -17,6 +17,13 @@ export interface SaveData {
   flags: string[];
   /** Fired once-trigger indices per room id. */
   firedTriggers: Record<string, number[]>;
+  /**
+   * How the world differs from its authored rooms — smashed floors, a
+   * chest that stays looted (absent in saves from before rooms could be
+   * changed → nothing is broken yet, which is exactly what a fresh run
+   * means). A default, not a migration.
+   */
+  patches?: RoomPatchSet;
   /** Current wave in a wave-combat room, so a checkpoint resumes the
    * gauntlet instead of restarting at wave 1 (absent = no waves). */
   wave?: number;

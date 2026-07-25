@@ -16,7 +16,14 @@ npm run dev                       # the game
 npm run agent-play                # HTTP bridge for turn-based (agent) play
 npm run replay                    # verify EVERY recording in recordings/
 npm run replay -- path/run.json   # verify one recording
+npm run replay -- --rerecord path/run.json   # accept a deliberate change
 ```
+
+`--rerecord` replays the tape and writes the hashes it produces back into
+the file. Reach for it ONLY when the divergence is a change you meant to
+make — new content in a room the tape walks through, say. An unintended
+divergence is a regression the recording caught, and refreshing the hashes
+throws that away.
 
 `npm run replay` starts its own vite (port 5199) if the dev server isn't
 already running, so it works as a one-command test suite.
@@ -42,6 +49,28 @@ forever after. Caveats: runs that used debug cheats (backquote overlay
 keys bypass the input system) won't reproduce, and co-op runs are
 skipped (network play can't replay — the recording is marked
 `tainted`).
+
+## The recordings
+
+`recordings/` is the regression suite `npm run replay` runs. Two kinds:
+
+- **Whole-run tapes** (`human-live`, `sonnet-wave1`, `well-seam`, ...) — a
+  real playthrough, broad and shallow.
+- **Verb tapes** (`verb-*`) — one boss verb each, scripted through this
+  bridge, and each one **paired with a `-locked` twin that feeds the exact
+  same inputs to a knight who has not earned it**. The pair is the test: a
+  verb that silently stops gating, or silently stops working, breaks
+  exactly one of the two. Ability ownership and changed geometry are both
+  in the hashed state (`player.earned`, `patches`), so divergence catches
+  either directly rather than only through knock-on movement.
+
+  `verb-shockwave-bow` is the odd one out: same verb, a bow instead of a
+  sword, proving the wave belongs to the knight rather than to her steel.
+
+When scripting a tape here, note that **`POST /save` writes whichever
+session is current** — take each recording immediately after its own run,
+or a paired locked run started next will be the one written under the
+unlocked name.
 
 ## Agent (turn-based) play
 

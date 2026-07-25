@@ -1,4 +1,4 @@
-import { Registry, type CollisionSource, type RoomEntity } from '@engine/index';
+import { Registry, entityKey, type CollisionSource, type RoomEntity } from '@engine/index';
 import { Monster, monsters } from '../actors/monster';
 import { Npc, npcs } from '../actors/npc';
 import type { ActionGame } from '../defs';
@@ -74,7 +74,13 @@ export function registerPlaceables(): void {
       // slain flag, so felling one boss doesn't banish the others.
       shouldSpawn: ({ flags }) => !(def.boss && flags.has(`slain:${id}`)),
       spawn: ({ game, tilemap }, e) => {
-        game.world.spawn(new Monster(id, game, tilemap, e.x, e.y));
+        const m = new Monster(id, game, tilemap, e.x, e.y);
+        // Remember the slot in the room this one filled, so a persistent
+        // kill can empty exactly that slot and no other. Wave and spawner
+        // monsters get the same call with a synthetic entity and simply
+        // never match anything the room places.
+        m.origin = entityKey(e);
+        game.world.spawn(m);
       },
     });
   }

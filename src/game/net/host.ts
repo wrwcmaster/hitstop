@@ -4,9 +4,11 @@ import { Player } from '../actors/player';
 import { Monster } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
 import { isGizmo } from '../actors/gizmos';
+import { Shockwave } from '../actors/shockwave';
 import { restorePlayer, snapshotPlayer, type SaveData } from '../save';
 import { cleanName } from '../name';
 import { NET_ACTIONS, SNAP_HZ, parseMsg, type SnapMsg } from './protocol';
+import type { RoomPatch } from '@engine/index';
 
 /** How often the guest's knight state is synced back for their save. */
 const SYNC_STEPS = 120; // 2s of fixed steps
@@ -36,6 +38,15 @@ export class CoopHost {
   private hostName = 'PLAYER 1';
   /** Set when the guest vanishes; the scene shows a banner and detaches. */
   dropped = false;
+  /**
+   * Room + patch we last put on the wire. Geometry barely ever changes,
+   * so resending it 20 times a second would be pure waste — but a guest
+   * that missed the one snapshot carrying it would stand on a floor that
+   * is no longer there. The channel is ordered and reliable, so
+   * send-on-change is enough, and folding the room id into the key means
+   * walking into a room always re-sends whatever that room has.
+   */
+  private sentPatch = '';
 
   constructor(
     private game: ActionGame,
@@ -102,7 +113,7 @@ export class CoopHost {
   }
 
   /** After the world steps: snapshot cadence + edge-flag cleanup. */
-  step(view: { roomId: string; score: number; banner: string | null }): void {
+  step(view: HostView): void {
     this.remote.endStep();
     this.stepN++;
     if (this.stepN % SYNC_STEPS === 0) this.syncBack();
@@ -119,7 +130,7 @@ export class CoopHost {
     return n;
   }
 
-  private snapshot(view: { roomId: string; score: number; banner: string | null }): SnapMsg {
+  private snapshot(view: HostView): SnapMsg {
     const g = this.guest;
     const snap: SnapMsg = {
       t: 'snap',
@@ -129,6 +140,7 @@ export class CoopHost {
       mobs: [],
       picks: [],
       shots: [],
+      waves: [],
       giz: [],
       hud: {
         hp: g?.hp ?? 0, maxHp: g?.maxHp ?? 1, mp: g?.mp ?? 0, maxMp: g?.maxMp ?? 1,
@@ -137,11 +149,18 @@ export class CoopHost {
       },
       banner: view.banner,
     };
+    const patchKey = `${view.roomId}|${JSON.stringify(view.patch ?? {})}`;
+    if (patchKey !== this.sentPatch) {
+      this.sentPatch = patchKey;
+      if (view.patch) snap.patch = view.patch;
+      else snap.patch = {}; // an empty patch is news too: the room is pristine
+    }
     for (const e of this.game.world.all()) {
       if (e instanceof Player) {
         snap.knights.push({
           id: this.id(e), name: e.name, x: r(e.x), y: r(e.y), facing: e.facing,
           state: e.fsm.state, st: r(e.fsm.t), animT: r(e.animT),
+          ...(e.fsm.state === 'attack' ? { ac: e.attackShape } : {}),
           hp: e.hp, maxHp: e.maxHp, gear: e.equipment.slots(),
         });
       } else if (e instanceof Monster) {
@@ -156,6 +175,8 @@ export class CoopHost {
         snap.shots.push(kind
           ? { x: r(e.x), y: r(e.y), w: e.w, h: e.h, k: kind, vx: r(e.vx), vy: r(e.vy) }
           : { x: r(e.x), y: r(e.y), w: e.w, h: e.h });
+      } else if (e instanceof Shockwave) {
+        snap.waves.push({ c: e.crestCells() });
       } else if (isGizmo(e)) {
         const s = e.gizmoSnap();
         snap.giz.push({ id: this.id(e), ...s, x: r(s.x), y: r(s.y) });
@@ -168,6 +189,15 @@ export class CoopHost {
     this.link.send(JSON.stringify({ t: 'bye' }));
     this.link.close();
   }
+}
+
+/** What the scene tells its co-op session each step. */
+export interface HostView {
+  roomId: string;
+  score: number;
+  banner: string | null;
+  /** How the live room differs from its authored JSON (see SnapMsg.patch). */
+  patch?: RoomPatch;
 }
 
 /** Wire precision: 0.1px is plenty and keeps snapshots compact. */

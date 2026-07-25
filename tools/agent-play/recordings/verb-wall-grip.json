@@ -1,0 +1,1 @@
+{"v":3,"seed":2654450634,"mode":"harness","created":"2026-07-25T08:58:07.056Z","start":{"kind":"scenario","scenario":{"room":"underground","player":{"earned":["wall-grip"],"equip":["rusty-sword"],"x":40,"y":40,"hp":100}}},"storage":{},"tape":[[2,"d","left"],[122,"u","left"]],"checks":[[60,267585087],[120,1894392401],[180,364803735],[182,956722457]],"end":182}

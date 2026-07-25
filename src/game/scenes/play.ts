@@ -10,6 +10,8 @@ import {
   Triggers,
   DialogueScene,
   Minimap,
+  RoomPatches,
+  entityKey,
   itemDef,
   items,
   validateRoom,
@@ -25,6 +27,8 @@ import { Monster, monsters } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
 import { placeables, type PlaceableCtx } from '../content/placeables';
 import { validateRoomContent } from '../content/room-features';
+import { abilityHint } from '../content/earnables';
+import { reactToSurface } from '../content/surface-reactions';
 import { PauseScene } from './pause';
 import { MapScene } from './map';
 import { OptionsScene } from './options';
@@ -103,6 +107,21 @@ export class PlayScene implements Scene {
   private flags = new Set<string>();
   /** Fired once-trigger indices per room. Serialized into saves. */
   private firedTriggers: Record<string, number[]> = {};
+  /**
+   * How the world differs from its authored rooms — broken floors, looted
+   * chests. Rooms are rebuilt from immutable JSON on every visit, so this
+   * is the only thing that makes a change to one outlive walking out of
+   * it. Serialized into saves.
+   */
+  private patches = new RoomPatches();
+  /**
+   * A run that must never be written home: the level editor's test room,
+   * a `?scenario=` setup, the debug jump to the test room. They are
+   * throwaway worlds with a fully kitted knight, and letting one autosave
+   * would overwrite a real run with a sandbox — now that a sandbox can
+   * also break the scenery, the same rule has to cover the rubble.
+   */
+  private sandbox = false;
   /** A checkpoint's wave, consumed by the next setRoom so a saved gauntlet
    * resumes where it left off rather than restarting at wave 1. */
   private pendingWave = 0;
@@ -113,6 +132,10 @@ export class PlayScene implements Scene {
   private comboT = 0;
   private banner = '';
   private bannerT = 0;
+  /** A second, smaller line under the banner: how to use what you just
+   * won. Outlives the banner, since reading it is the point. */
+  private hint = '';
+  private hintT = 0;
   private overT = 0;
   private victoryT = 0;
   /** Which epilogue the fallen boss earned (see MonsterDef.epilogue). */
@@ -157,6 +180,7 @@ export class PlayScene implements Scene {
       goToRoom: (roomId, x, y) => this.goToRoom(roomId, x, y),
       openConversation: (id) => this.openConversation(id),
       hasFlag: (id) => this.flags.has(id),
+      mutateTile: (tx, ty, id) => this.mutateTile(tx, ty, id),
     };
     this.waves = new WaveDirector(this.host);
     this.hud = new Hud(this.host);
@@ -241,8 +265,13 @@ export class PlayScene implements Scene {
         });
         game.feel.text(info.target.cx, info.target.y - 16, t('GEAR FREED!'), COLORS.gold);
       }
+      // Scenery that pays out once: empty its slot in the room so the
+      // walk back in finds it already broken (see MonsterDef.persistent).
+      if (info.target.def.persistent) this.retireEntity(info.target.origin);
       if (info.target.def.boss) this.onBossDefeated(info.target);
     }));
+    on(game.events.on('plungeLand', (e) => this.breakSurface(e)));
+    on(game.events.on('surfaceWave', (e) => this.waveSurface(e)));
     on(game.events.on('score', ({ points, x, y }) => {
       this.score += points;
       game.feel.text(x, y, points, COLORS.gold);
@@ -302,6 +331,12 @@ export class PlayScene implements Scene {
     return ROOMS[id] ?? ROOMS[START_ROOM];
   }
 
+  /** The usage line under the banner (see `hint`). */
+  private showHint(text: string, seconds: number): void {
+    this.hint = text;
+    this.hintT = seconds;
+  }
+
   private showBanner(text: string, seconds: number): void {
     this.banner = text;
     this.bannerT = seconds;
@@ -348,12 +383,20 @@ export class PlayScene implements Scene {
 
   /** A serializable snapshot for the replay recorder (the engine hashes
    * it for divergence checks; agents read it to decide their next move). */
-  replayState(): { phase: string; roomId: string; score: number; wave: { n: number; queued: number; pending: number } } {
+  replayState(): { phase: string; roomId: string; score: number; wave: { n: number; queued: number; pending: number }; patches?: number } {
+    const patches = this.patches.count();
     return {
       phase: this.phase,
       roomId: this.roomId,
       score: this.score,
       wave: { n: this.waves.wave, queued: this.waves.queued, pending: this.waves.telegraphs },
+      // Geometry the run has changed. A count, not the whole set: enough
+      // to diverge on a floor that broke in one pass and not the other,
+      // and it keeps the per-frame hash small. Omitted while nothing is
+      // broken so a run that never touches the scenery hashes exactly as
+      // it did before rooms could be changed — which is what lets the
+      // existing recordings stay valid regression tests.
+      ...(patches ? { patches } : {}),
     };
   }
 
@@ -385,15 +428,18 @@ export class PlayScene implements Scene {
       this.coop.adopt(knight);
       g.world.spawn(knight);
     }
+    this.sandbox = false;
     if (save) {
       restorePlayer(this.player, save.player);
       this.flags = new Set(save.flags);
       this.firedTriggers = { ...save.firedTriggers };
+      this.patches.restore(save.patches);
       this.best = Math.max(this.best, save.best);
       this.pendingWave = save.wave ?? 0; // resume a saved gauntlet mid-run
     } else {
       this.flags.clear();
       this.firedTriggers = {};
+      this.patches.clear();
       this.pendingWave = 0;
     }
     this.score = 0;
@@ -413,8 +459,10 @@ export class PlayScene implements Scene {
     this.player.gold = 999; // Give plenty of gold for testing!
     g.world.spawn(this.player);
 
+    this.sandbox = true;
     this.flags.clear();
     this.firedTriggers = {};
+    this.patches.clear();
     this.score = 0;
     this.combo = 0;
     this.comboT = 0;
@@ -454,8 +502,10 @@ export class PlayScene implements Scene {
     }
     if (pl.hp != null) this.player.hp = clamp(pl.hp, 1, this.player.maxHp);
 
+    this.sandbox = true;
     this.flags.clear();
     this.firedTriggers = {};
+    this.patches.clear();
     this.score = 0;
     this.combo = 0;
     this.comboT = 0;
@@ -506,6 +556,56 @@ export class PlayScene implements Scene {
     cam.y = clamp(target.y, cam.minY, Math.max(cam.minY, cam.maxY - cam.viewH));
   }
 
+  /* ---------------- room mutations ---------------- */
+
+  /**
+   * Change a tile in the live room AND remember it (see PlayHost). Both
+   * halves matter: the map is a throwaway copy rebuilt on every visit,
+   * and the patch is what the next build replays.
+   */
+  private mutateTile(tx: number, ty: number, id: string): void {
+    if (tx < 0 || ty < 0 || tx >= this.tilemap.cols || ty >= this.tilemap.rows) return;
+    if (!tiles.has(id) || this.tilemap.tileAt(tx, ty) === id) return;
+    this.tilemap.setTile(tx, ty, id);
+    this.patches.setTile(this.roomId, tx, ty, id);
+    // The minimap bakes the room's shape when it is built, so a fresh
+    // hole in the floor has to be baked in to show up on it.
+    this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
+  }
+
+  /** Empty a slot the room authored, for good (looted chests). */
+  private retireEntity(key: string): void {
+    // Only a slot the ROOM placed can be emptied. Waves, scenarios, and
+    // the test spawner all spawn through the same catalog and so carry a
+    // key too; theirs belongs to no slot and must not delete one.
+    if (!key || !this.room.entities.some((e) => entityKey(e) === key)) return;
+    this.patches.removeEntity(this.roomId, key);
+  }
+
+  /**
+   * An Impact Drop landed — does the floor survive it? The engine hands
+   * over the tiles under her feet with their content-defined traits, and
+   * the surface-reaction registry decides what each one does about the
+   * blow. Neither the knight nor this method names a tile id or a trait,
+   * so a new reacting surface is a registry entry and a tile, not an
+   * edit here.
+   */
+  private breakSurface(at: { x: number; y: number; w: number; h: number }): void {
+    let acted = false;
+    for (const tile of this.tilemap.probeTiles(at, 'down', 2)) {
+      if (reactToSurface(this.host, tile, 'plunge')) acted = true;
+    }
+    if (!acted) return;
+    this.game.feel.shake(0.5);
+    this.game.sfx.play('shatter');
+  }
+
+  /** A Shockwave front reached a tile — same registry, sideways. */
+  private waveSurface(at: { tx: number; ty: number }): void {
+    const tile = this.tilemap.tileRef(at.tx, at.ty);
+    if (tile && reactToSurface(this.host, tile, 'wave')) this.game.sfx.play('shatter');
+  }
+
   private setRoom(id: string, spawnX?: number, spawnY?: number): void {
     const g = this.game;
     this.roomId = id;
@@ -514,6 +614,10 @@ export class PlayScene implements Scene {
     if (this.player) this.flags.add(`visited:${id}`);
     validateRoomContent(this.room, id);
     this.tilemap = buildTilemap(this.room);
+    // The room as the world left it, replayed over the room as authored —
+    // before anything measures the map (minimap, camera bounds) and long
+    // before anyone stands on it.
+    this.patches.applyTiles(id, this.tilemap);
     this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
     this.triggers = new Triggers(this.room.triggers ?? []);
     this.triggers.importFired(this.firedTriggers[id] ?? []);
@@ -573,6 +677,7 @@ export class PlayScene implements Scene {
     const ctx: PlaceableCtx = { game: g, tilemap: this.tilemap, flags: this.flags };
     for (const e of this.room.entities) {
       if (!placeables.has(e.type)) continue;
+      if (this.patches.isRemoved(id, entityKey(e))) continue; // looted, for good
       const p = placeables.get(e.type);
       if (p.shouldSpawn && !p.shouldSpawn(ctx, e)) continue;
       p.spawn(ctx, e);
@@ -747,15 +852,16 @@ export class PlayScene implements Scene {
     this.game.music.play((this.room.props?.music as string) ?? DEFAULT_SONG);
   }
 
-  /** The current run as save data (null on test rooms / no player). */
+  /** The current run as save data (null in a sandbox / with no player). */
   private buildSave(): SaveData | null {
-    if (this.testRoom || !this.player) return null;
+    if (this.testRoom || this.sandbox || !this.player) return null;
     return {
       roomId: this.roomId,
       best: this.best,
       savedAt: Date.now(),
       flags: [...this.flags],
       firedTriggers: this.firedTriggers,
+      patches: this.patches.snapshot(),
       wave: this.waves.active ? this.waves.wave : undefined,
       player: snapshotPlayer(this.player),
     };
@@ -844,6 +950,12 @@ export class PlayScene implements Scene {
     if (!fresh) return false;
     const def = earnableDef(id);
     this.showBanner(t(def.name), 2.4);
+    // ...and how to USE it, in the buttons this player actually has. A
+    // verb whose banner names it and nothing else is a verb you go and
+    // look up; the hint's inputs are resolved per device, so a pad says
+    // X and a phone shows the on-screen glyph rather than a key nobody
+    // has pressed.
+    this.showHint(abilityHint(this.game, id), 5);
     // The floater is anchored on the local knight, who may be gone (a
     // guest can land the killing blow after the host falls); the banner
     // and flash still carry the news either way.
@@ -1168,7 +1280,15 @@ export class PlayScene implements Scene {
     this.coop?.applyInput(); // remote edges land before the world steps
     g.world.update(dt);
     if (this.coop) {
-      this.coop.step({ roomId: this.roomId, score: this.score, banner: this.bannerT > 0 ? this.banner : null });
+      this.coop.step({
+        roomId: this.roomId,
+        score: this.score,
+        banner: this.bannerT > 0 ? this.banner : null,
+        // Geometry the run has changed in THIS room, so a guest's tilemap
+        // agrees with the host's about what is solid. The session only puts
+        // it on the wire when it differs from what it last sent.
+        patch: this.patches.snapshot()[this.roomId],
+      });
       if (this.coop.dropped) this.endCoop();
     }
     if (this.phase === 'play') this.waves.update(dt);
@@ -1191,6 +1311,7 @@ export class PlayScene implements Scene {
       if (this.victoryT <= 0) this.openConversation(this.pendingEpilogue);
     }
     this.bannerT = Math.max(0, this.bannerT - dt);
+    this.hintT = Math.max(0, this.hintT - dt);
 
     if (this.player) {
       // Camera leads the player: facing offset + velocity lookahead,
@@ -1250,6 +1371,8 @@ export class PlayScene implements Scene {
           comboT: this.comboT,
           banner: this.banner,
           bannerT: this.bannerT,
+          hint: this.hint,
+          hintT: this.hintT,
           label: this.waves.active ? t('WAVE {n}', { n: this.waves.wave }) : t(this.room.name.toUpperCase()),
           uiT: this.uiT,
         },

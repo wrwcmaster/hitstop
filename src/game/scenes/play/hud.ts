@@ -32,6 +32,9 @@ export interface HudView {
   comboT: number;
   banner: string;
   bannerT: number;
+  /** Second line under the banner: how to use what was just earned. */
+  hint: string;
+  hintT: number;
   /** Center-top label: "WAVE 3" or the room name. */
   label: string;
   /** Free-running clock for idle wobble. */
@@ -167,6 +170,9 @@ export class Hud {
       g.fillRect(Math.round(gm.width / 2 - 15), 26, Math.round((30 * view.comboT) / 2), 2);
     }
     if (view.bannerT > 0) drawText(g, view.banner, gm.width / 2, 58, COLORS.white, 3, 'center');
+    // The usage hint sits under the banner and outlasts it — a verb you
+    // cannot read long enough to learn is a verb you go and look up.
+    if (view.hintT > 0) drawText(g, view.hint, gm.width / 2, 92, COLORS.gold, 1, 'center');
   }
 
   private renderBossBar(g: CanvasRenderingContext2D, boss: Monster): void {
