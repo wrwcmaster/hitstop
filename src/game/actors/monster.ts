@@ -8,7 +8,7 @@ import {
   rand,
   type CollisionSource,
 } from '@engine/index';
-import type { ActionGame } from '../defs';
+import type { ActorHost } from '../defs';
 import { nearestPlayer, type Player } from './player';
 
 export interface SwallowDef {
@@ -88,7 +88,7 @@ export class Monster extends Actor {
 
   constructor(
     public readonly type: string,
-    public game: ActionGame,
+    public game: ActorHost,
     public collision: CollisionSource,
     x: number,
     y: number,

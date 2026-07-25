@@ -53,7 +53,7 @@ import { Monster } from './monster';
 import { PlayerCapabilities } from './player-capabilities';
 import { QuestLog } from '../content/quests';
 import type { World } from '@engine/index';
-import type { ActionGame, Action } from '../defs';
+import type { ActorHost, Action } from '../defs';
 
 /** The living player nearest to (x, y) — for AI targeting, pickup
  * magnets, and NPC prompts, which all stop assuming a lone knight. */
@@ -275,7 +275,7 @@ export class Player extends Actor {
   fsm: FSM<Player>;
 
   constructor(
-    public game: ActionGame,
+    public game: ActorHost,
     public collision: CollisionSource,
     x: number,
     y: number,
