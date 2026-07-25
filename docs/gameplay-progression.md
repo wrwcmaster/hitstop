@@ -4,6 +4,12 @@ Status: **early design direction**. The gameplay principles and four-skill
 structure are current decisions. Boss names, appearances, regions, and story
 explanations are working concepts.
 
+> **Where the world went next:** the full story, region, room, puzzle, and
+> boss design built on this document lives in
+> [world-design.md](world-design.md) (the Undertoll). Several open
+> questions at the bottom of this file are resolved there and marked
+> **[resolves]** in place.
+
 ## Design thesis
 
 `hitstop` is an action game first. Story should create stakes and give the

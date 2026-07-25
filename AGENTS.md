@@ -448,6 +448,7 @@ a port with `-- --port 5174`), then drive the real game:
 ## Docs index
 
 - `docs/gameplay-progression.md` — gameplay-first progression, first-half bosses, impact skills
+- `docs/world-design.md` — the Undertoll: full story, regions, rooms, puzzles, boss mechanics
 - `docs/architecture.md` — engine/game layering, registries, play/ seams
 - `docs/adding-content.md` — step-by-step content recipes
 - `docs/design-tools.md` — level editor, sprite editor, sheet slicer
