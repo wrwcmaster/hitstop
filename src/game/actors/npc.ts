@@ -14,7 +14,7 @@ import { blit, merchantSprite } from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { ShopScene } from '../scenes/shop';
 import { SpawnerScene } from '../scenes/spawner';
-import { prettyCode, prettyButton, menuLine, type ActionGame, type ActorHost, type Action } from '../defs';
+import { actionLabel, menuLine, type ActionGame, type ActorHost, type Action } from '../defs';
 import { Player, nearestPlayer } from './player';
 import { healer, forge, questGiver } from './npc-roles';
 
@@ -152,19 +152,9 @@ export class Npc extends Actor {
     }
   }
 
-  /** What to press to interact, for the current device: a gamepad button
-   * if one's connected, the on-screen button on touch, else the key. */
+  /** What to press to interact, on whatever device is in hand. */
   private promptLabel(): string {
-    const pad = this.game.pad;
-    if (pad?.connected) {
-      const b = pad.buttonsFor('interact')[0];
-      return b != null ? prettyButton(b) : 'Y';
-    }
-    if (typeof window !== 'undefined' && !window.matchMedia('(pointer: fine)').matches) {
-      return t('TALK');
-    }
-    const code = this.game.input.codesFor('interact')[0];
-    return code ? prettyCode(code) : 'E';
+    return actionLabel(this.game as ActionGame, 'interact', t('TALK'));
   }
 }
 

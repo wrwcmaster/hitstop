@@ -49,8 +49,12 @@ npm run agent-play     # HTTP bridge for turn-based (LLM-agent) play
    tap-to-select (`Menu.tapAt` — render once, then taps hit-test), any
    new action needs a touch button in `index.html` + `bind()` in
    `main.ts` and a gamepad binding in `defs.ts`, and on-screen key
-   prompts must be device-aware (see `Npc.promptLabel`), never a
-   hardcoded "E".
+   prompts must be device-aware — route them through `actionLabel(game,
+   action, touchLabel)` in `defs.ts`, never a hardcoded "E". Prose that
+   names an input writes it as a `{token}` (see `abilityHint`) so the
+   string stays translatable and the device resolves it at display time.
+   A **directional** action needs its own touch button: piggybacking
+   `down` on the dash button meant every crouch fired a dash.
 7. **Registering a duplicate id throws.** Content ids are global per
    registry; pick a fresh id, or use `registry.replace()` only for a
    deliberate override.

@@ -457,6 +457,10 @@ export class CoopGuestScene implements Scene {
         comboT: 0,
         banner: this.banner ?? '',
         bannerT: this.banner ? 1 : 0,
+        // Usage hints are the host's screen: the grant happens there, and
+        // the guest's own is delivered by the sync that follows.
+        hint: '',
+        hintT: 0,
         label: this.roomId.toUpperCase(),
         uiT: this.uiT,
       }, this.minimap, boss);

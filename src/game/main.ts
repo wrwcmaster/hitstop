@@ -109,7 +109,11 @@ bind('bL', 'left');
 bind('bR', 'right');
 bind('bJ', 'jump', 'up');
 bind('bA', 'attack', 'confirm');
-bind('bD', 'dash', 'down');
+// Dash no longer doubles as "down": holding it fired a dash you did not
+// ask for every time you wanted to crouch, drop through a platform, or
+// aim an attack downward. Down has its own key (bDn) below.
+bind('bD', 'dash');
+bind('bDn', 'down');
 bind('bI', 'interact'); // talk to NPCs / use, the touch equivalent of E
 bind('bF', 'skill3'); // ice shard
 bind('bP', 'parry'); // deflect + riposte

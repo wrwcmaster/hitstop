@@ -589,6 +589,13 @@ Ownership lives in `Player.earned`, **not** in `capabilities`:
 - `earned.restore(ids, ctx)` is the load path: it replays projections but reports nothing. Unknown ids are dropped, so renamed or removed content can't break an old save. It runs *after* the class replay in `restorePlayer`, since that replay clears skills and capabilities.
 - It persists in `SaveData.player.earned` (absent = owns none, so older saves load fine). Because the co-op hello/sync profile **is** `SaveData['player']`, a guest carries what they earned in and home again with no parallel format.
 
+An earnable's `desc` is the **usage prompt**, and it names its inputs as
+`{tokens}` — `'On the ground, {down} + {attack} sends a wave through it.'`
+`abilityHint(game, id)` resolves them for whatever device is in hand
+(SPACE / A on a pad / the on-screen glyph on a phone) after translation,
+so the catalog and the locale files stay device-agnostic. `PlayScene`
+shows it under the unlock banner, outlasting the banner itself.
+
 Query it from anywhere holding the player — `player.earned.has('impact-drop')` — including item/skill/tree/NPC callbacks and trigger actions (via `host.player`). Registering an earnable does not implement it: an owned-but-unconsumed entry is simply inert, which is what lets the ownership layer ship before the verbs do.
 
 ## Saves

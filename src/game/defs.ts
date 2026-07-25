@@ -98,6 +98,31 @@ export function prettyButton(index: number): string {
   return named[index] ?? `B${index}`;
 }
 
+/**
+ * What to press for an action, on whatever device is being used right
+ * now: a gamepad button if one is connected, the on-screen button's own
+ * label on touch, otherwise the bound key. Prompts route through here so
+ * a rebound key, a plugged-in pad, or a phone all say the truth instead
+ * of a hardcoded "E".
+ */
+export function actionLabel(
+  game: ActionGame,
+  action: Action,
+  /** What the on-screen button shows, for touch. Falls back to the key. */
+  touch?: string,
+): string {
+  const pad = game.pad;
+  if (pad?.connected) {
+    const b = pad.buttonsFor(action)[0];
+    if (b != null) return prettyButton(b);
+  }
+  if (touch && typeof window !== 'undefined' && !window.matchMedia('(pointer: fine)').matches) {
+    return touch;
+  }
+  const code = game.input.codesFor(action)[0];
+  return code ? prettyCode(code) : action.toUpperCase();
+}
+
 /** localStorage prefix for saves/settings — also scopes what the replay
  * recorder snapshots at run start. */
 export const STORAGE_PREFIX = 'hitstop';

@@ -27,6 +27,7 @@ import { Monster, monsters } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
 import { placeables, type PlaceableCtx } from '../content/placeables';
 import { validateRoomContent } from '../content/room-features';
+import { abilityHint } from '../content/earnables';
 import { reactToSurface } from '../content/surface-reactions';
 import { PauseScene } from './pause';
 import { MapScene } from './map';
@@ -131,6 +132,10 @@ export class PlayScene implements Scene {
   private comboT = 0;
   private banner = '';
   private bannerT = 0;
+  /** A second, smaller line under the banner: how to use what you just
+   * won. Outlives the banner, since reading it is the point. */
+  private hint = '';
+  private hintT = 0;
   private overT = 0;
   private victoryT = 0;
   /** Which epilogue the fallen boss earned (see MonsterDef.epilogue). */
@@ -324,6 +329,12 @@ export class PlayScene implements Scene {
   private roomById(id: string): RoomDef {
     if (this.testRoom && id === 'test') return this.testRoom;
     return ROOMS[id] ?? ROOMS[START_ROOM];
+  }
+
+  /** The usage line under the banner (see `hint`). */
+  private showHint(text: string, seconds: number): void {
+    this.hint = text;
+    this.hintT = seconds;
   }
 
   private showBanner(text: string, seconds: number): void {
@@ -939,6 +950,12 @@ export class PlayScene implements Scene {
     if (!fresh) return false;
     const def = earnableDef(id);
     this.showBanner(t(def.name), 2.4);
+    // ...and how to USE it, in the buttons this player actually has. A
+    // verb whose banner names it and nothing else is a verb you go and
+    // look up; the hint's inputs are resolved per device, so a pad says
+    // X and a phone shows the on-screen glyph rather than a key nobody
+    // has pressed.
+    this.showHint(abilityHint(this.game, id), 5);
     // The floater is anchored on the local knight, who may be gone (a
     // guest can land the killing blow after the host falls); the banner
     // and flash still carry the news either way.
@@ -1294,6 +1311,7 @@ export class PlayScene implements Scene {
       if (this.victoryT <= 0) this.openConversation(this.pendingEpilogue);
     }
     this.bannerT = Math.max(0, this.bannerT - dt);
+    this.hintT = Math.max(0, this.hintT - dt);
 
     if (this.player) {
       // Camera leads the player: facing offset + velocity lookahead,
@@ -1353,6 +1371,8 @@ export class PlayScene implements Scene {
           comboT: this.comboT,
           banner: this.banner,
           bannerT: this.bannerT,
+          hint: this.hint,
+          hintT: this.hintT,
           label: this.waves.active ? t('WAVE {n}', { n: this.waves.wave }) : t(this.room.name.toUpperCase()),
           uiT: this.uiT,
         },
