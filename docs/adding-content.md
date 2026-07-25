@@ -145,12 +145,22 @@ rides along in the save (`SaveData.patches`). The mechanism is generic
 (`RoomPatches` in `engine/level/patches.ts`): tile replacements plus entities
 that must not respawn, keyed by room id, all plain JSON.
 
-The worked example is Impact Drop breaking weak floors. Nothing in that
-chain knows about anything else:
+What a surface *does* about force is a registry, not a branch. In
+`content/surface-reactions.ts`:
+
+```ts
+defineSurfaceReaction('breakable', {
+  to: ['plunge', 'wave'],          // omit for "all of them"
+  react({ host, tile }) { host.mutateTile(tile.tx, tile.ty, ''); return true; },
+});
+```
+
+Two verbs feed it and neither names a tile id or a trait:
 
 1. `crackedRock` declares `traits: ['breakable', ...]` — a label, not a behavior.
-2. The player emits `plungeLand` with the footprint she landed on. She has no idea what stone is.
-3. `PlayScene.breakSurface` probes two pixels down, keeps the tiles whose traits say `breakable`, and calls `mutateTile` on each. The meaning of `breakable` lives here and nowhere else.
+2. **Impact Drop** emits `plungeLand` with the footprint the knight landed on. She has no idea what stone is.
+3. **Shockwave** emits `surfaceWave` per tile its front crosses.
+4. `PlayScene` turns each into `reactToSurface(host, tile, by)`. Adding a reacting surface is a `defineSurfaceReaction` call plus a trait on a tile — no verb changes.
 
 A placed entity can be retired the same way. Give the definition
 `persistent: true` (see the chest in `actors/enemies.ts`) and killing one

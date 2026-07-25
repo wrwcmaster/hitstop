@@ -179,6 +179,13 @@ export interface GameEvents extends Record<string, unknown> {
    * the floor is now a hole.
    */
   plungeLand: { x: number; y: number; w: number; h: number };
+  /**
+   * A Shockwave reached this tile. Same bargain as `plungeLand`: the
+   * wave reports where its front is and the scene decides what the
+   * surface does about it, because only the scene can remember that the
+   * floor is now a hole.
+   */
+  surfaceWave: { tx: number; ty: number };
   /** Set/clear a story flag (levers, plates — PlayScene owns the set). */
   setFlag: { id: string; on: boolean };
   /** A Devourer got you. */

@@ -75,7 +75,7 @@ defineEarnable<EarnCtx>('air-step', {
 
 defineEarnable<EarnCtx>('shockwave', {
   name: 'SHOCKWAVE',
-  desc: 'Send one wave of force running away through the ground.',
+  desc: 'On the ground, press down + attack to send a wave through it.',
   kind: 'ability',
 });
 

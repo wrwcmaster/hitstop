@@ -5,6 +5,7 @@ import {
   Charge,
   Strike,
   Projectile,
+  Tilemap,
   applyGravity,
   moveAndCollide,
   type CollisionResult,
@@ -53,6 +54,7 @@ import { drawHeldWeapon, drawWeaponTrail, drawNeutralTrail, RANGED_HAND_Y } from
 import { type SkillCtx } from '../content/skills';
 import { classes, DEFAULT_CLASS } from '../content/classes';
 import { shootArrow, shootBullet, muzzleFlash } from '../content/ballistics';
+import { Shockwave } from './shockwave';
 import { Monster } from './monster';
 import { PlayerCapabilities } from './player-capabilities';
 import type { EarnCtx } from '../content/earnables';
@@ -171,6 +173,12 @@ export const PLAYER_TUNING = {
   // frames where resting flush produces no overlap, short enough that
   // leaving one really does end the grip.
   wallStick: 0.12,
+  /* ---- Shockwave ---- */
+  // Long enough to read as a commitment (you are planting your feet, not
+  // flicking a wrist), short enough that it opens a fight rather than
+  // ending your turn in one.
+  shockwaveTime: 0.3,
+
   hurtInvuln: 1.1,
   // Health and mana are point pools, not icon counts — 100/60 rather
   // than 5/3 hearts. Big enough that a light graze and a heavy slam can
@@ -734,6 +742,17 @@ export class Player extends Actor {
         this.attackContext = 'plunge';
         return 'attack';
       }
+      // Shockwave is the same gesture with your feet on the floor, and
+      // that pairing IS the design: down+attack means "send the force
+      // downward" — into the ground beneath you in the air, along the
+      // ground when you are standing on it. It needs no new Action, so
+      // touch, gamepad, rebinding, replay, and the network action list
+      // are untouched by construction, and it sits beside Impact Drop
+      // ahead of the ranged branch for the same reason — a verb the
+      // knight owns, not something her weapon does.
+      if (this.onGround && dry && this.input.held('down') && this.earned.has('shockwave')) {
+        return 'shockwave';
+      }
       // Ranged steel shoots instead of swinging. Charged weapons (the
       // bow) enter the draw state — the shot leaves on RELEASE, at a
       // power the hold decides. Uncharged ones (the flintlock) fire on
@@ -1068,6 +1087,38 @@ export class Player extends Actor {
       }
       return 'move';
     }
+  }
+
+  /**
+   * Slam the ground and send a wave running away through it.
+   *
+   * A short, committed stance rather than a weapon swing: the wave is
+   * the knight's own, so a bow, a flintlock, and a rusty sword all send
+   * exactly the same one. That is the point — no melee and ranged
+   * variants to keep in step, and the verb works with every loadout.
+   *
+   * The wave needs a real tile grid to run along — a knight standing on
+   * some other CollisionSource simply plants her feet and nothing
+   * travels, which is the honest outcome rather than a crash.
+   */
+  beginShockwave(): void {
+    this.vx = 0;
+    this.squash = 1.3;
+    this.feel.shake(0.45);
+    this.feel.sfx.play('quake');
+    this.feel.burst(this.cx, this.y + this.h, 8, {
+      color: [COLORS.gold, COLORS.white], speed: 80, life: 0.3,
+      angle: -Math.PI / 2, spread: 2.4, drag: 3.4, grav: 300,
+    });
+    if (this.collision instanceof Tilemap) {
+      this.game.world.spawn(new Shockwave(this.game, this.collision, this, this.facing));
+    }
+  }
+
+  /** Hold the stance briefly, then stand up. */
+  shockwaveUpdate(dt: number): string | void {
+    this.vx *= friction(0.0001, dt);
+    if (this.fsm.t >= PLAYER_TUNING.shockwaveTime) return 'move';
   }
 
   /** Catch the wall: kill the fall, turn to face out from it. */
@@ -1763,6 +1814,10 @@ const PLAYER_STATES: Record<string, StateDef<Player>> = {
   cling: {
     enter: (p) => p.beginCling(),
     update: (p, dt) => p.clingUpdate(dt),
+  },
+  shockwave: {
+    enter: (p) => p.beginShockwave(),
+    update: (p, dt) => p.shockwaveUpdate(dt),
   },
   dash: {
     enter: (p) => p.beginDash(),

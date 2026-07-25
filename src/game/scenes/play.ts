@@ -27,6 +27,7 @@ import { Monster, monsters } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
 import { placeables, type PlaceableCtx } from '../content/placeables';
 import { validateRoomContent } from '../content/room-features';
+import { reactToSurface } from '../content/surface-reactions';
 import { PauseScene } from './pause';
 import { MapScene } from './map';
 import { OptionsScene } from './options';
@@ -265,6 +266,7 @@ export class PlayScene implements Scene {
       if (info.target.def.boss) this.onBossDefeated(info.target);
     }));
     on(game.events.on('plungeLand', (e) => this.breakSurface(e)));
+    on(game.events.on('surfaceWave', (e) => this.waveSurface(e)));
     on(game.events.on('score', ({ points, x, y }) => {
       this.score += points;
       game.feel.text(x, y, points, COLORS.gold);
@@ -571,24 +573,26 @@ export class PlayScene implements Scene {
 
   /**
    * An Impact Drop landed — does the floor survive it? The engine hands
-   * over the tiles under her feet and their content-defined traits; the
-   * meaning of `breakable` lives here, which is why the knight can report
-   * the impact without knowing what stone is.
+   * over the tiles under her feet with their content-defined traits, and
+   * the surface-reaction registry decides what each one does about the
+   * blow. Neither the knight nor this method names a tile id or a trait,
+   * so a new reacting surface is a registry entry and a tile, not an
+   * edit here.
    */
   private breakSurface(at: { x: number; y: number; w: number; h: number }): void {
-    const broken = this.tilemap
-      .probeTiles(at, 'down', 2)
-      .filter((tile) => tile.def.traits?.includes('breakable'));
-    if (!broken.length) return;
-    for (const tile of broken) {
-      this.mutateTile(tile.tx, tile.ty, '');
-      this.game.feel.burst(tile.rect.x + tile.rect.w / 2, tile.rect.y + tile.rect.h / 2, 9, {
-        color: [COLORS.steel, COLORS.white, COLORS.navyLight],
-        speed: 90, life: 0.45, spread: Math.PI * 2, drag: 2.4, grav: 320,
-      });
+    let acted = false;
+    for (const tile of this.tilemap.probeTiles(at, 'down', 2)) {
+      if (reactToSurface(this.host, tile, 'plunge')) acted = true;
     }
+    if (!acted) return;
     this.game.feel.shake(0.5);
     this.game.sfx.play('shatter');
+  }
+
+  /** A Shockwave front reached a tile — same registry, sideways. */
+  private waveSurface(at: { tx: number; ty: number }): void {
+    const tile = this.tilemap.tileRef(at.tx, at.ty);
+    if (tile && reactToSurface(this.host, tile, 'wave')) this.game.sfx.play('shatter');
   }
 
   private setRoom(id: string, spawnX?: number, spawnY?: number): void {

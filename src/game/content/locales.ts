@@ -126,8 +126,8 @@ defineLocale('zh', {
     'Press jump again in midair to step off the air itself.':
       '在空中再按一次跳跃，踏空而起。',
     'SHOCKWAVE': '震波',
-    'Send one wave of force running away through the ground.':
-      '送出一道沿地面奔涌的力量波。',
+    'On the ground, press down + attack to send a wave through it.':
+      '按下 + 攻击，送出一道沿地面奔涌的力量波。',
 
     /* ---- classes & skill tree ---- */
     'KNIGHT': '骑士',
