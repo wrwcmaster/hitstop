@@ -1443,7 +1443,14 @@ export class Player extends Actor {
             this.jumpBuf.consume(); // deep tap absorbed; don't buffer it out of water
           }
         }
-      } else if (this.jumpBuf.active && this.coyote.active && !this.fsm.is('dead', 'attack')) {
+      // `cling` and `shockwave` are excluded because they consume the
+      // buffer THEMSELVES, a step later: the state's own update is what
+      // turns it into a wall kick. Letting the generic branches have it
+      // first is a real race — a jump buffered into the step the grab
+      // lands on used to be spent here as a plain air jump, launching
+      // her straight up while still stuck to the wall, and the kick that
+      // should have followed never fired because the buffer was gone.
+      } else if (this.jumpBuf.active && this.coyote.active && !this.fsm.is('dead', 'attack', 'cling', 'shockwave')) {
         this.jumpBuf.consume();
         this.coyote.consume();
         this.vy = -T.jumpSpeed;
@@ -1453,7 +1460,7 @@ export class Player extends Actor {
           color: COLORS.navyLight, speed: 40, life: 0.25,
           angle: Math.PI / 2, spread: 1.5, drag: 3,
         });
-      } else if (this.jumpBuf.active && this.airJumps > 0 && !this.fsm.is('dead', 'attack')) {
+      } else if (this.jumpBuf.active && this.airJumps > 0 && !this.fsm.is('dead', 'attack', 'cling', 'shockwave')) {
         // SKY DANCER (skill tree): kick off the air itself.
         this.jumpBuf.consume();
         this.airJumps--;
