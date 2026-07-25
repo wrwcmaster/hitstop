@@ -15,7 +15,7 @@ import { COLORS } from '../content/palette';
 import { ROOMS, START_ROOM } from '../content/rooms';
 import { drawCrest } from '../actors/shockwave';
 import { DEFAULT_SONG } from '../content/music';
-import { Player } from '../actors/player';
+import { Player, type AttackContext } from '../actors/player';
 import { Monster, monsters } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
 import { drawPlatform, drawLever, drawPlate, drawBarrier, type GizmoSnap } from '../actors/gizmos';
@@ -190,6 +190,9 @@ export class CoopGuestScene implements Scene {
       knight.maxHp = k.maxHp;
       knight.animT = k.animT;
       applyGear(knight, k.gear);
+      // The shape goes on BEFORE the state, because entering 'attack' is
+      // what reads it — set it after and the first frame poses wrong.
+      if (k.ac) knight.poseAttackAs(k.ac as AttackContext);
       if (knight.fsm.state !== k.state) {
         try { knight.fsm.set(k.state); } catch { /* unknown state: keep pose */ }
       }

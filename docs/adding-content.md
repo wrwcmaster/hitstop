@@ -285,6 +285,27 @@ Every move in a weapon's moveset names its own sheet animation — the combo swi
 
 The rusty sword's plunge is the shipped example: a committed point-down thrust instead of the borrowed swing. Sheets may also **alias** one animation to another explicitly (`"upper": "aerial"` — a string instead of frames, resolved at load with cycle detection) when a move should borrow something *other* than the default. In the sprite editor an alias shows as `upper→aerial` and editing under it edits its target; the composite panel is where per-move art is judged, posed on the full player with the move's own trail — on the base `attack` animation, its move selector still poses every un-arted move.
 
+### Carrying a weapon through a move it doesn't own
+
+Impact Drop and Shockwave belong to the knight, not her steel, so a bow
+has no swing to follow and would otherwise idle through a dive. Wrap a
+`drawHeld` body in `drawCarried` to opt in:
+
+```ts
+drawHeld(g, ctx) {
+  g.save(); g.translate(hx * ctx.facing, hy);
+  drawCarried(g, ctx, () => { /* ...the weapon... */ });
+  g.restore();
+}
+```
+
+`ctx.carry` is `'plunge'`, `'stomp'`, or absent, and the helper applies
+the tuck. A visual that never calls it is unchanged — which is why no
+melee weapon needed an edit: their `drawHeld` already follows the swing.
+It is the held-pose sibling of `drawNeutralTrail`, and written as a
+wrapper so the next knight-owned move costs one entry here rather than a
+pass over every visual.
+
 ### Shaping an attack trail
 
 Beyond the four required fields, `trail` takes three optional ones that turn the same renderer into very different swings:

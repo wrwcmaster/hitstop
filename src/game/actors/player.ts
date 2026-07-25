@@ -192,6 +192,10 @@ export const PLAYER_TUNING = {
  * feel kit — coyote time, jump buffering, jump cut, attack buffering,
  * squash & stretch, dash i-frames, and definition-driven weapon combos.
  */
+/** Which shape a swing takes. A guest's puppet is told this over the
+ * wire so a remote plunge poses like a plunge (see `poseAttackAs`). */
+export type AttackContext = 'ground' | 'aerial' | 'plunge' | 'upper' | 'dash';
+
 export class Player extends Actor {
   team = 'player' as const;
   w = baseKnight.hitbox.w;
@@ -699,7 +703,7 @@ export class Player extends Actor {
 
   /** Which move the next/current attack is: the grounded combo chain or
    * a contextual strike (set right before entering the attack state). */
-  private attackContext: 'ground' | 'aerial' | 'plunge' | 'upper' | 'dash' = 'ground';
+  private attackContext: AttackContext = 'ground';
   /** Set by the input path; consumed by beginShockwave (see there). */
   private pendingShockwave = false;
 
@@ -1131,6 +1135,22 @@ export class Player extends Actor {
   shockwaveUpdate(dt: number): string | void {
     this.vx *= friction(0.0001, dt);
     if (this.fsm.t >= PLAYER_TUNING.shockwaveTime) return 'move';
+  }
+
+  /**
+   * Tell a knight which shape her next swing takes, without giving her
+   * the input that would choose it. Only the co-op guest needs this: a
+   * puppet is force-posed with `fsm.set('attack')` and never runs the
+   * input path that sets the context, so without it every remote swing —
+   * a plunge, an uppercut, a dash strike — drew as a plain ground swing.
+   */
+  poseAttackAs(context: AttackContext): void {
+    this.attackContext = context;
+  }
+
+  /** Which shape the current swing is, for the wire. */
+  get attackShape(): AttackContext {
+    return this.attackContext;
   }
 
   /** Catch the wall: kill the fall, turn to face out from it. */
@@ -1756,6 +1776,14 @@ export class Player extends Actor {
             }
           : undefined,
         charge: this.fsm.is('draw') ? this.charge.progress : undefined,
+        // The two moves the KNIGHT owns rather than her steel. A weapon
+        // with nothing to say about them keeps its idle pose, which is
+        // exactly what every melee visual already does.
+        carry: this.fsm.is('shockwave')
+          ? 'stomp'
+          : this.fsm.is('attack') && this.attackDef?.aim === 'down'
+            ? 'plunge'
+            : undefined,
       });
     }
     g.restore();

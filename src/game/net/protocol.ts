@@ -36,6 +36,13 @@ export interface KnightSnap {
   /** FSM state name + time-in-state, so poses match. */
   state: string;
   st: number;
+  /**
+   * Which shape the swing is (`Player.attackShape`) while `state` is
+   * 'attack'. A puppet never runs the input path that chooses it, so
+   * without this every remote swing — plunge, uppercut, dash strike —
+   * drew as a plain ground swing. Omitted when she isn't swinging.
+   */
+  ac?: string;
   animT: number;
   hp: number;
   maxHp: number;
