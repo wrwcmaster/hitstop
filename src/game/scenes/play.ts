@@ -32,6 +32,7 @@ import { SaveSlotsScene } from './saveslots';
 import { Background } from './background';
 import { COLORS } from '../content/palette';
 import { ROOMS, START_ROOM } from '../content/rooms';
+import { worldAbilities } from '../content/abilities';
 import { DEFAULT_SONG } from '../content/music';
 import { saveStore, slotStore, newestSave, snapshotPlayer, restorePlayer, type SaveData } from '../save';
 import type { PlayHost } from './play/host';
@@ -809,10 +810,34 @@ export class PlayScene implements Scene {
     this.flags.add('bossDefeated');
     this.flags.add(`slain:${boss.type}`);
     this.pendingEpilogue = boss.def.epilogue ?? 'victory';
-    this.showBanner(t('VICTORY!'), 2);
+    // The reward is the louder news, so it takes the banner when there is
+    // one. Granted BEFORE the autosave below, so the ability is in the
+    // checkpoint you would reload — earning it and losing it to a crash
+    // on the walk out would be the worst possible bug here.
+    if (!this.grantBossReward(boss)) this.showBanner(t('VICTORY!'), 2);
     this.victoryT = 1.6; // let the gibs settle before the epilogue speaks
     this.autosave();
     this.updateMusic(); // the boss theme dies with him
+  }
+
+  /**
+   * Hand over whatever verb this boss owns. Returns true if something was
+   * actually earned — false covers every "nothing new" case: a boss with
+   * no reward declared, a dead player, and re-killing a boss whose
+   * ability you already hold. Only a genuinely new grant plays the
+   * fanfare, which is what stops a reload or a replay from re-announcing
+   * (restoring a save fills the ability set silently).
+   */
+  private grantBossReward(boss: Monster): boolean {
+    const id = boss.def.grants;
+    const p = this.player;
+    if (!id || !p || !p.abilities.grant(id)) return false;
+    const def = worldAbilities.get(id);
+    this.showBanner(t(def.name), 2.4);
+    this.game.feel.text(p.cx, p.y - 12, t('NEW ABILITY'), COLORS.gold, 1);
+    this.game.feel.flash(0.5, COLORS.gold);
+    this.game.sfx.play('unlock');
+    return true;
   }
 
   /* ---------------- triggers & dialogue ---------------- */

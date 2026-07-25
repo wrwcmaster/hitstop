@@ -38,6 +38,14 @@ export interface SaveData {
     forgeLevel?: number;
     /** Durability left on worn-down gear, by item id (absent = pristine). */
     armorWear?: Record<string, number>;
+    /**
+     * Permanent boss-earned verbs (absent in saves from before world
+     * abilities existed → owns none). This rides in the player blob
+     * rather than beside it so co-op gets it for free: the hello/sync
+     * profile IS `SaveData['player']`, so a guest carries their earned
+     * abilities in and home again with no parallel format.
+     */
+    abilities?: string[];
   };
 }
 
@@ -79,6 +87,7 @@ export function snapshotPlayer(p: Player): SaveData['player'] {
     quests: p.quests.snapshot(),
     forgeLevel: p.forgeLevel,
     armorWear: { ...p.armorWear },
+    abilities: p.abilities.list(),
   };
 }
 
@@ -100,6 +109,11 @@ export function restorePlayer(p: Player, data: SaveData['player']): void {
   for (const [, id] of data.equipped) p.equipment.equip(id);
   p.gold = data.gold;
   p.progression.restore(data.progression);
+  // Boss-earned verbs, restored BEFORE the class replay below on
+  // purpose: that replay resets capabilities, and abilities surviving it
+  // is exactly the invariant (respeccing never costs you a boss reward).
+  // Silent — the unlock fanfare belongs to the kill, not to loading.
+  p.abilities.restore(data.abilities);
   // Class + trees: re-applies class mods, stat mods, and onUnlock
   // effects (learned skills) without cost. Old flat saves migrate by
   // sorting each node into the class whose grid contains it.

@@ -51,6 +51,15 @@ export interface MonsterDef {
   displayName?: string;
   /** Conversation played after this boss falls (default 'victory'). */
   epilogue?: string;
+  /**
+   * World ability this boss hands over when it dies (an id from
+   * content/abilities.ts). One boss, one verb.
+   *
+   * Declaring the reward on the boss is what keeps `PlayScene` free of a
+   * boss-id switch: a fifth reward is this one line plus a catalog entry.
+   * Granting is idempotent, so a re-killed boss gives nothing twice.
+   */
+  grants?: string;
   /** Touching this monster doesn't hurt (it attacks some other way). */
   noContactDamage?: boolean;
   /**

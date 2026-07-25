@@ -271,6 +271,11 @@ defineMonster('slime-king', {
   mass: 6,
   boss: true,
   displayName: 'THE SLIME KING',
+  // Placeholder pairing: the design plan gives Impact Drop to a new first
+  // boss (docs/gameplay-progression.md), which does not exist yet. Hanging
+  // it on today's first mandatory boss makes the reward path real and
+  // playable now; re-point this one line when that region is authored.
+  grants: 'impact-drop',
   colors: [COLORS.green, COLORS.gold, COLORS.greenLight],
   drops: [
     { id: 'coin', chance: 1 },
@@ -614,6 +619,9 @@ defineMonster('duelist', {
   boss: true,
   displayName: 'THE DUELIST',
   epilogue: 'duelist-fallen',
+  // Placeholder pairing, as above — a second reward proves the catalog is
+  // data and not a one-off.
+  grants: 'air-step',
   colors: [DUEL_TINT, DUEL_TINT_ENRAGED, COLORS.steel],
   drops: [
     { id: 'flintlock', chance: 1 }, // her sidearm, yours now

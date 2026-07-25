@@ -493,6 +493,35 @@ defineMonster('my-boss', {
 
 The pattern: every attack is a telegraphed FSM state that ends in a `Strike` or `combat.shoot(...)`, so boss damage carries the same feedback as everything else. Phase changes are just a condition read inside states (`hp <= maxHp/2`). The PlayScene shows the HP bar whenever a `boss: true` monster is alive, sets the `bossDefeated` flag on kill (so it stays dead across saves), and plays the `victory` conversation.
 
+## A world ability (boss reward)
+
+A world ability is a **permanent verb earned from a boss** — one boss, one verb (see [gameplay-progression.md](gameplay-progression.md)). Register the ability in `content/abilities.ts`:
+
+```ts
+defineWorldAbility('impact-drop', {
+  name: 'IMPACT DROP',
+  desc: 'In the air, press down + attack to drive your fall into the ground.',
+  order: 1,
+});
+```
+
+Then name it on whichever boss hands it over — that one line is the whole wiring:
+
+```ts
+defineMonster('my-boss', { boss: true, /* ... */ grants: 'impact-drop' });
+```
+
+`PlayScene` reads `def.grants` on defeat, so a fifth reward never becomes another boss-id branch. A typo is caught at **boot**, not when the boss dies: `main.ts` checks every `grants` against the catalog at startup.
+
+Ownership lives in `Player.abilities` (a `WorldAbilities` set), **not** in `capabilities`:
+
+- `capabilities` is the class kit, and `setClass` wipes and replays it — right for a class, wrong for a boss reward. Abilities are untouched by class change, so respeccing never costs you a traversal verb.
+- `abilities.grant(id)` returns `true` only the **first** time. Unlock feedback keys off that return, so re-killing a boss or reloading never re-announces.
+- `abilities.restore(ids)` is the silent path used by saves; unknown ids are dropped, so renamed or removed content can't break an old save.
+- It persists in `SaveData.player.abilities` (absent = owns none, so pre-ability saves load fine). Because the co-op hello/sync profile **is** `SaveData['player']`, a guest carries earned abilities in and home again with no parallel format.
+
+Query it from anywhere holding the player — `player.abilities.has('impact-drop')` — including item/skill/tree/NPC callbacks and trigger actions (via `host.player`). Registering an ability does not implement it: an owned-but-unconsumed ability is simply inert, which is what lets the ownership layer ship before the verbs do.
+
 ## Saves
 
 `src/game/save.ts` defines the save shape: current room, inventory/equipment/skills, story flags, fired one-shot triggers, best score. Checkpoints happen automatically at every room entrance and on boss defeat; death returns you to the last checkpoint at full HP. To persist a new thing, add it to `SaveData` and bump the `JsonStore` version (old saves invalidate cleanly).

@@ -84,6 +84,7 @@ defineLocale('zh', {
     'QUEST COMPLETE!': '任务完成!',
     'GUEST LEFT': '同伴已离开',
     'VICTORY!': '胜利!',
+    'NEW ABILITY': '新能力',
     'WAVE CLEAR!': '本波清除!',
     'THE GATE KEY DROPS': '大门钥匙掉落了',
     'GEAR FREED!': '装备夺回!',
@@ -114,6 +115,20 @@ defineLocale('zh', {
     'Her sidearm stays. A duelist pays her debts, knight.': '她的手枪留下了。决斗者向来偿清欠债,骑士。',
     'The town vault. The old kings trapped it better than they filled it.': '小镇宝库。先王们设下的机关,比他们存下的财宝还要多。',
     'Spikes forgive nothing. Levers remember. Plates forget the moment you step off.': '尖刺从不留情。拉杆会记住,踏板在你离开的瞬间便已忘却。',
+    /* ---- world abilities (boss rewards) ---- */
+    'IMPACT DROP': '坠击',
+    'In the air, press down + attack to drive your fall into the ground.':
+      '在空中按下 + 攻击，把坠势砸进地面。',
+    'WALL GRIP': '附壁',
+    'Hold toward a wall in the air to cling to it, then jump to kick away.':
+      '在空中朝墙推即可附着，再按跳跃蹬开。',
+    'AIR STEP': '踏空',
+    'Press jump again in midair to step off the air itself.':
+      '在空中再按一次跳跃，踏空而起。',
+    'SHOCKWAVE': '震波',
+    'Send one wave of force running away through the ground.':
+      '送出一道沿地面奔涌的力量波。',
+
     /* ---- classes & skill tree ---- */
     'KNIGHT': '骑士',
     'MAGE': '法师',

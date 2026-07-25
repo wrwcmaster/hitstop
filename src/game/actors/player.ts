@@ -51,6 +51,7 @@ import { classes, DEFAULT_CLASS } from '../content/classes';
 import { shootArrow, shootBullet, muzzleFlash } from '../content/ballistics';
 import { Monster } from './monster';
 import { PlayerCapabilities } from './player-capabilities';
+import { WorldAbilities } from './world-abilities';
 import { QuestLog } from '../content/quests';
 import type { World } from '@engine/index';
 import type { ActorHost, Action } from '../defs';
@@ -193,6 +194,12 @@ export class Player extends Actor {
   );
   tree = new SkillTree<TreeCtx>({ stats: this.stats, syncStats: () => this.syncStats() });
   capabilities = new PlayerCapabilities();
+  /**
+   * Permanent verbs earned from bosses (persisted). Deliberately NOT in
+   * `capabilities`: that collection is the class kit and `setClass` wipes
+   * it, which would cost you a traversal ability for respeccing.
+   */
+  abilities = new WorldAbilities();
   /** Active class (see content/classes.ts). */
   classId = DEFAULT_CLASS;
   /** Dormant classes' unlocked nodes, by class id (persisted). The
