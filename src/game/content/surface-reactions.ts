@@ -1,5 +1,5 @@
 import { Registry, type TileRef } from '@engine/index';
-import type { PlayHost } from '../scenes/play/host';
+import type { ActorHost } from '../defs';
 import { COLORS } from './palette';
 
 /**
@@ -18,8 +18,23 @@ import { COLORS } from './palette';
  */
 export type SurfaceForce = 'plunge' | 'wave';
 
+/**
+ * Exactly what a reaction may do to the world, and nothing else — the
+ * same narrow-seam trick as `ActorHost`. Content must not depend on the
+ * scene layer, so this does NOT import `PlayHost`; instead it names the
+ * two capabilities reactions actually use, and `PlayScene`'s host object
+ * satisfies it structurally. A reaction that wants to open doors or push
+ * scenes is asking to be a trigger action, not a surface reaction.
+ */
+export interface SurfaceHost {
+  readonly game: ActorHost;
+  /** Change a tile for good ('' clears it) — the room-patch-recording
+   * mutation, never a raw `tilemap.setTile` (see AGENTS.md rule 10). */
+  mutateTile(tx: number, ty: number, id: string): void;
+}
+
 export interface SurfaceReactionCtx {
-  host: PlayHost;
+  host: SurfaceHost;
   tile: TileRef;
   by: SurfaceForce;
 }
@@ -42,7 +57,7 @@ export function defineSurfaceReaction(trait: string, def: SurfaceReaction): void
  * them did something, so the caller can play ONE sound for a burst
  * rather than one per tile.
  */
-export function reactToSurface(host: PlayHost, tile: TileRef, by: SurfaceForce): boolean {
+export function reactToSurface(host: SurfaceHost, tile: TileRef, by: SurfaceForce): boolean {
   let acted = false;
   for (const trait of tile.def.traits ?? []) {
     if (!surfaceReactions.has(trait)) continue;

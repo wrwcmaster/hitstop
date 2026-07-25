@@ -3,6 +3,7 @@ import { COLORS } from '../../content/palette';
 import type { PlayHost } from './host';
 import { Monster } from '../../actors/monster';
 import { optionalString, rejectUnknownProps, requireString } from '../../content/prop-validation';
+import { provideTriggerValidators } from '../../content/room-features';
 
 /**
  * What each trigger `event` name means in the game. Room JSON stays pure
@@ -27,6 +28,9 @@ export interface TriggerAction {
 }
 
 export const triggerActions = new Registry<TriggerAction>('triggerAction');
+// Hand room validation the validateProps half of this registry — content
+// declares that seam (TriggerValidatorSource) but cannot import us.
+provideTriggerValidators(triggerActions);
 
 export function defineTriggerAction(event: string, action: TriggerAction): void {
   triggerActions.register(event, action);
