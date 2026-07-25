@@ -346,12 +346,26 @@ tag). Puzzle gizmos cross the wire as
 `giz` snapshot entries (kind + rect + one state bit, drawn with the same
 shared `draw*` functions); the guest docks platform/closed-barrier
 solids into its own tilemap so the predicted knight rides and collides
-correctly. Known edges: dialogue/shops/pause are host-screen
+correctly. **Geometry** the world has changed rides as `patch` (a
+`RoomPatch`) — sent on room entry and whenever it changes, never every
+frame — because the guest builds its tilemap from the same immutable
+`RoomDef` and would otherwise stand on a floor the host has smashed;
+`enterRoom` reapplies it after rebuilding. **Surface waves** get their
+own `waves` entry (the crest's tile cells) and the live wave's own
+`drawCrest`, so a remote Shockwave is the same picture rather than a
+generic dot. An effect that a state's `enter` hook spawns must hang off
+a flag the INPUT path set (`pendingSkill`, `pendingShockwave`): a puppet
+is force-posed with `fsm.set` and would otherwise spawn a duplicate for
+every remote knight. **Earned verbs** ride the profile — `hello`/`sync`
+are literally `SaveData['player']` — and `sync` also re-applies them to
+the guest's *predicted* knight, without which a verb won mid-session
+would work on the host's screen and not on the guest's. Known edges: dialogue/shops/pause are host-screen
 only (NPCs ignore non-`isLocal` knights); projectiles render as generic
 dots on the guest; strict NATs may fail (STUN only); levers answer only the
 host's interact key (`interact` isn't a networked action), while
 pressure plates feel both knights (the guest's is a real Player in the
-host's world). When touching
+host's world); the guest predicts its own spells and waves, so a cast
+briefly draws twice (once predicted, once from the snapshot). When touching
 multiplayer-adjacent code, keep the single-player path byte-identical —
 `nearestPlayer()` and `isLocal` are the seams that keep both true.
 

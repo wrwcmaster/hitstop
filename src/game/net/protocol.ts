@@ -1,6 +1,7 @@
 import type { Action } from '../defs';
 import type { SaveData } from '../save';
 import type { GizmoSnap } from '../actors/gizmos';
+import type { RoomPatch } from '@engine/index';
 
 /**
  * The co-op wire protocol (host-authoritative). The host runs the only
@@ -76,6 +77,21 @@ export interface ShotSnap {
   vy?: number;
 }
 
+/**
+ * A Shockwave on the wire: the tile cells its crest currently occupies,
+ * front first, in world pixels. Sending the drawn cells rather than a
+ * position and a direction means the guest reproduces a wave that
+ * stepped up a stair or curved with the floor without knowing the route
+ * — and it is a handful of numbers, since a crest is four tiles long.
+ *
+ * It is a snapshot kind of its own precisely so it never arrives as the
+ * generic projectile glow: a ground wave is not a flying hitbox and must
+ * not read as one.
+ */
+export interface WaveSnap {
+  c: [number, number][];
+}
+
 /** host → guest: the world as of this instant. */
 export interface SnapMsg {
   t: 'snap';
@@ -86,11 +102,23 @@ export interface SnapMsg {
   mobs: MobSnap[];
   picks: PickSnap[];
   shots: ShotSnap[];
+  /** Surface waves, drawn as crests rather than dots (see WaveSnap). */
+  waves: WaveSnap[];
   /** Puzzle gizmos (platforms, levers, plates, barriers), id-keyed like
    * mobs so the guest can dock/undock their solids across snapshots. */
   giz: (GizmoSnap & { id: number })[];
   /** The guest knight's HUD numbers (host-authoritative). */
   hud: { hp: number; maxHp: number; mp: number; maxMp: number; gold: number; level: number; score: number; air: number };
+  /**
+   * How the live room differs from its authored JSON — a smashed floor.
+   * The guest builds its tilemap from the same immutable RoomDef the host
+   * does, so without this the two disagree about what is solid the moment
+   * anything breaks. Sent on room entry and whenever it changes, not every
+   * frame. A snapshot-driven guest spawns no room entities, so only
+   * `tiles` can matter to it today; the whole patch rides along because it
+   * is already the shape both sides speak.
+   */
+  patch?: RoomPatch;
   banner: string | null;
 }
 

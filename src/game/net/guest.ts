@@ -4,6 +4,7 @@ import {
   type Solid,
   Tilemap,
   Minimap,
+  RoomPatches,
   buildTilemap,
   drawText,
   clamp,
@@ -12,6 +13,7 @@ import {
 import type { ActionGame } from '../defs';
 import { COLORS } from '../content/palette';
 import { ROOMS, START_ROOM } from '../content/rooms';
+import { drawCrest } from '../actors/shockwave';
 import { DEFAULT_SONG } from '../content/music';
 import { Player } from '../actors/player';
 import { Monster, monsters } from '../actors/monster';
@@ -84,6 +86,13 @@ export class CoopGuestScene implements Scene {
   private serverMe: KnightSnap | null = null;
   /** The saved knight we brought along (drives local gear visuals too). */
   private profile: SaveData['player'] | undefined;
+  /**
+   * The live room's differences from its authored JSON, as the host last
+   * reported them. Held here rather than applied and forgotten, because
+   * `enterRoom` rebuilds the tilemap from the immutable RoomDef and the
+   * hole has to be put back.
+   */
+  private patches = new RoomPatches();
   private banner: string | null = null;
   private snap: SnapMsg | null = null;
   private uiT = 0;
@@ -112,6 +121,13 @@ export class CoopGuestScene implements Scene {
   /** Fold the host's word on my knight into my own save, so co-op gold,
    * XP, and gear survive the session. Creates a save if I had none. */
   private persist(player: SaveData['player']): void {
+    // The host's word on my knight is also the only way my PREDICTED
+    // knight learns about a verb won mid-session: the boss grants it to
+    // the host's copy, and without this my local copy would keep failing
+    // its `earned.has(...)` gate until I quit and reloaded — a wall my own
+    // knight could climb on the host's screen but not on mine.
+    this.profile = player;
+    if (this.me) this.me.earned.restore(player.earned, { game: this.me.game, player: this.me });
     const cur = saveStore.load();
     if (cur) {
       cur.player = player;
@@ -136,6 +152,13 @@ export class CoopGuestScene implements Scene {
     this.banner = s.banner;
     const enteredRoom = s.room !== this.roomId;
     if (enteredRoom) this.enterRoom(s.room);
+    // Geometry the host has changed. Arrives on room entry and whenever
+    // it changes; applied AFTER enterRoom, which has just rebuilt the map
+    // from the authored room and undone everything the world did to it.
+    if (s.patch) {
+      this.patches.restore({ [s.room]: s.patch });
+      this.applyPatch();
+    }
     const seen = new Set<number>();
     for (const k of s.knights) {
       // My own knight is predicted locally, not puppeted — remember the
@@ -260,6 +283,13 @@ export class CoopGuestScene implements Scene {
     return p;
   }
 
+  /** Stamp the host's geometry onto our copy of the room. */
+  private applyPatch(): void {
+    if (!this.tilemap) return;
+    this.patches.applyTiles(this.roomId, this.tilemap);
+    this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
+  }
+
   private enterRoom(id: string): void {
     this.roomId = id;
     this.puppets.clear();
@@ -278,6 +308,8 @@ export class CoopGuestScene implements Scene {
     this.me.name = displayName('guest');
     if (this.profile) restorePlayer(this.me, this.profile); // my gear, my look
     this.game.world.spawn(this.me);
+    // A room we have been in before may already have holes in it.
+    this.applyPatch();
     this.hudHost.player = this.me;
   }
 
@@ -396,6 +428,12 @@ export class CoopGuestScene implements Scene {
       this.me?.render(g); // the predicted knight, on top of the puppets
       // Projectiles come across as plain rects; ballistic kinds carry
       // their velocity so arrows/bullets draw for real, the rest glow.
+      // Surface waves get their own snapshot kind and the same drawing
+      // routine the live wave uses, so a remote Shockwave is the picture
+      // it is on the host rather than a generic glowing dot.
+      for (const w of this.snap?.waves ?? []) {
+        drawCrest(g, w.c, this.tilemap.tileSize);
+      }
       for (const s of this.snap?.shots ?? []) {
         if (s.k === 'arrow') drawArrow(g, s.x, s.y, s.vx ?? 1, s.vy ?? 0);
         else if (s.k === 'bullet') drawBullet(g, s.x, s.y, s.vx ?? 1, s.vy ?? 0);

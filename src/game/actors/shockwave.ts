@@ -124,22 +124,47 @@ export class Shockwave extends Entity {
     }
   }
 
-  render(g: CanvasRenderingContext2D): void {
-    // A crest riding the surface with a short wake behind it — readable
-    // without any aiming, which is the whole point of a non-aimed verb.
+  /**
+   * The tile cells the crest currently occupies, front first, in world
+   * pixels. This IS the wire format (see `WaveSnap`): a guest that gets
+   * the drawn cells reproduces a wave that climbed a stair or followed a
+   * dip without knowing the route, and it is a handful of numbers.
+   */
+  crestCells(): [number, number][] {
     const ts = this.tilemap.tileSize;
     const front = Math.min(this.path.length - 1, Math.floor(this.travelled / ts));
-    const spent = 1 - this.fade / SHOCKWAVE_TUNING.trail;
-    for (let i = Math.max(0, front - 3); i <= front; i++) {
-      const tile = this.path[i];
-      const age = (front - i) / 4;
-      const h = Math.round(10 * (1 - age) + 3);
-      g.globalAlpha = (1 - age * 0.7) * spent;
-      g.fillStyle = i === front ? COLORS.white : COLORS.gold;
-      g.fillRect(Math.round(tile.rect.x + 1), Math.round(tile.rect.y - h), tile.rect.w - 2, h);
-      g.fillStyle = COLORS.gold;
-      g.fillRect(Math.round(tile.rect.x), Math.round(tile.rect.y - 2), tile.rect.w, 2);
+    const out: [number, number][] = [];
+    for (let i = front; i >= Math.max(0, front - 3); i--) {
+      out.push([Math.round(this.path[i].rect.x), Math.round(this.path[i].rect.y)]);
     }
-    g.globalAlpha = 1;
+    return out;
   }
+
+  render(g: CanvasRenderingContext2D): void {
+    drawCrest(g, this.crestCells(), this.tilemap.tileSize, 1 - this.fade / SHOCKWAVE_TUNING.trail);
+  }
+}
+
+/**
+ * Draw a wave crest from its cells. Shared by the live wave and by the
+ * co-op guest's renderer, so a remote wave is the same picture rather
+ * than an approximation of one.
+ */
+export function drawCrest(
+  g: CanvasRenderingContext2D,
+  cells: readonly (readonly [number, number])[],
+  tileSize: number,
+  spent = 1,
+): void {
+  for (let i = 0; i < cells.length; i++) {
+    const [x, y] = cells[i];
+    const age = i / 4;
+    const h = Math.round(10 * (1 - age) + 3);
+    g.globalAlpha = (1 - age * 0.7) * spent;
+    g.fillStyle = i === 0 ? COLORS.white : COLORS.gold;
+    g.fillRect(x + 1, y - h, tileSize - 2, h);
+    g.fillStyle = COLORS.gold;
+    g.fillRect(x, y - 2, tileSize, 2);
+  }
+  g.globalAlpha = 1;
 }

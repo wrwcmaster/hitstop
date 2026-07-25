@@ -1263,7 +1263,15 @@ export class PlayScene implements Scene {
     this.coop?.applyInput(); // remote edges land before the world steps
     g.world.update(dt);
     if (this.coop) {
-      this.coop.step({ roomId: this.roomId, score: this.score, banner: this.bannerT > 0 ? this.banner : null });
+      this.coop.step({
+        roomId: this.roomId,
+        score: this.score,
+        banner: this.bannerT > 0 ? this.banner : null,
+        // Geometry the run has changed in THIS room, so a guest's tilemap
+        // agrees with the host's about what is solid. The session only puts
+        // it on the wire when it differs from what it last sent.
+        patch: this.patches.snapshot()[this.roomId],
+      });
       if (this.coop.dropped) this.endCoop();
     }
     if (this.phase === 'play') this.waves.update(dt);

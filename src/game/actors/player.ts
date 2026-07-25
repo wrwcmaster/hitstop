@@ -700,6 +700,8 @@ export class Player extends Actor {
   /** Which move the next/current attack is: the grounded combo chain or
    * a contextual strike (set right before entering the attack state). */
   private attackContext: 'ground' | 'aerial' | 'plunge' | 'upper' | 'dash' = 'ground';
+  /** Set by the input path; consumed by beginShockwave (see there). */
+  private pendingShockwave = false;
 
   /** Input driving this knight. Defaults to the local device; a net
    * session substitutes a remote-fed Input for the guest's knight. */
@@ -751,6 +753,7 @@ export class Player extends Actor {
       // ahead of the ranged branch for the same reason — a verb the
       // knight owns, not something her weapon does.
       if (this.onGround && dry && this.input.held('down') && this.earned.has('shockwave')) {
+        this.pendingShockwave = true;
         return 'shockwave';
       }
       // Ranged steel shoots instead of swinging. Charged weapons (the
@@ -1100,6 +1103,13 @@ export class Player extends Actor {
    * The wave needs a real tile grid to run along — a knight standing on
    * some other CollisionSource simply plants her feet and nothing
    * travels, which is the honest outcome rather than a crash.
+   *
+   * The spawn hangs off a flag the INPUT path sets, not off entering the
+   * state, for the same reason `beginCast` hangs off `pendingSkill`: a
+   * co-op guest force-sets a puppet's FSM state from the host's snapshot,
+   * and a puppet that spawned its own wave would give every remote knight
+   * a duplicate. A puppet never runs `moveUpdate`, so it poses and
+   * nothing else.
    */
   beginShockwave(): void {
     this.vx = 0;
@@ -1110,7 +1120,9 @@ export class Player extends Actor {
       color: [COLORS.gold, COLORS.white], speed: 80, life: 0.3,
       angle: -Math.PI / 2, spread: 2.4, drag: 3.4, grav: 300,
     });
-    if (this.collision instanceof Tilemap) {
+    const cast = this.pendingShockwave;
+    this.pendingShockwave = false;
+    if (cast && this.collision instanceof Tilemap) {
       this.game.world.spawn(new Shockwave(this.game, this.collision, this, this.facing));
     }
   }
