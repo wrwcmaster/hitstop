@@ -57,6 +57,38 @@ npm run agent-play     # HTTP bridge for turn-based (LLM-agent) play
 8. **Listeners follow scene lifetime.** A scene that subscribes (event
    bus, input, `window`) keeps the unsubscribe/disposer and releases it
    in `exit()` — see PlayScene's `disposers` for the pattern.
+9. **Saves are not sacred yet.** The game is in **demo phase**, so old
+   save data does not constrain design. Do NOT hand-write migration code
+   in the game. See "Save compatibility" below before touching `SaveData`.
+
+## Save compatibility (demo phase)
+
+**Status: demo.** Nothing has shipped to players who could lose a run
+that matters, so save compatibility is explicitly NOT a design
+constraint. Prefer the clean shape over the compatible one.
+
+When changing `SaveData`:
+
+- **Additive optional field** (`foo?: T`) — just add it. Old saves load
+  and take the default. Nothing else to do.
+- **A change that would strand or corrupt old saves** — bump the
+  `SlotVault` version in `save.ts`. Old saves invalidate cleanly and the
+  player starts fresh. That is an acceptable cost right now.
+- **Never** write in-game backfill/migration logic that reconstructs
+  state from an older save's contents. It couples one release's accident
+  to the game's runtime forever, and it is the kind of code nobody dares
+  delete later.
+
+Accepting a rough edge is fine here: a demo save that loads but can no
+longer reach some content is a "start a new game", not a bug to engineer
+around. Say so in the PR rather than building a migration.
+
+**After release, flip this.** The plan is a *separate* migration
+pipeline — a standalone tool that reads an old save and writes a current
+one, living outside the game (alongside `tools/`), versioned and tested
+on its own. The game keeps loading exactly one shape; converting old
+data is somebody else's job, run once, off to the side. Until then, this
+rule stays as written.
 
 ## Architecture map
 
