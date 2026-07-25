@@ -1,5 +1,6 @@
 import { SlotVault, t, type JsonStore, type ItemStack } from '@engine/index';
 import type { Player } from './actors/player';
+import { monsters } from './actors/monster';
 import { classOfNode, DEFAULT_CLASS } from './content/classes';
 
 /**
@@ -38,6 +39,14 @@ export interface SaveData {
     forgeLevel?: number;
     /** Durability left on worn-down gear, by item id (absent = pristine). */
     armorWear?: Record<string, number>;
+    /**
+     * Permanent unlocks — key items, off-tree skills, bare verbs (absent
+     * in saves from before they existed → owns none). This rides in the
+     * player blob rather than beside it so co-op gets it for free: the
+     * hello/sync profile IS `SaveData['player']`, so a guest carries what
+     * they earned in and home again with no parallel format.
+     */
+    earned?: string[];
   };
 }
 
@@ -79,7 +88,38 @@ export function snapshotPlayer(p: Player): SaveData['player'] {
     quests: p.quests.snapshot(),
     forgeLevel: p.forgeLevel,
     armorWear: { ...p.armorWear },
+    earned: p.earned.list(),
   };
+}
+
+/**
+ * Award, once, the rewards of bosses a save had already felled before
+ * earnables existed.
+ *
+ * Without this such a save is a DEAD END, not merely an empty one: a
+ * felled boss never spawns again (placeables suppress `slain:<id>`), so
+ * the reward it declares could never be obtained by that character. The
+ * empty-set-on-old-saves rule is still honoured — this only fills in what
+ * the save's own history says was already won.
+ *
+ * Runs only when `earned` is ABSENT. A modern save that legitimately owns
+ * nothing keeps its empty list, and re-running is harmless anyway because
+ * granting is idempotent.
+ */
+export function backfillEarned(
+  p: Player,
+  data: SaveData['player'],
+  flags: ReadonlySet<string>,
+): void {
+  if (data.earned !== undefined) return;
+  const ctx = { game: p.game, player: p };
+  for (const flag of flags) {
+    if (!flag.startsWith('slain:')) continue;
+    const type = flag.slice('slain:'.length);
+    if (!monsters.has(type)) continue; // boss retired from the game
+    const grants = monsters.get(type).grants;
+    if (grants) p.earned.grant(grants, ctx);
+  }
 }
 
 /** Pre-class saves held one flat node list; deal it out to the class
@@ -108,6 +148,12 @@ export function restorePlayer(p: Player, data: SaveData['player']): void {
   // (class change wipes and replays the book, so this must come last).
   for (const id of data.skills) p.skills.learn(id);
   p.quests.restore(data.quests);
+  // Permanent unlocks, replayed AFTER the class settles: an unlock may
+  // project into skills or capabilities, and the class replay above
+  // clears both — restoring earlier would let a class change quietly eat
+  // a boss reward's effect. Silent by design: no unlock fanfare fires on
+  // load, only on the moment it was actually earned.
+  p.earned.restore(data.earned, { game: p.game, player: p });
   p.forgeLevel = data.forgeLevel ?? 0;
   p.armorWear = { ...(data.armorWear ?? {}) };
   p.applyForge();

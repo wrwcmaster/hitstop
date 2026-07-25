@@ -157,3 +157,122 @@ export class SkillTree<Ctx = unknown> {
     def.onUnlock?.(ctx);
   }
 }
+
+/* ---------------- earned unlocks ---------------- */
+
+/**
+ * Something a run can EARN and keep for good.
+ *
+ * This is the mechanism behind permanent progression, and it stays
+ * deliberately silent about what an unlock *means*. Games express the
+ * same idea very differently — a key item you carry, a unique skill that
+ * sits off the normal tree, a bare traversal verb with no inventory
+ * presence at all — and all three are the same bookkeeping: an id you own
+ * from some moment onward, which survives everything else being rebuilt.
+ *
+ * So the engine owns the ledger and `kind` is an OPAQUE label the game
+ * gives meaning to ('keyItem', 'skill', 'ability', whatever fits). How an
+ * unlock manifests is the game's business, expressed through `onEarn`.
+ *
+ * Distinct from `SkillTree`, which is the neighbouring mechanism: tree
+ * nodes cost points, belong to a class, and are torn down and replayed
+ * when that class changes. An earnable has no cost and no owner but the
+ * character, which is exactly why it can't live in a tree.
+ */
+export interface EarnableDef<Ctx = unknown> {
+  name: string;
+  desc: string;
+  /**
+   * Free-form category the GAME interprets — the engine only carries it.
+   * Lets one catalog hold key items, off-tree skills, and plain verbs
+   * together, with the UI deciding how each is presented.
+   */
+  kind?: string;
+  /**
+   * How this unlock manifests: hand over an item, teach a skill, enable a
+   * capability. Optional — an unlock that content merely *queries* needs
+   * no projection at all.
+   *
+   * IMPORTANT: this RE-RUNS on `restore`, exactly as `TreeNodeDef
+   * .onUnlock` does, because projections into non-persisted state
+   * (capabilities, derived flags) would otherwise be lost on load. It
+   * must therefore be idempotent. Beware targets that are themselves
+   * saved AND non-idempotent — `Inventory.add` stacks, so a key-item
+   * projection should guard on already having the item.
+   */
+  onEarn?(ctx: Ctx): void;
+}
+
+export const earnables = new Registry<EarnableDef<never>>('earnable');
+
+export function defineEarnable<Ctx>(id: string, def: EarnableDef<Ctx>): void {
+  earnables.register(id, def as EarnableDef<never>);
+}
+
+export function earnableDef<Ctx = unknown>(id: string): EarnableDef<Ctx> {
+  return earnables.get(id) as EarnableDef<Ctx>;
+}
+
+/**
+ * The set of unlocks a character has earned.
+ *
+ * Nothing here is scoped to a class, a room, or a run phase: once earned,
+ * an id stays until the save says otherwise. Rebuilding a class, a room,
+ * or the whole world leaves it untouched.
+ */
+export class EarnedSet<Ctx = unknown> {
+  private owned = new Set<string>();
+
+  has(id: string): boolean {
+    return this.owned.has(id);
+  }
+
+  /**
+   * Earn an unlock, running its projection. Returns true only the FIRST
+   * time, which is what lets one-shot presentation (a fanfare, a prompt)
+   * key off the return and never repeat — earning the same thing twice
+   * is a no-op, not a second celebration.
+   */
+  grant(id: string, ctx: Ctx): boolean {
+    if (!earnables.has(id)) {
+      throw new Error(`earnable "${id}": not registered`);
+    }
+    if (this.owned.has(id)) return false;
+    this.owned.add(id);
+    earnableDef<Ctx>(id).onEarn?.(ctx);
+    return true;
+  }
+
+  /**
+   * Restore from a save: re-apply every projection, at no cost and with
+   * no first-time reporting. Ids that no longer exist are skipped rather
+   * than throwing, so a save outlives content being renamed or dropped.
+   */
+  restore(ids: readonly string[] | undefined, ctx: Ctx): void {
+    this.owned.clear();
+    for (const id of ids ?? []) {
+      if (!earnables.has(id)) continue;
+      this.owned.add(id);
+      earnableDef<Ctx>(id).onEarn?.(ctx);
+    }
+  }
+
+  /**
+   * Re-run every owned projection without changing what is owned.
+   *
+   * Needed whenever something downstream is torn down and rebuilt under
+   * a character who has already earned things — a class change being the
+   * usual case, since it clears the skill book and capabilities. Without
+   * this, an unlock that manifests as a skill or a capability would go
+   * quietly dead until the next load, even though it is still owned.
+   * Safe to call at any time: projections are required to be idempotent.
+   */
+  reapply(ctx: Ctx): void {
+    for (const id of this.list()) earnableDef<Ctx>(id).onEarn?.(ctx);
+  }
+
+  /** Owned ids in registration order, so saves stay stable run to run. */
+  list(): string[] {
+    return earnables.ids().filter((id) => this.owned.has(id));
+  }
+}
