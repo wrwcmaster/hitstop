@@ -16,7 +16,14 @@ npm run dev                       # the game
 npm run agent-play                # HTTP bridge for turn-based (agent) play
 npm run replay                    # verify EVERY recording in recordings/
 npm run replay -- path/run.json   # verify one recording
+npm run replay -- --rerecord path/run.json   # accept a deliberate change
 ```
+
+`--rerecord` replays the tape and writes the hashes it produces back into
+the file. Reach for it ONLY when the divergence is a change you meant to
+make — new content in a room the tape walks through, say. An unintended
+divergence is a regression the recording caught, and refreshing the hashes
+throws that away.
 
 `npm run replay` starts its own vite (port 5199) if the dev server isn't
 already running, so it works as a one-command test suite.

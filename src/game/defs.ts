@@ -171,6 +171,14 @@ export interface GameEvents extends Record<string, unknown> {
   pickup: { id: string };
   /** A level trigger region fired. */
   trigger: { event: string; props?: Record<string, unknown> };
+  /**
+   * A downward strike finished on the ground: the rect is the footprint
+   * it landed on. The player reports the impact and nothing more — what
+   * a surface does about it (shatter, resonate, rebound) is the scene's
+   * business, since only the scene owns the room and can remember that
+   * the floor is now a hole.
+   */
+  plungeLand: { x: number; y: number; w: number; h: number };
   /** Set/clear a story flag (levers, plates — PlayScene owns the set). */
   setFlag: { id: string; on: boolean };
   /** A Devourer got you. */

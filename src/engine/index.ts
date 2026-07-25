@@ -111,6 +111,7 @@ export {
 } from './level/tilemap';
 export { buildTilemap, validateRoom, type RoomDef, type RoomEntity } from './level/room';
 export { Triggers, type TriggerDef, type TriggerFire } from './level/triggers';
+export { RoomPatches, entityKey, type RoomPatch, type RoomPatchSet } from './level/patches';
 
 export { Stats, type StatMods } from './items/stats';
 export {

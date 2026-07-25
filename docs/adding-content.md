@@ -128,6 +128,46 @@ The engine does not recognize those names. Gameplay inspects them through a
 step limits and caller predicates decide where that effect stops. Registered
 traits appear in the level-editor tile tooltip automatically.
 
+## A tile that breaks (and stays broken)
+
+A `RoomDef` is immutable content, rebuilt from JSON on every visit — so a
+floor you smash grows straight back when you leave. **Room patches** are
+what make a change stick. Never call `tilemap.setTile` from gameplay: that
+edits the throwaway copy you are standing in. Go through the scene:
+
+```ts
+host.mutateTile(tx, ty, '');   // '' clears the tile
+```
+
+`PlayScene.mutateTile` writes the live map *and* records the change against
+the current room, so it is replayed the next time the room is built, and it
+rides along in the save (`SaveData.patches`). The mechanism is generic
+(`RoomPatches` in `engine/level/patches.ts`): tile replacements plus entities
+that must not respawn, keyed by room id, all plain JSON.
+
+The worked example is Impact Drop breaking weak floors. Nothing in that
+chain knows about anything else:
+
+1. `crackedRock` declares `traits: ['breakable', ...]` — a label, not a behavior.
+2. The player emits `plungeLand` with the footprint she landed on. She has no idea what stone is.
+3. `PlayScene.breakSurface` probes two pixels down, keeps the tiles whose traits say `breakable`, and calls `mutateTile` on each. The meaning of `breakable` lives here and nowhere else.
+
+A placed entity can be retired the same way. Give the definition
+`persistent: true` (see the chest in `actors/enemies.ts`) and killing one
+empties its slot in the room for good — the identity is `entityKey(e)`
+(`type@x,y`), not an array index, so editing the room later cannot
+resurrect the wrong thing. Patches are idempotent, and coordinates or ids
+that no longer exist are skipped rather than throwing.
+
+Two rules the tests enforce: leave a hole a body can fit through (the knight
+is 10px wide, so a break must span at least two 8px tiles — footprint probes
+do this naturally), and don't drop the player anywhere a normal jump can't
+leave.
+
+Sandbox runs (level-editor test rooms, `?scenario=`, the debug test-room
+jump) can break scenery freely; they never write a save, so the rubble stays
+in the sandbox.
+
 ## A new room / level
 
 Use the level editor (`/tools/level-editor.html`): paint tiles, place monsters, set the player spawn, then **test play** (one click, uses `?room=local`) and iterate. When happy, **download** the JSON into `src/game/content/rooms/` and load it in `main.ts`.
@@ -543,7 +583,7 @@ Query it from anywhere holding the player — `player.earned.has('impact-drop')`
 
 ## Saves
 
-`src/game/save.ts` defines the save shape: current room, inventory/equipment/skills, story flags, fired one-shot triggers, best score. Checkpoints happen automatically at every room entrance and on boss defeat; death returns you to the last checkpoint at full HP. To persist a new thing, add it to `SaveData` — an optional field (`foo?: T`) just works, since old saves take the default; a change that would strand or corrupt old saves bumps the `SlotVault` version instead, and they invalidate cleanly.
+`src/game/save.ts` defines the save shape: current room, inventory/equipment/skills, story flags, fired one-shot triggers, room patches (geometry the run has changed), best score. Checkpoints happen automatically at every room entrance and on boss defeat; death returns you to the last checkpoint at full HP. To persist a new thing, add it to `SaveData` — an optional field (`foo?: T`) just works, since old saves take the default; a change that would strand or corrupt old saves bumps the `SlotVault` version instead, and they invalidate cleanly.
 
 **The game is in demo phase, so save compatibility is not a design constraint** — do not write in-game migration code that reconstructs state from an older save's contents. A demo save that loads but can't reach some content is a "start a new game". See the *Save compatibility* section in [AGENTS.md](../AGENTS.md); after release this flips to a standalone migration pipeline that lives outside the game.
 

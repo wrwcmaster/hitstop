@@ -60,6 +60,12 @@ npm run agent-play     # HTTP bridge for turn-based (LLM-agent) play
 9. **Saves are not sacred yet.** The game is in **demo phase**, so old
    save data does not constrain design. Do NOT hand-write migration code
    in the game. See "Save compatibility" below before touching `SaveData`.
+10. **Rooms are immutable content.** A `RoomDef` is rebuilt from JSON on
+    every visit, so gameplay must never call `tilemap.setTile` — that
+    edits a copy that is about to be thrown away. Change geometry through
+    `PlayHost.mutateTile`, which also records a room patch, and retire a
+    placed entity by marking its definition `persistent`. See "A tile that
+    breaks (and stays broken)" in docs/adding-content.md.
 
 ## Save compatibility (demo phase)
 
@@ -385,7 +391,9 @@ a port with `-- --port 5174`), then drive the real game:
 - **Record/replay harness**: `npm run replay` re-runs every recording in
   `tools/agent-play/recordings/` and fails on any divergence — run it
   after gameplay changes (a diverging recording is either a regression or
-  an intended change; re-record if intended). To play the game turn-based
+  an intended change; if intended — new content in a room the tape walks
+  through, say — refresh it with
+  `npm run replay -- --rerecord <file>` and say so in the PR). To play the game turn-based
   yourself (no real-time pressure) use the HTTP bridge:
   `npm run agent-play` — see `tools/agent-play/README.md`. Gameplay
   randomness must use the engine `rand/randInt/pick/chance` helpers

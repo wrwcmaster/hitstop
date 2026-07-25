@@ -1053,6 +1053,10 @@ export class Player extends Actor {
         color: [COLORS.steel, COLORS.white], speed: 70, life: 0.3,
         angle: -Math.PI / 2, spread: 2.6, drag: 4,
       });
+      // Tell the room she hit it. The knight has no opinion about what
+      // the floor is made of — she reports the blow and its footprint,
+      // and the scene decides whether anything down there gives way.
+      this.game.events.emit('plungeLand', { x: this.x, y: this.y, w: this.w, h: this.h });
       return 'move';
     }
     if (prog >= 1) {
