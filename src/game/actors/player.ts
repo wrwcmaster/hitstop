@@ -10,9 +10,6 @@ import {
   moveAndCollide,
   type CollisionResult,
   type CollisionContact,
-  frameAt,
-  whiteOf,
-  tintOf,
   friction,
   clamp,
   overlaps,
@@ -20,7 +17,6 @@ import {
   chance,
   rand,
   swim,
-  drawText,
   items,
   itemDef,
   t,
@@ -41,7 +37,6 @@ import {
 } from '@engine/index';
 import type { TreeCtx } from '../content/skilltree';
 import { KNIGHT_ANIMS, baseKnight } from '../content/sprites';
-import { gearLayers, DEBUG_ANCHORS } from '../content/gear-visuals';
 import { COLORS } from '../content/palette';
 import {
   weaponDefOf,
@@ -50,11 +45,14 @@ import {
   type WeaponAttackDef,
   type WeaponDef,
 } from '../content/weapons';
-import { drawHeldWeapon, drawWeaponTrail, drawNeutralTrail, RANGED_HAND_Y } from '../content/weapon-visuals';
+import { RANGED_HAND_Y } from '../content/weapon-visuals';
 import { type SkillCtx } from '../content/skills';
 import { classes, DEFAULT_CLASS } from '../content/classes';
 import { shootArrow, shootBullet, muzzleFlash } from '../content/ballistics';
 import { Shockwave } from './shockwave';
+import { PLAYER_TUNING, SWIM, ARMOR_MAX_SOAK } from './player-tuning';
+import { renderPlayer } from './player-render';
+export { PLAYER_TUNING } from './player-tuning';
 import { Monster } from './monster';
 import { PlayerCapabilities } from './player-capabilities';
 import type { EarnCtx } from '../content/earnables';
@@ -86,106 +84,6 @@ function nearestMonster(world: World, x: number, y: number): Monster | null {
   }
   return best;
 }
-
-/** Movement + combat tuning in one place. Tweak freely. */
-/**
- * Water feel. Buoyancy beats gravity once you're deep, so the knight
- * bobs to the surface on her own; strokes (jump) kick upward, holding
- * down dives, and a stroke near the surface breaches into a real jump.
- * Armor doesn't rust, but lungs are lungs: `airSeconds` underwater,
- * then `drownDamage` per `drownEvery` until you surface.
- */
-const SWIM = {
-  buoyancy: 0.82, // < 1× gravity: slightly heavy, so you sink slowly by default
-  dragY: 0.1, // per-second velocity keep factors (heavy water)
-  dragX: 0.5,
-  swimUp: 520, // px/s² upward while holding jump (ascend)
-  dive: 340, // px/s² downward while holding down (dive faster)
-  maxRise: 95, // ascent cap while holding jump
-  driftSink: 30, // gentle sink cap when not diving — "slowly sinking"
-  maxSink: 100, // faster sink cap while holding down
-  swimSpeed: 66, // horizontal cap in water (slower than the land runSpeed)
-  breachDepth: 0.55, // shallower than this, a jump press launches you out
-  airSeconds: 8,
-  refillSeconds: 2,
-  drownEvery: 1,
-  drownDamage: 20, // per drownEvery tick with empty lungs
-};
-
-/**
- * The most of any single blow armor may soak. Armor is a flat absorb
- * rating, so without a cap a well-armored knight would be immune to
- * everything small — chip damage would vanish and the damage spread
- * (a bat's 10 vs a boss's 30) would stop mattering. Capping the soak at
- * a fraction of the incoming hit keeps every attack meaningful: heavy
- * blows still land heavier, and no amount of plate makes you untouchable.
- */
-const ARMOR_MAX_SOAK = 0.5;
-
-export const PLAYER_TUNING = {
-  runSpeed: 110,
-  runAccel: 1400,
-  groundFriction: 0.0001,
-  airFriction: 0.1,
-  // 400 px/s ≈ 53px of rise (v²/2g): enough to reach the 48-50px arena
-  // platforms with a little margin. (At the POC's 350 they were 41px —
-  // decoratively unreachable.)
-  jumpSpeed: 400,
-  jumpCutSpeed: 130, // vy clamp when jump is released early
-  doubleJumpSpeed: 370, // SKY DANCER's air jump
-  coyoteTime: 0.1,
-  jumpBufferTime: 0.12,
-  /** How long a down+jump keeps you falling past one-way platforms. */
-  dropThroughTime: 0.14,
-  attackBufferTime: 0.16,
-  dashSpeed: 300,
-  dashTime: 0.16,
-  dashCooldown: 0.45,
-  dashInvuln: 0.2,
-  castTime: 0.2, // brief commit while a spell leaves the hand
-  castRecoil: 40, // backward brace when a spell fires
-  drawMoveMult: 0.45, // drawing a bow you can creep, not sprint
-  // Parry: a short deflect window; land a hit inside it and the blow is
-  // turned aside, the attacker staggered, and a riposte opened.
-  parryWindow: 0.16, // the active guard (hits inside are deflected)
-  parryRecovery: 0.22, // committed lag after the window
-  parryCooldown: 0.4, // wait after the stance ends before guarding again
-  parryIFrames: 0.4, // grace granted on a successful parry
-  parryStagger: 0.55, // how long a parried melee attacker is stunned
-  riposteTime: 1.3, // window to cash in the empowered counter
-  riposteBonus: 60, // extra damage on the riposte swing
-  /* ---- Wall Grip ---- */
-  // A slow slide rather than a full stop: the knight is holding on, not
-  // parked, and the drift tells you the grip is a moment you spend
-  // rather than a place you live. No stamina meter — the design brief
-  // asks for forgiving, and gravity already sets the clock.
-  clingSlide: 34,
-  // The kick: horizontal enough to clear the wall and cross a shaft,
-  // vertical enough to gain height on each side of one.
-  wallJumpX: 190,
-  wallJumpY: 300,
-  // Long enough to leave the wall behind while still holding toward it,
-  // short enough that the grab on the FAR side still lands. A narrow
-  // shaft is the binding case: 32px crossed at wallJumpX takes about
-  // 0.17s, so a lock near that swallows the arrival and the climb stalls.
-  regripLock: 0.09,
-  // How long a touched wall is remembered. Long enough to bridge the
-  // frames where resting flush produces no overlap, short enough that
-  // leaving one really does end the grip.
-  wallStick: 0.12,
-  /* ---- Shockwave ---- */
-  // Long enough to read as a commitment (you are planting your feet, not
-  // flicking a wrist), short enough that it opens a fight rather than
-  // ending your turn in one.
-  shockwaveTime: 0.3,
-
-  hurtInvuln: 1.1,
-  // Health and mana are point pools, not icon counts — 100/60 rather
-  // than 5/3 hearts. Big enough that a light graze and a heavy slam can
-  // be different numbers (see the damage spread in actors/enemies.ts).
-  maxHp: 100,
-  maxMp: 60,
-};
 
 /**
  * The player knight: an FSM over move/attack/dash/dead, with the classic
@@ -281,18 +179,22 @@ export class Player extends Actor {
   private wasGround = false;
   private dashCd = 0;
   private attackIndex = 0;
-  private attackDur = 0;
-  private attackDef: WeaponAttackDef | null = null;
+  /** Public for player-render, same reason. */
+  attackDur = 0;
+  /** Public for player-render (the drawn swing tracks the live one). */
+  attackDef: WeaponAttackDef | null = null;
   private strike: Strike | null = null;
   /** Active spell + its animation window (the `cast` state). */
   private pendingSkill: string | null = null;
-  private castDur = 0;
+  /** Public for player-render (the cast lean tracks the cast window). */
+  castDur = 0;
   /** Ranged weapon: a queued shot + the reload clock. */
   private pendingRanged = false;
   private rangedCd = 0;
   /** Hold-to-charge (the `draw` state): the engine gesture plus the
    * power the release banked for fireRanged (1 = uncharged weapons). */
-  private charge = new Charge({ time: 1, floor: 1 });
+  /** Public for player-render (the bow's pull IS the charge meter). */
+  charge = new Charge({ time: 1, floor: 1 });
   private chargePower = 1;
   /** Parry: reload clock between guards, and the empowered-counter window. */
   private parryCd = 0;
@@ -1612,242 +1514,9 @@ export class Player extends Actor {
 
   /* ---------------- render ---------------- */
 
-  /**
-   * Procedural body English, layered on top of squash & stretch so each
-   * action reads distinctly even though the sprite set is tiny. Returns a
-   * horizontal shear (upper body lean; negative leans the head toward +x),
-   * a pixel offset, and extra scale. Anchored at the feet in render.
-   */
-  private bodyPose(): { shear: number; ox: number; oy: number; sx: number; sy: number } {
-    const f = this.facing;
-
-    if (this.fsm.is('dash')) {
-      // Streak: head thrown ahead of the trailing feet.
-      return { shear: -f * 0.34, ox: f * 1.5, oy: 0, sx: 1, sy: 1 };
-    }
-
-    if (this.fsm.is('attack')) {
-      const prog = clamp(this.fsm.t / this.attackDur, 0, 1);
-      const attack = this.attackDef;
-      if (!attack) return { shear: 0, ox: 0, oy: 0, sx: 1, sy: 1 };
-      const mag = attack.bodyWeight;
-      let shear: number;
-      let ox: number;
-      if (prog < attack.active[0]) {
-        const w = prog / attack.active[0]; // wind up: coil back
-        shear = f * 0.22 * mag * w;
-        ox = -f * 2 * mag * w;
-      } else if (prog < attack.active[1]) {
-        const s = (prog - attack.active[0]) / (attack.active[1] - attack.active[0]);
-        shear = (f * 0.22 - f * 0.52 * s) * mag;
-        ox = (-f * 2 + f * 5 * s) * mag;
-      } else {
-        const r = (prog - attack.active[1]) / (1 - attack.active[1]);
-        shear = -f * 0.3 * mag * (1 - r);
-        ox = f * 3 * mag * (1 - r);
-      }
-      const oy = -attack.lift * Math.sin(prog * Math.PI);
-      return { shear, ox, oy, sx: 1, sy: 1 };
-    }
-
-    if (this.fsm.is('cast')) {
-      const prog = clamp(this.fsm.t / this.castDur, 0, 1);
-      const k = prog < 0.3 ? prog / 0.3 : 1 - (prog - 0.3) / 0.7; // snap back, ease out
-      return { shear: f * 0.26 * k, ox: -f * 2 * k, oy: -k, sx: 1, sy: 1 };
-    }
-
-    if (this.fsm.is('parry')) {
-      // A braced guard: weight settled back, blade shoulder forward.
-      const k = clamp(1 - this.fsm.t / (PLAYER_TUNING.parryWindow + PLAYER_TUNING.parryRecovery), 0, 1);
-      return { shear: -f * 0.18 * k, ox: -f * 1.5 * k, oy: 0, sx: 1, sy: 1 };
-    }
-
-    // move / air: lean into horizontal motion; stretch on a fast rise,
-    // pinch slightly on the fall — a subtle jump arc.
-    const shear = -clamp(this.vx / 900, -0.18, 0.18);
-    let sy = 1;
-    if (!this.onGround) sy = 1 + clamp(-this.vy / 1600, -0.06, 0.1);
-    return { shear, ox: 0, oy: 0, sx: 2 - sy, sy };
-  }
-
   render(g: CanvasRenderingContext2D): void {
-    // Name tag (multiplayer): who is this knight. Drawn before the
-    // i-frame blink so the tag holds steady while the body strobes.
-    if (this.name) drawText(g, this.name, this.cx, this.y - 4, COLORS.steel, 1, 'center');
-    // I-frame blink (god mode holds i-frames but shouldn't strobe).
-    if (this.invulnT > 0 && !this.godMode && !this.fsm.is('dead') && Math.floor(this.invulnT * 20) % 2) return;
-
-    let anim = 'air';
-    if (this.onGround) anim = Math.abs(this.vx) > 8 ? 'run' : 'idle';
-    const set = this.facing === 1 ? this.animSet.right : this.animSet.left;
-    let img = frameAt(set, anim, this.animT);
-    if (this.flashT > 0) img = whiteOf(img);
-
-    // Entity coordinates describe the collision box. Sprite geometry maps
-    // its draw origin onto that box, allowing transparent overhangs without
-    // changing physics.
-    const cx = this.x - baseKnight.hitbox.x + baseKnight.w / 2;
-    const by = this.y - baseKnight.hitbox.y + baseKnight.h;
-    const dh = baseKnight.h;
-    const dw = baseKnight.w;
-
-    const q = (v: number) => Math.round(v * 4) / 4;
-    if (this.fsm.is('dead')) {
-      // Keel over and fade.
-      g.save();
-      g.translate(q(cx), q(by - 4));
-      g.rotate(this.facing * (Math.PI / 2) * Math.min(1, this.deadT * 3));
-      g.globalAlpha = Math.max(0, 1 - Math.max(0, this.deadT - 0.8));
-      g.drawImage(img, -dw / 2, -dh * 0.7, dw, dh);
-      g.restore();
-      g.globalAlpha = 1;
-      return;
-    }
-
-    // Squash & stretch + per-action body English, anchored at the feet.
-    const pose = this.bodyPose();
-    const baseSy = this.squash;
-    const baseSx = 1 + (1 - baseSy) * 0.7;
-    const sx = baseSx * pose.sx;
-    const sy = baseSy * pose.sy;
-    g.save();
-    
-    let finalImg = img;
-    const isSwallowed = this.fsm.is('swallowed');
-    if (isSwallowed) {
-      g.globalAlpha = 0.9; // keep player highly visible
-      // Pain shiver translation
-      const shiverX = Math.sin(this.animT * 50) * 0.8;
-      const shiverY = Math.cos(this.animT * 50) * 0.8;
-      g.translate(q(cx + pose.ox + shiverX), q(by + pose.oy + shiverY));
-      // Tint the player red for acid pain/damage!
-      finalImg = tintOf(img, COLORS.red, 0.55);
-    } else {
-      g.translate(q(cx + pose.ox), q(by + pose.oy));
-    }
-    
-    g.scale(sx, sy);
-    if (pose.shear) g.transform(1, 0, pose.shear, 1, 0, 0);
-    g.drawImage(finalImg, -dw / 2, -dh, dw, dh);
-
-    const animObj = this.animSet.right[anim];
-    const frameIdx = animObj
-      ? (animObj.loop === false
-        ? Math.min(Math.floor(this.animT * animObj.fps), animObj.frames.length - 1)
-        : Math.floor(this.animT * animObj.fps) % animObj.frames.length)
-      : 0;
-    
-    // Visible gear draws as registered layers over the body (armor under
-    // helmet, etc). Any equipped slot with a visual in the gear-visuals
-    // registry composites here — new gear slots need no player changes.
-    if (this.flashT <= 0 && !isSwallowed) {
-      const f = this.facing;
-
-      for (const [slot, visual] of gearLayers()) {
-        if (this.equipment.get(slot) === null) continue;
-        const layerSet = f === 1 ? visual.anims.right : visual.anims.left;
-        const layerImg = frameAt(layerSet, anim, this.animT);
-        const anchor = visual.anchors?.[anim]?.[frameIdx] ?? { x: 0, y: 0, angle: 0 };
-
-        g.save();
-        g.translate(anchor.x * f, anchor.y);
-        if (anchor.angle) g.rotate(anchor.angle * f);
-        g.drawImage(layerImg, -dw / 2, -dh, dw, dh);
-        if (DEBUG_ANCHORS) {
-          g.fillStyle = '#ff0000';
-          g.fillRect(-1, -1, 2, 2);
-        }
-        g.restore();
-      }
-    }
-    
-    if (isSwallowed && this.swallowedBy) {
-      this.swallowedBy.def.swallow?.drawPlayerOverlay?.(g, this.swallowedBy, this, dw, dh);
-    }
-    
-    // Equipment visuals ride the same body transform as the knight.
-    if (this.flashT <= 0) {
-      if (this.equipment.get('charm')) this.renderCharm(g, dh);
-      const weapon = this.weapon;
-      drawHeldWeapon(g, weapon.visual, {
-        facing: this.facing,
-        anim,
-        frame: frameIdx,
-        animT: this.animT,
-        bodyW: dw,
-        bodyH: dh,
-        attack: this.fsm.is('attack')
-          ? {
-              progress: Math.min(1, this.fsm.t / this.attackDur),
-              def: this.attackDef!,
-            }
-          : undefined,
-        charge: this.fsm.is('draw') ? this.charge.progress : undefined,
-        // The two moves the KNIGHT owns rather than her steel. A weapon
-        // with nothing to say about them keeps its idle pose, which is
-        // exactly what every melee visual already does.
-        carry: this.fsm.is('shockwave')
-          ? 'stomp'
-          : this.fsm.is('attack') && this.attackDef?.aim === 'down'
-            ? 'plunge'
-            : undefined,
-      });
-    }
-    g.restore();
-    g.globalAlpha = 1;
-
-    if (this.fsm.is('attack') && this.renderTrail) {
-      const weapon = this.weapon;
-      const trailCtx = {
-        x: cx,
-        y: by - dh * 0.45,
-        facing: this.facing,
-        colors: [...weapon.colors],
-        attack: {
-          progress: Math.min(1, this.fsm.t / this.attackDur),
-          def: this.attackDef!,
-        },
-      };
-      // Impact Drop's fallback belongs to the knight, not the steel, so
-      // it draws its own arc — a bow registers no trail, and routing it
-      // through the weapon visual left a damaging plunge with nothing on
-      // screen to read.
-      if (this.attackDef === IMPACT_DROP_PLUNGE) drawNeutralTrail(g, trailCtx);
-      else drawWeaponTrail(g, weapon.visual, trailCtx);
-    }
-
-    // Guard flash: a bright crescent in front while the parry window is
-    // open — the readable "now" of the deflect.
-    if (this.fsm.is('parry') && this.parrying) {
-      const gx = cx + this.facing * 7;
-      const gy = by - dh * 0.5;
-      g.save();
-      g.globalAlpha = 0.5 + 0.3 * Math.sin(this.animT * 40);
-      g.strokeStyle = COLORS.white;
-      g.lineWidth = 1.4;
-      g.beginPath();
-      g.arc(gx, gy, 7, this.facing === 1 ? -1.1 : Math.PI + 1.1, this.facing === 1 ? 1.1 : Math.PI - 1.1);
-      g.stroke();
-      g.globalAlpha = 1;
-      g.restore();
-    }
-    // Riposte charge: a small gold spark orbiting the blade hand.
-    if (this.riposteT > 0 && !this.fsm.is('parry')) {
-      const a = this.animT * 8;
-      g.fillStyle = COLORS.gold;
-      g.fillRect(Math.round(cx + this.facing * 6 + Math.cos(a) * 3), Math.round(by - dh * 0.55 + Math.sin(a) * 3), 1.5, 1.5);
-    }
+    renderPlayer(this, g);
   }
-
-  /** A small charm glint on the chest when a charm is worn. */
-  private renderCharm(g: CanvasRenderingContext2D, dh: number): void {
-    const cy = -Math.round(dh * 0.5);
-    g.fillStyle = COLORS.gold;
-    g.fillRect(-1, cy, 2, 2);
-    g.fillStyle = COLORS.white;
-    g.fillRect(0, cy, 1, 1);
-  }
-
 }
 
 const PLAYER_STATES: Record<string, StateDef<Player>> = {
