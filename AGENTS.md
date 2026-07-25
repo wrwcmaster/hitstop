@@ -79,6 +79,17 @@ When changing `SaveData`:
   to the game's runtime forever, and it is the kind of code nobody dares
   delete later.
 
+The line between the first bullet and the last is what the code must be
+checkable against: `data.foo ?? DEFAULT` is a **default** for a field
+that may be absent, and is fine. Anything that reads an *older shape* and
+translates it — dealing a flat list into per-class buckets, inferring a
+flag from a retired one, copying a previous store forward — is a
+**migration**, and is not. This rule is kept true, not aspirational: the
+save loader, `PlayScene`'s run start, and `settings.ts` each carried one
+of those three and all three were deleted (save `SlotVault` version 3 →
+4) rather than left as exceptions. The same applies to settings and any
+other persisted store, not just `SaveData`.
+
 Accepting a rough edge is fine here: a demo save that loads but can no
 longer reach some content is a "start a new game", not a bug to engineer
 around. Say so in the PR rather than building a migration.

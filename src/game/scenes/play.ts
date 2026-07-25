@@ -388,11 +388,6 @@ export class PlayScene implements Scene {
     if (save) {
       restorePlayer(this.player, save.player);
       this.flags = new Set(save.flags);
-      // Legacy saves predate per-boss slain flags: their 'bossDefeated'
-      // could only have meant the Slime King.
-      if (this.flags.has('bossDefeated') && ![...this.flags].some((f) => f.startsWith('slain:'))) {
-        this.flags.add('slain:slime-king');
-      }
       this.firedTriggers = { ...save.firedTriggers };
       this.best = Math.max(this.best, save.best);
       this.pendingWave = save.wave ?? 0; // resume a saved gauntlet mid-run
