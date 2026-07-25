@@ -165,6 +165,11 @@ Details and code samples: `docs/adding-content.md`. The short version —
   above the head; `pogo: <speed>` makes an airborne down-hit bounce her
   up with air jumps and the dash refreshed. Plunges ride gravity and
   finish on landing; only grounded swings advance the combo chain.
+  The plunge is special: it is **Impact Drop**, a boss-earned verb (see
+  earnables), so it is gated on `earned.has('impact-drop')` rather than
+  on the weapon owning a `plunge`, it is checked BEFORE the ranged
+  branch, and a type without one falls back to `IMPACT_DROP_PLUNGE`.
+  That is what lets a bow use the same traversal move a sword does.
 - **Ranged weapon / ballistic shot**: give a weapon type a `ranged`
   block (`projectile: 'arrow'|'bullet'`, `speed`, `gravity`, `cooldown`,
   `recoil`) — the attack button then shoots instead of swinging (melee

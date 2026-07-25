@@ -283,6 +283,34 @@ const attack = (
  * forward hitbox width, `arc` the vertical coverage, `heft` scales
  * damage/feel for heavier steel.
  */
+/**
+ * Impact Drop's fallback: the plunge you get when your weapon has none.
+ *
+ * Impact Drop is a MOVEMENT verb earned from a boss, not a property of
+ * steel, so a bow or a flintlock must be able to use it too — and those
+ * types ship `attacks: []` with no `plunge` of their own. Rather than
+ * teach every ranged type a melee move, the player falls back to this:
+ * the knight herself is the weapon, dropping knees-first.
+ *
+ * Weaker and stubbier than an authored weapon plunge (that is the point —
+ * a sword should reward you for bringing it), but it keeps the pogo, so
+ * the traversal use is identical whatever you are carrying.
+ */
+export const IMPACT_DROP_PLUNGE: WeaponAttackDef = attack({
+  animation: 'plunge',
+  duration: 0.8,
+  active: [0.06, 1],
+  damageScale: 0.7,
+  strength: 0.5,
+  lunge: 0,
+  aim: 'down',
+  pogo: 230,
+  hitbox: { forward: -2, y: 0, w: 12, h: 11 },
+  trail: { startAngle: 0.6, endAngle: 2.54, radius: 9, thickness: 3 },
+  movementKeep: 0.9,
+  bodyWeight: 1.1,
+});
+
 const contextuals = (p: { reach: number; arc: number; heft: number }) => ({
   // Jump attack: a quick mid-air swipe that keeps your momentum.
   // Every contextual names its OWN animation. Sheets satisfy a slot

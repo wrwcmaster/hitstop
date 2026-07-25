@@ -43,6 +43,7 @@ import { COLORS } from '../content/palette';
 import {
   weaponDefOf,
   weaponTypeOf,
+  IMPACT_DROP_PLUNGE,
   type WeaponAttackDef,
   type WeaponDef,
 } from '../content/weapons';
@@ -282,6 +283,25 @@ export class Player extends Actor {
   private dashStrike: Strike | null = null;
 
   fsm: FSM<Player>;
+
+  /**
+   * How many midair jumps this knight gets.
+   *
+   * Air Step is a boss-earned verb, so ownership comes from `earned` —
+   * not from `capabilities`, which is the class kit and is wiped on every
+   * class change.
+   *
+   * Without the verb the answer is zero no matter what the tree says.
+   * That early return is the whole point: `extraAirJumps` MULTIPLIES an
+   * ability you already won rather than adding up to one, so a class node
+   * can never quietly hand over a verb the player is supposed to take
+   * from a boss — while still leaving room for a node that makes the verb
+   * better once it is hers.
+   */
+  private maxAirJumps(): number {
+    if (!this.earned.has('air-step')) return 0;
+    return 1 + this.capabilities.modifier('extraAirJumps', 0);
+  }
 
   constructor(
     public game: ActorHost,
@@ -615,23 +635,35 @@ export class Player extends Actor {
       // bow) enter the draw state — the shot leaves on RELEASE, at a
       // power the hold decides. Uncharged ones (the flintlock) fire on
       // the press as ever, straight into the recoil brace.
-      const rangedType = weaponTypeOf(this.weapon);
-      if (rangedType.ranged) {
+      const type = weaponTypeOf(this.weapon);
+      const dry = this.submersion <= 0.2;
+      // Impact Drop is checked FIRST, ahead of the ranged branch below,
+      // because it is a movement verb the knight owns rather than
+      // something her weapon does: a bow that shot here instead could
+      // never use the traversal move at all. The gate is ownership, not
+      // whether the weapon defines a plunge — one without falls back to
+      // IMPACT_DROP_PLUNGE when the move is resolved.
+      if (!this.onGround && dry && this.input.held('down') && this.earned.has('impact-drop')) {
+        this.attackContext = 'plunge';
+        return 'attack';
+      }
+      // Ranged steel shoots instead of swinging. Charged weapons (the
+      // bow) enter the draw state — the shot leaves on RELEASE, at a
+      // power the hold decides. Uncharged ones (the flintlock) fire on
+      // the press as ever, straight into the recoil brace.
+      if (type.ranged) {
         if (this.rangedCd <= 0) {
-          if (rangedType.ranged.charge) return 'draw';
+          if (type.ranged.charge) return 'draw';
           this.pendingRanged = true;
           return 'cast';
         }
         return; // dry-fire: the reload isn't done
       }
-      // Context picks the move: airborne+down plunges, up-held swings
-      // overhead, airborne swipes aerial, grounded runs the combo chain.
-      // Not in water, though: tucking down there is how you hold depth,
-      // so a submerged swing stays a swipe at what's beside you.
-      const type = weaponTypeOf(this.weapon);
-      const dry = this.submersion <= 0.2;
-      if (!this.onGround && dry && this.input.held('down') && type.plunge) this.attackContext = 'plunge';
-      else if (this.input.held('up') && type.upper) this.attackContext = 'upper';
+      // Context picks the move: up-held swings overhead, airborne swipes
+      // aerial, grounded runs the combo chain. Not in water, though:
+      // tucking down there is how you hold depth, so a submerged swing
+      // stays a swipe at what's beside you.
+      if (this.input.held('up') && type.upper) this.attackContext = 'upper';
       else if (!this.onGround && type.aerial) this.attackContext = 'aerial';
       else this.attackContext = 'ground';
       return 'attack';
@@ -827,7 +859,7 @@ export class Player extends Actor {
     this.parriedThisWindow = true;
     this.riposteT = T.riposteTime;
     this.dashCd = 0; // the counter footwork is free
-    this.airJumps = this.capabilities.modifier('airJumps', 0);
+    this.airJumps = this.maxAirJumps();
     this.feel.sfx.play('parry');
     this.feel.flash(0.14, COLORS.gold);
     this.feel.shake(0.35);
@@ -848,7 +880,14 @@ export class Player extends Actor {
       this.attackDef = type.attacks[this.attackIndex];
     } else {
       // Contextual moves sit outside the combo chain (and never advance it).
-      const table = { aerial: type.aerial, plunge: type.plunge, upper: type.upper, dash: type.dashAttack };
+      // A weapon's own plunge when it has one, the knight's body when it
+      // doesn't — Impact Drop belongs to her, not to the steel.
+      const table = {
+        aerial: type.aerial,
+        plunge: type.plunge ?? IMPACT_DROP_PLUNGE,
+        upper: type.upper,
+        dash: type.dashAttack,
+      };
       this.attackDef = table[ctx] ?? type.attacks[0];
       this.attackIndex = 0;
     }
@@ -902,7 +941,7 @@ export class Player extends Actor {
       // refreshes the air — chain plunges Hollow Knight style.
       if (hits.length && attack.pogo && !this.onGround) {
         this.vy = -attack.pogo;
-        this.airJumps = this.capabilities.modifier('airJumps', 0);
+        this.airJumps = this.maxAirJumps();
         this.dashCd = 0;
         this.squash = 1.35;
         this.feel.burst(this.cx, this.y + this.h, 8, {
@@ -1239,7 +1278,7 @@ export class Player extends Actor {
 
     if (this.onGround) {
       this.coyote.set();
-      this.airJumps = this.capabilities.modifier('airJumps', 0);
+      this.airJumps = this.maxAirJumps();
       if (!this.wasGround && fallSpeed > 240) {
         // Landing feedback scales with impact speed.
         this.squash = 0.6;
