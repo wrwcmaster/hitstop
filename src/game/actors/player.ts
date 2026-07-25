@@ -163,8 +163,14 @@ export const PLAYER_TUNING = {
   wallJumpX: 190,
   wallJumpY: 300,
   // Long enough to leave the wall behind while still holding toward it,
-  // short enough that a deliberate re-grip on the way up still lands.
-  regripLock: 0.16,
+  // short enough that the grab on the FAR side still lands. A narrow
+  // shaft is the binding case: 32px crossed at wallJumpX takes about
+  // 0.17s, so a lock near that swallows the arrival and the climb stalls.
+  regripLock: 0.09,
+  // How long a touched wall is remembered. Long enough to bridge the
+  // frames where resting flush produces no overlap, short enough that
+  // leaving one really does end the grip.
+  wallStick: 0.12,
   hurtInvuln: 1.1,
   // Health and mana are point pools, not icon counts — 100/60 rather
   // than 5/3 hearts. Big enough that a light graze and a heavy slam can
@@ -314,6 +320,18 @@ export class Player extends Actor {
   private regripT = 0;
   /** Which wall is being held (-1 left, +1 right); only valid in `cling`. */
   private clingSide: -1 | 0 | 1 = 0;
+  /**
+   * The wall most recently touched, and how long that memory has left.
+   *
+   * Resting flush against a wall produces NO overlap, so the contact that
+   * proves it exists only on the frames she actually pushes into it — it
+   * flickers on and off. Demanding a live contact every frame to STAY
+   * clinging therefore drops her a frame after she grabs on, and she
+   * oscillates between holding and falling. So the wall is remembered for
+   * a breath, exactly as `coyote` remembers the ground for one.
+   */
+  private wallSeenSide: -1 | 0 | 1 = 0;
+  private wallSeenT = 0;
 
   /**
    * Which side has a wall worth gripping: -1 left, +1 right, 0 none.
@@ -348,7 +366,7 @@ export class Player extends Actor {
     if (this.onGround || this.regripT > 0) return 0;
     if (this.submersion > 0.2) return 0;
     if (this.fsm.is('dead', 'dash', 'swallowed')) return 0;
-    const side = this.grippableSide();
+    const side = this.wallSeenT > 0 ? this.wallSeenSide : this.grippableSide();
     if (side === 0) return 0;
     return this.input.axis('left', 'right') === side ? side : 0;
   }
@@ -1105,7 +1123,8 @@ export class Player extends Actor {
     // Let go: stop holding toward the wall, or hold away from it.
     if (this.input.axis('left', 'right') !== side) return 'move';
     // The wall ran out, or the floor arrived.
-    if (this.onGround || this.grippableSide() !== side) return 'move';
+    if (this.onGround) return 'move';
+    if (!(this.wallSeenT > 0 && this.wallSeenSide === side)) return 'move';
     if (this.submersion > 0.2) return 'move';
 
     // Still holding on: slide, don't hang.
@@ -1406,6 +1425,16 @@ export class Player extends Actor {
     // not merely that it stopped. They are read on the next frame's FSM
     // pass, which runs before this one — a frame of lag no one can feel.
     this.contacts = moveAndCollide(this, dt, this.collision, { dropThrough: this.dropT > 0 });
+    // Remember the wall while it is genuinely there; let the memory lapse
+    // once she is clear of it (see wallSeenSide).
+    const touched = this.grippableSide();
+    if (touched !== 0) {
+      this.wallSeenSide = touched;
+      this.wallSeenT = PLAYER_TUNING.wallStick;
+    } else {
+      this.wallSeenT = Math.max(0, this.wallSeenT - dt);
+      if (this.wallSeenT === 0) this.wallSeenSide = 0;
+    }
 
     // Hazard tiles (spikes): a bite of health and a launch clear of the danger.
     // Dashing skims across; i-frames blink through.
@@ -1459,6 +1488,13 @@ export class Player extends Actor {
   private runControls(dt: number): void {
     const T = PLAYER_TUNING;
     const speed = this.stats.get('speed'); // buffs/debuffs live here
+    // Just kicked off a wall: the stick is almost always still pushed
+    // INTO it, and steering would cancel the kick on the very next frame
+    // — the knight would peel off and slide back down instead of
+    // crossing. So the kick owns her horizontal motion for a moment.
+    // Same window as the re-grip lock: both exist to let a wall jump
+    // actually leave the wall.
+    if (this.regripT > 0 && !this.onGround) return;
     const dir = this.input.axis('left', 'right');
     if (dir !== 0) {
       this.facing = dir as 1 | -1;
