@@ -50,6 +50,28 @@ keys bypass the input system) won't reproduce, and co-op runs are
 skipped (network play can't replay — the recording is marked
 `tainted`).
 
+## The recordings
+
+`recordings/` is the regression suite `npm run replay` runs. Two kinds:
+
+- **Whole-run tapes** (`human-live`, `sonnet-wave1`, `well-seam`, ...) — a
+  real playthrough, broad and shallow.
+- **Verb tapes** (`verb-*`) — one boss verb each, scripted through this
+  bridge, and each one **paired with a `-locked` twin that feeds the exact
+  same inputs to a knight who has not earned it**. The pair is the test: a
+  verb that silently stops gating, or silently stops working, breaks
+  exactly one of the two. Ability ownership and changed geometry are both
+  in the hashed state (`player.earned`, `patches`), so divergence catches
+  either directly rather than only through knock-on movement.
+
+  `verb-shockwave-bow` is the odd one out: same verb, a bow instead of a
+  sword, proving the wave belongs to the knight rather than to her steel.
+
+When scripting a tape here, note that **`POST /save` writes whichever
+session is current** — take each recording immediately after its own run,
+or a paired locked run started next will be the one written under the
+unlocked name.
+
 ## Agent (turn-based) play
 
 The bridge stops the game loop; time only passes when you POST a step, so

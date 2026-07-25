@@ -37,7 +37,16 @@ export interface HarnessState {
   player?: {
     x: number; y: number; vx: number; vy: number;
     hp: number; maxHp: number; gold: number; dead: boolean;
+    /**
+     * Permanent unlocks she owns, in registration order. Omitted while
+     * she owns none, so a run that never touches a boss verb hashes
+     * exactly as it did before verbs existed — which is what keeps
+     * recordings made before them valid regression tests.
+     */
+    earned?: string[];
   };
+  /** Geometry this run has changed (see PlayScene.replayState). Omitted at zero. */
+  patches?: number;
   monsters: { type: string; x: number; y: number; hp: number }[];
   pickups: number;
 }
@@ -66,12 +75,15 @@ export function attachHarness(game: ActionGame): void {
         out.roomId = p.roomId;
         out.score = p.score;
         out.wave = p.wave;
+        if (p.patches) out.patches = p.patches;
       }
       for (const e of game.world.all()) {
         if (e instanceof Player) {
+          const earned = e.earned.list();
           out.player = {
             x: r2(e.x), y: r2(e.y), vx: r2(e.vx), vy: r2(e.vy),
             hp: e.hp, maxHp: e.maxHp, gold: e.gold, dead: e.dead,
+            ...(earned.length ? { earned } : {}),
           };
         } else if (e instanceof Monster) {
           out.monsters.push({ type: e.type, x: r2(e.x), y: r2(e.y), hp: e.hp });

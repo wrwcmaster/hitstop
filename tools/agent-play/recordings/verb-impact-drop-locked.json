@@ -1,0 +1,1 @@
+{"v":3,"seed":2654443195,"mode":"harness","created":"2026-07-25T08:54:55.976Z","start":{"kind":"scenario","scenario":{"room":"underground","player":{"earned":[],"equip":["rusty-sword"],"x":276,"y":40,"hp":100}}},"storage":{},"tape":[[8,"d","down"],[8,"d","attack"],[12,"u","attack"],[112,"u","down"]],"checks":[[60,1855247335],[120,3982772020],[172,1129251899]],"end":172}
