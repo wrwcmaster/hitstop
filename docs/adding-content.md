@@ -543,7 +543,9 @@ Query it from anywhere holding the player — `player.earned.has('impact-drop')`
 
 ## Saves
 
-`src/game/save.ts` defines the save shape: current room, inventory/equipment/skills, story flags, fired one-shot triggers, best score. Checkpoints happen automatically at every room entrance and on boss defeat; death returns you to the last checkpoint at full HP. To persist a new thing, add it to `SaveData` and bump the `JsonStore` version (old saves invalidate cleanly).
+`src/game/save.ts` defines the save shape: current room, inventory/equipment/skills, story flags, fired one-shot triggers, best score. Checkpoints happen automatically at every room entrance and on boss defeat; death returns you to the last checkpoint at full HP. To persist a new thing, add it to `SaveData` — an optional field (`foo?: T`) just works, since old saves take the default; a change that would strand or corrupt old saves bumps the `SlotVault` version instead, and they invalidate cleanly.
+
+**The game is in demo phase, so save compatibility is not a design constraint** — do not write in-game migration code that reconstructs state from an older save's contents. A demo save that loads but can't reach some content is a "start a new game". See the *Save compatibility* section in [AGENTS.md](../AGENTS.md); after release this flips to a standalone migration pipeline that lives outside the game.
 
 ## A song (BGM)
 

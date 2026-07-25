@@ -34,7 +34,7 @@ import { COLORS } from '../content/palette';
 import { ROOMS, START_ROOM } from '../content/rooms';
 import { earnableDef } from '@engine/index';
 import { DEFAULT_SONG } from '../content/music';
-import { saveStore, slotStore, newestSave, snapshotPlayer, restorePlayer, backfillEarned, type SaveData } from '../save';
+import { saveStore, slotStore, newestSave, snapshotPlayer, restorePlayer, type SaveData } from '../save';
 import type { PlayHost } from './play/host';
 import { WaveDirector } from './play/waves';
 import { triggerActions, doorLocked } from './play/trigger-actions';
@@ -393,11 +393,6 @@ export class PlayScene implements Scene {
       if (this.flags.has('bossDefeated') && ![...this.flags].some((f) => f.startsWith('slain:'))) {
         this.flags.add('slain:slime-king');
       }
-      // Saves older than earnables record which bosses fell but own no
-      // rewards, and a felled boss never comes back — so hand over what
-      // their own history already earned. After the slain migration
-      // above, which is where the oldest saves get their flag.
-      backfillEarned(this.player, save.player, this.flags);
       this.firedTriggers = { ...save.firedTriggers };
       this.best = Math.max(this.best, save.best);
       this.pendingWave = save.wave ?? 0; // resume a saved gauntlet mid-run
