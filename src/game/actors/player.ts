@@ -7,6 +7,8 @@ import {
   Projectile,
   applyGravity,
   moveAndCollide,
+  type CollisionResult,
+  type CollisionContact,
   frameAt,
   whiteOf,
   tintOf,
@@ -150,6 +152,19 @@ export const PLAYER_TUNING = {
   parryStagger: 0.55, // how long a parried melee attacker is stunned
   riposteTime: 1.3, // window to cash in the empowered counter
   riposteBonus: 60, // extra damage on the riposte swing
+  /* ---- Wall Grip ---- */
+  // A slow slide rather than a full stop: the knight is holding on, not
+  // parked, and the drift tells you the grip is a moment you spend
+  // rather than a place you live. No stamina meter — the design brief
+  // asks for forgiving, and gravity already sets the clock.
+  clingSlide: 34,
+  // The kick: horizontal enough to clear the wall and cross a shaft,
+  // vertical enough to gain height on each side of one.
+  wallJumpX: 190,
+  wallJumpY: 300,
+  // Long enough to leave the wall behind while still holding toward it,
+  // short enough that a deliberate re-grip on the way up still lands.
+  regripLock: 0.16,
   hurtInvuln: 1.1,
   // Health and mana are point pools, not icon counts — 100/60 rather
   // than 5/3 hearts. Big enough that a light graze and a heavy slam can
@@ -283,6 +298,60 @@ export class Player extends Actor {
   private dashStrike: Strike | null = null;
 
   fsm: FSM<Player>;
+
+  /** Last step's collision contacts — which surfaces were touched, and
+   * from which side. Wall Grip reads it; see the physics step. */
+  private contacts: CollisionResult | null = null;
+  /**
+   * Blocks re-gripping for a moment after kicking off a wall.
+   *
+   * Without it a wall jump that leaves you still holding *toward* the
+   * wall re-grips on the very next frame, and the knight buzzes in place
+   * instead of leaving — the classic wall-jump jitter. One short lockout
+   * is enough, and it is why the kick sets a heading away from the wall
+   * rather than relying on the player to let go of the stick.
+   */
+  private regripT = 0;
+  /** Which wall is being held (-1 left, +1 right); only valid in `cling`. */
+  private clingSide: -1 | 0 | 1 = 0;
+
+  /**
+   * Which side has a wall worth gripping: -1 left, +1 right, 0 none.
+   *
+   * Symmetric by construction — it asks the collision result for a
+   * contact on each side rather than probing at hand-tuned offsets, so
+   * left and right cannot drift apart. A grip needs a REAL wall: one-way
+   * platforms are not walls (you are meant to pass through their faces),
+   * and the level-extent backstop is not either, or you could cling to
+   * the sky at the edge of the world.
+   */
+  private grippableSide(): -1 | 0 | 1 {
+    const c = this.contacts;
+    if (!c) return 0;
+    const usable = (hit: CollisionContact | null): boolean =>
+      !!hit && !hit.oneWay && !hit.boundary;
+    if (usable(c.left)) return -1;
+    if (usable(c.right)) return 1;
+    return 0;
+  }
+
+  /**
+   * Is the knight in a position to cling right now?
+   *
+   * Earned first — Wall Grip is a boss verb, so without it every wall is
+   * just a wall. Then: airborne, out of the water (clinging to a wall
+   * while swimming would fight the swim controls), not mid-dash or dead,
+   * off the re-grip lockout, and holding TOWARD the side that has one.
+   */
+  private wallGripSide(): -1 | 0 | 1 {
+    if (!this.earned.has('wall-grip')) return 0;
+    if (this.onGround || this.regripT > 0) return 0;
+    if (this.submersion > 0.2) return 0;
+    if (this.fsm.is('dead', 'dash', 'swallowed')) return 0;
+    const side = this.grippableSide();
+    if (side === 0) return 0;
+    return this.input.axis('left', 'right') === side ? side : 0;
+  }
 
   /**
    * How many midair jumps this knight gets.
@@ -668,6 +737,11 @@ export class Player extends Actor {
       else this.attackContext = 'ground';
       return 'attack';
     }
+    // Wall Grip: catch a wall you are pressing into. After the attack
+    // block so a swing still wins — clinging is a recovery, never
+    // something that eats a deliberate input — and before dash so that
+    // falling into a wall you are holding reads as "grab it".
+    if (this.wallGripSide() !== 0) return 'cling';
     if (this.input.consumePress('dash') && this.dashCd <= 0) return 'dash';
     // Shooting is a real action: enter `cast` so the body recoils.
     for (const slot of this.classDef.loadout) {
@@ -974,6 +1048,76 @@ export class Player extends Actor {
     }
   }
 
+  /** Catch the wall: kill the fall, turn to face out from it. */
+  beginCling(): void {
+    this.clingSide = this.wallGripSide();
+    this.vy = 0;
+    this.vx = 0;
+    // Face AWAY from the wall — she is looking where she will go, and it
+    // makes the kick's direction legible before it happens.
+    this.facing = this.clingSide === 1 ? -1 : 1;
+    this.squash = 1.15;
+    this.feel.sfx.play('land');
+    this.feel.burst(this.cx + this.clingSide * this.w * 0.4, this.cy, 5, {
+      color: [COLORS.steel, COLORS.white], speed: 40, life: 0.22,
+      angle: this.clingSide === 1 ? Math.PI : 0, spread: 1.4, drag: 4,
+    });
+  }
+
+  /**
+   * Hold the wall, and leave it on your terms.
+   *
+   * Four ways out, in priority order: kick off (jump), drop off (press
+   * away or let go), dash away, or simply run out of wall. The knight
+   * slides down slowly throughout, so doing nothing is also an exit —
+   * which is what keeps this forgiving rather than a perch.
+   */
+  clingUpdate(dt: number): string | void {
+    const T = PLAYER_TUNING;
+    const side = this.clingSide;
+
+    // Air jumps and the dash come back the moment she catches a wall, so
+    // a shaft can be climbed by alternating sides — the same refresh a
+    // pogo grants, for the same reason.
+    this.airJumps = this.maxAirJumps();
+    this.dashCd = 0;
+
+    // Kick off: away from the wall and up, and lock the re-grip so the
+    // held direction cannot immediately drag her back on.
+    if (this.jumpBuf.active) {
+      this.jumpBuf.consume();
+      this.vx = -side * T.wallJumpX;
+      this.vy = -T.wallJumpY;
+      this.facing = -side === 1 ? 1 : -1;
+      this.regripT = T.regripLock;
+      this.squash = 1.4;
+      this.feel.sfx.play('jump');
+      this.feel.burst(this.cx + side * this.w * 0.4, this.cy, 8, {
+        color: [COLORS.white, COLORS.steel], speed: 70, life: 0.3,
+        angle: side === 1 ? Math.PI : 0, spread: 1.8, drag: 3,
+      });
+      return 'move';
+    }
+    if (this.input.consumePress('dash') && this.dashCd <= 0) {
+      this.regripT = T.regripLock; // dashing away shouldn't re-grip either
+      return 'dash';
+    }
+    // Let go: stop holding toward the wall, or hold away from it.
+    if (this.input.axis('left', 'right') !== side) return 'move';
+    // The wall ran out, or the floor arrived.
+    if (this.onGround || this.grippableSide() !== side) return 'move';
+    if (this.submersion > 0.2) return 'move';
+
+    // Still holding on: slide, don't hang.
+    this.vx = side * 6; // stay pressed in so the contact survives the step
+    this.vy = Math.min(this.vy, T.clingSlide);
+    if (Math.random() < dt * 8) {
+      this.feel.burst(this.cx + side * this.w * 0.4, this.cy + this.h * 0.3, 1, {
+        color: [COLORS.steelDark], speed: 18, life: 0.25, drag: 4, grav: 120,
+      });
+    }
+  }
+
   beginDash(): void {
     const T = PLAYER_TUNING;
     // GALE DASH (tidecaller) shortens the wait between dashes.
@@ -1116,6 +1260,7 @@ export class Player extends Actor {
     this.dashCd = Math.max(0, this.dashCd - dt);
     this.rangedCd = Math.max(0, this.rangedCd - dt);
     this.parryCd = Math.max(0, this.parryCd - dt);
+    this.regripT = Math.max(0, this.regripT - dt);
     this.riposteT = Math.max(0, this.riposteT - dt);
     this.skills.update(dt);
     this.statuses.update(dt);
@@ -1257,7 +1402,10 @@ export class Player extends Actor {
 
     const fallSpeed = this.vy;
     if (this.dropT > 0) this.dropT -= dt;
-    moveAndCollide(this, dt, this.collision, { dropThrough: this.dropT > 0 });
+    // Keep the contacts: Wall Grip needs to know WHICH side it touched,
+    // not merely that it stopped. They are read on the next frame's FSM
+    // pass, which runs before this one — a frame of lag no one can feel.
+    this.contacts = moveAndCollide(this, dt, this.collision, { dropThrough: this.dropT > 0 });
 
     // Hazard tiles (spikes): a bite of health and a launch clear of the danger.
     // Dashing skims across; i-frames blink through.
@@ -1566,6 +1714,10 @@ const PLAYER_STATES: Record<string, StateDef<Player>> = {
   attack: {
     enter: (p) => p.beginAttack(),
     update: (p, dt) => p.attackUpdate(dt),
+  },
+  cling: {
+    enter: (p) => p.beginCling(),
+    update: (p, dt) => p.clingUpdate(dt),
   },
   dash: {
     enter: (p) => p.beginDash(),
