@@ -196,12 +196,22 @@ defineTreeNode<TreeCtx>('s1', {
   mods: { mult: { speed: 1.15 } },
 });
 
+/**
+ * Once the double jump itself; now the second one.
+ *
+ * The midair jump became AIR STEP, a permanent verb won from a boss, so
+ * a class node must not hand it out — beating the boss has to be the way
+ * you get it. The node keeps its place in the WIND chain (it gates GALE
+ * DASH) and its movement flavour by ADDING a step on top: worthless
+ * until Air Step is earned, and the say-so is in the description rather
+ * than hidden, so nobody buys it expecting a double jump.
+ */
 defineTreeNode<TreeCtx>('v4', {
   name: 'SKY DANCER',
-  desc: 'Double jump: press jump again in the air',
+  desc: 'One more Air Step (needs the AIR STEP ability)',
   cost: 3, branch: 1, tier: 1, requires: ['s1'],
   onUnlock({ player }) {
-    player.capabilities.setModifier('airJumps', 1);
+    player.capabilities.setModifier('extraAirJumps', 1);
   },
 });
 

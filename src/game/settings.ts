@@ -30,22 +30,6 @@ export const settingsStore = new JsonStore<Settings>('hitstop.settings', 3);
  * v3 stores only what the player actually rebound, so untouched keys
  * always track the current defaults.
  */
-const legacyStore = new JsonStore<Settings>('hitstop.settings', 2);
-
-/** Carry volumes and language forward; drop the frozen binding snapshots. */
-function migrateLegacy(): Settings | null {
-  const old = legacyStore.load();
-  if (!old) return null;
-  const moved: Settings = {
-    master: old.master,
-    music: old.music,
-    sfx: old.sfx,
-    locale: old.locale,
-  };
-  settingsStore.save(moved);
-  return moved;
-}
-
 type Bindings = Record<string, Action | Action[]>;
 
 /**
@@ -75,7 +59,7 @@ function applyChanges(defaults: Bindings, changes: Record<string, Action[]>): Bi
 }
 
 export function loadSettings(game: ActionGame): void {
-  const s = settingsStore.load() ?? migrateLegacy();
+  const s = settingsStore.load();
   if (!s) return;
   game.audio.setVolume('master', s.master);
   game.audio.setVolume('music', s.music);

@@ -38,16 +38,8 @@ export function defineClass(id: string, def: ClassDef): void {
   classes.register(id, def);
 }
 
-/** New knights start here (and old saves migrate here). */
+/** New knights start here, and a save with no class recorded defaults here. */
 export const DEFAULT_CLASS = 'knight';
-
-/** Which class's grid contains this tree node (old-save migration). */
-export function classOfNode(nodeId: string): string | null {
-  for (const [id, def] of classes.entries()) {
-    if (def.grid.some((branch) => branch.includes(nodeId))) return id;
-  }
-  return null;
-}
 
 defineClass('knight', {
   name: 'KNIGHT',

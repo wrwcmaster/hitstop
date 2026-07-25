@@ -32,7 +32,7 @@ import { SaveSlotsScene } from './saveslots';
 import { Background } from './background';
 import { COLORS } from '../content/palette';
 import { ROOMS, START_ROOM } from '../content/rooms';
-import { earnableDef } from '@engine/index';
+import { earnableDef, earnables } from '@engine/index';
 import { DEFAULT_SONG } from '../content/music';
 import { saveStore, slotStore, newestSave, snapshotPlayer, restorePlayer, type SaveData } from '../save';
 import type { PlayHost } from './play/host';
@@ -388,11 +388,6 @@ export class PlayScene implements Scene {
     if (save) {
       restorePlayer(this.player, save.player);
       this.flags = new Set(save.flags);
-      // Legacy saves predate per-boss slain flags: their 'bossDefeated'
-      // could only have meant the Slime King.
-      if (this.flags.has('bossDefeated') && ![...this.flags].some((f) => f.startsWith('slain:'))) {
-        this.flags.add('slain:slime-king');
-      }
       this.firedTriggers = { ...save.firedTriggers };
       this.best = Math.max(this.best, save.best);
       this.pendingWave = save.wave ?? 0; // resume a saved gauntlet mid-run
@@ -452,6 +447,11 @@ export class PlayScene implements Scene {
       this.player.equipment.equip(id);
     }
     this.player.syncStats();
+    // Boss verbs, without the boss: a scenario that wants to exercise
+    // Impact Drop or Air Step starts already owning them.
+    for (const id of pl.earned ?? []) {
+      if (earnables.has(id)) this.player.earned.grant(id, { game: this.player.game, player: this.player });
+    }
     if (pl.hp != null) this.player.hp = clamp(pl.hp, 1, this.player.maxHp);
 
     this.flags.clear();

@@ -79,6 +79,17 @@ When changing `SaveData`:
   to the game's runtime forever, and it is the kind of code nobody dares
   delete later.
 
+The line between the first bullet and the last is what the code must be
+checkable against: `data.foo ?? DEFAULT` is a **default** for a field
+that may be absent, and is fine. Anything that reads an *older shape* and
+translates it — dealing a flat list into per-class buckets, inferring a
+flag from a retired one, copying a previous store forward — is a
+**migration**, and is not. This rule is kept true, not aspirational: the
+save loader, `PlayScene`'s run start, and `settings.ts` each carried one
+of those three and all three were deleted (save `SlotVault` version 3 →
+4) rather than left as exceptions. The same applies to settings and any
+other persisted store, not just `SaveData`.
+
 Accepting a rough edge is fine here: a demo save that loads but can no
 longer reach some content is a "start a new game", not a bug to engineer
 around. Say so in the PR rather than building a migration.
@@ -165,6 +176,11 @@ Details and code samples: `docs/adding-content.md`. The short version —
   above the head; `pogo: <speed>` makes an airborne down-hit bounce her
   up with air jumps and the dash refreshed. Plunges ride gravity and
   finish on landing; only grounded swings advance the combo chain.
+  The plunge is special: it is **Impact Drop**, a boss-earned verb (see
+  earnables), so it is gated on `earned.has('impact-drop')` rather than
+  on the weapon owning a `plunge`, it is checked BEFORE the ranged
+  branch, and a type without one falls back to `IMPACT_DROP_PLUNGE`.
+  That is what lets a bow use the same traversal move a sword does.
 - **Ranged weapon / ballistic shot**: give a weapon type a `ranged`
   block (`projectile: 'arrow'|'bullet'`, `speed`, `gravity`, `cooldown`,
   `recoil`) — the attack button then shoots instead of swinging (melee

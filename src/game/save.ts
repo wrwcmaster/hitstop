@@ -1,6 +1,6 @@
 import { SlotVault, t, type JsonStore, type ItemStack } from '@engine/index';
 import type { Player } from './actors/player';
-import { classOfNode, DEFAULT_CLASS } from './content/classes';
+import { DEFAULT_CLASS } from './content/classes';
 
 /**
  * Save games. A save is a checkpoint at a room entrance: which room,
@@ -26,8 +26,6 @@ export interface SaveData {
     skills: string[];
     gold: number;
     progression: { xp: number; level: number; skillPoints: number };
-    /** Legacy: the active class's unlocked nodes (kept for old readers). */
-    tree: string[];
     /** Active class id (absent in old saves → knight). */
     classId?: string;
     /** Every class's unlocked nodes, active and dormant alike. */
@@ -51,7 +49,11 @@ export interface SaveData {
 
 /** Autosave + manual slots (the town made saving a habit). */
 export const SAVE_SLOT_COUNT = 3;
-const vault = new SlotVault<SaveData>('hitstop.save', 3, SAVE_SLOT_COUNT, (d) => d.savedAt ?? 0);
+// Version 4 dropped the pre-class save shape (a flat `tree` list) and the
+// legacy `bossDefeated` flag rather than keep code to translate them. Old
+// saves invalidate cleanly here, which is the demo-phase bargain: see
+// "Save compatibility" in AGENTS.md.
+const vault = new SlotVault<SaveData>('hitstop.save', 4, SAVE_SLOT_COUNT, (d) => d.savedAt ?? 0);
 
 /** The autosave (checkpoints). Slot 0 in the slots UI. */
 export const saveStore = vault.store(0);
@@ -81,7 +83,6 @@ export function snapshotPlayer(p: Player): SaveData['player'] {
     skills: [...p.skills.known],
     gold: p.gold,
     progression: p.progression.snapshot(),
-    tree: p.tree.ownedIds(),
     classId: p.classId,
     trees: p.snapshotTrees(),
     quests: p.quests.snapshot(),
@@ -89,17 +90,6 @@ export function snapshotPlayer(p: Player): SaveData['player'] {
     armorWear: { ...p.armorWear },
     earned: p.earned.list(),
   };
-}
-
-/** Pre-class saves held one flat node list; deal it out to the class
- * whose tree grid contains each node (unclaimed nodes are dropped). */
-function migrateFlatTree(flat: string[]): Record<string, string[]> {
-  const trees: Record<string, string[]> = {};
-  for (const id of flat) {
-    const cls = classOfNode(id);
-    if (cls) (trees[cls] ??= []).push(id);
-  }
-  return trees;
 }
 
 export function restorePlayer(p: Player, data: SaveData['player']): void {
@@ -110,9 +100,10 @@ export function restorePlayer(p: Player, data: SaveData['player']): void {
   p.gold = data.gold;
   p.progression.restore(data.progression);
   // Class + trees: re-applies class mods, stat mods, and onUnlock
-  // effects (learned skills) without cost. Old flat saves migrate by
-  // sorting each node into the class whose grid contains it.
-  p.restoreClasses(data.classId ?? DEFAULT_CLASS, data.trees ?? migrateFlatTree(data.tree));
+  // effects (learned skills) without cost. Absent fields take their
+  // defaults — that is a default, not a migration: nothing here
+  // reconstructs state from an older save's shape.
+  p.restoreClasses(data.classId ?? DEFAULT_CLASS, data.trees ?? {});
   // After the class settles its loadout: any extra known skills
   // (class change wipes and replays the book, so this must come last).
   for (const id of data.skills) p.skills.learn(id);
