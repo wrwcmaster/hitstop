@@ -1073,7 +1073,12 @@ export class Player extends Actor {
     this.vx = 0;
     // Face AWAY from the wall — she is looking where she will go, and it
     // makes the kick's direction legible before it happens.
-    this.facing = this.clingSide === 1 ? -1 : 1;
+    //
+    // Only when there IS a wall, though: a co-op guest replays the host's
+    // state name onto a puppet that has no input of its own, so this hook
+    // runs with no side. Forcing a facing there would overwrite the one
+    // the snapshot just delivered and point every remote climber right.
+    if (this.clingSide !== 0) this.facing = this.clingSide === 1 ? -1 : 1;
     this.squash = 1.15;
     this.feel.sfx.play('land');
     this.feel.burst(this.cx + this.clingSide * this.w * 0.4, this.cy, 5, {
