@@ -39,12 +39,16 @@ export class CoopHost {
   /** Set when the guest vanishes; the scene shows a banner and detaches. */
   dropped = false;
   /**
-   * Room + patch we last put on the wire. Geometry barely ever changes,
-   * so resending it 20 times a second would be pure waste — but a guest
-   * that missed the one snapshot carrying it would stand on a floor that
-   * is no longer there. The channel is ordered and reliable, so
-   * send-on-change is enough, and folding the room id into the key means
-   * walking into a room always re-sends whatever that room has.
+   * Room + patch revision we last put on the wire. Geometry barely ever
+   * changes, so resending it 20 times a second would be pure waste — but
+   * a guest that missed the one snapshot carrying it would stand on a
+   * floor that is no longer there. The channel is ordered and reliable,
+   * so send-on-change is enough; the revision counter makes "did it
+   * change" a number comparison instead of a re-serialization, and
+   * folding the room id into the key means walking into a room always
+   * re-sends whatever that room has. The revision is global to the run,
+   * so a mutation in ANOTHER room re-sends this one's (unchanged) patch
+   * once — harmless, since applying a patch is idempotent.
    */
   private sentPatch = '';
 
@@ -149,11 +153,11 @@ export class CoopHost {
       },
       banner: view.banner,
     };
-    const patchKey = `${view.roomId}|${JSON.stringify(view.patch ?? {})}`;
+    const patchKey = `${view.roomId}|${view.patchRev}`;
     if (patchKey !== this.sentPatch) {
       this.sentPatch = patchKey;
-      if (view.patch) snap.patch = view.patch;
-      else snap.patch = {}; // an empty patch is news too: the room is pristine
+      // Deep-copied HERE, only on change — never on the 60 Hz step path.
+      snap.patch = view.patch() ?? {}; // an empty patch is news too: the room is pristine
     }
     for (const e of this.game.world.all()) {
       if (e instanceof Player) {
@@ -196,8 +200,10 @@ export interface HostView {
   roomId: string;
   score: number;
   banner: string | null;
-  /** How the live room differs from its authored JSON (see SnapMsg.patch). */
-  patch?: RoomPatch;
+  /** The patch store's revision — a number the scene reads for free. */
+  patchRev: number;
+  /** The live room's patch, fetched lazily and only when patchRev moved. */
+  patch(): RoomPatch | undefined;
 }
 
 /** Wire precision: 0.1px is plenty and keeps snapshots compact. */

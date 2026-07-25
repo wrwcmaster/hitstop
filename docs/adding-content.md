@@ -612,10 +612,11 @@ Ownership lives in `Player.earned`, **not** in `capabilities`:
 
 An earnable's `desc` is the **usage prompt**, and it names its inputs as
 `{tokens}` — `'On the ground, {down} + {attack} sends a wave through it.'`
-`abilityHint(game, id)` resolves them for whatever device is in hand
-(SPACE / A on a pad / the on-screen glyph on a phone) after translation,
-so the catalog and the locale files stay device-agnostic. `PlayScene`
-shows it under the unlock banner, outlasting the banner itself.
+The catalog stays pure data; `promptText(game, t(desc))` (in `defs.ts`)
+resolves the tokens for whatever device is in hand (SPACE / A on a pad /
+the on-screen glyph on a phone) at the moment the text is shown, so the
+catalog and the locale files stay device-agnostic. `PlayScene` shows it
+under the unlock banner, outlasting the banner itself.
 
 Query it from anywhere holding the player — `player.earned.has('impact-drop')` — including item/skill/tree/NPC callbacks and trigger actions (via `host.player`). Registering an earnable does not implement it: an owned-but-unconsumed entry is simply inert, which is what lets the ownership layer ship before the verbs do.
 

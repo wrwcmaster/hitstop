@@ -123,6 +123,30 @@ export function actionLabel(
   return code ? prettyCode(code) : action.toUpperCase();
 }
 
+/** On-screen button glyphs for the touch column of `promptText`. */
+const TOUCH_GLYPHS: Partial<Record<Action, string>> = {
+  down: '\u25bc', jump: '\u25b2', attack: '\u2694',
+};
+
+/**
+ * Fill `{action}` tokens in an already-translated prompt with what this
+ * device actually presses — `{jump}` becomes SPACE, or A on a pad, or
+ * the on-screen button's own glyph on a phone. Prose that names an input
+ * writes the token and stays device-agnostic (and translatable); the
+ * device is consulted here, at the moment the text is shown. Unknown
+ * tokens pass through untouched, so `{braces}` in flavor text survive.
+ */
+export function promptText(game: ActionGame, text: string): string {
+  return text.replace(/\{(\w+)\}/g, (whole, name: string) => {
+    const action = name as Action;
+    if (!(action in TOUCH_GLYPHS) && !PROMPTABLE.has(action)) return whole;
+    return actionLabel(game, action, TOUCH_GLYPHS[action]);
+  });
+}
+
+/** The actions a prompt may name. Anything else is left alone. */
+const PROMPTABLE = new Set<Action>(['left', 'right', 'up', 'down', 'jump', 'attack', 'dash', 'parry', 'interact']);
+
 /** localStorage prefix for saves/settings — also scopes what the replay
  * recorder snapshots at run start. */
 export const STORAGE_PREFIX = 'hitstop';

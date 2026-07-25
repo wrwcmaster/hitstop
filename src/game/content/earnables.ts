@@ -1,6 +1,5 @@
-import { earnableDef, defineEarnable } from '@engine/index';
-import { t } from '@engine/index';
-import { actionLabel, type ActionGame, type ActorHost, type Action } from '../defs';
+import { defineEarnable } from '@engine/index';
+import type { ActorHost } from '../defs';
 import type { Player } from '../actors/player';
 
 /**
@@ -82,25 +81,3 @@ defineEarnable<EarnCtx>('shockwave', {
 
 /** Importing this module registers the catalog. */
 export function registerEarnables(): void {}
-
-/**
- * An earnable's description with its input tokens filled in for whatever
- * device is in hand — `{jump}` becomes SPACE, or A on a pad, or the
- * on-screen button's own arrow on a phone. Catalog entries stay device-
- * agnostic (and translatable) because the substitution happens here, at
- * the moment something is shown, not where the text is written.
- */
-export function abilityHint(game: ActionGame, id: string): string {
-  const touch: Partial<Record<Action, string>> = {
-    down: '\u25bc', jump: '\u25b2', attack: '\u2694',
-  };
-  return t(earnableDef(id).desc).replace(/\{(\w+)\}/g, (whole, name: string) => {
-    const action = name as Action;
-    return touch[action] === undefined && !ACTIONS.has(action)
-      ? whole
-      : actionLabel(game, action, touch[action]);
-  });
-}
-
-/** The actions an ability hint may name. Anything else is left alone. */
-const ACTIONS = new Set<Action>(['left', 'right', 'up', 'down', 'jump', 'attack', 'dash', 'parry', 'interact']);

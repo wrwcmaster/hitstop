@@ -21,13 +21,12 @@ import {
   overlaps,
   t,
 } from '@engine/index';
-import { menuLine, prettyCode, prettyButton, REPLAY_PENDING_KEY, type ActionGame, type Action, type RunStart, type TestScenario } from '../defs';
+import { menuLine, prettyCode, prettyButton, promptText, REPLAY_PENDING_KEY, type ActionGame, type Action, type RunStart, type TestScenario } from '../defs';
 import { Player } from '../actors/player';
 import { Monster, monsters } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
 import { placeables, type PlaceableCtx } from '../content/placeables';
 import { validateRoomContent } from '../content/room-features';
-import { abilityHint } from '../content/earnables';
 import { reactToSurface } from '../content/surface-reactions';
 import { PauseScene } from './pause';
 import { MapScene } from './map';
@@ -122,6 +121,10 @@ export class PlayScene implements Scene {
    * also break the scenery, the same rule has to cover the rubble.
    */
   private sandbox = false;
+  /** A mutation landed this frame; rebake the minimap once, in update. */
+  private minimapDirty = false;
+  /** Debounce for the wave's per-tile shatter reports (see waveSurface). */
+  private shatterCd = 0;
   /** A checkpoint's wave, consumed by the next setRoom so a saved gauntlet
    * resumes where it left off rather than restarting at wave 1. */
   private pendingWave = 0;
@@ -569,8 +572,10 @@ export class PlayScene implements Scene {
     this.tilemap.setTile(tx, ty, id);
     this.patches.setTile(this.roomId, tx, ty, id);
     // The minimap bakes the room's shape when it is built, so a fresh
-    // hole in the floor has to be baked in to show up on it.
-    this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
+    // hole has to be baked in to show up — but ONE bake per frame: a
+    // Shockwave shatters a dozen tiles in a burst, and rebaking the
+    // whole map per tile would be quadratic for no visible difference.
+    this.minimapDirty = true;
   }
 
   /** Empty a slot the room authored, for good (looted chests). */
@@ -603,7 +608,13 @@ export class PlayScene implements Scene {
   /** A Shockwave front reached a tile — same registry, sideways. */
   private waveSurface(at: { tx: number; ty: number }): void {
     const tile = this.tilemap.tileRef(at.tx, at.ty);
-    if (tile && reactToSurface(this.host, tile, 'wave')) this.game.sfx.play('shatter');
+    // One crack per burst, not one per tile: the wave reports each tile
+    // as its front arrives, and a run of weak stone would otherwise
+    // machine-gun the same sound a dozen times in a third of a second.
+    if (tile && reactToSurface(this.host, tile, 'wave') && this.shatterCd <= 0) {
+      this.shatterCd = 0.18;
+      this.game.sfx.play('shatter');
+    }
   }
 
   private setRoom(id: string, spawnX?: number, spawnY?: number): void {
@@ -618,6 +629,7 @@ export class PlayScene implements Scene {
     // before anything measures the map (minimap, camera bounds) and long
     // before anyone stands on it.
     this.patches.applyTiles(id, this.tilemap);
+    this.minimapDirty = false; // freshly baked below; a stale flag would rebake it
     this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
     this.triggers = new Triggers(this.room.triggers ?? []);
     this.triggers.importFired(this.firedTriggers[id] ?? []);
@@ -955,7 +967,7 @@ export class PlayScene implements Scene {
     // look up; the hint's inputs are resolved per device, so a pad says
     // X and a phone shows the on-screen glyph rather than a key nobody
     // has pressed.
-    this.showHint(abilityHint(this.game, id), 5);
+    this.showHint(promptText(this.game, t(def.desc)), 5);
     // The floater is anchored on the local knight, who may be gone (a
     // guest can land the killing blow after the host falls); the banner
     // and flash still carry the news either way.
@@ -1285,9 +1297,11 @@ export class PlayScene implements Scene {
         score: this.score,
         banner: this.bannerT > 0 ? this.banner : null,
         // Geometry the run has changed in THIS room, so a guest's tilemap
-        // agrees with the host's about what is solid. The session only puts
-        // it on the wire when it differs from what it last sent.
-        patch: this.patches.snapshot()[this.roomId],
+        // agrees with the host's about what is solid. The revision is the
+        // cheap per-step read; the session calls patch() — the deep copy —
+        // only when the revision (or room) has actually moved.
+        patchRev: this.patches.revision,
+        patch: () => this.patches.snapshot()[this.roomId],
       });
       if (this.coop.dropped) this.endCoop();
     }
@@ -1312,6 +1326,11 @@ export class PlayScene implements Scene {
     }
     this.bannerT = Math.max(0, this.bannerT - dt);
     this.hintT = Math.max(0, this.hintT - dt);
+    this.shatterCd = Math.max(0, this.shatterCd - dt);
+    if (this.minimapDirty) {
+      this.minimapDirty = false;
+      this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
+    }
 
     if (this.player) {
       // Camera leads the player: facing offset + velocity lookahead,

@@ -61,6 +61,19 @@ function parseCoord(key: string): [number, number] | null {
  */
 export class RoomPatches {
   private rooms = new Map<string, RoomPatch>();
+  /**
+   * Bumped on every mutation (and on clear/restore). A consumer that
+   * mirrors this set — the co-op host resending geometry to its guest —
+   * compares revisions instead of deep-comparing or re-serializing the
+   * whole set every frame. `count()` cannot serve here: overwriting one
+   * tile id with another leaves the count unchanged.
+   */
+  private rev = 0;
+
+  /** Monotonic change marker; equal revisions mean identical contents. */
+  get revision(): number {
+    return this.rev;
+  }
 
   private edit(roomId: string): RoomPatch {
     let patch = this.rooms.get(roomId);
@@ -76,6 +89,7 @@ export class RoomPatches {
     if (!Number.isInteger(tx) || !Number.isInteger(ty)) return;
     const patch = this.edit(roomId);
     (patch.tiles ??= {})[`${tx},${ty}`] = id;
+    this.rev++;
   }
 
   /** Remember that the entity with this key is gone for good. */
@@ -83,6 +97,7 @@ export class RoomPatches {
     const patch = this.edit(roomId);
     const removed = (patch.removed ??= []);
     if (!removed.includes(key)) removed.push(key);
+    this.rev++;
   }
 
   /** Should this room skip spawning the entity with this key? */
@@ -122,6 +137,7 @@ export class RoomPatches {
 
   clear(): void {
     this.rooms.clear();
+    this.rev++;
   }
 
   /** A deep, JSON-safe copy — for saves, replay tapes, and net sync. */
@@ -143,6 +159,7 @@ export class RoomPatches {
    */
   restore(data: RoomPatchSet | undefined | null): void {
     this.rooms.clear();
+    this.rev++;
     if (!data || typeof data !== 'object') return;
     for (const [roomId, patch] of Object.entries(data)) {
       if (!patch || typeof patch !== 'object') continue;
