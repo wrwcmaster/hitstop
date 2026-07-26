@@ -25,8 +25,10 @@ import { Monster } from '../actors/monster';
  * changes, only who is holding the controls. The PRESENTATION does need
  * machinery: snapshots carry a `cine` field (the directed camera) while
  * a scene runs, the guest mirrors the shot and letterbox from it, and a
- * guest menu press travels up as a skip request. The guest's own knight
- * stays live throughout — the world doesn't pause, so neither do they.
+ * guest menu press travels up as a skip request. The guest's knight
+ * stands down for the duration — the guest streams a neutral held-set
+ * and predicts on never-pressed input, so nobody plays blind while the
+ * camera is elsewhere; the world itself never pauses.
  *
  * Definitions are data in a registry, so a room places one with a
  * `cutscene` trigger in the level editor and no scene changes — the same

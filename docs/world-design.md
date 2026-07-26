@@ -172,7 +172,14 @@ home.*
    geography each (see each region's last room).
 3. **Non-linearity is terrain.** After Maul, "up" (Windspires) and "down"
    (the Riven) are both open from the hub. **[resolves: bosses 2/3 are
-   fully non-linear]**
+   fully non-linear]** The branches are parallel in *order*, not in
+   content, and the asymmetry is intended: the Riven is the
+   geometry-heavy branch (one Keeper, the game's hardest traversal),
+   the Windspires the combat-heavy one (the Duelist's mandatory toll,
+   then Bellwether). Both are required in the end — the Underbell takes
+   both verbs — so the choice is which weight to carry first, and the
+   Duelist can never be routed around: she sits on the main story's
+   only road through the sky.
 4. **Depth bands are difficulty bands — until the Strike breaks them.**
    First half: surface is tier 1, Foundry tier 2, Riven/Windspires
    tier 3 in parallel, Underbell tier 4, and nothing rescales to the
@@ -197,7 +204,9 @@ home.*
    Riven's `span-bridges` — the two regions share the crack's east
    face, and the shortcut skips the Bore entirely; the Brinehollow's
    `pearl-vault` drains through a flooded sump into the Riven's
-   `undercut`, linking the water content laterally; and a wind-scoured
+   `undercut`, linking the water content laterally — the sump's mouth is
+   choked with cracked stone, so **Impact Drop opens it** (from either
+   side): the side door never undercuts the Riven's own verb gate; and a wind-scoured
    chute off `spire-steps` drops one-way into `old-toll-road`, giving
    the Windspires an early back stair down. Each connector lives inside
    existing rooms (a door, a seam — no new room budget) and turns
@@ -211,8 +220,8 @@ home.*
 
 First half ≈ 40 rooms (opening 7 — of which 2 are the tutorial belt —
 hub 2, Bore 3, Foundry 7, Riven 7, Windspires 8, Underbell 6),
-plus the optional Brinehollow 4. Second half ≈ 15
-(Crown 7, Clapperworks 6, stilled-zone overlays reuse existing rooms).
+plus the optional Brinehollow 4. Second half = 13
+(Crown 7, Clapperworks 6; stilled-zone overlays reuse existing rooms).
 Every room must do at least one of: **teach, test, reward, connect,
 breathe** — a room that does none is cut.
 
@@ -361,13 +370,33 @@ not sponge, and a clean kill runs two to three minutes. (Humanoid duels
 are the exception — the Duelist is a pure low-HP, high-tempo fencing
 match. People duel; monsters come apart.)
 
+**Boss law: fast pace, visible progress — expressed differently every
+time.** Only two rules bind every boss. First, **pace**: openings are
+frequent and short rather than rare and long, there is no invulnerable
+sulking (when one target is guarded another is reachable), and a clean
+kill runs two to three minutes — danger comes from tempo, never from a
+sponge of hit points. Second, **progress must be visible**: a deep HP
+pool feels like erosion, so every fight shows its state on the boss's
+body or on the arena itself, and the boss bar reads as segments, not a
+sliver. Everything else — breakable components, spawned minions,
+terrain destruction — is an *instrument*, never a mandate: each fight
+picks the instruments that fit it, and no two fights share a signature.
+
 **One punish grammar per Keeper.** Maul keeps the classic bait → stagger
 → punish-window loop — it is boss grammar 101, taught once. The others
 each use a different damage model so the lesson never repeats: Vise is
 damaged *in motion* (limbs during traversal), Bellwether is damaged *by
 interception* (during its own offense, on the counted beat), and
 Mourn's openings are *authored by noise* (you choose where sound
-happens, and strike from the quiet side).
+happens, and strike from the quiet side). The progress signatures
+differ the same way: Maul is **demolition** — crown and arena come
+apart together, no adds, the wrecked room is the progress bar; Vise is
+**dismemberment plus siege** — the one fight where components and adds
+both appear; Bellwether is a **pure skill-check with audible progress**
+— one bell, three cracks, an empty sky; Mourn's adds are **your tools**
+(decoy noise), and its spine-knots are the score. (Humanoid duels are
+exempt from structure entirely: the Duelist is a low-HP, high-tempo
+fencing match — people duel; monsters come apart.)
 
 ### The Fallows (opening, tier 1)
 
@@ -385,7 +414,11 @@ its prompt, and nothing gates on reading: veterans cross the belt in
 under a minute. And every station is **diegetic**: the belt is the
 story's opening beats — a dead shrine that rings for her, a caravan in
 trouble — never a training construct. The player should finish it
-having done the story's first favor, not a drill.
+having done the story's first favor, not a drill. Skipping the belt is
+also **backstopped**: the same stall-armed prompt triggers ride into
+`fallows-edge`, so a player who walked past the yard and stalls against
+the first slime still gets the `{attack}` hint — once, quietly, in the
+fight where it matters.
 
 | Room | Size | Jobs | Design |
 | --- | --- | --- | --- |
@@ -433,9 +466,9 @@ region *demonstrates* Impact Drop before granting it), ember bat, gunner.
 hammer; it fights by remaking the arena's floors. Arena: two `crackedRock`
 floor layers over a solid slag-pooled base. **Its health is a crown of
 four ring-plates** around the hammerhead: each `embed` punish shears one
-off with a visible clang (ember bats shake loose and join the fight),
-its slams grow faster and wilder as the head lightens, and the bare
-head's final wedge ends the fight.
+off with a visible clang, its slams grow faster and wilder as the head
+lightens, and the bare head's final wedge ends the fight. No adds: the
+collapsing arena is the second enemy.
 
 | State | Behavior | Counterplay |
 | --- | --- | --- |
@@ -525,8 +558,8 @@ its throat; it redirects mid-air by kicking off bursts of impact — Air
 Step, weaponized. Arena: open sky, two fixed spires, a cycling raft of
 moving platforms. **Its health is the throat-bell: each on-beat
 interception widens the crack, and the third shatters it.** Every crack
-audibly detunes the tolls — progress you can *hear* — and spills chime
-kites from the spires to keep the sky busy between reads.
+audibly detunes the tolls — progress you can *hear*. The sky stays
+empty: nothing dilutes the read, because the read IS the fight.
 
 | State | Behavior | Counterplay |
 | --- | --- | --- |
@@ -651,9 +684,15 @@ old ground.
 ### The Crown (7 rooms, tier 5, above the Windspires)
 
 The bell's crown loop and the founder's fire — the world's summit,
-all verb-weave: grip flues feed step-gap chains onto rebound spires. Key
-rooms: `crown-ascent` (1w×6h; the game's longest climb, every grammar in
-sequence), `founder-forge` (the fire that will recast the bell; lighting
+all verb-weave: grip flues feed step-gap chains onto rebound spires.
+All seven rooms: `crownreach` (C B; arrival off the Windspires' summit,
+portal pad, and the first place the whole world is visible below — the
+map made literal), `crown-ascent` (1w×6h; the game's longest climb,
+every grammar in sequence), `ringwalk` (X; the crown loop proper — a
+verb-weave circuit around the bell's rim whose completed loop is its
+own shortcut), `vigil` (B; the healer has climbed up to tend the
+firewatch — the Stilling's barometer now reads from the summit),
+`founder-forge` (the fire that will recast the bell; lighting
 it is a wave-shaping puzzle across three floors), `founder-sanctum`
 (optional boss: **the Founder**, an animated effigy that fights in
 strict verb-answer patterns — a mastery exam whose body is the exam
@@ -680,7 +719,7 @@ the clapper's chain), `hush-arena`, `the-recasting` (ending, scripted).
 
 | Phase | Behavior | Counterplay |
 | --- | --- | --- |
-| **1 — Silence walks** | a bell-shaped absence; sweeps reaching limbs along the ground (wave-grammar attacks); drops silence from above; casts **quiet-zones** from **hush-anchors** — pale pods at the arena's rim, breakable: shatter one and its zone collapses (the phase's health is the anchor ring, demolition like every Keeper). Pockets are short-lived, visibly edged, drifting. Inside one, feel is *stolen, not deleted*: hitstop compresses to a tick, sfx duck to a low-frequency pulse, hits confirm by flash and frame-compression — feedback enough to fight fairly, wrong enough to frighten; knockback halves | Shockwave cleanses a zone; fight for ground that still rings. Sustained combat never happens in full silence — the pockets move, and so do you |
+| **1 — Silence walks** | a bell-shaped absence; sweeps reaching limbs along the ground (wave-grammar attacks); drops silence from above; casts **quiet-zones** from **hush-anchors** — pale pods at the arena's rim, breakable: shatter one and its zone collapses (the phase's health is the anchor ring). Pockets are short-lived, visibly edged, drifting. Inside one, feel is *stolen, not deleted*: hitstop compresses to a tick, sfx duck to a low-frequency pulse, hits confirm by flash and frame-compression — feedback enough to fight fairly, wrong enough to frighten; knockback halves | Shockwave cleanses a zone; fight for ground that still rings. Sustained combat never happens in full silence — the pockets move, and so do you |
 | **2 — The world mutes** | stills floor sections to deadstone; only *resonating* — struck by your wave — does its body take full damage (chip otherwise); unmakes floor tiles at the arena edges | plunge to re-ring floors → wave to open damage windows → grip/step to survive the shrinking ground: all four verbs by construction |
 | **3 — Re-strike** | pinned against the strike point by the ringing arena; toll rhythm sweeps the whole floor | survive the rhythm, climb the final wall run, and deliver the last plunge — the player is the clapper; the blow is the ending |
 

@@ -6,12 +6,13 @@ import {
   Minimap,
   RoomPatches,
   Letterbox,
+  Input,
   buildTilemap,
   drawText,
   clamp,
   t,
 } from '@engine/index';
-import type { ActionGame } from '../defs';
+import { KEYMAP, type Action, type ActionGame } from '../defs';
 import { COLORS } from '../content/palette';
 import { ROOMS, START_ROOM } from '../content/rooms';
 import { drawCrest } from '../actors/shockwave';
@@ -102,6 +103,9 @@ export class CoopGuestScene implements Scene {
    * we mirror the camera and the letterbox for its duration. */
   private cine: { x: number; y: number } | null = null;
   private cineBox = new Letterbox();
+  /** Never-pressed hands for the predicted knight during a cutscene: the
+   * camera is the director's, so playing on would be playing blind. */
+  private neutral = new Input<Action>(KEYMAP);
 
   constructor(
     private game: ActionGame,
@@ -367,13 +371,27 @@ export class CoopGuestScene implements Scene {
       this.leave();
       return;
     }
-    // Stream what's held right now; the host turns it into edges.
-    this.link.send(JSON.stringify({ t: 'in', held: NET_ACTIONS.filter((a) => this.game.input.held(a)) }));
+    // Stream what's held right now; the host turns it into edges. While
+    // the director holds the stage, the guest's hands come off the
+    // controls too: a neutral held-set goes on the wire, so the host's
+    // copy of this knight stands down instead of fighting unseen — she
+    // can still fall or be hit (the world never pauses), but she cannot
+    // act blind while the camera is elsewhere.
+    this.link.send(JSON.stringify({
+      t: 'in',
+      held: this.cine ? [] : NET_ACTIONS.filter((a) => this.game.input.held(a)),
+    }));
 
     // Prediction: my knight runs real physics with my live input — zero
-    // felt latency — then the server's word pulls it into line.
-    this.game.world.update(dt);
+    // felt latency — then the server's word pulls it into line. During a
+    // cutscene she predicts on the same never-pressed input the host
+    // sees, so both copies stand down together.
     const me = this.me;
+    if (me) {
+      if (this.cine) me.source = this.neutral;
+      else if (me.source === this.neutral) me.source = null;
+    }
+    this.game.world.update(dt);
     const sv = this.serverMe;
     if (me && sv) {
       const dx = sv.x - me.x;
