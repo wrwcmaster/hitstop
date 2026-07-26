@@ -183,8 +183,8 @@ home.*
 
 ### Room budget
 
-First half ≈ 38 rooms (opening 5, hub 2, Bore 3, Foundry 7, Riven 7,
-Windspires 8, Underbell 6),
+First half ≈ 40 rooms (opening 7 — of which 2 are the tutorial belt —
+hub 2, Bore 3, Foundry 7, Riven 7, Windspires 8, Underbell 6),
 plus the optional Brinehollow 4. Second half ≈ 15
 (Crown 7, Clapperworks 6, stilled-zone overlays reuse existing rooms).
 Every room must do at least one of: **teach, test, reward, connect,
@@ -317,9 +317,21 @@ Sizes are in map cells (screens). `[T]`each `[X]`test `[R]`eward
 Gray-green ruins west of town; the first stilled patches sit in the
 distance like missing teeth. Enemies: slimes, bats, one archer.
 
+The region opens with a **tutorial belt** — two safe rooms that teach
+the base kit before the first enemy appears. Prompt philosophy: hints
+are trigger-driven `{action}` tokens (device-aware — keyboard, pad, or
+touch labels resolve at draw time, the shipped `promptText` mechanism),
+each fires once, and each arms only after a few seconds of no progress
+in its zone — a player who already moves like a knight never reads a
+single tutorial line. Every taught verb is *used* within one screen of
+its prompt, and nothing gates on reading: veterans cross the belt in
+under a minute.
+
 | Room | Size | Jobs | Design |
 | --- | --- | --- | --- |
-| `fallows-edge` | 2w | T | Movement/jump/dash teach. A stilled gray copse in the background — the first sight of the antagonist, unremarked. |
+| `waking-hollow` | 1w | T | The road's last toll-shrine, half sunk. Move and jump taught purely by geometry: a knee-high step, then a real gap. Weathered toll-marks on the stones light up as stall-hints. Interact taught on the shrine bell — one tap rings the game's first clean note, and the title card lands on it (a two-beat Director cutscene). |
+| `practice-yard` | 2w | T | A collapsed waystation yard the caravans drill in. Straw slime-dummies teach slash; a rope-hung sandbag across a pit takes a ranged shot or a dash-attack (both loadouts get a first verb); a slumping lintel teaches dash through the closing gap (it re-lifts on a cycle — never a softlock). Optional corner: a creaking spring-arm swings slow and telegraphed — parry it to ring the yard bell for a coin cache. No station is required; the east gate is always open. |
+| `fallows-edge` | 2w | T X | First live combat: two slimes, applying the yard's verbs. A stilled gray copse in the background — the first sight of the antagonist, unremarked. |
 | `fallows-fields` | 3w | T X | First combat mixes; a visibly cracked floor plate with a glinting cache beneath — Impact Drop foreshadow, unreachable for hours. |
 | `waystone-gate` | 1w | X | Gate miniboss: **the Slime King** (existing fight, demoted with honor). Teaches boss grammar: HP bar, phases, arena discipline. |
 | `old-toll-road` | 2w | B C | Breather; merchant caravan (first shop); a small resonant seal hides a coin cache — Shockwave foreshadow in miniature. |
@@ -608,7 +620,8 @@ finally reachable in-world), 2) Foundry + Maul (moves the Impact Drop
 grant), 3) Underbell + Mourn (Shockwave reachable, midpoint event), 4)
 Windspires upper + Bellwether (moves Air Step; Duelist becomes the
 rampart's mandatory gatekeeper),
-5) Fallows retheme + Slime King demotion, 6) second half.
+5) Fallows retheme + Slime King demotion + the tutorial belt
+(`waking-hollow`, `practice-yard`), 6) second half.
 
 Engine extensions ride the same steps (each with its first user, per
 Part III): transient mutation with the Foundry's brittle floors (step
