@@ -87,7 +87,7 @@ what event marks the midpoint]**
 | **The blacksmith** | forges ring-metal; armor/forge services; comic relief with anvils | Hearthstead |
 | **The healer** | tends stilled victims; quiet barometer of the Stilling's spread | Hearthstead |
 | **The merchant** | trades "echoes"; travels — appears in region rest rooms before you'd expect | roams |
-| **The Duelist** | rival bearer; optional duel in the first half, mandatory rematch in the second | Windspires, then the Bore gate |
+| **The Duelist** | rival bearer; bars the Windspires rampart in the first half and the reopened Bore gate in the second — both duels mandatory | Windspires, then the Bore gate |
 | **Maul, the Buried Hammer** | Keeper of the falling weight → **Impact Drop** | Sunken Foundry |
 | **Vise, the Wall Beast** | Keeper of the frame's grip → **Wall Grip** | the Riven |
 | **Bellwether, the Sky Ram** | Keeper of the rebound → **Air Step**; wears a cracked bell at its throat | Windspires |
@@ -184,7 +184,7 @@ home.*
 ### Room budget
 
 First half ≈ 38 rooms (opening 5, hub 2, Bore 3, Foundry 7, Riven 7,
-Windspires 8 — one of which, `rampart-duel`, is optional — Underbell 6),
+Windspires 8, Underbell 6),
 plus the optional Brinehollow 4. Second half ≈ 15
 (Crown 7, Clapperworks 6, stilled-zone overlays reuse existing rooms).
 Every room must do at least one of: **teach, test, reward, connect,
@@ -379,14 +379,20 @@ scripted by geometry (nothing else to land on) — then the flue climb.
 Wind-carved stone needles above the mountain; the existing mountain and
 passage rooms become the lower third. Palette: pale sky, snow, prayer
 ribbons. Enemies: leaper, archer, chime kite (aerial). The **Duelist**
-waits on a rampart mid-region: optional duel #1, taunting the "errand
-girl" — beatable with any loadout, drops a skill-tree point.
+stops shadowing here and stands in the road: she holds the only bridge
+onward, certain the facets belong to whoever can take them, and she will
+not watch an "errand girl" walk to a Keeper unproven. Mandatory duel #1
+— her grounded kit only (combo, backstep, pistol; no air game yet), tier
+3, beatable with any loadout, drops a skill-tree point. Beaten, she
+opens the rampart gate herself and leaves a promise instead of a
+concession — the second-half rematch is declared the moment the first
+duel ends.
 
 | Room | Size | Jobs | Design |
 | --- | --- | --- | --- |
 | `spire-steps` | 1w×4h | T | Ledge climbing at jump height; gust telegraphs (visual sway only — wind never moves the player). |
 | `gale-pass` | 2w | X | Horizontal gap run; archers on far ledges; the gaps are jump-plus-a-little — the *ache* for Air Step. |
-| `rampart-duel` | 2w | X B | The Duelist (optional); banners, a long flat stage — the game's purest 1v1. |
+| `rampart-duel` | 2w | X B | The Duelist bars the region's only bridge onward; banners, a long flat stage — the game's purest 1v1. The Windspires cannot be crossed without answering her. |
 | `broken-sky-bridge` | 3w | X C | Wide gaps crossed the slow way: lever-extended bridges. Post-verb these are one air step each — recontextualization is built into the room. |
 | `the-roost` | 2w | X B | Wave-table gauntlet in a bowl arena; rest alcove with the merchant, improbably. |
 | `bellwether-approach` | 1w×2h | T B | Rising platform chimney; above, the ram's silhouette bounds between spires on bursts of force — Air Step demonstrated across the skyline. Autosave. |
@@ -493,8 +499,10 @@ old ground.
   the map screen filling with new doors falls out of the seals' rooms
   reporting their open state. Recontextualization as a single world-wide
   beat, built entirely from flags + barriers that already exist.
-- **The Duelist rematch** (mandatory) at `bore-gallery`: she bars the
-  reopened gate; full-kit mirror duel — she air-steps, wall-kicks, and
+- **The Duelist rematch** (mandatory) at `bore-gallery`: she keeps the
+  promise made on the rampart and bars the reopened gate; full-kit
+  mirror duel — the grounded kit from duel #1 plus everything she
+  lacked then: she air-steps, wall-kicks, and
   reads the ground like you do. Beaten, she yields her oath (and an
   optional-tier upgrade: **Riposte Tempo** — parry follow-ups refresh the
   air step).
@@ -544,7 +552,7 @@ Nothing shipped is wasted; each room grows into its target role:
 | --- | --- |
 | `town` | `hearthstead` (add well-as-Bore-mouth, Eastern Seal, chimney) |
 | `arena`, `cavern`, `corridor`, `throne` | the Fallows band; Slime King demotes to `waystone-gate` miniboss (his Impact Drop grant moves to Maul) |
-| `mountain`, `mountain_passage`, `ramparts` | Windspires lower third; the Duelist becomes the optional rival (her Air Step grant moves to Bellwether) |
+| `mountain`, `mountain_passage`, `ramparts` | Windspires lower third; the Duelist becomes the rival who bars the rampart bridge (her Air Step grant moves to Bellwether) |
 | `underground`, `vault` | Foundry top layer (the cracked cache stays as-is) |
 | `grotto` | `brine-gate` |
 | well seam, portals, worldmap | unchanged mechanisms; new rooms are data |
@@ -552,7 +560,8 @@ Nothing shipped is wasted; each room grows into its target role:
 Migration order (each step shippable): 1) the Riven + Vise (Wall Grip
 finally reachable in-world), 2) Foundry + Maul (moves the Impact Drop
 grant), 3) Underbell + Mourn (Shockwave reachable, midpoint event), 4)
-Windspires upper + Bellwether (moves Air Step; Duelist becomes rival),
+Windspires upper + Bellwether (moves Air Step; Duelist becomes the
+rampart's mandatory gatekeeper),
 5) Fallows retheme + Slime King demotion, 6) second half.
 
 Grant moves are demo-phase save changes (AGENTS.md rule 9): owned verbs
