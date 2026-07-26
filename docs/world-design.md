@@ -344,6 +344,23 @@ combat destruction vs. progression geometry" rule.
 Sizes are in map cells (screens). `[T]`each `[X]`test `[R]`eward
 `[C]`onnect `[B]`reathe mark each room's jobs.
 
+**Bosses are structures, not health bars.** A deep HP pool makes a
+fight feel like erosion — you hit the same silhouette a hundred times
+and only a sliver moves. These fights are **demolition**: each Keeper's
+health lives in visible sub-components — plates, limbs, cracks, knots —
+that break off one at a time, so every meaningful hit removes a piece
+of the boss the player can see (and the boss bar reads as segments, not
+a sliver). The same choice sets the pace: components die in a few hits
+each, openings are frequent and short rather than rare and long, and
+there is no invulnerable sulking — while one component is out of reach
+there is always another, or adds to clear. **Spawned minions keep the
+tempo** between breaks — split slimes, wallcrawlers, chime kites, echo
+bats — and double as resources (pogo fodder, noise decoys), never
+padding. Difficulty sits mid-curve by construction: the danger is pace,
+not sponge, and a clean kill runs two to three minutes. (Humanoid duels
+are the exception — the Duelist is a pure low-HP, high-tempo fencing
+match. People duel; monsters come apart.)
+
 **One punish grammar per Keeper.** Maul keeps the classic bait → stagger
 → punish-window loop — it is boss grammar 101, taught once. The others
 each use a different damage model so the lesson never repeats: Vise is
@@ -376,7 +393,7 @@ having done the story's first favor, not a drill.
 | `practice-yard` | 2w | T | The merchant's caravan, stalled in a collapsed waystation yard with slimes in the walls — the story's first favor, and every station is the rescue. Slash taught cutting the snare-ropes off the cart; the winched supply bag hung over the pit comes down to a ranged shot or a dash-attack (both loadouts get a first verb); dash taught slipping under the slumping gate-lintel to reach the trapped drover (it re-lifts on a cycle — never a softlock). Optional: the caravan guard offers a friendly bout — parry her slow, telegraphed swing to win a coin purse and her respect. No station is required; the east gate is always open, and the caravan manages without you (slower, and the guard says so). |
 | `fallows-edge` | 2w | T X | First live combat: two slimes, applying the yard's verbs. A stilled gray copse in the background — the first sight of the antagonist, unremarked. |
 | `fallows-fields` | 3w | T X | First combat mixes; a visibly cracked floor plate with a glinting cache beneath — Impact Drop foreshadow, unreachable for hours. |
-| `waystone-gate` | 1w | X | Gate miniboss: **the Slime King** (existing fight, demoted with honor). Teaches boss grammar: HP bar, phases, arena discipline. |
+| `waystone-gate` | 1w | X | Gate miniboss: **the Slime King** (existing fight, demoted with honor and retuned to the structural rule: his bulk sheds lesser slimes as pieces are knocked off, so the first boss already teaches that progress is demolition). Teaches boss grammar: segmented boss bar, phases, arena discipline. |
 | `old-toll-road` | 2w | B C | Breather; the caravan you freed at the yard, rolled ahead and trading (first shop — gratitude priced in if you helped); a small resonant seal hides a coin cache — Shockwave foreshadow in miniature. |
 | `hearthgate` | 1w | C | Arrival framing: the well's silhouette, the chimney above town howling wind. |
 
@@ -414,7 +431,11 @@ region *demonstrates* Impact Drop before granting it), ember bat, gunner.
 
 **Maul, the Buried Hammer.** A blind forge-colossus whose head is the
 hammer; it fights by remaking the arena's floors. Arena: two `crackedRock`
-floor layers over a solid slag-pooled base.
+floor layers over a solid slag-pooled base. **Its health is a crown of
+four ring-plates** around the hammerhead: each `embed` punish shears one
+off with a visible clang (ember bats shake loose and join the fight),
+its slams grow faster and wilder as the head lightens, and the bare
+head's final wedge ends the fight.
 
 | State | Behavior | Counterplay |
 | --- | --- | --- |
@@ -422,8 +443,8 @@ floor layers over a solid slag-pooled base.
 | `slam` | rears, hangs one beat, drives down — emits `plungeLand`, breaking the floor span it hits (persistent for the visit) | sidestep; the HOLE it makes is your route between layers |
 | `sweep` | low horizontal drag across one layer | jump it (aerial attack window) |
 | `burrow` | dives into the base layer, tracks under the player (dust plume telegraph), erupts | keep moving; the eruption breaks floor upward |
-| `embed` | after `slam` on already-broken ground its head sticks fast for 2.2s | the punish window — melee wails, ranged unloads |
-| `enrage` (≤40% HP) | slams chain in twos; more floor gone | the arena is now mostly holes: fight vertically |
+| `embed` | after `slam` on already-broken ground its head sticks fast for 2.2s | the punish window — shear a ring-plate: melee pries, ranged shears the seam |
+| `enrage` (one plate left) | slams chain in twos; more floor gone | the arena is now mostly holes: fight vertically |
 
 Teaching: every mechanic *is* Impact Drop performed at you — falling
 weight breaking floors, with the reward window for reading it. Co-op: one
@@ -452,7 +473,10 @@ slow pre-Grip exit, so route-choosers are never trapped.
 **Vise, the Wall Beast.** A many-limbed spanner of the crack that never
 touches the floor; the player fights from temporary platforms while the
 boss owns every wall. Arena: a tall shaft, four crumbling platforms, two
-permanent ledges.
+permanent ledges. **Its health is its grip: six limbs — severing four
+ends it.** Nest clusters on both walls (breakable components in their
+own right) drip wallcrawlers until smashed, so clearing a nest is a
+choice: fewer adds, or more time on the limbs.
 
 | State | Behavior | Counterplay |
 | --- | --- | --- |
@@ -460,8 +484,8 @@ permanent ledges.
 | `lunge` | coils (limbs bunch — the tell), springs flat across the shaft | drop a platform level, or dash through the gap under it; a hit limb mid-lunge makes the next coil slower |
 | `rockfall` | hammers its wall; debris falls in two marked columns | stand the third column; its hammering limb is planted and exposed while it works |
 | `pin-slam` | slams both walls; a shudder crosses platforms and *crumbles* the one you stand on if you linger | move on the tell; platforms respawn on a cycle |
-| `limb-loss` (per ~20% hp) | a mauled limb tears free; it re-grips lower and crawls closer to platform level | each stage brings it nearer — more reachable AND more dangerous |
-| `enrage` (≤35%) | destroys two platform anchors permanently (patches); lunges feint once | tighter footing; the feint is a second coil |
+| `limb-loss` (per limb severed) | the limb tears free; it re-grips lower and crawls closer to platform level | each severed limb brings it nearer — more reachable AND more dangerous |
+| `enrage` (two limbs left) | destroys two platform anchors permanently (patches); lunges feint once | tighter footing; the feint is a second coil |
 
 Teaching: the whole fight is *wanting* Wall Grip — you watch a creature
 own the walls while you rent the floor, and you hurt it by unmaking its
@@ -499,7 +523,10 @@ duel ends.
 **Bellwether, the Sky Ram.** A great horned ram wearing a cracked bell at
 its throat; it redirects mid-air by kicking off bursts of impact — Air
 Step, weaponized. Arena: open sky, two fixed spires, a cycling raft of
-moving platforms.
+moving platforms. **Its health is the throat-bell: each on-beat
+interception widens the crack, and the third shatters it.** Every crack
+audibly detunes the tolls — progress you can *hear* — and spills chime
+kites from the spires to keep the sky busy between reads.
 
 | State | Behavior | Counterplay |
 | --- | --- | --- |
@@ -508,7 +535,7 @@ moving platforms.
 | `intercept` | **the damage model**: a hit landed at a redirect moment — the counted beat, where it hangs weightless mid-turn — knocks it off its line into a raft-scraping tumble | damage happens DURING its offense; melee times a raft-edge swing on the beat, ranged leads the bend. A miss means the charge completes — the count you learned is the risk you take |
 | `stampede` | runs the platform level, cracking each platform it leaves (respawn on cycle) | be airborne or on a spire |
 | `toss` | under-platform head toss, flipping one platform | watch its climb under you |
-| `enrage` (≤35%) | three-toll charges standard; one spire crumbles to half height | the raft is now the main floor; three beats = three chances to intercept |
+| `enrage` (final crack) | three-toll charges standard; one spire crumbles to half height | the raft is now the main floor; three beats = three chances to intercept |
 
 Teaching: counted redirects — heard or seen — make players *read*
 aerial impulse, and intercepting on the beat makes them *act* on the
@@ -537,16 +564,20 @@ were earned. Enemies: echo bat (relocates to sound), stilled crawler
 through connected surfaces — standing still or being airborne makes you
 quiet; running makes you loud. The fight examines the whole first-half
 kit. Arena: the bell's shoulder — resonant floor, two wall runs with
-deadstone rests, one high perch.
+deadstone rests, one high perch. **Its health is its grief made solid:
+four deadstone knots along the spine.** Each noise-authored opening is
+the chance to shatter one (a plunge or a heavy hit); the fourth rings
+it clean — Mourn is *beaten, not butchered*, which is what the Keepers'
+story needs the fight to say.
 
 | State | Behavior | Counterplay |
 | --- | --- | --- |
 | `listen` | head tracks ground vibration; attacks aim at the last loud thing — and **while its attention is pinned to a loud surface, the flank facing the quiet side hangs open** | the damage model: you AUTHOR the opening by choosing where sound happens, then strike from the silence |
 | `toll-wave` | sends shockwaves along floor AND up the walls (the engine's own `traceSurface` rules — deadstone rests are safe holds) | jump/air-step the floor wave; cling on deadstone |
 | `pounce` | leaps and impact-drops the last heard position, breaking that floor span | bait it — its own craters become your cover, your plunge routes, and fresh noise-makers |
-| `fixate` | a loud enough decoy — a rung bell-node, an echo bat pogo'd into a wall, sustained running on one span — makes it press its ear to that surface | the biggest opening you can build, and entirely yours to time; no free timer, just the noise you arranged |
+| `fixate` | a loud enough decoy — a rung bell-node, an echo bat pogo'd into a wall, sustained running on one span — makes it press its ear to that surface | the biggest opening you can build, and entirely yours to time: long enough to shatter a spine-knot outright |
 | `keen` | a standing cry summons echo bats | thin them — or steer them into walls as decoy noise |
-| `enrage` (≤40%) | the chamber itself hums: rolling floor ripples on a rhythm | the fight becomes rhythm traversal — and the hum masks your footsteps, so the brave get free approaches between beats |
+| `enrage` (one knot left) | the chamber itself hums: rolling floor ripples on a rhythm | the fight becomes rhythm traversal — and the hum masks your footsteps, so the brave get free approaches between beats |
 
 Teaching: sound-as-aggro previews stilled-zone stakes; every counter is
 a first-half verb used precisely, and every opening is noise-shaped —
@@ -625,8 +656,10 @@ rooms: `crown-ascent` (1w×6h; the game's longest climb, every grammar in
 sequence), `founder-forge` (the fire that will recast the bell; lighting
 it is a wave-shaping puzzle across three floors), `founder-sanctum`
 (optional boss: **the Founder**, an animated effigy that fights in
-strict verb-answer patterns — a mastery exam; reward: **Greater
-Shockwave**, +50% range), `crown-gate` (scripted: the lit fire is carried
+strict verb-answer patterns — a mastery exam whose body is the exam
+sheet: each limb is a different material answering exactly one verb, and
+the fight ends when every limb has been broken by its answer; reward:
+**Greater Shockwave**, +50% range), `crown-gate` (scripted: the lit fire is carried
 down the Bore in one continuous descent — the game's victory-lap
 traversal, every shortcut used in anger).
 
@@ -647,7 +680,7 @@ the clapper's chain), `hush-arena`, `the-recasting` (ending, scripted).
 
 | Phase | Behavior | Counterplay |
 | --- | --- | --- |
-| **1 — Silence walks** | a bell-shaped absence; sweeps reaching limbs along the ground (wave-grammar attacks); drops silence from above; casts **quiet-zones** — short-lived, visibly edged, drifting pockets. Inside one, feel is *stolen, not deleted*: hitstop compresses to a tick, sfx duck to a low-frequency pulse, hits confirm by flash and frame-compression — feedback enough to fight fairly, wrong enough to frighten; knockback halves | Shockwave cleanses a zone; fight for ground that still rings. Sustained combat never happens in full silence — the pockets move, and so do you |
+| **1 — Silence walks** | a bell-shaped absence; sweeps reaching limbs along the ground (wave-grammar attacks); drops silence from above; casts **quiet-zones** from **hush-anchors** — pale pods at the arena's rim, breakable: shatter one and its zone collapses (the phase's health is the anchor ring, demolition like every Keeper). Pockets are short-lived, visibly edged, drifting. Inside one, feel is *stolen, not deleted*: hitstop compresses to a tick, sfx duck to a low-frequency pulse, hits confirm by flash and frame-compression — feedback enough to fight fairly, wrong enough to frighten; knockback halves | Shockwave cleanses a zone; fight for ground that still rings. Sustained combat never happens in full silence — the pockets move, and so do you |
 | **2 — The world mutes** | stills floor sections to deadstone; only *resonating* — struck by your wave — does its body take full damage (chip otherwise); unmakes floor tiles at the arena edges | plunge to re-ring floors → wave to open damage windows → grip/step to survive the shrinking ground: all four verbs by construction |
 | **3 — Re-strike** | pinned against the strike point by the ringing arena; toll rhythm sweeps the whole floor | survive the rhythm, climb the final wall run, and deliver the last plunge — the player is the clapper; the blow is the ending |
 
