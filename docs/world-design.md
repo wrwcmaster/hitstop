@@ -353,23 +353,6 @@ combat destruction vs. progression geometry" rule.
 Sizes are in map cells (screens). `[T]`each `[X]`test `[R]`eward
 `[C]`onnect `[B]`reathe mark each room's jobs.
 
-**Bosses are structures, not health bars.** A deep HP pool makes a
-fight feel like erosion — you hit the same silhouette a hundred times
-and only a sliver moves. These fights are **demolition**: each Keeper's
-health lives in visible sub-components — plates, limbs, cracks, knots —
-that break off one at a time, so every meaningful hit removes a piece
-of the boss the player can see (and the boss bar reads as segments, not
-a sliver). The same choice sets the pace: components die in a few hits
-each, openings are frequent and short rather than rare and long, and
-there is no invulnerable sulking — while one component is out of reach
-there is always another, or adds to clear. **Spawned minions keep the
-tempo** between breaks — split slimes, wallcrawlers, chime kites, echo
-bats — and double as resources (pogo fodder, noise decoys), never
-padding. Difficulty sits mid-curve by construction: the danger is pace,
-not sponge, and a clean kill runs two to three minutes. (Humanoid duels
-are the exception — the Duelist is a pure low-HP, high-tempo fencing
-match. People duel; monsters come apart.)
-
 **Boss law: fast pace, visible progress — expressed differently every
 time.** Only two rules bind every boss. First, **pace**: openings are
 frequent and short rather than rare and long, there is no invulnerable
