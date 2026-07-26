@@ -356,7 +356,14 @@ An open doorway in a room's **outer wall** is a gap you simply walk into — no 
 | open, in the room's interior | press E | a gap in the wall |
 | locked (`key` or `flag`) | press E, refused with a banner | a banded timber door |
 
-Outer-wall doorways sit **flush with the room boundary** — the outermost tile column — so you cross only when you have actually walked to the edge of the room. Placed even a couple of tiles inboard, the room swaps out while there is still visible floor ahead of you, which reads as the game snatching control rather than you leaving.
+Outer-wall doorways may sit flush with the boundary or up to three tiles
+inside a thick wall. `play/doorways.ts` derives one edge classification
+from that geometry, clears ordinary solid tiles between the trigger and
+the boundary (authored `gate` tiles stay intact), and uses the same side
+for the walk-through transition. The knight therefore keeps walking out
+of the old room and into the new one instead of freezing at the trigger.
+Keep true interior passages farther from the edge so they remain explicit
+interactions.
 
 The interior exception matters more than it sounds. The shaft down to the grotto and the stair up to the ramparts sit in the middle of floors you have every reason to walk across; firing those on contact means you can no longer cross your own room without being swallowed. Castlevania solves it the same way — doors live at the edges, and the way down is something you choose.
 

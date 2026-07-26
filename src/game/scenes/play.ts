@@ -53,6 +53,7 @@ import { CoopGuestScene } from '../net/guest';
 import { CoopScene } from './coop';
 import { displayName } from '../name';
 import type { PeerLink } from '@engine/index';
+import { edgeDoorSide, openEdgeDoorways } from './play/doorways';
 
 /** A door transition in progress: fade out, swap rooms, fade in. */
 interface Transition {
@@ -698,6 +699,7 @@ export class PlayScene implements Scene {
     // before anything measures the map (minimap, camera bounds) and long
     // before anyone stands on it.
     this.patches.applyTiles(id, this.tilemap);
+    openEdgeDoorways(this.room, this.tilemap);
     this.minimapDirty = false; // freshly baked below; a stale flag would rebake it
     this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
     this.triggers = new Triggers(this.room.triggers ?? []);
@@ -829,6 +831,7 @@ export class PlayScene implements Scene {
     // as the hole it now is.
     const map = buildTilemap(dest);
     this.patches.applyTiles(toRoom, map);
+    openEdgeDoorways(dest, map);
     const buried = (x: number, y: number): boolean => {
       for (const s of map.solidsNear({ x, y, w: pw, h: ph })) {
         if (!s.oneWay && x < s.x + s.w && s.x < x + pw && y < s.y + s.h && s.y < y + ph) return true;
@@ -917,13 +920,6 @@ export class PlayScene implements Scene {
    * instead of freezing as soon as the hitbox touches a trigger.
    */
   private edgeWalk(toRoom: string): { out: -1 | 1; into: -1 | 1 } | null {
-    const side = (room: RoomDef, door: TriggerDef): -1 | 1 | null => {
-      if (door.props?.fallIn === true || door.props?.leapUp === true) return null;
-      const width = Math.max(...room.tiles.map((row) => row.length)) * room.tileSize;
-      if (door.x <= 0) return -1;
-      if (door.x + door.w >= width) return 1;
-      return null;
-    };
     const leaving = this.room.triggers?.find(
       (tr) => tr.event === 'door' && tr.props?.room === toRoom,
     );
@@ -932,8 +928,8 @@ export class PlayScene implements Scene {
       (tr) => tr.event === 'door' && tr.props?.room === this.roomId,
     );
     if (!leaving || !entering || !dest) return null;
-    const out = side(this.room, leaving);
-    const farSide = side(dest, entering);
+    const out = edgeDoorSide(this.room, leaving);
+    const farSide = edgeDoorSide(dest, entering);
     if (out === null || farSide === null) return null;
     return { out, into: farSide === -1 ? 1 : -1 };
   }

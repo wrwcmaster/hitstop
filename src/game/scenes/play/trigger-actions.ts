@@ -5,6 +5,7 @@ import { Monster } from '../../actors/monster';
 import { optionalString, rejectUnknownProps, requireString } from '../../content/prop-validation';
 import { provideTriggerValidators } from '../../content/room-features';
 import { cutscenes } from '../../content/cutscenes';
+import { edgeDoorSide } from './doorways';
 
 /**
  * What each trigger `event` name means in the game. Room JSON stays pure
@@ -116,10 +117,7 @@ defineTriggerAction('door', {
  * grotto halfway.
  */
 function inOuterWall(def: TriggerDef, host: PlayHost): boolean {
-  const room = host.room;
-  const roomW = Math.max(...room.tiles.map((r) => r.length)) * room.tileSize;
-  const margin = room.tileSize * 3;
-  return def.x <= margin || def.x + def.w >= roomW - margin;
+  return edgeDoorSide(host.room, def) !== null;
 }
 
 /** Below this you are settling on a ledge; above it you are falling. */
