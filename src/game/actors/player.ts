@@ -645,6 +645,31 @@ export class Player extends Actor {
     return this.source === null;
   }
 
+  /**
+   * Room transitions keep rendering the live world while controls are
+   * suspended. Nearby actors must not advertise interactions during that
+   * limbo, especially when a failed vertical seam briefly visits a room.
+   */
+  interactionsEnabled = true;
+
+  /**
+   * Room fades pause the normal Player update, but an airborne crossing
+   * must still obey the same forces as ordinary play. In particular,
+   * releasing jump cuts an ascent; gravity alone would let a transition
+   * silently turn every tap into a full-height jump.
+   */
+  advanceTransitionAir(dt: number): void {
+    applyGravity(this, dt);
+    this.cutReleasedJump(false);
+  }
+
+  private cutReleasedJump(swimming: boolean): void {
+    const T = PLAYER_TUNING;
+    if (!swimming && !this.fsm.is('dead') && !this.input.held('jump') && this.vy < -T.jumpCutSpeed) {
+      this.vy = -T.jumpCutSpeed;
+    }
+  }
+
   get feel() {
     return this.game.feel;
   }
@@ -1398,9 +1423,7 @@ export class Player extends Actor {
       }
       // Variable jump height: releasing jump early cuts the ascent.
       // (Not while swimming — strokes and breaches are fixed impulses.)
-      if (!swimming && !this.fsm.is('dead') && !this.input.held('jump') && this.vy < -T.jumpCutSpeed) {
-        this.vy = -T.jumpCutSpeed;
-      }
+      this.cutReleasedJump(swimming);
     }
     // Entry splash: hitting the surface with speed reads as impact.
     this.submersion = sub;

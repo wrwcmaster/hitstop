@@ -82,7 +82,7 @@ export class Npc extends Actor {
     // Only the locally-driven knight can talk — dialogue and shops live on
     // this screen. A net guest's knight walks past NPCs without prompts.
     const p = nearestPlayer(this.world, this.cx, this.cy);
-    if (!p || !p.isLocal) return null;
+    if (!p || !p.isLocal || !p.interactionsEnabled) return null;
     const dx = Math.abs(p.cx - this.cx);
     const dy = Math.abs(p.cy - this.cy);
     return dx < INTERACT_RANGE && dy < 24 ? p : null;

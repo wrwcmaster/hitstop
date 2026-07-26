@@ -21,6 +21,7 @@ import {
   clamp,
   overlaps,
   t,
+  moveAndCollide,
 } from '@engine/index';
 import { menuLine, prettyCode, prettyButton, promptText, REPLAY_PENDING_KEY, type ActionGame, type Action, type RunStart, type TestScenario } from '../defs';
 import { Player } from '../actors/player';
@@ -53,10 +54,12 @@ import { CoopGuestScene } from '../net/guest';
 import { CoopScene } from './coop';
 import { displayName } from '../name';
 import type { PeerLink } from '@engine/index';
+import { edgeDoorSide, openEdgeDoorways } from './play/doorways';
 
 /** A door transition in progress: fade out, swap rooms, fade in. */
 interface Transition {
   t: number;
+  fromRoomId: string;
   roomId: string;
   x: number;
   y: number;
@@ -66,10 +69,12 @@ interface Transition {
    * nothing to open.
    */
   open?: { left: number; x: number; y: number; w: number; h: number };
-  /** Velocity to restore on arrival — a vertical seam keeps your arc. */
+  /** Velocity to restore on arrival — connected seams keep your arc. */
   carry?: { vx: number; vy: number };
-  /** Horizontal edge gaps keep the knight walking through the fade. */
+  /** Horizontal edge gaps keep the knight moving naturally through the fade. */
   walk?: { out: -1 | 1; into: -1 | 1 };
+  /** Destination geometry used to advance a vertical seam before room swap. */
+  seamMap?: Tilemap;
 }
 
 const TRANSITION_TIME = 0.6;
@@ -698,6 +703,7 @@ export class PlayScene implements Scene {
     // before anything measures the map (minimap, camera bounds) and long
     // before anyone stands on it.
     this.patches.applyTiles(id, this.tilemap);
+    openEdgeDoorways(this.room, this.tilemap);
     this.minimapDirty = false; // freshly baked below; a stale flag would rebake it
     this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
     this.triggers = new Triggers(this.room.triggers ?? []);
@@ -721,9 +727,10 @@ export class PlayScene implements Scene {
       }
     }
     // Doors and portals are interaction zones (press E), not auto-fires.
-    this.interactZones = (this.room.triggers ?? []).filter(
-      (t) => t.event === 'door' || t.event === 'portal',
-    );
+    this.interactZones = (this.room.triggers ?? []).filter((t) => (
+      t.event === 'portal'
+      || (t.event === 'door' && t.props?.fallIn !== true && t.props?.leapUp !== true)
+    ));
     this.nearInteract = null;
 
     // Snap the camera so the new room doesn't smear in; with no player
@@ -792,7 +799,15 @@ export class PlayScene implements Scene {
     }
   }
 
-  /** Begin a fade transition into another room (door travel). */
+  /** Build the run's current collision view of a room before entering it. */
+  private collisionMapFor(roomId: string): Tilemap {
+    const room = this.roomById(roomId);
+    const map = buildTilemap(room);
+    this.patches.applyTiles(roomId, map);
+    openEdgeDoorways(room, map);
+    return map;
+  }
+
   /**
    * Where you come out when you walk through a doorway into `toRoom`:
    * at that room's own door back here. The two triggers stop being a
@@ -814,6 +829,13 @@ export class PlayScene implements Scene {
       (tr) => tr.event === 'door' && tr.props?.room === this.roomId,
     );
     if (!back) return null;
+    const leaving = this.room.triggers?.find(
+      (tr) => tr.event === 'door' && tr.props?.room === toRoom,
+    );
+    const trackedSeam = back.props?.trackX === true && leaving?.props?.trackX === true;
+    const edgePair = !!leaving
+      && edgeDoorSide(this.room, leaving) !== null
+      && edgeDoorSide(dest, back) !== null;
     const pw = this.player?.w ?? 14;
     const ph = this.player?.h ?? 18;
 
@@ -823,8 +845,7 @@ export class PlayScene implements Scene {
     // arrives through makes no difference to how bad that is. The map is
     // built WITH this run's patches, so a floor the player smashed reads
     // as the hole it now is.
-    const map = buildTilemap(dest);
-    this.patches.applyTiles(toRoom, map);
+    const map = this.collisionMapFor(toRoom);
     const buried = (x: number, y: number): boolean => {
       for (const s of map.solidsNear({ x, y, w: pw, h: ph })) {
         if (!s.oneWay && x < s.x + s.w && s.x < x + pw && y < s.y + s.h && s.y < y + ph) return true;
@@ -846,18 +867,32 @@ export class PlayScene implements Scene {
     // falling; jump up it and the same jump lifts you out of the well's
     // mouth on the other side. The room swap becomes a splice in one
     // continuous arc, which is what makes it read as one place.
-    const cx = back.x + back.w / 2 - pw / 2;
+    // Preserve where the knight crossed a vertical seam. Wide breakable
+    // floors may only be open beneath the exact tiles she smashed; always
+    // returning at the trigger's centre can put her under intact stone.
+    // Mapping the source fraction onto the far opening also makes unequal
+    // shaft widths join as one continuous passage.
+    const verticalX = (): number => {
+      if (!trackedSeam || !this.player || !leaving || leaving.w <= 0) {
+        return back.x + back.w / 2 - pw / 2;
+      }
+      const along = clamp((this.player.cx - leaving.x) / leaving.w, 0, 1);
+      return clamp(back.x + back.w * along - pw / 2, back.x, back.x + back.w - pw);
+    };
     if (back.props?.leapUp === true) {
       // Their ceiling gap: appear just below it, still falling — and if
       // the gap's lip is thicker than the trigger, keep going down.
-      const at = settle(cx, back.y + back.h, 1);
+      const at = settle(verticalX(), back.y + back.h, 1);
       return at && { ...at, carry: true };
     }
     if (back.props?.fallIn === true) {
-      // Their floor shaft: appear at its foot, still rising. A trigger
-      // drawn a little into the shaft's floor would otherwise plant you
-      // ankle-deep in it, so rise until the body is clear.
-      const at = settle(cx, back.y + back.h - ph, -1);
+      // Their floor shaft: enter just inside its lower lip, still rising.
+      // Starting at the trigger's foot made the invisible tunnel taller
+      // than a normal jump once transition-time gravity became real, so
+      // even a full jump could never clear the mouth. One pixel of overlap
+      // keeps the arrival primed while the real collision map decides the
+      // result: a strong jump clears the floor, a weak one reverses below.
+      const at = settle(verticalX(), back.y - ph + 1, -1);
       return at && { ...at, carry: true };
     }
     // Step OUT of the doorway, not into it. Landing on the trigger was
@@ -868,12 +903,19 @@ export class PlayScene implements Scene {
     const roomW = Math.max(...dest.tiles.map((r) => r.length)) * dest.tileSize;
     const outward = back.x + back.w / 2 < roomW / 2 ? 1 : -1;
     const x = outward === 1 ? back.x + back.w + 2 : back.x - pw - 2;
-    const y = back.y + back.h - ph;
+    // A horizontal seam maps the exact height at which it was crossed,
+    // rather than pinning every arrival to the destination floor. Equal
+    // trigger heights preserve Y offset exactly; unequal ones scale it.
+    // Together with carried velocity below, a jump stays a jump across
+    // the room boundary and a fall keeps falling.
+    const y = edgePair && this.player && leaving && leaving.h > 0
+      ? back.y + (this.player.y - leaving.y) * (back.h / leaving.h)
+      : back.y + back.h - ph;
     // Stepping out sideways assumes a doorway you walk through. A shaft
     // you FALL down has no beside — the town well is two tiles wide with
     // rock either side — so let the caller fall back to the room's spawn
     // rather than burying you in stone.
-    return buried(x, y) ? null : { x, y };
+    return buried(x, y) ? null : { x, y, carry: edgePair };
   }
 
   private goToRoom(roomId: string, x?: number, y?: number): void {
@@ -881,17 +923,22 @@ export class PlayScene implements Scene {
     // pair up with the doorway on the far side, then the room's spawn.
     const land = x === undefined && y === undefined ? this.doorLanding(roomId) : null;
     const spawn = this.roomById(roomId).playerSpawn;
+    const walk = this.edgeWalk(roomId) ?? undefined;
+    const carry = land?.carry && this.player ? { vx: this.player.vx, vy: this.player.vy } : undefined;
     this.transition = {
       t: 0,
+      fromRoomId: this.roomId,
       roomId,
       x: x ?? land?.x ?? spawn.x,
       y: y ?? land?.y ?? spawn.y,
       open: this.doorwayArt(roomId) ?? undefined,
-      walk: this.edgeWalk(roomId) ?? undefined,
-      // Vertical seams splice the player's arc across rooms, so capture
+      walk,
+      // Connected seams splice the player's arc across rooms, so capture
       // the velocity at the moment of crossing (setRoom zeroes it).
-      carry: land?.carry && this.player ? { vx: this.player.vx, vy: this.player.vy } : undefined,
+      carry,
+      seamMap: carry && !walk ? this.collisionMapFor(roomId) : undefined,
     };
+    if (this.player) this.player.interactionsEnabled = false;
     this.game.sfx.play(this.transition.open ? 'unlock' : 'menuOpen');
   }
 
@@ -901,13 +948,6 @@ export class PlayScene implements Scene {
    * instead of freezing as soon as the hitbox touches a trigger.
    */
   private edgeWalk(toRoom: string): { out: -1 | 1; into: -1 | 1 } | null {
-    const side = (room: RoomDef, door: TriggerDef): -1 | 1 | null => {
-      if (door.props?.fallIn === true || door.props?.leapUp === true) return null;
-      const width = Math.max(...room.tiles.map((row) => row.length)) * room.tileSize;
-      if (door.x <= 0) return -1;
-      if (door.x + door.w >= width) return 1;
-      return null;
-    };
     const leaving = this.room.triggers?.find(
       (tr) => tr.event === 'door' && tr.props?.room === toRoom,
     );
@@ -916,19 +956,109 @@ export class PlayScene implements Scene {
       (tr) => tr.event === 'door' && tr.props?.room === this.roomId,
     );
     if (!leaving || !entering || !dest) return null;
-    const out = side(this.room, leaving);
-    const farSide = side(dest, entering);
+    const out = edgeDoorSide(this.room, leaving);
+    const farSide = edgeDoorSide(dest, entering);
     if (out === null || farSide === null) return null;
     return { out, into: farSide === -1 ? 1 : -1 };
   }
 
-  private walkThroughEdge(direction: -1 | 1, dt: number): void {
+  private moveThroughEdge(direction: -1 | 1, dt: number): void {
     const p = this.player;
     if (!p || dt <= 0) return;
+
+    // The rest of the world pauses behind the fade, but the crossing
+    // knight does not. Keep gravity and vertical collision live so a
+    // jump traces one continuous arc instead of floating at its entry Y.
+    //
+    // Horizontal travel remains explicit: moveAndCollide's level
+    // backstop quite correctly keeps ordinary actors inside a room, while
+    // this is the one moment the knight must walk beyond that boundary.
+    p.advanceTransitionAir(dt);
+    const oldX = p.x;
+    const bounds = p.collision.bounds;
+    if (bounds) p.x = clamp(p.x, bounds.x, bounds.x + bounds.w - p.w);
+    p.vx = 0;
+    moveAndCollide(p, dt, p.collision);
+    p.x = oldX;
+
     p.facing = direction;
     p.vx = direction * EDGE_WALK_SPEED;
     p.x += p.vx * dt;
     p.animT += dt;
+  }
+
+  /**
+   * Advance a vertical seam while the rest of the room waits behind the
+   * fade. Before the swap, advance a logical body through the destination
+   * geometry while its displacement animates the still-visible source
+   * knight. That prevents a long fade from skipping the first far-side
+   * platform. After the swap the real body continues the same simulation.
+   * Room bounds stay open along the seam so they cannot erase the velocity
+   * needed to return.
+   */
+  private moveThroughVerticalSeam(tr: Transition, dt: number, beforeSwap: boolean): void {
+    const p = this.player;
+    if (!p || dt <= 0) return;
+    if (beforeSwap) {
+      const visualX = p.x;
+      const visualY = p.y;
+      const oldVx = p.vx;
+      const logicalY = tr.y;
+      p.x = tr.x;
+      p.y = logicalY;
+      p.vx = 0;
+      p.advanceTransitionAir(dt);
+      moveAndCollide(p, dt, {
+        solidsNear: (rect) => tr.seamMap?.solidsNear(rect) ?? [],
+      });
+      tr.y = this.reversedVerticalSeamY(tr, tr.roomId, p.y, p.vy) ?? p.y;
+      p.x = visualX;
+      p.y = visualY + tr.y - logicalY;
+      p.vx = oldVx;
+      return;
+    }
+
+    const oldX = p.x;
+    const oldVx = p.vx;
+    p.vx = 0;
+    p.advanceTransitionAir(dt);
+    moveAndCollide(p, dt, {
+      solidsNear: (rect) => p.collision.solidsNear(rect),
+    });
+    p.x = oldX;
+    p.vx = oldVx;
+    this.holdReversedVerticalSeam(tr);
+  }
+
+  /**
+   * A weak vertical crossing can reverse during the fade. Keep the knight
+   * on the destination threshold instead of letting her fall beyond the
+   * room extent; the ordinary seam poll will send her naturally back on
+   * the next simulation step, with the gravity-grown velocity intact.
+   */
+  private reversedVerticalSeamY(
+    tr: Transition,
+    roomId: string,
+    y: number,
+    vy: number,
+  ): number | null {
+    const back = this.roomById(roomId).triggers?.find(
+      (def) => def.event === 'door' && def.props?.room === tr.fromRoomId,
+    );
+    const p = this.player;
+    if (!back || !p) return null;
+    if (back.props?.fallIn === true && vy > 40 && y + p.h >= back.y + back.h) {
+      return back.y + back.h - p.h;
+    }
+    if (back.props?.leapUp === true && vy < -40 && y <= back.y) return back.y;
+    return null;
+  }
+
+  private holdReversedVerticalSeam(tr: Transition): void {
+    const p = this.player;
+    if (!p) return;
+    const y = this.reversedVerticalSeamY(tr, this.roomId, p.y, p.vy);
+    if (y !== null) p.y = y;
   }
 
   /**
@@ -1156,10 +1286,13 @@ export class PlayScene implements Scene {
    * mouth, and you fall back down INSIDE the trigger you were placed in —
    * there is no entry edge left to fire. The honest outcome of a failed
    * exit is to fall back through the seam to the room below, so a
-   * fallIn/leapUp door is checked every frame the player overlaps it:
-   * the moment the motion matches (falling for fallIn, rising for
-   * leapUp), through you go. The motion gate itself prevents refiring —
-   * you cannot be both standing still and falling.
+   * fallIn/leapUp door is checked every frame the player overlaps it.
+   *
+   * An arrival is primed only while its carried arc still travels INTO
+   * the room. Once collision or gravity reverses that arc, the matching
+   * return condition disarms the prime and fires immediately. Geometry
+   * therefore gets the final word: a clear, strong jump exits; an intact
+   * ceiling or short hop returns, with no pocket the knight can strand in.
    */
   private updateVerticalSeams(): void {
     const p = this.player;
@@ -1173,7 +1306,10 @@ export class PlayScene implements Scene {
         this.seamPrimed.delete(def);
         continue;
       }
-      if (this.seamPrimed.has(def)) continue; // arrived inside it
+      if (this.seamPrimed.has(def)) {
+        if (!this.firesOnContact(def)) continue; // still travelling into this room
+        this.seamPrimed.delete(def); // the arc reversed before leaving the seam
+      }
       if (doorLocked(def, this.host)) continue;
       if (this.firesOnContact(def)) {
         triggerActions.get('door').run(def, this.host);
@@ -1360,25 +1496,35 @@ export class PlayScene implements Scene {
       const before = tr.t;
       const after = Math.min(TRANSITION_TIME, before + dt);
       const outDt = Math.max(0, Math.min(after, half) - Math.min(before, half));
-      if (tr.walk) this.walkThroughEdge(tr.walk.out, outDt);
+      if (tr.walk) this.moveThroughEdge(tr.walk.out, outDt);
+      else if (tr.carry) this.moveThroughVerticalSeam(tr, outDt, true);
       tr.t = after;
       if (before < half && after >= half) {
+        // The fade-out half may have advanced a jump or fall. Re-map that
+        // CURRENT height at the threshold instead of using the Y captured
+        // when the transition began, then carry the current velocity into
+        // the new room. This keeps both halves of the arc continuous.
+        const liveLanding = tr.walk ? this.doorLanding(tr.roomId) : null;
+        const liveCarry = tr.carry && this.player
+          ? { vx: this.player.vx, vy: this.player.vy }
+          : tr.carry;
         if (tr.walk && this.player) this.player.facing = tr.walk.into;
-        this.setRoom(tr.roomId, tr.x, tr.y);
-        // setRoom zeroes velocity for ordinary doors; a vertical seam
-        // hands the arc back UNCHANGED, so the fall (or the jump) simply
-        // continues. Deliberately no boost for a weak jump: physics stays
-        // honest, and an arc that cannot clear the far shaft falls back
-        // through the seam to where it came from (see updateVerticalSeams).
-        if (tr.carry && this.player) {
-          this.player.vx = tr.carry.vx;
-          this.player.vy = tr.carry.vy;
+        this.setRoom(tr.roomId, liveLanding?.x ?? tr.x, liveLanding?.y ?? tr.y);
+        // setRoom zeroes velocity for ordinary doors; a connected seam
+        // hands the arc back UNCHANGED, so a fall or jump simply continues.
+        // Deliberately no boost for a weak jump: physics stays honest.
+        if (liveCarry && this.player) {
+          this.player.vx = liveCarry.vx;
+          this.player.vy = liveCarry.vy;
         }
       }
       const inDt = Math.max(0, after - half) - Math.max(0, before - half);
-      if (tr.walk) this.walkThroughEdge(tr.walk.into, inDt);
+      if (tr.walk) this.moveThroughEdge(tr.walk.into, inDt);
+      else if (tr.carry) this.moveThroughVerticalSeam(tr, inDt, false);
       if (tr.t >= TRANSITION_TIME) {
+        if (tr.carry && !tr.walk) this.holdReversedVerticalSeam(tr);
         if (tr.walk && this.player) this.player.vx = 0;
+        if (this.player) this.player.interactionsEnabled = true;
         this.transition = null;
       }
       return;

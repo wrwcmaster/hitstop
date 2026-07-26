@@ -78,7 +78,8 @@
       "once": false,
       "props": {
         "room": "riven-lip",
-        "fallIn": true
+        "fallIn": true,
+        "trackX": true
       }
     }
   ],

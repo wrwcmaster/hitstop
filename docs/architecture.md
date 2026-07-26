@@ -146,6 +146,7 @@ The second wave of systems keeps the same shape — registries of data + small h
 
 - **`play/waves.ts` — WaveDirector**: runs a room's wave combat from a **wave table** (`content/waves.ts`, a registry — `props.waves: "<table id>"` names the recipe; rooms can run different gauntlets). Also handles `waveGoal`/`gateKey`: clearing the goal wave drops the key and stops the waves.
 - **`play/trigger-actions.ts`**: what each trigger `event` means — behavior plus an optional definition-owned `validateProps`. `talk` and `door` validate their payloads before a room starts; custom unregistered events still flow through the event bus.
+- **`play/doorways.ts`**: one geometry rule for outer-wall doors. It identifies the nearest edge, derives a collision-free opening through thick walls, and drives smooth walk-through transitions without room-specific cases.
 - **`play/hud.ts` — Hud**: all in-game screen-space drawing (vitals, purse, level, statuses, minimap, boss bar, combo, banners) plus the world-space gate marker. Pure rendering; state stays in the scene.
 - **`play/screens.ts`**: the title screen (menu + render) and the game-over overlay.
 - **`play/cheats.ts`**: debug cheats as a data table — the key handler and the on-screen legend both walk it, so a new cheat is one entry.

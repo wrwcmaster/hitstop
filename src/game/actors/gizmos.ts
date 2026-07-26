@@ -139,7 +139,7 @@ export class Lever extends Entity {
 
   private playerNear(): Player | null {
     const p = nearestPlayer(this.world, this.x + 4, this.y + 4);
-    if (!p || !p.isLocal) return null;
+    if (!p || !p.isLocal || !p.interactionsEnabled) return null;
     return Math.abs(p.cx - (this.x + 4)) < 16 && Math.abs(p.cy - this.y) < 24 ? p : null;
   }
 

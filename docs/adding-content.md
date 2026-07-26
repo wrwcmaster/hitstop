@@ -356,7 +356,23 @@ An open doorway in a room's **outer wall** is a gap you simply walk into — no 
 | open, in the room's interior | press E | a gap in the wall |
 | locked (`key` or `flag`) | press E, refused with a banner | a banded timber door |
 
-Outer-wall doorways sit **flush with the room boundary** — the outermost tile column — so you cross only when you have actually walked to the edge of the room. Placed even a couple of tiles inboard, the room swaps out while there is still visible floor ahead of you, which reads as the game snatching control rather than you leaving.
+Outer-wall doorways may sit flush with the boundary or up to three tiles
+inside a thick wall. `play/doorways.ts` derives one edge classification
+from that geometry, clears ordinary solid tiles between the trigger and
+the boundary (authored `gate` tiles stay intact), and uses the same side
+for the walk-through transition. The knight therefore keeps walking out
+of the old room and into the new one instead of freezing at the trigger.
+Keep true interior passages farther from the edge so they remain explicit
+interactions.
+
+Paired edge doors also map the knight's height within the source trigger
+onto the destination trigger and carry vertical velocity. Gravity and
+vertical collision continue during the fade, so running across stays
+grounded while jumping or falling across keeps the same arc. Jump release
+still applies the normal variable-height cut during the fade; a tap never
+turns into a full jump merely because it crossed a room boundary. Align each
+trigger's bottom with its doorway floor (a one-way ledge is preserved as
+a valid threshold floor) so both rooms describe the same physical seam.
 
 The interior exception matters more than it sounds. The shaft down to the grotto and the stair up to the ramparts sit in the middle of floors you have every reason to walk across; firing those on contact means you can no longer cross your own room without being swallowed. Castlevania solves it the same way — doors live at the edges, and the way down is something you choose.
 
@@ -373,11 +389,11 @@ A pair of doors can join two rooms **vertically** — the town well over the und
 { "event": "door", "x": 40, "y": 0, "w": 24, "h": 8, "props": { "room": "town", "leapUp": true } }
 ```
 
-Both fire only on genuine motion through them — falling for `fallIn`, rising for `leapUp` — and the landing rules change: you arrive **in** the far opening rather than beside it, and your velocity carries across the transition. Drop down the well and you emerge under the far ceiling still falling, to land on whatever the room put beneath the gap; jump up through the gap and the same jump lifts you out of the well's mouth. The room swap is a splice in one continuous arc, which is what makes the two rooms read as one place.
+Both fire only on genuine motion through them — falling for `fallIn`, rising for `leapUp` — and the landing rules change: you arrive **in** the far opening rather than beside it. Gravity keeps accelerating the player throughout the fade, and destination collision is already active, so dropping down the well lands on the first far-side platform while a jump can hit an intact ceiling or clear an open mouth naturally. The room swap is a splice in one continuous arc, not a pause that restores the old velocity.
 
 The physics stays **honest**: a weak jump gets no boost. A tapped jump can cross the seam and still fail the far mouth — and then it falls back down *inside* the shaft it arrived in, which is a blind spot for entry-edge triggering (there is no entry left to fire). So vertical seams are checked every frame the player overlaps them (`PlayScene.updateVerticalSeams`): the moment the motion matches the door — falling for `fallIn`, rising for `leapUp` — through you go. A failed exit simply returns you to the room below, back on the bar you jumped from; the motion gate itself prevents refiring, since you cannot be both standing and falling.
 
-The corollary is that the seam's difficulty lives in the **room geometry**, not in code: place the bar close enough under the gap, and the far mouth shallow enough, that a full jump clears it with margin. In the shipped well, a held jump crosses with ~50px of rise in hand against a 24px mouth — comfortable; the only jump that bounces back is one deliberately cut short.
+The corollary is that the seam's difficulty lives in the **room geometry**, not in code: place the bar close enough under the gap, and the far mouth shallow enough, that a full jump clears it with margin. An upward arrival starts just inside the lower lip of the `fallIn` trigger; the shipped well leaves enough rise for a held jump to clear and land above, while a deliberately short jump stays below.
 
 Keep a `leapUp` trigger **thin** (the top row of the gap). Anything taller reaches down to where the player stands waiting to jump — and since triggers fire on entry, a trigger you are already inside has spent its edge before the jump begins.
 

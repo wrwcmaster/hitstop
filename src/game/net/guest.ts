@@ -28,6 +28,7 @@ import type { PlayHost } from '../scenes/play/host';
 import { saveStore, newestSave, restorePlayer, type SaveData } from '../save';
 import { displayName } from '../name';
 import { NET_ACTIONS, parseMsg, type SnapMsg, type KnightSnap } from './protocol';
+import { openEdgeDoorways } from '../scenes/play/doorways';
 
 /** Beyond this far from the server's word, stop gliding and snap. */
 const SNAP_DIST = 48;
@@ -304,6 +305,8 @@ export class CoopGuestScene implements Scene {
   private applyPatch(): void {
     if (!this.tilemap) return;
     this.patches.applyTiles(this.roomId, this.tilemap);
+    const room = ROOMS[this.roomId];
+    if (room) openEdgeDoorways(room, this.tilemap);
     this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
   }
 
@@ -316,6 +319,7 @@ export class CoopGuestScene implements Scene {
     const room = ROOMS[id];
     if (!room) return;
     this.tilemap = buildTilemap(room);
+    openEdgeDoorways(room, this.tilemap);
     this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
     this.game.camera.setBounds(0, -30, this.tilemap.worldW, this.tilemap.worldH - 16);
     this.game.music.play((room.props?.music as string) ?? DEFAULT_SONG);
