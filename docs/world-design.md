@@ -197,8 +197,15 @@ breathe** — a room that does none is cut.
 All puzzle grammars compose the four verbs with mechanisms that already
 exist (traits `breakable`/`resonant`/`rebound`, gizmos platform / lever /
 plate / barrier, water + oxygen, hazards, one-way platforms, room
-patches, surface reactions). New mechanisms are listed at the end of this
-section — there are only four, and two are pure content.
+patches, surface reactions). New mechanisms are listed at the end of
+this section, together with the engine growth each one demands. Cost is
+not a filter here: when the design wants something the engine cannot do,
+the engine grows. An assumption the design has to tiptoe around is a bug
+in the engine's extensibility, not a constraint to honor. What keeps
+this honest is that every extension must be **general** — a capability
+any future game could use, never a special case for one room — and
+**independently shippable**, so the game upgrades smoothly by
+increments: each extension lands with the first content that needs it.
 
 ### The grammars
 
@@ -242,19 +249,53 @@ section — there are only four, and two are pure content.
 - **Tide routing** (Brinehollow): existing swim/oxygen plus lever-driven
   water gates; DEEP LUNGS and tidecaller content live here.
 
-### New mechanisms required (complete list)
+### New mechanisms (complete list)
 
-| Mechanism | Kind | Cost |
+| Mechanism | Layer | Shape |
 | --- | --- | --- |
-| `deadstone` tile + `stilled` surface reaction | pure content — a tile *without* `resonant`, plus one `defineSurfaceReaction('stilled', {to: ['plunge']})` | zero engine work |
-| Bell-node placeable | new placeable listening for `plungeLand` overlap / `surfaceWave` on its tile; emits `setFlag` like levers do | game code only |
-| `slick` trait | tile trait excluded by `wallGripSide()` (one tile lookup at the contact) | small player change |
-| Quiet-zone feel suppression (Hush fight only) | scene-level: suppress hitstop/shake/sfx inside marked circles | game code only |
-| `brittle` trait + transient break | a non-recording sibling of `mutateTile` on the reaction's host (break the live map, record nothing) so puzzle floors regrow on re-entry | game code only |
+| `deadstone` tile + `stilled` surface reaction | content | a tile *without* `resonant`, plus one `defineSurfaceReaction('stilled', {to: ['plunge']})` |
+| Bell-node placeable | game | new placeable listening for `plungeLand` overlap / `surfaceWave` on its tile; emits `setFlag` like levers do |
+| `slick` trait | game | tile trait excluded by `wallGripSide()` (one tile lookup at the contact) |
+| `brittle` trait + transient break | **engine** | a transient mode on the patch seam (extension 1 below) |
+| World patches | **engine** | authoring geometry in rooms that aren't loaded (extension 2) |
+| Room overlays | **engine** | flag-conditioned variant layers over a base room (extension 3) |
+| Quiet zones | **engine** | feel-suppression regions (extension 4) — the Hush is the loudest user, not the only one |
 
-An updraft gizmo for the Windspires was considered and **cut**: moving
-platforms plus air-step economy carry every route, and a fifth movement
-force dilutes the verb vocabulary.
+### Engine growth this design funds
+
+Four engine extensions — each general, each shippable on its own, each
+arriving with the first content that needs it:
+
+1. **Transient mutation.** `mutateTile` gains a non-recording mode:
+   break the live tilemap, record no patch, so the room regrows on
+   re-entry. `brittle` puzzle floors are the first user; any
+   resets-on-exit geometry (collapsing bridges, regrowing vines) rides
+   the same switch. The seam stays the seam — one entry point, two
+   persistence modes.
+2. **World patches.** The patch store already persists per-room across
+   saves; what is missing is *authoring into it* for a room that isn't
+   loaded. A deferred-patch surface (`patches.forRoom(id).setTile(...)`)
+   closes the gap: the change applies the moment that room loads, saves
+   exactly like a live mutation, and the "geometry only changes under
+   your feet" assumption dies. The Strike is the first user — it
+   genuinely rewrites distant ground, not just its own presentation.
+3. **Room overlays.** A room declares variant layers — tile patches,
+   spawn-table swaps, placeable additions — keyed to story flags and
+   applied at load. This is what "stilled-zone overlays reuse existing
+   rooms" concretely is: the second-half Fallows is the same room file
+   plus a `world-rung` layer, and any future world event (a flood, a
+   thaw, a festival) is one more layer, never a forked room file.
+4. **Quiet zones.** Feel suppression becomes an engine capability:
+   marked regions attenuate hitstop, screen shake, and sfx per channel.
+   The Hush fight is the extreme case — full silence as the stolen
+   resource — but overworld stilled zones reuse it at partial strength,
+   so the gray ground *feels* dead before anything in it moves. Scene
+   code stops owning the trick.
+
+An updraft gizmo for the Windspires was considered and **cut** — a
+design cut, not a cost cut: moving platforms plus air-step economy carry
+every route, and a fifth movement force dilutes the verb vocabulary. The
+extension would be easy; it is the vocabulary that refuses it.
 
 Boss floor-collapse needs **nothing**: any actor may emit `plungeLand`,
 and the existing `breakSurface` handler breaks `breakable` tiles under
@@ -490,15 +531,20 @@ old ground.
   (Fallows ~3, Foundry ~4): the remix and the variants earn the
   difficulty — the numbers on unchanged monsters don't move. Re-ringing
   ground (plunge, then wave) is the local grammar everywhere.
+  Mechanically the creep is **room overlays** on the same room files
+  (Part III, extension 3), and stilled ground carries partial
+  **quiet-zone** suppression (extension 4) — the gray patches feel dead
+  before anything in them moves.
 - **The Eastern Seal** and every small resonant seal on the map crack
-  open at the midpoint. Mechanism: seals are **flag-gated barrier
-  placeables** — the Strike sets one story flag (`world-rung`), and each
-  seal spawns open once its room loads with the flag set. No cross-room
-  patching is needed or possible (`mutateTile` only touches the loaded
-  room, by design); the montage is presentation over the flag flip, and
-  the map screen filling with new doors falls out of the seals' rooms
-  reporting their open state. Recontextualization as a single world-wide
-  beat, built entirely from flags + barriers that already exist.
+  open at the midpoint. The Strike sets one story flag (`world-rung`)
+  and, through **world patches** (Part III, extension 2), writes real
+  geometry into distant rooms: seal stones crack, blocked mouths open,
+  the gray creep's borders shift. Seals whose opening reads best as a
+  door stay flag-gated barrier placeables; seals whose opening reads
+  best as broken stone are patched for real — the choice per seal is
+  aesthetic, never forced by an engine limit. The map screen filling
+  with new doors falls out of the seals' rooms reporting their open
+  state: recontextualization as a single world-wide beat.
 - **The Duelist rematch** (mandatory) at `bore-gallery`: she keeps the
   promise made on the rampart and bars the reopened gate; full-kit
   mirror duel — the grounded kit from duel #1 plus everything she
@@ -563,6 +609,11 @@ grant), 3) Underbell + Mourn (Shockwave reachable, midpoint event), 4)
 Windspires upper + Bellwether (moves Air Step; Duelist becomes the
 rampart's mandatory gatekeeper),
 5) Fallows retheme + Slime King demotion, 6) second half.
+
+Engine extensions ride the same steps (each with its first user, per
+Part III): transient mutation with the Foundry's brittle floors (step
+2), world patches with the midpoint event (step 3), room overlays and
+quiet zones with the second half (step 6).
 
 Grant moves are demo-phase save changes (AGENTS.md rule 9): owned verbs
 in old saves stay owned; only the *source* moves.
