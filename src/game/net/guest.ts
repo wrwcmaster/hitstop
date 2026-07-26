@@ -106,6 +106,10 @@ export class CoopGuestScene implements Scene {
   /** Never-pressed hands for the predicted knight during a cutscene: the
    * camera is the director's, so playing on would be playing blind. */
   private neutral = new Input<Action>(KEYMAP);
+  /** Where the scene found my knight — the host anchors its copy there,
+   * so the prediction holds the same spot instead of sagging into the
+   * server correction under gravity. */
+  private cineAnchor: { x: number; y: number } | null = null;
 
   constructor(
     private game: ActionGame,
@@ -308,6 +312,7 @@ export class CoopGuestScene implements Scene {
     this.puppets.clear();
     this.gizmos.clear(); // buildTilemap starts extraSolids fresh
     this.serverMe = null;
+    this.cineAnchor = null; // a new room means a new knight — never hold her to old ground
     const room = ROOMS[id];
     if (!room) return;
     this.tilemap = buildTilemap(room);
@@ -388,10 +393,21 @@ export class CoopGuestScene implements Scene {
     // sees, so both copies stand down together.
     const me = this.me;
     if (me) {
-      if (this.cine) me.source = this.neutral;
-      else if (me.source === this.neutral) me.source = null;
+      if (this.cine) {
+        me.source = this.neutral;
+        this.cineAnchor ??= { x: me.x, y: me.y };
+      } else {
+        if (me.source === this.neutral) me.source = null;
+        this.cineAnchor = null;
+      }
     }
     this.game.world.update(dt);
+    if (me && this.cineAnchor) {
+      me.x = this.cineAnchor.x;
+      me.y = this.cineAnchor.y;
+      me.vx = 0;
+      me.vy = 0;
+    }
     const sv = this.serverMe;
     if (me && sv) {
       const dx = sv.x - me.x;
