@@ -21,7 +21,6 @@ import {
   clamp,
   overlaps,
   t,
-  applyGravity,
   moveAndCollide,
 } from '@engine/index';
 import { menuLine, prettyCode, prettyButton, promptText, REPLAY_PENDING_KEY, type ActionGame, type Action, type RunStart, type TestScenario } from '../defs';
@@ -974,7 +973,7 @@ export class PlayScene implements Scene {
     // Horizontal travel remains explicit: moveAndCollide's level
     // backstop quite correctly keeps ordinary actors inside a room, while
     // this is the one moment the knight must walk beyond that boundary.
-    applyGravity(p, dt);
+    p.advanceTransitionAir(dt);
     const oldX = p.x;
     const bounds = p.collision.bounds;
     if (bounds) p.x = clamp(p.x, bounds.x, bounds.x + bounds.w - p.w);
@@ -1008,7 +1007,7 @@ export class PlayScene implements Scene {
       p.x = tr.x;
       p.y = logicalY;
       p.vx = 0;
-      applyGravity(p, dt);
+      p.advanceTransitionAir(dt);
       moveAndCollide(p, dt, {
         solidsNear: (rect) => tr.seamMap?.solidsNear(rect) ?? [],
       });
@@ -1022,7 +1021,7 @@ export class PlayScene implements Scene {
     const oldX = p.x;
     const oldVx = p.vx;
     p.vx = 0;
-    applyGravity(p, dt);
+    p.advanceTransitionAir(dt);
     moveAndCollide(p, dt, {
       solidsNear: (rect) => p.collision.solidsNear(rect),
     });

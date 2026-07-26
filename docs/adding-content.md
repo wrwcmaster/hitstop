@@ -368,7 +368,9 @@ interactions.
 Paired edge doors also map the knight's height within the source trigger
 onto the destination trigger and carry vertical velocity. Gravity and
 vertical collision continue during the fade, so running across stays
-grounded while jumping or falling across keeps the same arc. Align each
+grounded while jumping or falling across keeps the same arc. Jump release
+still applies the normal variable-height cut during the fade; a tap never
+turns into a full jump merely because it crossed a room boundary. Align each
 trigger's bottom with its doorway floor (a one-way ledge is preserved as
 a valid threshold floor) so both rooms describe the same physical seam.
 
