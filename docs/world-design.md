@@ -163,9 +163,18 @@ home.*
 3. **Non-linearity is terrain.** After Maul, "up" (Windspires) and "down"
    (the Riven) are both open from the hub. **[resolves: bosses 2/3 are
    fully non-linear]**
-4. **Depth bands are difficulty bands.** Surface enemies stay tier 1
-   forever; Foundry is tier 2; Riven/Windspires tier 3 in parallel;
-   Underbell tier 4; second half tier 5. The world never rescales.
+4. **Depth bands are difficulty bands — until the Strike breaks them.**
+   First half: surface is tier 1, Foundry tier 2, Riven/Windspires
+   tier 3 in parallel, Underbell tier 4, and nothing rescales to the
+   player — depth is the only difficulty axis, so a player always knows
+   how dangerous a place is by how deep it sits. At the midpoint the
+   Stilling re-tiers old ground as a **story event**: stilled variants
+   and remixed encounter compositions push the Fallows to ~tier 3 and
+   the Foundry to ~tier 4, while the new regions (Crown, Clapperworks)
+   open at tier 5 (see Part V). This stays inside
+   gameplay-progression.md's rule — upgraded variants are encounter
+   progression; the world changes because the story changed it, never
+   because the player got stronger.
 5. **Optional content lives on the rim, mandatory on the spine.**
    Brinehollow (water, class content) and the Crown's mastery half hang
    off the sides; the critical path stays readable.
@@ -465,9 +474,15 @@ old ground.
 
 ### The world after the Strike
 
-- **Stilled zones** creep into the Fallows and Foundry: deadstone patches
-  (waves die), stilled enemy variants (silent — no audio telegraphs, but
-  slower, with enlarged visual tells; fairness preserved). Re-ringing
+- **Old ground is genuinely harder now.** Stilled zones creep into the
+  Fallows and Foundry: deadstone patches kill waves (Shockwave and every
+  resonant tool go quiet until re-rung), and stilled enemy variants
+  replace the old spawns — silent (no audio telegraphs, but slower, with
+  enlarged visual tells; fairness preserved), tougher, and mixed into
+  encounter compositions the first half never used. A returning player
+  walks familiar rooms at roughly two tiers above the first visit
+  (Fallows ~3, Foundry ~4): the remix and the variants earn the
+  difficulty — the numbers on unchanged monsters don't move. Re-ringing
   ground (plunge, then wave) is the local grammar everywhere.
 - **The Eastern Seal** and every small resonant seal on the map crack
   open at the midpoint. Mechanism: seals are **flag-gated barrier
@@ -556,7 +571,9 @@ in old saves stay owned; only the *source* moves.
   escape, every recontextualize is the shortcut home. ✓
 - No enemy reads inputs, counters a preferred verb systematically, or
   removes powers; stilled variants trade audio tells for larger visual
-  ones. ✓
+  ones. The second-half re-tiering of old regions is encounter
+  progression — the Strike swaps the encounters — never scaling to the
+  player. ✓
 - Both loadouts everywhere: every punish window is reachable by melee
   position AND ranged angle; the verbs are the knight's, not the
   weapon's. ✓
