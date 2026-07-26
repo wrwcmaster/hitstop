@@ -325,16 +325,19 @@ each fires once, and each arms only after a few seconds of no progress
 in its zone — a player who already moves like a knight never reads a
 single tutorial line. Every taught verb is *used* within one screen of
 its prompt, and nothing gates on reading: veterans cross the belt in
-under a minute.
+under a minute. And every station is **diegetic**: the belt is the
+story's opening beats — a dead shrine that rings for her, a caravan in
+trouble — never a training construct. The player should finish it
+having done the story's first favor, not a drill.
 
 | Room | Size | Jobs | Design |
 | --- | --- | --- | --- |
-| `waking-hollow` | 1w | T | The road's last toll-shrine, half sunk. Move and jump taught purely by geometry: a knee-high step, then a real gap. Weathered toll-marks on the stones light up as stall-hints. Interact taught on the shrine bell — one tap rings the game's first clean note, and the title card lands on it (a two-beat Director cutscene). |
-| `practice-yard` | 2w | T | A collapsed waystation yard the caravans drill in. Straw slime-dummies teach slash; a rope-hung sandbag across a pit takes a ranged shot or a dash-attack (both loadouts get a first verb); a slumping lintel teaches dash through the closing gap (it re-lifts on a cycle — never a softlock). Optional corner: a creaking spring-arm swings slow and telegraphed — parry it to ring the yard bell for a coin cache. No station is required; the east gate is always open. |
+| `waking-hollow` | 1w | T | The road's last toll-shrine, half sunk and long silent — travelers ring for safe passage, and this one has answered no one in years. Move and jump taught purely by geometry: a knee-high step, then a real gap. Weathered toll-marks on the stones light up as stall-hints. Interact taught on the shrine bell: it wakes *for her* — the game's first clean note, the first sign she is a bearer, and the title card lands on it (a two-beat Director cutscene). The ring carries: Ansa's first line at the tollhouse is that the west shrine sounded for the first time in living memory. |
+| `practice-yard` | 2w | T | The merchant's caravan, stalled in a collapsed waystation yard with slimes in the walls — the story's first favor, and every station is the rescue. Slash taught cutting the snare-ropes off the cart; the winched supply bag hung over the pit comes down to a ranged shot or a dash-attack (both loadouts get a first verb); dash taught slipping under the slumping gate-lintel to reach the trapped drover (it re-lifts on a cycle — never a softlock). Optional: the caravan guard offers a friendly bout — parry her slow, telegraphed swing to win a coin purse and her respect. No station is required; the east gate is always open, and the caravan manages without you (slower, and the guard says so). |
 | `fallows-edge` | 2w | T X | First live combat: two slimes, applying the yard's verbs. A stilled gray copse in the background — the first sight of the antagonist, unremarked. |
 | `fallows-fields` | 3w | T X | First combat mixes; a visibly cracked floor plate with a glinting cache beneath — Impact Drop foreshadow, unreachable for hours. |
 | `waystone-gate` | 1w | X | Gate miniboss: **the Slime King** (existing fight, demoted with honor). Teaches boss grammar: HP bar, phases, arena discipline. |
-| `old-toll-road` | 2w | B C | Breather; merchant caravan (first shop); a small resonant seal hides a coin cache — Shockwave foreshadow in miniature. |
+| `old-toll-road` | 2w | B C | Breather; the caravan you freed at the yard, rolled ahead and trading (first shop — gratitude priced in if you helped); a small resonant seal hides a coin cache — Shockwave foreshadow in miniature. |
 | `hearthgate` | 1w | C | Arrival framing: the well's silhouette, the chimney above town howling wind. |
 
 ### Hearthstead (hub)
