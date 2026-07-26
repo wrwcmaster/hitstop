@@ -164,8 +164,9 @@ home.*
 
 ### Room budget
 
-First half ≈ 37 rooms (opening 5, hub 2, Bore 3, Foundry 7, Riven 7,
-Windspires 7, Underbell 6), optional Brinehollow 4. Second half ≈ 15
+First half ≈ 38 rooms (opening 5, hub 2, Bore 3, Foundry 7, Riven 7,
+Windspires 8 — one of which, `rampart-duel`, is optional — Underbell 6),
+plus the optional Brinehollow 4. Second half ≈ 15
 (Crown 7, Clapperworks 6, stilled-zone overlays reuse existing rooms).
 Every room must do at least one of: **teach, test, reward, connect,
 breathe** — a room that does none is cut.
@@ -183,10 +184,14 @@ section — there are only four, and two are pure content.
 ### The grammars
 
 - **Weight-and-floor** (Foundry): a lever drops an ingot; where it lands
-  depends on which weak floors you have broken first. Order-of-breaking
-  puzzles, using persistence — a wrong break is permanent for the visit,
-  and the reset is walking out and back in (rooms rebuild; only
-  *scripted* progression breaks are recorded via `mutateTile`).
+  depends on which floors you have broken first. Order puzzles use
+  **`brittle`** stone — a *transient* breakable whose surface reaction
+  breaks the live tilemap without recording a patch, so walking out and
+  back in regrows it and a wrong order is never a dead end. (The shipped
+  `breakable` reaction always records; transient breakage is a new
+  mechanism — see the table below.) Design guardrail: geometry broken
+  through the *recording* reaction must leave every break order solvable,
+  because those holes are permanent for the run.
 - **Pogo chains** (Foundry, Windspires): `rebound` surfaces + Impact
   Drop's enemy/surface bounce chain height out of pits and across spike
   fields. Ranged loadouts get identical pogo (the verb is the knight's).
@@ -226,6 +231,7 @@ section — there are only four, and two are pure content.
 | Bell-node placeable | new placeable listening for `plungeLand` overlap / `surfaceWave` on its tile; emits `setFlag` like levers do | game code only |
 | `slick` trait | tile trait excluded by `wallGripSide()` (one tile lookup at the contact) | small player change |
 | Quiet-zone feel suppression (Hush fight only) | scene-level: suppress hitstop/shake/sfx inside marked circles | game code only |
+| `brittle` trait + transient break | a non-recording sibling of `mutateTile` on the reaction's host (break the live map, record nothing) so puzzle floors regrow on re-entry | game code only |
 
 An updraft gizmo for the Windspires was considered and **cut**: moving
 platforms plus air-step economy carry every route, and a fifth movement
@@ -454,9 +460,14 @@ old ground.
   slower, with enlarged visual tells; fairness preserved). Re-ringing
   ground (plunge, then wave) is the local grammar everywhere.
 - **The Eastern Seal** and every small resonant seal on the map crack
-  open at the midpoint montage — pre-authored `mutateTile` patches, the
-  map screen suddenly full of new doors. Recontextualization as a single
-  world-wide beat.
+  open at the midpoint. Mechanism: seals are **flag-gated barrier
+  placeables** — the Strike sets one story flag (`world-rung`), and each
+  seal spawns open once its room loads with the flag set. No cross-room
+  patching is needed or possible (`mutateTile` only touches the loaded
+  room, by design); the montage is presentation over the flag flip, and
+  the map screen filling with new doors falls out of the seals' rooms
+  reporting their open state. Recontextualization as a single world-wide
+  beat, built entirely from flags + barriers that already exist.
 - **The Duelist rematch** (mandatory) at `bore-gallery`: she bars the
   reopened gate; full-kit mirror duel — she air-steps, wall-kicks, and
   reads the ground like you do. Beaten, she yields her oath (and an
