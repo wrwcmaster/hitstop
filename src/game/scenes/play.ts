@@ -425,6 +425,11 @@ export class PlayScene implements Scene {
    * knight alongside — a real Player fed by the remote action stream. */
   startCoopHost(link: PeerLink): void {
     this.coop = new CoopHost(this.game, link);
+    // The guest's menu press during a scene means the same thing the
+    // host's does: skip. Honored only while the director is live.
+    this.coop.onSkip = () => {
+      if (this.director.active) this.director.skip();
+    };
     this.startRun(newestSave()); // names both knights, spawns the guest's
   }
 
@@ -1349,6 +1354,8 @@ export class PlayScene implements Scene {
         // only when the revision (or room) has actually moved.
         patchRev: this.patches.revision,
         patch: () => this.patches.snapshot()[this.roomId],
+        // While a cutscene directs the camera, the guest mirrors the shot.
+        cine: this.director.active ? { x: g.camera.x, y: g.camera.y } : null,
       });
       if (this.coop.dropped) this.endCoop();
     }

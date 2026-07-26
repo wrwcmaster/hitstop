@@ -20,9 +20,13 @@ import { Monster } from '../actors/monster';
  * `Input<Action>` swapped in as the player's `source` for the duration,
  * so a scripted knight runs, jumps, and swings through the exact
  * deterministic action stream a remote player would. That is why
- * cutscenes replay bit-for-bit and why a co-op guest simply sees them
- * happen: nothing about the simulation changes, only who is holding the
- * controls.
+ * cutscenes replay bit-for-bit, and why a co-op guest sees every actor
+ * move without any extra machinery: nothing about the simulation
+ * changes, only who is holding the controls. The PRESENTATION does need
+ * machinery: snapshots carry a `cine` field (the directed camera) while
+ * a scene runs, the guest mirrors the shot and letterbox from it, and a
+ * guest menu press travels up as a skip request. The guest's own knight
+ * stays live throughout — the world doesn't pause, so neither do they.
  *
  * Definitions are data in a registry, so a room places one with a
  * `cutscene` trigger in the level editor and no scene changes — the same

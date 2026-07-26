@@ -6,8 +6,10 @@
  * actors, physics, camera, and feel systems, driven by a timeline
  * instead of a player. That is what keeps cutscenes deterministic (they
  * advance on the fixed timestep like everything else, so they record and
- * replay bit-for-bit) and what lets a co-op guest watch one for free
- * (the host simulates; the snapshots carry the motion).
+ * replay bit-for-bit). Actor MOTION reaches a co-op guest for free (the
+ * host simulates; the snapshots carry it) — but the presentation does
+ * not: direction state (which shot, letterbox) must be synchronized
+ * explicitly by whoever hosts the session (see Letterbox below).
  *
  * The engine owns the MECHANISM: steps, sequencing, easing, skip
  * semantics, and the letterbox state. The game owns the MEANING: what a
@@ -55,20 +57,36 @@ export function tween<Ctx>(
   return { duration: seconds, update: onUpdate, ease };
 }
 
-/** Run steps simultaneously; the group lasts as long as its longest. */
+/** Run steps simultaneously; the group lasts as long as its longest.
+ * Each child finishes on its own clock: the moment its local time hits
+ * its duration it gets update(1) + exit ONCE and goes quiet — a 0.5s
+ * hold inside a 2s group releases at 0.5s, not at the group's end. */
 export function together<Ctx>(...steps: DirectorStep<Ctx>[]): DirectorStep<Ctx> {
   const total = Math.max(0, ...steps.map((s) => s.duration ?? 0));
+  let done: boolean[] = [];
+  const finish = (ctx: Ctx, s: DirectorStep<Ctx>, i: number): void => {
+    if (done[i]) return;
+    done[i] = true;
+    s.update?.(ctx, 1);
+    s.exit?.(ctx);
+  };
   return {
     duration: total,
-    enter: (ctx) => steps.forEach((s) => s.enter?.(ctx)),
+    enter: (ctx) => {
+      done = steps.map(() => false);
+      steps.forEach((s) => s.enter?.(ctx));
+    },
     update: (ctx, t) =>
-      steps.forEach((s) => {
+      steps.forEach((s, i) => {
+        if (done[i]) return;
         const d = s.duration ?? 0;
-        // Each child finishes on its own clock inside the group's span.
-        const local = d <= 0 ? 1 : Math.min(1, (t * total) / d);
-        s.update?.(ctx, (s.ease ?? smoothstep)(local));
+        const local = d <= 0 ? 1 : (t * total) / d;
+        if (local >= 1) finish(ctx, s, i);
+        else s.update?.(ctx, (s.ease ?? smoothstep)(local));
       }),
-    exit: (ctx) => steps.forEach((s) => s.exit?.(ctx)),
+    // Skip and group-end both land here; stragglers finalize, finished
+    // children stay finished.
+    exit: (ctx) => steps.forEach((s, i) => finish(ctx, s, i)),
     // The group hands children pre-eased local time, so it must receive
     // raw time itself.
     ease: (t) => t,
@@ -80,12 +98,35 @@ const LETTERBOX_SPEED = 4;
 /** Bar height as a fraction of the view (each bar). */
 const LETTERBOX_DEPTH = 0.11;
 
+/**
+ * The cinematic-bars animation, standalone — so a remote viewer that
+ * MIRRORS a director it doesn't run (a co-op guest told "a scene is
+ * playing") can show the same frame the director's own screen shows.
+ */
+export class Letterbox {
+  /** Slide 0..1; animates in while active, out after. */
+  private box = 0;
+
+  update(dt: number, active: boolean): void {
+    const target = active ? 1 : 0;
+    this.box += Math.sign(target - this.box) * Math.min(LETTERBOX_SPEED * dt, Math.abs(target - this.box));
+  }
+
+  /** Visible whenever sliding, so the exit animation still shows. */
+  render(g: CanvasRenderingContext2D, width: number, height: number): void {
+    if (this.box <= 0) return;
+    const h = Math.round(height * LETTERBOX_DEPTH * this.box);
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, width, h);
+    g.fillRect(0, height - h, width, h);
+  }
+}
+
 export class Director<Ctx> {
   /** True while a sequence is playing — the scene's cue to hand over
    * input, stop following with the camera, and draw the letterbox. */
   active = false;
-  /** Letterbox slide 0..1; animates in while active, out after. */
-  private box = 0;
+  private box = new Letterbox();
 
   private steps: DirectorStep<Ctx>[] = [];
   private index = 0;
@@ -105,6 +146,10 @@ export class Director<Ctx> {
     this.entered = false;
     this.onDone = onDone ?? null;
     this.active = steps.length > 0;
+    // An empty timeline completes synchronously — a caller that swapped
+    // inputs or state before play() must get its onDone unconditionally,
+    // or a conditional cutscene with nothing to do steals control forever.
+    if (!this.active) this.finish();
   }
 
   /** Fast-forward everything left: enter, land on t=1, exit. */
@@ -130,8 +175,7 @@ export class Director<Ctx> {
 
   update(dt: number): void {
     // The letterbox animates on both edges of a sequence.
-    const target = this.active ? 1 : 0;
-    this.box += Math.sign(target - this.box) * Math.min(LETTERBOX_SPEED * dt, Math.abs(target - this.box));
+    this.box.update(dt, this.active);
 
     if (!this.active) return;
     let budget = dt;
@@ -172,14 +216,9 @@ export class Director<Ctx> {
     }
   }
 
-  /** Cinematic bars, drawn by the scene over the world (screen space).
-   * Visible whenever sliding, so the exit animation still shows. */
+  /** Cinematic bars, drawn by the scene over the world (screen space). */
   renderLetterbox(g: CanvasRenderingContext2D, width: number, height: number): void {
-    if (this.box <= 0) return;
-    const h = Math.round(height * LETTERBOX_DEPTH * this.box);
-    g.fillStyle = '#000';
-    g.fillRect(0, 0, width, h);
-    g.fillRect(0, height - h, width, h);
+    this.box.render(g, width, height);
   }
 
   /** Drop everything without running it — scene teardown only. Content

@@ -51,6 +51,16 @@ it was **containment**. Something lives inside the crack: **the Hush**,
 the primordial stillness the bell was cast to hold out. The Keepers were
 never hoarding; they were *plugging the leaks*. Her strike woke it.
 
+The reveal is **seeded, not asserted**: every Keeper's fall has a small,
+visible, local cost, hours before the Strike names the pattern. Each
+victory is followed by a new stilled patch near that region's mouth (a
+room overlay keyed on the boss's flag — the same mechanism the second
+half uses at scale), the healer's queue in Hearthstead grows by a bed,
+and the merchant's small talk turns to roads gone quiet. Nothing
+comments on the pattern. A player who notices carries the dread up the
+mountain; a player who doesn't gets the twist with the receipts already
+in their memory — discovered either way, retroactive never.
+
 ### The second half
 
 The Stilling stops creeping and starts hunting. Stilled zones spread
@@ -168,10 +178,10 @@ home.*
    tier 3 in parallel, Underbell tier 4, and nothing rescales to the
    player — depth is the only difficulty axis, so a player always knows
    how dangerous a place is by how deep it sits. At the midpoint the
-   Stilling re-tiers old ground as a **story event**: stilled variants
-   and remixed encounter compositions push the Fallows to ~tier 3 and
-   the Foundry to ~tier 4, while the new regions (Crown, Clapperworks)
-   open at tier 5 (see Part V). This stays inside
+   Stilling re-tiers old ground as a **story event**: bounded stilled
+   pockets in the Fallows and Foundry play roughly two tiers above the
+   first visit *until the player reclaims them*, while the new regions
+   (Crown, Clapperworks) open at tier 5 (see Part V). This stays inside
    gameplay-progression.md's rule — upgraded variants are encounter
    progression; the world changes because the story changed it, never
    because the player got stronger.
@@ -180,6 +190,22 @@ home.*
    off the sides; the critical path stays readable.
 6. **Portals unlock outward.** A region's portal pad activates on first
    arrival on foot. Geography is learned before it is skipped.
+7. **The map is a lattice, not spokes.** Home-loops and portals alone
+   would make each region a corridor with a convenient exit, so regions
+   also touch *each other*, sideways: a breakaway wall in the Foundry's
+   `slag-run` opens (Impact Drop, from the Foundry side) into the
+   Riven's `span-bridges` — the two regions share the crack's east
+   face, and the shortcut skips the Bore entirely; the Brinehollow's
+   `pearl-vault` drains through a flooded sump into the Riven's
+   `undercut`, linking the water content laterally; and a wind-scoured
+   chute off `spire-steps` drops one-way into `old-toll-road`, giving
+   the Windspires an early back stair down. Each connector lives inside
+   existing rooms (a door, a seam — no new room budget) and turns
+   "which corridor next" into a route decision. Mastery is a sanctioned
+   key: anything crossable by skill alone — a pogo off a live enemy, a
+   dash-jump off a lip — is a legitimate sequence break, never a bug;
+   story gates sit only behind true verb-locks, never behind a
+   merely-hard jump.
 
 ### Room budget
 
@@ -246,6 +272,9 @@ increments: each extension lands with the first content that needs it.
   `stilled` trait + `plunge` → becomes rock via `mutateTile`), after which
   waves cross it. Every stilled-zone puzzle is Impact Drop preparing the
   ground for Shockwave: the two "down+attack" verbs in conversation.
+  The grammar culminates at each zone's **stilled heart** — one plunge
+  there re-rings the whole zone permanently (see Part V), so the small
+  puzzles are the road to the heart, never a recurring toll.
 - **Tide routing** (Brinehollow): existing swim/oxygen plus lever-driven
   water gates; DEEP LUNGS and tidecaller content live here.
 
@@ -257,13 +286,12 @@ increments: each extension lands with the first content that needs it.
 | Bell-node placeable | game | new placeable listening for `plungeLand` overlap / `surfaceWave` on its tile; emits `setFlag` like levers do |
 | `slick` trait | game | tile trait excluded by `wallGripSide()` (one tile lookup at the contact) |
 | `brittle` trait + transient break | **engine** | a transient mode on the patch seam (extension 1 below) |
-| World patches | **engine** | authoring geometry in rooms that aren't loaded (extension 2) |
-| Room overlays | **engine** | flag-conditioned variant layers over a base room (extension 3) |
-| Quiet zones | **engine** | feel-suppression regions (extension 4) — the Hush is the loudest user, not the only one |
+| Room overlays | **engine** | flag-conditioned variant layers over a base room (extension 2) |
+| Quiet zones | **engine** | feel-suppression regions (extension 3) — the Hush is the loudest user, not the only one |
 
 ### Engine growth this design funds
 
-Four engine extensions — each general, each shippable on its own, each
+Three engine extensions — each general, each shippable on its own, each
 arriving with the first content that needs it:
 
 1. **Transient mutation.** `mutateTile` gains a non-recording mode:
@@ -272,25 +300,29 @@ arriving with the first content that needs it:
    resets-on-exit geometry (collapsing bridges, regrowing vines) rides
    the same switch. The seam stays the seam — one entry point, two
    persistence modes.
-2. **World patches.** The patch store already persists per-room across
-   saves; what is missing is *authoring into it* for a room that isn't
-   loaded. A deferred-patch surface (`patches.forRoom(id).setTile(...)`)
-   closes the gap: the change applies the moment that room loads, saves
-   exactly like a live mutation, and the "geometry only changes under
-   your feet" assumption dies. The Strike is the first user — it
-   genuinely rewrites distant ground, not just its own presentation.
-3. **Room overlays.** A room declares variant layers — tile patches,
+2. **Room overlays.** A room declares variant layers — tile patches,
    spawn-table swaps, placeable additions — keyed to story flags and
    applied at load. This is what "stilled-zone overlays reuse existing
    rooms" concretely is: the second-half Fallows is the same room file
    plus a `world-rung` layer, and any future world event (a flood, a
    thaw, a festival) is one more layer, never a forked room file.
-4. **Quiet zones.** Feel suppression becomes an engine capability:
-   marked regions attenuate hitstop, screen shake, and sfx per channel.
-   The Hush fight is the extreme case — full silence as the stolen
-   resource — but overworld stilled zones reuse it at partial strength,
-   so the gray ground *feels* dead before anything in it moves. Scene
-   code stops owning the trick.
+   Ownership is the point: **overlays own story-driven geometry** —
+   every authored, flag-keyed world change, including changes to rooms
+   the player isn't standing in — while the persistent patch store stays
+   what it is today, the record of what *players* did, one `mutateTile`
+   at a time. A change caused by the story is an overlay layer; a change
+   caused by a hand on the controls is a patch. (A deferred cross-room
+   patch surface was considered and dropped for exactly this reason: it
+   would have been a second source of truth for the same doors.)
+3. **Quiet zones.** Feel suppression becomes an engine capability:
+   marked regions attenuate hitstop, screen shake, and sfx **per
+   channel**. Full silence is a scripted-beat tool, never a sustained
+   combat state: in fights the channels duck and *transform* — hitstop
+   compresses, impacts confirm as delayed low-frequency pulses and
+   frame-flash — so feedback survives the theft. Overworld stilled
+   zones use it at partial strength (the gray ground feels dead before
+   anything in it moves); the Hush turns it up. Scene code stops owning
+   the trick.
 
 An updraft gizmo for the Windspires was considered and **cut** — a
 design cut, not a cost cut: moving platforms plus air-step economy carry
@@ -311,6 +343,14 @@ combat destruction vs. progression geometry" rule.
 
 Sizes are in map cells (screens). `[T]`each `[X]`test `[R]`eward
 `[C]`onnect `[B]`reathe mark each room's jobs.
+
+**One punish grammar per Keeper.** Maul keeps the classic bait → stagger
+→ punish-window loop — it is boss grammar 101, taught once. The others
+each use a different damage model so the lesson never repeats: Vise is
+damaged *in motion* (limbs during traversal), Bellwether is damaged *by
+interception* (during its own offense, on the counted beat), and
+Mourn's openings are *authored by noise* (you choose where sound
+happens, and strike from the quiet side).
 
 ### The Fallows (opening, tier 1)
 
@@ -416,17 +456,18 @@ permanent ledges.
 
 | State | Behavior | Counterplay |
 | --- | --- | --- |
-| `traverse` | crawls wall to wall above/below platform level | track it; ranged pokes the body |
-| `lunge` | coils (limbs bunch — the tell), springs flat across the shaft | drop a platform level, or dash through the gap under it |
-| `rockfall` | hammers its wall; debris falls in two marked columns | stand the third column |
+| `traverse` | crawls wall to wall above/below platform level; **its gripping limbs are the health** — the limbs nearest platform level are always in reach while it moves | melee strikes limbs from platform edges; ranged leads the crawl. No stationary gift: damage happens DURING its motion |
+| `lunge` | coils (limbs bunch — the tell), springs flat across the shaft | drop a platform level, or dash through the gap under it; a hit limb mid-lunge makes the next coil slower |
+| `rockfall` | hammers its wall; debris falls in two marked columns | stand the third column; its hammering limb is planted and exposed while it works |
 | `pin-slam` | slams both walls; a shudder crosses platforms and *crumbles* the one you stand on if you linger | move on the tell; platforms respawn on a cycle |
-| `hang` | a missed `lunge` leaves it hanging low on the far wall, belly node exposed, 2.5s | the punish window; melee needs the adjacent platform, ranged shoots across |
+| `limb-loss` (per ~20% hp) | a mauled limb tears free; it re-grips lower and crawls closer to platform level | each stage brings it nearer — more reachable AND more dangerous |
 | `enrage` (≤35%) | destroys two platform anchors permanently (patches); lunges feint once | tighter footing; the feint is a second coil |
 
 Teaching: the whole fight is *wanting* Wall Grip — you watch a creature
-own the walls while you rent the floor. Co-op: platforms are scarce, so
-splitting levels is natural; the `hang` window is on one side, rewarding
-the ranged partner when melee is stranded. Victory: every platform
+own the walls while you rent the floor, and you hurt it by unmaking its
+grip limb by limb. Co-op: platforms are scarce, so splitting levels is
+natural; limbs surface on both walls, giving each partner their own
+work. Victory: every platform
 crumbles, grant **WALL GRIP** mid-fall onto the wall — the first grab is
 scripted by geometry (nothing else to land on) — then the flue climb.
 
@@ -463,17 +504,18 @@ moving platforms.
 | State | Behavior | Counterplay |
 | --- | --- | --- |
 | `perch` | lands on a spire, bleats; brief vulnerability | ranged window; melee repositions |
-| `charge` | aerial charge; **the bell tolls once per redirect it will make** (one toll = straight, two = one bend, three = two bends) | count the tolls; the audio IS the telegraph |
+| `charge` | aerial charge; **the bell at its throat tolls once per redirect it will make, and flashes a synchronized ring-pulse per toll** (one = straight, two = one bend, three = two bends) | count the tolls OR the pulses — sound is the fastest tell, never the only one |
+| `intercept` | **the damage model**: a hit landed at a redirect moment — the counted beat, where it hangs weightless mid-turn — knocks it off its line into a raft-scraping tumble | damage happens DURING its offense; melee times a raft-edge swing on the beat, ranged leads the bend. A miss means the charge completes — the count you learned is the risk you take |
 | `stampede` | runs the platform level, cracking each platform it leaves (respawn on cycle) | be airborne or on a spire |
 | `toss` | under-platform head toss, flipping one platform | watch its climb under you |
-| `stagger` | a charge that hits a spire wedges its horns, 2.5s | the punish; melee gets the spire, ranged the angle |
-| `enrage` (≤35%) | three-toll charges standard; one spire crumbles to half height | the raft is now the main floor |
+| `enrage` (≤35%) | three-toll charges standard; one spire crumbles to half height | the raft is now the main floor; three beats = three chances to intercept |
 
-Teaching: audio-counted redirects make players *read* aerial impulse —
-the exact skill Air Step then hands them. Co-op: spires + raft give two
-natural stations; the toll count is shared information, so calling it is
-the co-op verb. Victory: the arena floor falls away spire by spire, grant
-**AIR STEP** in the fall, dive home.
+Teaching: counted redirects — heard or seen — make players *read*
+aerial impulse, and intercepting on the beat makes them *act* on the
+read: the exact skill Air Step then hands them. Co-op: spires + raft
+give two natural stations; the toll count is shared information, so
+calling it is the co-op verb. Victory: the arena floor falls away spire
+by spire, grant **AIR STEP** in the fall, dive home.
 
 ### The Underbell (boss 4 — Mourn, tier 4)
 
@@ -499,15 +541,16 @@ deadstone rests, one high perch.
 
 | State | Behavior | Counterplay |
 | --- | --- | --- |
-| `listen` | head tracks ground vibration; attacks aim at the last loud thing | stillness, walls, or air break its aim |
+| `listen` | head tracks ground vibration; attacks aim at the last loud thing — and **while its attention is pinned to a loud surface, the flank facing the quiet side hangs open** | the damage model: you AUTHOR the opening by choosing where sound happens, then strike from the silence |
 | `toll-wave` | sends shockwaves along floor AND up the walls (the engine's own `traceSurface` rules — deadstone rests are safe holds) | jump/air-step the floor wave; cling on deadstone |
-| `pounce` | leaps and impact-drops the last heard position, breaking that floor span | bait it — its own craters become your cover and plunge routes |
-| `keen` | a standing cry summons echo bats | thin them or use them as pogo fodder |
-| `stagger` | a `pounce` onto already-broken floor drops it through, wedged below, back exposed, 3s | plunge onto its back — the game's own verb as the punish |
-| `enrage` (≤40%) | the chamber itself hums: rolling floor ripples on a rhythm | the fight becomes rhythm traversal: ground only between beats |
+| `pounce` | leaps and impact-drops the last heard position, breaking that floor span | bait it — its own craters become your cover, your plunge routes, and fresh noise-makers |
+| `fixate` | a loud enough decoy — a rung bell-node, an echo bat pogo'd into a wall, sustained running on one span — makes it press its ear to that surface | the biggest opening you can build, and entirely yours to time; no free timer, just the noise you arranged |
+| `keen` | a standing cry summons echo bats | thin them — or steer them into walls as decoy noise |
+| `enrage` (≤40%) | the chamber itself hums: rolling floor ripples on a rhythm | the fight becomes rhythm traversal — and the hum masks your footsteps, so the brave get free approaches between beats |
 
-Teaching: sound-as-aggro previews stilled-zone stakes; every counter is a
-first-half verb used precisely. Co-op: two players = two noise sources —
+Teaching: sound-as-aggro previews stilled-zone stakes; every counter is
+a first-half verb used precisely, and every opening is noise-shaped —
+made, not waited for. Co-op: two players = two noise sources —
 deliberate loudness becomes the baiting tool, the fight's co-op verb.
 Victory: grant **SHOCKWAVE**; the confirm is the antechamber seal, opened
 by sending a wave along the floor into its base; then the Strike.
@@ -536,30 +579,36 @@ old ground.
 
 ### The world after the Strike
 
-- **Old ground is genuinely harder now.** Stilled zones creep into the
-  Fallows and Foundry: deadstone patches kill waves (Shockwave and every
-  resonant tool go quiet until re-rung), and stilled enemy variants
-  replace the old spawns — silent (no audio telegraphs, but slower, with
-  enlarged visual tells; fairness preserved), tougher, and mixed into
-  encounter compositions the first half never used. A returning player
-  walks familiar rooms at roughly two tiers above the first visit
-  (Fallows ~3, Foundry ~4): the remix and the variants earn the
-  difficulty — the numbers on unchanged monsters don't move. Re-ringing
-  ground (plunge, then wave) is the local grammar everywhere.
-  Mechanically the creep is **room overlays** on the same room files
-  (Part III, extension 3), and stilled ground carries partial
-  **quiet-zone** suppression (extension 4) — the gray patches feel dead
-  before anything in them moves.
+- **Old ground is harder where the Stilling holds it — and
+  reclaimable.** Stilled zones are bounded pockets, not a blanket:
+  inside one, deadstone kills waves, and stilled variants replace the
+  old spawns — silent (no audio telegraphs, but slower, with enlarged
+  visual tells; fairness preserved), tougher, mixed into compositions
+  the first half never used — so a pocket plays roughly two tiers above
+  the first visit. Everything *outside* the pockets stays the easy
+  ground it always was: old fast routes stay fast, and returning with
+  four verbs still feels liberating, per gameplay-progression.md. Each
+  zone has a **stilled heart**, a deadstone mass at its center: one
+  Impact Drop on the heart re-rings the whole zone *permanently* (the
+  heart sets `rung:<zone>`; the zone's overlay is keyed on `world-rung
+  && !rung:<zone>`, so it lifts for good). Reclaiming is optional and
+  pays — the zone reverts to easy ground, a route through it opens, and
+  the plunge-then-wave puzzles inside are the road TO the heart, never
+  a toll charged twice. Mechanically the creep is **room overlays** on
+  the same room files (Part III, extension 2), and stilled ground
+  carries partial **quiet-zone** suppression (extension 3) — the gray
+  patches feel dead before anything in them moves.
 - **The Eastern Seal** and every small resonant seal on the map crack
-  open at the midpoint. The Strike sets one story flag (`world-rung`)
-  and, through **world patches** (Part III, extension 2), writes real
-  geometry into distant rooms: seal stones crack, blocked mouths open,
-  the gray creep's borders shift. Seals whose opening reads best as a
-  door stay flag-gated barrier placeables; seals whose opening reads
-  best as broken stone are patched for real — the choice per seal is
-  aesthetic, never forced by an engine limit. The map screen filling
-  with new doors falls out of the seals' rooms reporting their open
-  state: recontextualization as a single world-wide beat.
+  open at the midpoint. The Strike sets one story flag (`world-rung`),
+  and **room overlays** keyed on it (Part III, extension 2) change real
+  geometry in distant rooms the moment each one loads: seal stones
+  crack, blocked mouths open, the gray creep's borders shift. Seals
+  whose opening reads best as a door stay flag-gated barrier
+  placeables; seals whose opening reads best as broken stone are
+  overlay retiles — the choice per seal is aesthetic, never forced by
+  an engine limit. The map screen filling with new doors falls out of
+  the seals' rooms reporting their open state: recontextualization as a
+  single world-wide beat.
 - **The Duelist rematch** (mandatory) at `bore-gallery`: she keeps the
   promise made on the rampart and bars the reopened gate; full-kit
   mirror duel — the grounded kit from duel #1 plus everything she
@@ -587,21 +636,29 @@ Through the crack. The bell's hollow: every surface resonant, geometry
 half-unmade. Rooms: `the-crack` (squeeze-through threshold; the Hush's
 quiet-zones introduced as environment), `hollow-vaults` (floor tiles
 *unmake* on a cycle — patches removing and restoring; step economy at
-tier 5), `silence-run` (a quiet-zone gauntlet: no hitstop, no sfx inside
-— feel itself is the stolen resource; Shockwave re-rings the corridor
-segment by segment), `clapper-shaft` (1w×6h grip/step descent on the
-clapper's chain), `hush-arena`, `the-recasting` (ending, scripted).
+tier 5), `silence-run` (quiet pockets sweep the corridor on visible
+fronts — short, moving, dodgeable; inside one, feel *thins* rather than
+dies: hitstop compresses, impacts land as delayed low pulses and
+frame-flash instead of sound; Shockwave re-rings segments to carve
+ground that answers back), `clapper-shaft` (1w×6h grip/step descent on
+the clapper's chain), `hush-arena`, `the-recasting` (ending, scripted).
 
 **The Hush** (final boss, three phases):
 
 | Phase | Behavior | Counterplay |
 | --- | --- | --- |
-| **1 — Silence walks** | a bell-shaped absence; sweeps reaching limbs along the ground (wave-grammar attacks); drops silence from above; casts **quiet-zones** — inside them your feel dies (no hitstop/shake/sfx) and knockback halves | Shockwave cleanses a zone; fight for ground that still rings |
+| **1 — Silence walks** | a bell-shaped absence; sweeps reaching limbs along the ground (wave-grammar attacks); drops silence from above; casts **quiet-zones** — short-lived, visibly edged, drifting pockets. Inside one, feel is *stolen, not deleted*: hitstop compresses to a tick, sfx duck to a low-frequency pulse, hits confirm by flash and frame-compression — feedback enough to fight fairly, wrong enough to frighten; knockback halves | Shockwave cleanses a zone; fight for ground that still rings. Sustained combat never happens in full silence — the pockets move, and so do you |
 | **2 — The world mutes** | stills floor sections to deadstone; only *resonating* — struck by your wave — does its body take full damage (chip otherwise); unmakes floor tiles at the arena edges | plunge to re-ring floors → wave to open damage windows → grip/step to survive the shrinking ground: all four verbs by construction |
 | **3 — Re-strike** | pinned against the strike point by the ringing arena; toll rhythm sweeps the whole floor | survive the rhythm, climb the final wall run, and deliver the last plunge — the player is the clapper; the blow is the ending |
 
 No input reading anywhere: the Hush's threat is *subtraction* (of feel,
-of sound, of floor), never counters.
+of sound, of floor), never counters. And subtraction is never total in
+live combat: the quiet-zone extension's per-channel attenuation (Part
+III, extension 3) always leaves a replacement confirm — compressed
+hitstop, delayed low pulses, flash. TRUE silence is reserved for one
+scripted beat: the breath before the final blow lands, when the whole
+world holds still — then the recast bell answers with everything at
+once.
 
 ---
 
@@ -628,8 +685,8 @@ rampart's mandatory gatekeeper),
 
 Engine extensions ride the same steps (each with its first user, per
 Part III): transient mutation with the Foundry's brittle floors (step
-2), world patches with the midpoint event (step 3), room overlays and
-quiet zones with the second half (step 6).
+2), room overlays with the midpoint event (step 3), quiet zones with
+the second half (step 6).
 
 Grant moves are demo-phase save changes (AGENTS.md rule 9): owned verbs
 in old saves stay owned; only the *source* moves.

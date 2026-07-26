@@ -5,6 +5,7 @@ import {
   Tilemap,
   Minimap,
   RoomPatches,
+  Letterbox,
   buildTilemap,
   drawText,
   clamp,
@@ -97,6 +98,10 @@ export class CoopGuestScene implements Scene {
   private snap: SnapMsg | null = null;
   private uiT = 0;
   private closedT = -1;
+  /** The host's directed shot while its cutscene runs (see SnapMsg.cine):
+   * we mirror the camera and the letterbox for its duration. */
+  private cine: { x: number; y: number } | null = null;
+  private cineBox = new Letterbox();
 
   constructor(
     private game: ActionGame,
@@ -150,6 +155,7 @@ export class CoopGuestScene implements Scene {
   private apply(s: SnapMsg): void {
     this.snap = s;
     this.banner = s.banner;
+    this.cine = s.cine ?? null;
     const enteredRoom = s.room !== this.roomId;
     if (enteredRoom) this.enterRoom(s.room);
     // Geometry the host has changed. Arrives on room entry and whenever
@@ -343,8 +349,20 @@ export class CoopGuestScene implements Scene {
       if (this.closedT <= 0) this.leave();
       return;
     }
-    // Esc leaves the session (there's no pause to open — the world is remote).
-    if (this.game.input.consumePress('menu') || this.game.input.consumePress('cancel')) {
+    // Esc leaves the session (there's no pause to open — the world is
+    // remote) — EXCEPT during a cutscene, where menu means what it means
+    // on the host: skip. The request goes up; the host fast-forwards for
+    // both screens. Cancel still leaves, so a guest is never trapped.
+    if (this.game.input.consumePress('menu')) {
+      if (this.cine) {
+        this.link.send(JSON.stringify({ t: 'skip' }));
+      } else {
+        this.link.send(JSON.stringify({ t: 'bye' }));
+        this.leave();
+        return;
+      }
+    }
+    if (this.game.input.consumePress('cancel')) {
       this.link.send(JSON.stringify({ t: 'bye' }));
       this.leave();
       return;
@@ -404,7 +422,14 @@ export class CoopGuestScene implements Scene {
       s.w = p.snap.w;
       s.h = p.snap.h;
     }
-    if (me) {
+    // During the host's cutscene the shot is the director's: glide to the
+    // host camera instead of framing my own knight. My knight stays live
+    // (prediction and input keep running — the world doesn't pause), the
+    // camera just isn't mine for a few seconds.
+    this.cineBox.update(dt, !!this.cine && this.closedT < 0);
+    if (this.cine) {
+      this.game.camera.follow(this.cine.x, this.cine.y, dt);
+    } else if (me) {
       const cam = this.game.camera;
       const target = this.cameraTarget()!;
       cam.follow(target.x, target.y, dt);
@@ -468,6 +493,7 @@ export class CoopGuestScene implements Scene {
         uiT: this.uiT,
       }, this.minimap, boss);
     }
+    this.cineBox.render(g, gm.width, gm.height); // the host's scene frames both screens
     drawText(g, t('CO-OP GUEST'), gm.width - 6, gm.height - 10, COLORS.steelDark, 1, 'right');
     if (this.closedT >= 0) {
       g.fillStyle = 'rgba(7,7,13,0.6)';
