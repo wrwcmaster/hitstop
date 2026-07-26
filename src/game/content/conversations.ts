@@ -162,5 +162,30 @@ defineConversation('duelist-fallen', {
   ],
 });
 
+/* ---------------- the Riven ---------------- */
+
+defineConversation('riven-entry', {
+  lines: [
+    { speaker: 'VOICE', text: 'The floor gives, and the world opens downward.' },
+    { speaker: 'VOICE', text: 'Cold blue, hanging chains, and walls that go up further than they go down.' },
+    { speaker: 'VOICE', text: 'Something is climbing them. It makes it look easy.' },
+  ],
+});
+
+defineConversation('vise-approach', {
+  lines: [
+    { speaker: 'VOICE', text: 'The nest matter thickens until the stone is more nest than stone.' },
+    { speaker: 'VOICE', text: 'Below: a shaft, four ledges, and nothing else to stand on.' },
+    { speaker: 'VOICE', text: 'Whatever holds these walls has never needed a floor.' },
+  ],
+});
+
+defineConversation('vise-fallen', {
+  lines: [
+    { speaker: 'VOICE', text: 'The last grip fails. It falls the way anything falls.' },
+    { speaker: 'VOICE', text: 'The walls are only walls now — and your hands finally know what to do with them.' },
+  ],
+});
+
 /** Importing this module registers the conversations. */
 export function registerConversations(): void {}

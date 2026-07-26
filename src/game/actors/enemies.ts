@@ -559,5 +559,149 @@ defineMonster('gunner', {
   },
 });
 
+/* ---------------- the Riven ---------------- */
+
+/** Is the stone beside `m` on `side` too slick to hold? Same question the
+ * knight's hands ask (Player.slickOn) through the same engine query, so
+ * the wall means one thing for everyone who touches it. */
+function slickBeside(m: Monster, side: -1 | 1): boolean {
+  return m.collision.traitAt?.(
+    { x: side < 0 ? m.x - 3 : m.x + m.w, y: m.y + 2, w: 3, h: m.h - 4 },
+    'slick',
+  ) ?? false;
+}
+
+/** Is there wall at all on `side` (something to hold)? */
+function wallBeside(m: Monster, side: -1 | 1): boolean {
+  const probe = { x: side < 0 ? m.x - 3 : m.x + m.w, y: m.y + 2, w: 3, h: m.h - 4 };
+  for (const s of m.collision.solidsNear(probe)) {
+    if (s.oneWay) continue;
+    if (probe.x < s.x + s.w && probe.x + probe.w > s.x && probe.y < s.y + s.h && probe.y + probe.h > s.y) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * THE WALLCRAWLER — the Riven's teacher.
+ *
+ * It owns the walls you cannot yet hold, and it climbs them in front of
+ * you: hand over hand up gripstone, and REFUSING slick panels, which it
+ * reaches, recoils from, and works around. Nothing announces the rule;
+ * the creature demonstrates it, so by the time Wall Grip is in your
+ * hands you have already read a dozen walls. When the knight comes level
+ * with it, it drops off the wall and lunges — the only time it is easy
+ * to reach, which is the bargain the region keeps making.
+ */
+defineMonster('wallcrawler', {
+  hp: 70, damage: 14, w: 14, h: 12, score: 220, flies: true,
+  colors: ['#5b7fa8', '#8fb6d6', COLORS.white],
+  drops: [
+    { id: 'coin', chance: 0.5 },
+    { id: 'mana-orb', chance: 0.25 },
+  ],
+  validateProps(props, path) {
+    if (props.side !== undefined && props.side !== 'left' && props.side !== 'right') {
+      throw new Error(`${path}.side: expected "left" or "right"`);
+    }
+  },
+  init(m) {
+    // Which wall this one lives on; the room may say, else it looks.
+    const want = m.props?.side;
+    m.state.side = want === 'right' ? 1 : want === 'left' ? -1 : (wallBeside(m, -1) ? -1 : 1);
+    m.state.climb = -1; // start upward
+    m.state.lungeT = 0;
+    m.state.balkT = 0;
+  },
+  update(m, dt) {
+    const side = m.state.side as -1 | 1;
+    m.facing = side < 0 ? 1 : -1; // back to the wall, face the shaft
+    const player = m.player;
+
+    // Mid-lunge: a thrown body, gravity-free but committed.
+    if ((m.state.lungeT as number) > 0) {
+      m.state.lungeT = (m.state.lungeT as number) - dt;
+      if ((m.state.lungeT as number) <= 0) {
+        m.vx = 0;
+        m.vy = 0;
+      }
+      return;
+    }
+
+    // Balking at a slick panel: it hangs, gropes, and turns back. The
+    // pause is the whole point — a climb visibly refusing to continue.
+    if ((m.state.balkT as number) > 0) {
+      m.state.balkT = (m.state.balkT as number) - dt;
+      m.vx = 0;
+      m.vy = 0;
+      if ((m.state.balkT as number) <= 0) m.state.climb = -(m.state.climb as number);
+      return;
+    }
+
+    // Off the wall entirely (a lunge that missed, a broken hold): find
+    // the nearest wall again rather than floating in the shaft.
+    if (!wallBeside(m, side)) {
+      if (wallBeside(m, -side as -1 | 1)) m.state.side = -side;
+      else {
+        m.vx = side * 40;
+        m.vy = 12;
+        return;
+      }
+    }
+
+    // Level with the knight and close enough to matter: let go and lunge.
+    if (player && player.hp > 0) {
+      const dy = Math.abs(player.cy - m.cy);
+      const dx = (player.cx - m.cx) * side;
+      if (dy < 12 && dx < 0 && Math.abs(player.cx - m.cx) < 110) {
+        m.state.lungeT = 0.55;
+        m.vx = -side * 190;
+        m.vy = -30;
+        m.game.feel.sfx.play('slash');
+        return;
+      }
+    }
+
+    // Ordinary business: climb, hugging the wall, tracking the knight's
+    // height so the shaft always has something moving in it.
+    const dir = m.state.climb as -1 | 1;
+    const ahead = { x: m.x, y: dir < 0 ? m.y - 6 : m.y + m.h, w: m.w, h: 6 };
+    if (m.collision.traitAt?.(ahead, 'slick') || slickBeside(m, side)) {
+      // The hold it was reaching for is glass. Recoil, then work back.
+      m.state.balkT = 0.7;
+      m.vx = 0;
+      m.vy = 0;
+      m.game.feel.burst(m.cx, m.cy, 3, { color: '#8fb6d6', speed: 30, life: 0.25, drag: 4 });
+      return;
+    }
+    m.vy = dir * 34;
+    m.vx = side * 26; // press into the wall so contact is never lost
+    if (player && Math.abs(player.cy - m.cy) > 40) m.state.climb = player.cy < m.cy ? -1 : 1;
+  },
+  draw(g, m) {
+    const side = (m.state.side as number) ?? 1;
+    const x = Math.round(m.x);
+    const y = Math.round(m.y);
+    const balking = (m.state.balkT as number) > 0;
+    const body = m.flashT > 0 ? COLORS.white : '#3f5f85';
+    g.fillStyle = body;
+    g.fillRect(x + 2, y + 2, m.w - 4, m.h - 4);
+    // Gripping limbs: four hooks on the wall side, splayed on the other.
+    g.fillStyle = m.flashT > 0 ? COLORS.white : '#8fb6d6';
+    const wallX = side < 0 ? x : x + m.w - 2;
+    for (let i = 0; i < 4; i++) {
+      const ly = y + 1 + i * 3;
+      const reach = balking ? 3 + Math.sin(m.animT * 14 + i) * 2 : 2 + ((Math.floor(m.animT * 6) + i) % 2);
+      g.fillRect(side < 0 ? wallX - reach : wallX, ly, reach + 2, 2);
+    }
+    // Two cold eyes, watching the shaft it does not have to share.
+    g.fillStyle = m.flashT > 0 ? COLORS.white : COLORS.gold;
+    const ex = side < 0 ? x + m.w - 5 : x + 3;
+    g.fillRect(ex, y + 4, 2, 2);
+    g.fillRect(ex, y + 8, 2, 2);
+  },
+});
+
 /** Importing this module registers the built-in enemies. */
 export function registerEnemies(): void {}

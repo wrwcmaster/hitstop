@@ -254,6 +254,30 @@ export class Tilemap implements CollisionSource {
     return worst;
   }
 
+  /**
+   * Does any tile the rect overlaps carry `trait`?
+   *
+   * The engine still assigns no meaning to trait ids — this only answers
+   * the spatial question ("is there breakable/slick/resonant stone
+   * here?") that content would otherwise re-derive by hand from
+   * `tilesOverlapping`. Same shape as `submersion`/`hazardAt`: a narrow
+   * query on the collision seam, so a controller can ask about the world
+   * it is touching without holding the tilemap itself.
+   */
+  traitAt(r: Rect, trait: string): boolean {
+    const ts = this.tileSize;
+    const x0 = Math.max(0, Math.floor(r.x / ts));
+    const y0 = Math.max(0, Math.floor(r.y / ts));
+    const x1 = Math.min(this.cols - 1, Math.floor((r.x + r.w - 0.001) / ts));
+    const y1 = Math.min(this.rows - 1, Math.floor((r.y + r.h - 0.001) / ts));
+    for (let ty = y0; ty <= y1; ty++) {
+      for (let tx = x0; tx <= x1; tx++) {
+        if (tiles.get(this.grid[ty][tx]).traits?.includes(trait)) return true;
+      }
+    }
+    return false;
+  }
+
   /** Top of the first solid tile scanning down column `x` (spawn placement). */
   groundY(x: number): number {
     const ts = this.tileSize;

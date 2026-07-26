@@ -269,11 +269,24 @@ export class Player extends Actor {
   private grippableSide(): -1 | 0 | 1 {
     const c = this.contacts;
     if (!c) return 0;
-    const usable = (hit: CollisionContact | null): boolean =>
-      !!hit && !hit.oneWay && !hit.boundary;
-    if (usable(c.left)) return -1;
-    if (usable(c.right)) return 1;
+    const usable = (hit: CollisionContact | null, side: -1 | 1): boolean =>
+      !!hit && !hit.oneWay && !hit.boundary && !this.slickOn(side);
+    if (usable(c.left, -1)) return -1;
+    if (usable(c.right, 1)) return 1;
     return 0;
+  }
+
+  /**
+   * Is the wall on `side` too slick to hold? A thin probe just outside
+   * the body reads the tile the hand would actually close on, so a
+   * gripstone wall interrupted by a slick panel is legible from the
+   * shape of the climb — the route is read like a wall of holds.
+   */
+  private slickOn(side: -1 | 1): boolean {
+    return this.collision.traitAt?.(
+      { x: side < 0 ? this.x - 2 : this.x + this.w, y: this.y + 4, w: 2, h: this.h - 8 },
+      'slick',
+    ) ?? false;
   }
 
   /**

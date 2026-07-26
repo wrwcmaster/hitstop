@@ -11,6 +11,13 @@ import corridorJson from './corridor.json';
 import mountainJson from './mountain.json';
 import mountainPassageJson from './mountain_passage.json';
 import undergroundJson from './underground.json';
+import rivenLipJson from './riven_lip.json';
+import rivenDescentJson from './riven_descent.json';
+import spanBridgesJson from './span_bridges.json';
+import undercutJson from './undercut.json';
+import viseApproachJson from './vise_approach.json';
+import viseArenaJson from './vise_arena.json';
+import rivenFlueJson from './riven_flue.json';
 
 /**
  * The world's rooms, by id. Door triggers reference these ids
@@ -29,6 +36,15 @@ export const ROOMS: Record<string, RoomDef> = {
   mountain: validateRoom(mountainJson),
   mountain_passage: validateRoom(mountainPassageJson),
   underground: validateRoom(undergroundJson),
+  // The Riven: the crack under the Foundry's floor, and the only place
+  // Wall Grip can be earned (docs/world-design.md, migration step 1).
+  'riven-lip': validateRoom(rivenLipJson),
+  'riven-descent': validateRoom(rivenDescentJson),
+  'span-bridges': validateRoom(spanBridgesJson),
+  undercut: validateRoom(undercutJson),
+  'vise-approach': validateRoom(viseApproachJson),
+  'vise-arena': validateRoom(viseArenaJson),
+  'riven-flue': validateRoom(rivenFlueJson),
 };
 
 export const START_ROOM = 'arena';

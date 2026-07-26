@@ -132,6 +132,87 @@ tiles.register('alpineLedge', {
   },
 });
 
+/* ---------------- the Riven: a crack in the world's frame ----------------
+ *
+ * The region's whole grammar is READING A WALL. Three stones say three
+ * different things at a glance, and the difference is mechanical, not
+ * decorative: `rivenRock` is the cold body of the crack, `gripstone`
+ * wears visible holds and is what a climb is made of, and `slickPanel`
+ * is polished blue glass that hands slide off — it carries the `slick`
+ * trait, which is what Wall Grip refuses (see Player.grippableSide).
+ * A shaft is therefore legible from below, like a route on a crag.
+ */
+
+function drawRivenStone(g: CanvasRenderingContext2D, px: number, py: number, size: number, tx: number, ty: number): void {
+  g.fillStyle = '#22304f';
+  g.fillRect(px, py, size, size);
+  g.fillStyle = '#1a2540';
+  const n = (tx * 7 + ty * 13) % 5;
+  g.fillRect(px + n, py + ((tx + ty) % 4), 3, 1);
+  g.fillRect(px + (n + 4) % (size - 2), py + 5 + (ty % 3), 2, 1);
+  g.fillStyle = '#2c3d63';
+  g.fillRect(px + (tx * 3 + ty) % (size - 1), py + (ty * 5) % (size - 1), 1, 2);
+}
+
+/** The cold body of the crack: solid, rings, offers nothing to hold. */
+tiles.register('rivenRock', {
+  solid: true,
+  traits: ['resonant'],
+  draw: drawRivenStone,
+});
+
+/** Grip-worthy stone: fractured with visible holds. The climb is made of
+ * this, and it is drawn so you can pick it out of a wall from below. */
+tiles.register('gripstone', {
+  solid: true,
+  traits: ['resonant', 'grip'],
+  draw(g, px, py, size, tx, ty) {
+    drawRivenStone(g, px, py, size, tx, ty);
+    // Ledges and cracks — the holds themselves, staggered per tile.
+    g.fillStyle = '#5b7fa8';
+    const off = (tx + ty) % 3;
+    g.fillRect(px + 1, py + 3 + off, size - 4, 2);
+    g.fillRect(px + 3, py + size - 4 - off, size - 5, 1);
+    g.fillStyle = '#8fb6d6';
+    g.fillRect(px + 1, py + 3 + off, size - 4, 1);
+    g.fillRect(px + 3, py + size - 4 - off, 2, 1);
+  },
+});
+
+/** Polished panel: solid and ordinary in every way EXCEPT that hands
+ * slide off it. Interrupts climbs and forces kick-transfers. */
+tiles.register('slickPanel', {
+  solid: true,
+  traits: ['resonant', 'slick'],
+  draw(g, px, py, size, tx, ty) {
+    g.fillStyle = '#2f4a72';
+    g.fillRect(px, py, size, size);
+    g.fillStyle = '#3d608f';
+    g.fillRect(px, py, size, 1);
+    g.fillRect(px, py, 1, size);
+    // A wet sheen running the panel: the visual promise of no purchase.
+    g.fillStyle = 'rgba(190,225,255,0.32)';
+    const band = (tx * 5 + ty * 3) % size;
+    g.fillRect(px + band, py, 2, size);
+    g.fillStyle = 'rgba(230,245,255,0.5)';
+    g.fillRect(px + band, py, 1, size);
+    g.fillStyle = '#233a5c';
+    g.fillRect(px, py + size - 1, size, 1);
+  },
+});
+
+/** Hanging chain: pure atmosphere, no collision — the Riven's ceiling
+ * is strung with the machinery that once worked this crack. */
+tiles.register('chain', {
+  draw(g, px, py, size, tx) {
+    const cx = px + size / 2 + ((tx % 3) - 1);
+    g.fillStyle = '#3f5170';
+    g.fillRect(cx - 1, py, 2, size);
+    g.fillStyle = '#6d86a8';
+    for (let y = 0; y < size; y += 4) g.fillRect(cx - 1, py + y, 2, 1);
+  },
+});
+
 /** Non-solid windswept grass/snow tuft, used as a readable ledge accent. */
 tiles.register('snowTuft', {
   draw(g, px, py, size, tx) {
