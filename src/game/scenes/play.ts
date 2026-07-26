@@ -21,6 +21,8 @@ import {
   clamp,
   overlaps,
   t,
+  applyGravity,
+  moveAndCollide,
 } from '@engine/index';
 import { menuLine, prettyCode, prettyButton, promptText, REPLAY_PENDING_KEY, type ActionGame, type Action, type RunStart, type TestScenario } from '../defs';
 import { Player } from '../actors/player';
@@ -69,7 +71,7 @@ interface Transition {
   open?: { left: number; x: number; y: number; w: number; h: number };
   /** Velocity to restore on arrival — connected seams keep your arc. */
   carry?: { vx: number; vy: number };
-  /** Horizontal edge gaps keep the knight walking through the fade. */
+  /** Horizontal edge gaps keep the knight moving naturally through the fade. */
   walk?: { out: -1 | 1; into: -1 | 1 };
 }
 
@@ -946,9 +948,25 @@ export class PlayScene implements Scene {
     return { out, into: farSide === -1 ? 1 : -1 };
   }
 
-  private walkThroughEdge(direction: -1 | 1, dt: number): void {
+  private moveThroughEdge(direction: -1 | 1, dt: number): void {
     const p = this.player;
     if (!p || dt <= 0) return;
+
+    // The rest of the world pauses behind the fade, but the crossing
+    // knight does not. Keep gravity and vertical collision live so a
+    // jump traces one continuous arc instead of floating at its entry Y.
+    //
+    // Horizontal travel remains explicit: moveAndCollide's level
+    // backstop quite correctly keeps ordinary actors inside a room, while
+    // this is the one moment the knight must walk beyond that boundary.
+    applyGravity(p, dt);
+    const oldX = p.x;
+    const bounds = p.collision.bounds;
+    if (bounds) p.x = clamp(p.x, bounds.x, bounds.x + bounds.w - p.w);
+    p.vx = 0;
+    moveAndCollide(p, dt, p.collision);
+    p.x = oldX;
+
     p.facing = direction;
     p.vx = direction * EDGE_WALK_SPEED;
     p.x += p.vx * dt;
@@ -1390,21 +1408,29 @@ export class PlayScene implements Scene {
       const before = tr.t;
       const after = Math.min(TRANSITION_TIME, before + dt);
       const outDt = Math.max(0, Math.min(after, half) - Math.min(before, half));
-      if (tr.walk) this.walkThroughEdge(tr.walk.out, outDt);
+      if (tr.walk) this.moveThroughEdge(tr.walk.out, outDt);
       tr.t = after;
       if (before < half && after >= half) {
+        // The fade-out half may have advanced a jump or fall. Re-map that
+        // CURRENT height at the threshold instead of using the Y captured
+        // when the transition began, then carry the current velocity into
+        // the new room. This keeps both halves of the arc continuous.
+        const liveLanding = tr.walk ? this.doorLanding(tr.roomId) : null;
+        const liveCarry = tr.walk && tr.carry && this.player
+          ? { vx: this.player.vx, vy: this.player.vy }
+          : tr.carry;
         if (tr.walk && this.player) this.player.facing = tr.walk.into;
-        this.setRoom(tr.roomId, tr.x, tr.y);
+        this.setRoom(tr.roomId, liveLanding?.x ?? tr.x, liveLanding?.y ?? tr.y);
         // setRoom zeroes velocity for ordinary doors; a connected seam
         // hands the arc back UNCHANGED, so a fall or jump simply continues.
         // Deliberately no boost for a weak jump: physics stays honest.
-        if (tr.carry && this.player) {
-          this.player.vx = tr.carry.vx;
-          this.player.vy = tr.carry.vy;
+        if (liveCarry && this.player) {
+          this.player.vx = liveCarry.vx;
+          this.player.vy = liveCarry.vy;
         }
       }
       const inDt = Math.max(0, after - half) - Math.max(0, before - half);
-      if (tr.walk) this.walkThroughEdge(tr.walk.into, inDt);
+      if (tr.walk) this.moveThroughEdge(tr.walk.into, inDt);
       if (tr.t >= TRANSITION_TIME) {
         if (tr.walk && this.player) this.player.vx = 0;
         if (this.player) this.player.interactionsEnabled = true;

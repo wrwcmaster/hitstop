@@ -366,8 +366,9 @@ Keep true interior passages farther from the edge so they remain explicit
 interactions.
 
 Paired edge doors also map the knight's height within the source trigger
-onto the destination trigger and carry vertical velocity. Running across
-stays grounded; jumping or falling across keeps the same arc. Align each
+onto the destination trigger and carry vertical velocity. Gravity and
+vertical collision continue during the fade, so running across stays
+grounded while jumping or falling across keeps the same arc. Align each
 trigger's bottom with its doorway floor (a one-way ledge is preserved as
 a valid threshold floor) so both rooms describe the same physical seam.
 
