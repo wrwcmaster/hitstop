@@ -141,7 +141,9 @@
       "once": false,
       "props": {
         "room": "riven-flue",
-        "fallIn": true
+        "fallIn": true,
+        "flag": "slain:vise",
+        "lockedText": "RUBBLE CHOKES THE SHAFT"
       }
     }
   ]

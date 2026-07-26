@@ -118,6 +118,7 @@ defineLocale('zh', {
     'VISE, THE WALL BEAST': '钳兽',
     'LIMB SEVERED': '断肢',
     'THE WALLS ARE STILL HELD': '墙壁仍被牢牢攫住',
+    'RUBBLE CHOKES THE SHAFT': '碎石堵住了竖井',
     'RIVEN-LIP': '裂隙边缘',
     'RIVEN-DESCENT': '裂隙深降',
     'SPAN-BRIDGES': '横桥',
