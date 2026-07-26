@@ -149,7 +149,14 @@ export function validateRoomContent(room: RoomDef, id = room.name): RoomDef {
       throw new Error(`${root}: trigger validation unavailable — scenes/play/trigger-actions has not loaded`);
     }
     const path = `${root}.triggers[${index}] (${trigger.event}).props`;
-    const props = propsAt(trigger.props, path);
+    // `assemble` is scene infrastructure valid on ANY trigger — in co-op
+    // it holds the firing until every knight has gathered (critical
+    // cutscenes, boss intros). Validated once here and hidden from the
+    // per-event validators, which each keep their own strict prop list.
+    const { assemble, ...props } = propsAt(trigger.props, path);
+    if (assemble !== undefined && typeof assemble !== 'boolean') {
+      throw new Error(`${path}.assemble: expected a boolean`);
+    }
     if (triggerValidators.has(trigger.event)) triggerValidators.get(trigger.event).validateProps?.(props, path);
     if (trigger.event === 'door') requireReachable(room, trigger, `${root}.triggers[${index}]`);
   });

@@ -162,6 +162,10 @@ export class PlayScene implements Scene {
   private director = new Director<CutsceneCtx>();
   /** The scripted hands holding the player's controls while one plays. */
   private cutsceneInput: ReturnType<typeof scriptInput> | null = null;
+  /** Where the scene found the co-op guest: held there for its duration
+   * so live physics can't carry an off-camera knight somewhere she
+   * can't see (see the anchor block in update). */
+  private cineAnchor: { x: number; y: number } | null = null;
 
   private host: PlayHost;
   private waves: WaveDirector;
@@ -658,6 +662,24 @@ export class PlayScene implements Scene {
       if (this.player && this.player.source === input) this.player.source = null;
       this.cutsceneInput = null;
     });
+  }
+
+  /**
+   * Co-op assembly gate for triggers marked `assemble: true` — critical
+   * moments (a cutscene, a boss intro) hold at the threshold until every
+   * knight is gathered. Solo, or with the partner down, there is nobody
+   * to wait for. The trigger stays unfired while held (see
+   * Triggers.update's gate), so standing in place fires it the moment
+   * the partner arrives; meanwhile the host sees why nothing happened.
+   */
+  private assembled(def: TriggerDef): boolean {
+    if (!def.props?.assemble) return true;
+    const guest = this.coop?.guest;
+    const p = this.player;
+    if (!guest || !p || guest.hp <= 0) return true;
+    const near = Math.abs(guest.cx - p.cx) < 200 && Math.abs(guest.cy - p.cy) < 140;
+    if (!near) this.showHint(t('WAIT FOR YOUR PARTNER'), 0.5);
+    return near;
   }
 
   private setRoom(id: string, spawnX?: number, spawnY?: number): void {
@@ -1350,13 +1372,30 @@ export class PlayScene implements Scene {
     // (drowning bypasses invulnT) and clears the step the scene ends.
     {
       const cine = this.director.active;
-      for (const p of [this.player, this.coop?.guest ?? null]) {
+      const guest = this.coop?.guest ?? null;
+      for (const p of [this.player, guest]) {
         if (!p) continue;
         p.cineShield = cine;
         if (cine) p.invulnT = Math.max(p.invulnT, 0.1);
       }
+      // The guest knight is also ANCHORED for the scene's duration. The
+      // host knight is the cutscene author's to stage (scripted hands),
+      // but the guest is nobody's — stood down, camera elsewhere — and
+      // neutral input under live gravity could carry her off a ledge, a
+      // moving platform, or a one-way she cannot see. So she is held
+      // where the scene found her (restored after the world steps,
+      // velocities zeroed), and released the moment control returns.
+      if (cine && guest) this.cineAnchor ??= { x: guest.x, y: guest.y };
+      else this.cineAnchor = null;
     }
     g.world.update(dt);
+    if (this.cineAnchor && this.coop?.guest) {
+      const knight = this.coop.guest;
+      knight.x = this.cineAnchor.x;
+      knight.y = this.cineAnchor.y;
+      knight.vx = 0;
+      knight.vy = 0;
+    }
     this.cutsceneInput?.endStep(); // scripted press/release edges last one step
     if (this.coop) {
       this.coop.step({
@@ -1385,7 +1424,7 @@ export class PlayScene implements Scene {
     // control returns — which is exactly the sequencing a reveal
     // followed by a conversation wants.
     if (this.phase === 'play' && this.player && this.player.hp > 0 && !this.director.active) {
-      this.triggers.update(this.player, (f) => this.handleTrigger(f.def));
+      this.triggers.update(this.player, (f) => this.handleTrigger(f.def), (def) => this.assembled(def));
       // Doors & portals: stand on one and press interact to use it. Checked
       // after the world step so an NPC in range wins the key first.
       const p = this.player;

@@ -131,6 +131,7 @@ defineLocale('zh', {
 
     /* ---- cutscenes ---- */
     'THE SLIME KING': '史莱姆王',
+    'WAIT FOR YOUR PARTNER': '等待你的同伴',
 
     /* ---- classes & skill tree ---- */
     'KNIGHT': '骑士',

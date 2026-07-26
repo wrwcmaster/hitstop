@@ -76,7 +76,8 @@
       "event": "cutscene",
       "once": true,
       "props": {
-        "cutscene": "slime-king-reveal"
+        "cutscene": "slime-king-reveal",
+        "assemble": true
       }
     },
     {
@@ -87,7 +88,8 @@
       "event": "talk",
       "once": true,
       "props": {
-        "conversation": "boss-intro"
+        "conversation": "boss-intro",
+        "assemble": true
       }
     },
     {

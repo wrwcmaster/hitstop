@@ -28,7 +28,10 @@ import { Monster } from '../actors/monster';
  * guest menu press travels up as a skip request. The guest's knight
  * stands down for the duration — the guest streams a neutral held-set
  * and predicts on never-pressed input, so nobody plays blind while the
- * camera is elsewhere; the world itself never pauses.
+ * camera is elsewhere; the world itself never pauses. The scene also
+ * shields both knights (no damage, no drowning) and ANCHORS the guest
+ * in place, and critical triggers should carry `assemble: true` so the
+ * moment waits for both knights to gather before it starts.
  *
  * Definitions are data in a registry, so a room places one with a
  * `cutscene` trigger in the level editor and no scene changes — the same

@@ -493,8 +493,14 @@ defineCutscene('my-reveal', () => [
 ```json
 { "x": 44, "y": 140, "w": 12, "h": 100,
   "event": "cutscene", "once": true,
-  "props": { "cutscene": "my-reveal" } }
+  "props": { "cutscene": "my-reveal", "assemble": true } }
 ```
+
+`"assemble": true` works on ANY trigger (cutscenes, boss-intro talk
+zones): in co-op it holds the trigger at the threshold — unfired — until
+both knights are gathered, and fires the moment the partner arrives (the
+host sees WAIT FOR YOUR PARTNER meanwhile). Mark it on every critical
+story trigger, so a scene never starts with a partner half a room away.
 
 What the scene guarantees while one plays: the player's `source` is a
 scripted `Input` (the co-op seam — manual keys are dead, and any action a
@@ -502,7 +508,11 @@ step presses runs through the real FSM), the camera stops following,
 contact triggers hold their fire (a scripted walk crossing a talk zone
 would push a modal dialogue and freeze the scene — anything she is left
 standing in fires the frame control returns), menu SKIPS instead of
-pausing, and the letterbox draws. Skip fast-forwards rather than aborts:
+pausing, and the letterbox draws. In co-op the guest mirrors the shot
+and letterbox, their menu press asks the host to skip, and their knight
+is protected AND anchored — no damage, no drowning, no being carried
+off a ledge they cannot see; the host knight's staging is the cutscene
+author's job (the scripted hands). Skip fast-forwards rather than aborts:
 every remaining step enters, lands on its final state, and exits, so a
 cutscene that sets a flag can never be cheated out of it.
 
