@@ -112,7 +112,8 @@
       "once": false,
       "props": {
         "room": "underground",
-        "leapUp": true
+        "leapUp": true,
+        "trackX": true
       }
     },
     {

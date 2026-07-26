@@ -64,8 +64,12 @@ defineTriggerAction('door', {
     // No arrival coordinates: a door lands you at the destination's door
     // back here, so the doorway has one definition instead of two that
     // can disagree. See PlayScene.doorLanding.
-    rejectUnknownProps(props, ['room', 'key', 'flag', 'lockedText', 'bossSeal', 'fallIn', 'leapUp'], path);
-    for (const key of ['bossSeal', 'fallIn', 'leapUp']) {
+    rejectUnknownProps(
+      props,
+      ['room', 'key', 'flag', 'lockedText', 'bossSeal', 'fallIn', 'leapUp', 'trackX', 'emergeUp'],
+      path,
+    );
+    for (const key of ['bossSeal', 'fallIn', 'leapUp', 'trackX', 'emergeUp']) {
       if (props[key] !== undefined && props[key] !== true) {
         throw new Error(`${path}.${key}: expected true or omitted`);
       }

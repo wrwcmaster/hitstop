@@ -814,6 +814,10 @@ export class PlayScene implements Scene {
       (tr) => tr.event === 'door' && tr.props?.room === this.roomId,
     );
     if (!back) return null;
+    const leaving = this.room.triggers?.find(
+      (tr) => tr.event === 'door' && tr.props?.room === toRoom,
+    );
+    const trackedSeam = back.props?.trackX === true && leaving?.props?.trackX === true;
     const pw = this.player?.w ?? 14;
     const ph = this.player?.h ?? 18;
 
@@ -846,18 +850,68 @@ export class PlayScene implements Scene {
     // falling; jump up it and the same jump lifts you out of the well's
     // mouth on the other side. The room swap becomes a splice in one
     // continuous arc, which is what makes it read as one place.
-    const cx = back.x + back.w / 2 - pw / 2;
+    // Preserve where the knight crossed a vertical seam. Wide breakable
+    // floors may only be open beneath the exact tiles she smashed; always
+    // returning at the trigger's centre can put her under intact stone.
+    // Mapping the source fraction onto the far opening also makes unequal
+    // shaft widths join as one continuous passage.
+    const verticalX = (): number => {
+      if (!trackedSeam || !this.player || !leaving || leaving.w <= 0) {
+        return back.x + back.w / 2 - pw / 2;
+      }
+      const along = clamp((this.player.cx - leaving.x) / leaving.w, 0, 1);
+      return clamp(back.x + back.w * along - pw / 2, back.x, back.x + back.w - pw);
+    };
+    const verticalLanding = (
+      y: number,
+      step: -1 | 1,
+      emerge = false,
+    ): { x: number; y: number } | null => {
+      const preferred = verticalX();
+      const minX = back.x;
+      const maxX = back.x + back.w - pw;
+      if (maxX < minX) return null;
+      const passageDepth = 4 * dest.tileSize;
+      const clearAlongArc = (x: number, fromY: number): boolean => {
+        for (let d = 0; d <= passageDepth; d++) {
+          if (buried(x, fromY + step * d)) return false;
+        }
+        return true;
+      };
+      // Stay as close as possible to the crossing point, but nudge sideways
+      // when a fractional edge of the body still catches the next intact
+      // tile. Half-pixel steps retain subpixel motion while finding every
+      // practical player-sized corridor through an eight-pixel tile grid.
+      for (let halfPixels = 0; halfPixels <= Math.ceil(back.w * 2); halfPixels++) {
+        const distance = halfPixels / 2;
+        for (const candidate of distance === 0
+          ? [preferred]
+          : [preferred - distance, preferred + distance]) {
+          if (candidate < minX || candidate > maxX) continue;
+          const at = settle(candidate, y, step);
+          if (at && clearAlongArc(at.x, at.y)) {
+            return emerge ? { x: at.x, y: at.y + step * passageDepth } : at;
+          }
+        }
+      }
+      return null;
+    };
     if (back.props?.leapUp === true) {
       // Their ceiling gap: appear just below it, still falling — and if
       // the gap's lip is thicker than the trigger, keep going down.
-      const at = settle(cx, back.y + back.h, 1);
+      const at = trackedSeam
+        ? verticalLanding(back.y + back.h, 1)
+        : settle(verticalX(), back.y + back.h, 1);
       return at && { ...at, carry: true };
     }
     if (back.props?.fallIn === true) {
-      // Their floor shaft: appear at its foot, still rising. A trigger
-      // drawn a little into the shaft's floor would otherwise plant you
-      // ankle-deep in it, so rise until the body is clear.
-      const at = settle(cx, back.y + back.h - ph, -1);
+      // Their floor shaft: finish emerging through its open mouth, still
+      // rising. Leaving the knight at the bottom of the pocket made a
+      // released jump shorten during the fade and strand her below the
+      // floor she had already crossed.
+      const at = trackedSeam
+        ? verticalLanding(back.y + back.h - ph, -1, back.props?.emergeUp === true)
+        : settle(verticalX(), back.y + back.h - ph, -1);
       return at && { ...at, carry: true };
     }
     // Step OUT of the doorway, not into it. Landing on the trigger was
