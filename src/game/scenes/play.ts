@@ -862,56 +862,18 @@ export class PlayScene implements Scene {
       const along = clamp((this.player.cx - leaving.x) / leaving.w, 0, 1);
       return clamp(back.x + back.w * along - pw / 2, back.x, back.x + back.w - pw);
     };
-    const verticalLanding = (
-      y: number,
-      step: -1 | 1,
-      emerge = false,
-    ): { x: number; y: number } | null => {
-      const preferred = verticalX();
-      const minX = back.x;
-      const maxX = back.x + back.w - pw;
-      if (maxX < minX) return null;
-      const passageDepth = 4 * dest.tileSize;
-      const clearAlongArc = (x: number, fromY: number): boolean => {
-        for (let d = 0; d <= passageDepth; d++) {
-          if (buried(x, fromY + step * d)) return false;
-        }
-        return true;
-      };
-      // Stay as close as possible to the crossing point, but nudge sideways
-      // when a fractional edge of the body still catches the next intact
-      // tile. Half-pixel steps retain subpixel motion while finding every
-      // practical player-sized corridor through an eight-pixel tile grid.
-      for (let halfPixels = 0; halfPixels <= Math.ceil(back.w * 2); halfPixels++) {
-        const distance = halfPixels / 2;
-        for (const candidate of distance === 0
-          ? [preferred]
-          : [preferred - distance, preferred + distance]) {
-          if (candidate < minX || candidate > maxX) continue;
-          const at = settle(candidate, y, step);
-          if (at && clearAlongArc(at.x, at.y)) {
-            return emerge ? { x: at.x, y: at.y + step * passageDepth } : at;
-          }
-        }
-      }
-      return null;
-    };
     if (back.props?.leapUp === true) {
       // Their ceiling gap: appear just below it, still falling — and if
       // the gap's lip is thicker than the trigger, keep going down.
-      const at = trackedSeam
-        ? verticalLanding(back.y + back.h, 1)
-        : settle(verticalX(), back.y + back.h, 1);
+      const at = settle(verticalX(), back.y + back.h, 1);
       return at && { ...at, carry: true };
     }
     if (back.props?.fallIn === true) {
-      // Their floor shaft: finish emerging through its open mouth, still
-      // rising. Leaving the knight at the bottom of the pocket made a
-      // released jump shorten during the fade and strand her below the
-      // floor she had already crossed.
-      const at = trackedSeam
-        ? verticalLanding(back.y + back.h - ph, -1, back.props?.emergeUp === true)
-        : settle(verticalX(), back.y + back.h - ph, -1);
+      // Their floor shaft: appear at its foot, still rising. The real
+      // collision map decides whether this jump clears the mouth; a weak
+      // jump or intact tile stops it naturally and the reversed arc sends
+      // the knight back through the seam.
+      const at = settle(verticalX(), back.y + back.h - ph, -1);
       return at && { ...at, carry: true };
     }
     // Step OUT of the doorway, not into it. Landing on the trigger was
@@ -1210,10 +1172,13 @@ export class PlayScene implements Scene {
    * mouth, and you fall back down INSIDE the trigger you were placed in —
    * there is no entry edge left to fire. The honest outcome of a failed
    * exit is to fall back through the seam to the room below, so a
-   * fallIn/leapUp door is checked every frame the player overlaps it:
-   * the moment the motion matches (falling for fallIn, rising for
-   * leapUp), through you go. The motion gate itself prevents refiring —
-   * you cannot be both standing still and falling.
+   * fallIn/leapUp door is checked every frame the player overlaps it.
+   *
+   * An arrival is primed only while its carried arc still travels INTO
+   * the room. Once collision or gravity reverses that arc, the matching
+   * return condition disarms the prime and fires immediately. Geometry
+   * therefore gets the final word: a clear, strong jump exits; an intact
+   * ceiling or short hop returns, with no pocket the knight can strand in.
    */
   private updateVerticalSeams(): void {
     const p = this.player;
@@ -1227,7 +1192,10 @@ export class PlayScene implements Scene {
         this.seamPrimed.delete(def);
         continue;
       }
-      if (this.seamPrimed.has(def)) continue; // arrived inside it
+      if (this.seamPrimed.has(def)) {
+        if (!this.firesOnContact(def)) continue; // still travelling into this room
+        this.seamPrimed.delete(def); // the arc reversed before leaving the seam
+      }
       if (doorLocked(def, this.host)) continue;
       if (this.firesOnContact(def)) {
         triggerActions.get('door').run(def, this.host);

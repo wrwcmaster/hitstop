@@ -66,10 +66,10 @@ defineTriggerAction('door', {
     // can disagree. See PlayScene.doorLanding.
     rejectUnknownProps(
       props,
-      ['room', 'key', 'flag', 'lockedText', 'bossSeal', 'fallIn', 'leapUp', 'trackX', 'emergeUp'],
+      ['room', 'key', 'flag', 'lockedText', 'bossSeal', 'fallIn', 'leapUp', 'trackX'],
       path,
     );
-    for (const key of ['bossSeal', 'fallIn', 'leapUp', 'trackX', 'emergeUp']) {
+    for (const key of ['bossSeal', 'fallIn', 'leapUp', 'trackX']) {
       if (props[key] !== undefined && props[key] !== true) {
         throw new Error(`${path}.${key}: expected true or omitted`);
       }
