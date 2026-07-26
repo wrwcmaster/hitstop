@@ -69,6 +69,18 @@
       }
     },
     {
+      "x": 44,
+      "y": 140,
+      "w": 12,
+      "h": 100,
+      "event": "cutscene",
+      "once": true,
+      "props": {
+        "cutscene": "slime-king-reveal",
+        "assemble": true
+      }
+    },
+    {
       "x": 100,
       "y": 140,
       "w": 60,
@@ -76,7 +88,8 @@
       "event": "talk",
       "once": true,
       "props": {
-        "conversation": "boss-intro"
+        "conversation": "boss-intro",
+        "assemble": true
       }
     },
     {

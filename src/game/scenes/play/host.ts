@@ -33,4 +33,10 @@ export interface PlayHost {
    * and the room grows back the moment you walk out.
    */
   mutateTile(tx: number, ty: number, id: string): void;
+  /**
+   * Play a registered cutscene (content/cutscenes.ts) over the live
+   * world: the scene hands the director the player's controls and the
+   * camera until the timeline ends or is skipped.
+   */
+  playCutscene(id: string): void;
 }

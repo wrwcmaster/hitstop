@@ -127,6 +127,13 @@ export interface SnapMsg {
    */
   patch?: RoomPatch;
   banner: string | null;
+  /**
+   * Present while the host's director is running a cutscene: the host's
+   * camera position, so the guest shows the SAME shot — letterbox on,
+   * camera gliding with the direction instead of following their own
+   * knight. Absent = no scene; the guest goes back to its own framing.
+   */
+  cine?: { x: number; y: number };
 }
 
 /** guest → host, once on connect: bring my saved knight into your world.
@@ -151,7 +158,14 @@ export interface ByeMsg {
   t: 'bye';
 }
 
-export type NetMsg = InMsg | SnapMsg | HelloMsg | SyncMsg | ByeMsg;
+/** guest → host: please skip the running cutscene (the guest's menu
+ * press during a scene — the same key that skips on the host). The host
+ * honors it only while its director is actually active. */
+export interface SkipMsg {
+  t: 'skip';
+}
+
+export type NetMsg = InMsg | SnapMsg | HelloMsg | SyncMsg | ByeMsg | SkipMsg;
 
 export function parseMsg(raw: string): NetMsg | null {
   try {

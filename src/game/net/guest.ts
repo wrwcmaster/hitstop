@@ -5,12 +5,14 @@ import {
   Tilemap,
   Minimap,
   RoomPatches,
+  Letterbox,
+  Input,
   buildTilemap,
   drawText,
   clamp,
   t,
 } from '@engine/index';
-import type { ActionGame } from '../defs';
+import { KEYMAP, type Action, type ActionGame } from '../defs';
 import { COLORS } from '../content/palette';
 import { ROOMS, START_ROOM } from '../content/rooms';
 import { drawCrest } from '../actors/shockwave';
@@ -97,6 +99,17 @@ export class CoopGuestScene implements Scene {
   private snap: SnapMsg | null = null;
   private uiT = 0;
   private closedT = -1;
+  /** The host's directed shot while its cutscene runs (see SnapMsg.cine):
+   * we mirror the camera and the letterbox for its duration. */
+  private cine: { x: number; y: number } | null = null;
+  private cineBox = new Letterbox();
+  /** Never-pressed hands for the predicted knight during a cutscene: the
+   * camera is the director's, so playing on would be playing blind. */
+  private neutral = new Input<Action>(KEYMAP);
+  /** Where the scene found my knight — the host anchors its copy there,
+   * so the prediction holds the same spot instead of sagging into the
+   * server correction under gravity. */
+  private cineAnchor: { x: number; y: number } | null = null;
 
   constructor(
     private game: ActionGame,
@@ -150,6 +163,7 @@ export class CoopGuestScene implements Scene {
   private apply(s: SnapMsg): void {
     this.snap = s;
     this.banner = s.banner;
+    this.cine = s.cine ?? null;
     const enteredRoom = s.room !== this.roomId;
     if (enteredRoom) this.enterRoom(s.room);
     // Geometry the host has changed. Arrives on room entry and whenever
@@ -298,6 +312,7 @@ export class CoopGuestScene implements Scene {
     this.puppets.clear();
     this.gizmos.clear(); // buildTilemap starts extraSolids fresh
     this.serverMe = null;
+    this.cineAnchor = null; // a new room means a new knight — never hold her to old ground
     const room = ROOMS[id];
     if (!room) return;
     this.tilemap = buildTilemap(room);
@@ -343,19 +358,56 @@ export class CoopGuestScene implements Scene {
       if (this.closedT <= 0) this.leave();
       return;
     }
-    // Esc leaves the session (there's no pause to open — the world is remote).
-    if (this.game.input.consumePress('menu') || this.game.input.consumePress('cancel')) {
+    // Esc leaves the session (there's no pause to open — the world is
+    // remote) — EXCEPT during a cutscene, where menu means what it means
+    // on the host: skip. The request goes up; the host fast-forwards for
+    // both screens. Cancel still leaves, so a guest is never trapped.
+    if (this.game.input.consumePress('menu')) {
+      if (this.cine) {
+        this.link.send(JSON.stringify({ t: 'skip' }));
+      } else {
+        this.link.send(JSON.stringify({ t: 'bye' }));
+        this.leave();
+        return;
+      }
+    }
+    if (this.game.input.consumePress('cancel')) {
       this.link.send(JSON.stringify({ t: 'bye' }));
       this.leave();
       return;
     }
-    // Stream what's held right now; the host turns it into edges.
-    this.link.send(JSON.stringify({ t: 'in', held: NET_ACTIONS.filter((a) => this.game.input.held(a)) }));
+    // Stream what's held right now; the host turns it into edges. While
+    // the director holds the stage, the guest's hands come off the
+    // controls too: a neutral held-set goes on the wire, so the host's
+    // copy of this knight stands down instead of fighting unseen — she
+    // can still fall or be hit (the world never pauses), but she cannot
+    // act blind while the camera is elsewhere.
+    this.link.send(JSON.stringify({
+      t: 'in',
+      held: this.cine ? [] : NET_ACTIONS.filter((a) => this.game.input.held(a)),
+    }));
 
     // Prediction: my knight runs real physics with my live input — zero
-    // felt latency — then the server's word pulls it into line.
-    this.game.world.update(dt);
+    // felt latency — then the server's word pulls it into line. During a
+    // cutscene she predicts on the same never-pressed input the host
+    // sees, so both copies stand down together.
     const me = this.me;
+    if (me) {
+      if (this.cine) {
+        me.source = this.neutral;
+        this.cineAnchor ??= { x: me.x, y: me.y };
+      } else {
+        if (me.source === this.neutral) me.source = null;
+        this.cineAnchor = null;
+      }
+    }
+    this.game.world.update(dt);
+    if (me && this.cineAnchor) {
+      me.x = this.cineAnchor.x;
+      me.y = this.cineAnchor.y;
+      me.vx = 0;
+      me.vy = 0;
+    }
     const sv = this.serverMe;
     if (me && sv) {
       const dx = sv.x - me.x;
@@ -404,7 +456,14 @@ export class CoopGuestScene implements Scene {
       s.w = p.snap.w;
       s.h = p.snap.h;
     }
-    if (me) {
+    // During the host's cutscene the shot is the director's: glide to the
+    // host camera instead of framing my own knight. My knight stays live
+    // (prediction and input keep running — the world doesn't pause), the
+    // camera just isn't mine for a few seconds.
+    this.cineBox.update(dt, !!this.cine && this.closedT < 0);
+    if (this.cine) {
+      this.game.camera.follow(this.cine.x, this.cine.y, dt);
+    } else if (me) {
       const cam = this.game.camera;
       const target = this.cameraTarget()!;
       cam.follow(target.x, target.y, dt);
@@ -468,6 +527,7 @@ export class CoopGuestScene implements Scene {
         uiT: this.uiT,
       }, this.minimap, boss);
     }
+    this.cineBox.render(g, gm.width, gm.height); // the host's scene frames both screens
     drawText(g, t('CO-OP GUEST'), gm.width - 6, gm.height - 10, COLORS.steelDark, 1, 'right');
     if (this.closedT >= 0) {
       g.fillStyle = 'rgba(7,7,13,0.6)';

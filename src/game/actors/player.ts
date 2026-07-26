@@ -204,6 +204,15 @@ export class Player extends Actor {
 
   /** Debug god mode (cheat): no damage, always topped up. */
   godMode = false;
+  /**
+   * Host-authoritative cinematic protection. The scene sets this each
+   * step while its director owns the stage: scripted hands (the host)
+   * and stood-down hands (a co-op guest on neutral input) must not eat
+   * unavoidable damage. Combat, hazard, and contact paths are already
+   * covered by the invulnT top-up; this flag covers what bypasses
+   * invulnT — the breath: air neither drains nor drowns while it holds.
+   */
+  cineShield = false;
 
   /** Monster currently holding the player through its swallow strategy. */
   swallowedBy: Monster | null = null;
@@ -1396,15 +1405,19 @@ export class Player extends Actor {
     // fast in air (surface or an air pocket), drowns in bites at a time.
     const headWet = (this.collision.submersion?.({ x: this.x, y: this.y, w: this.w, h: 5 }) ?? 0) > 0.5;
     if (headWet && this.hp > 0) {
-      // DEEP LUNGS (skill tree) extends how long a breath lasts.
-      this.air = Math.max(0, this.air - dt / (SWIM.airSeconds + this.capabilities.modifier('extraAirSeconds', 0)));
+      // DEEP LUNGS (skill tree) extends how long a breath lasts. A
+      // cinematic holds the breath entirely — no drain, no drowning —
+      // so a scene playing out underwater costs the knight nothing.
+      if (!this.cineShield) {
+        this.air = Math.max(0, this.air - dt / (SWIM.airSeconds + this.capabilities.modifier('extraAirSeconds', 0)));
+      }
       if (chance(dt * 1.6)) {
         this.feel.particles.spawn({
           x: this.cx + this.facing * 3, y: this.y + 2,
           vy: -26, vx: rand(-6, 6), life: 0.8, size: 1, color: '#bfe0ff', drag: 0.5,
         });
       }
-      if (this.air <= 0 && !this.godMode) {
+      if (this.air <= 0 && !this.godMode && !this.cineShield) {
         this.drownT -= dt;
         if (this.drownT <= 0) {
           this.drownT = SWIM.drownEvery;

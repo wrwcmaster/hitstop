@@ -38,6 +38,9 @@ export class CoopHost {
   private hostName = 'PLAYER 1';
   /** Set when the guest vanishes; the scene shows a banner and detaches. */
   dropped = false;
+  /** The guest asked to skip the running cutscene (their menu press).
+   * The scene decides whether a skip is currently meaningful. */
+  onSkip: (() => void) | null = null;
   /**
    * Room + patch revision we last put on the wire. Geometry barely ever
    * changes, so resending it 20 times a second would be pure waste — but
@@ -72,6 +75,7 @@ export class CoopHost {
         this.syncBack(); // last chance to send their progress home
         this.dropped = true;
       }
+      if (m?.t === 'skip') this.onSkip?.();
     };
     link.onClose = () => { this.dropped = true; };
   }
@@ -152,6 +156,7 @@ export class CoopHost {
         air: g?.air ?? 1,
       },
       banner: view.banner,
+      ...(view.cine ? { cine: { x: r(view.cine.x), y: r(view.cine.y) } } : {}),
     };
     const patchKey = `${view.roomId}|${view.patchRev}`;
     if (patchKey !== this.sentPatch) {
@@ -204,6 +209,8 @@ export interface HostView {
   patchRev: number;
   /** The live room's patch, fetched lazily and only when patchRev moved. */
   patch(): RoomPatch | undefined;
+  /** The host camera while a cutscene directs it; null otherwise. */
+  cine: { x: number; y: number } | null;
 }
 
 /** Wire precision: 0.1px is plenty and keeps snapshots compact. */

@@ -474,6 +474,55 @@ defineSkill<SkillCtx>('ice-shard', {
 
 Teach it with `player.skills.learn('ice-shard')` and add an input slot to `DEFAULT_SKILL_LOADOUT` (or cast it from AI). The `SkillBook` handles cooldowns and mana; return `false` from `cast` to abort without charging.
 
+## A cutscene
+
+A cutscene is the live world with scripted hands on the controls — not a
+video, not a second renderer. Define a Director timeline in
+`src/game/content/cutscenes.ts` and place it from any room as a trigger:
+
+```ts
+defineCutscene('my-reveal', () => [
+  hold('right', 0.5),                    // she walks in HERSELF: the world
+                                         // simulates; only the hands changed
+  panTo(0.9, (ctx) => whereToLook(ctx)), // director owns the camera
+  banner('THE THING', 1.4),
+  panTo(0.7, (ctx) => ({ x: ctx.host.player!.cx, y: ctx.host.player!.cy })),
+]);
+```
+
+```json
+{ "x": 44, "y": 140, "w": 12, "h": 100,
+  "event": "cutscene", "once": true,
+  "props": { "cutscene": "my-reveal", "assemble": true } }
+```
+
+`"assemble": true` works on ANY trigger (cutscenes, boss-intro talk
+zones): in co-op it holds the trigger at the threshold — unfired — until
+both knights are gathered, and fires the moment the partner arrives (the
+host sees WAIT FOR YOUR PARTNER meanwhile). Mark it on every critical
+story trigger, so a scene never starts with a partner half a room away.
+
+What the scene guarantees while one plays: the player's `source` is a
+scripted `Input` (the co-op seam — manual keys are dead, and any action a
+step presses runs through the real FSM), the camera stops following,
+contact triggers hold their fire (a scripted walk crossing a talk zone
+would push a modal dialogue and freeze the scene — anything she is left
+standing in fires the frame control returns), menu SKIPS instead of
+pausing, and the letterbox draws. In co-op the guest mirrors the shot
+and letterbox, their menu press asks the host to skip, and their knight
+is protected AND anchored — no damage, no drowning, no being carried
+off a ledge they cannot see; the host knight's staging is the cutscene
+author's job (the scripted hands). Skip fast-forwards rather than aborts:
+every remaining step enters, lands on its final state, and exits, so a
+cutscene that sets a flag can never be cheated out of it.
+
+Cutscenes are deterministic — they advance on the fixed timestep and the
+skip is an input like any other, so they record and replay exactly
+(`cutscene-reveal` and `cutscene-skip` in the recordings are the proof,
+one watched and one skipped). Step vocabulary: engine `wait`/`call`/
+`tween`/`together` plus the game's `panTo`/`banner`/`hold` — add new
+game verbs in `cutscenes.ts`, not the engine.
+
 ## A conversation
 
 In `src/game/content/conversations.ts` — pure data, with optional branching:

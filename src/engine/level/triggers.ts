@@ -30,12 +30,21 @@ export class Triggers {
   /**
    * Test the probe against all triggers; `fire` is called on entry
    * (edge-triggered — staying inside doesn't refire).
+   *
+   * `gate` (optional) may hold a trigger at the threshold: when it
+   * returns false for a def about to fire, the entry is NOT recorded —
+   * not fired, not even "inside" — so the trigger re-tests every frame
+   * and fires the moment the gate opens, without the probe stepping out
+   * and back. This is how a game defers a firing on a condition the
+   * trigger rectangle can't express (a co-op partner not yet gathered)
+   * while keeping once-semantics honest: a gated trigger has not fired.
    */
-  update(probe: Rect, fire: (t: TriggerFire) => void): void {
+  update(probe: Rect, fire: (t: TriggerFire) => void, gate?: (def: TriggerDef) => boolean): void {
     this.defs.forEach((def, index) => {
       const hit = overlaps(probe, def);
       const wasInside = this.inside.has(index);
       if (hit && !wasInside) {
+        if (gate && !this.fired.has(index) && !gate(def)) return;
         this.inside.add(index);
         if (!this.fired.has(index)) {
           if (def.once !== false) this.fired.add(index);
