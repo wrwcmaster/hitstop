@@ -74,7 +74,7 @@ export function registerPlaceables(): void {
       // slain flag, so felling one boss doesn't banish the others.
       shouldSpawn: ({ flags }) => !(def.boss && flags.has(`slain:${id}`)),
       spawn: ({ game, tilemap }, e) => {
-        const m = new Monster(id, game, tilemap, e.x, e.y);
+        const m = new Monster(id, game, tilemap, e.x, e.y, e.props);
         // Remember the slot in the room this one filled, so a persistent
         // kill can empty exactly that slot and no other. Wave and spawner
         // monsters get the same call with a synthetic entity and simply

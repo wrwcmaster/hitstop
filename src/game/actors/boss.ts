@@ -4,6 +4,7 @@ import { SLIME1, SLIME2, TEXEL, DUELIST_ANIMS, duelistSprite } from '../content/
 import { tintOf, whiteOf } from '@engine/index';
 import { COLORS } from '../content/palette';
 import { shootBullet, muzzleFlash, BULLET_GRAVITY } from '../content/ballistics';
+import { drawDebris } from './gizmos';
 import type { Player } from './player';
 
 /** Lob a sticky slime ball: no damage, applies the slow on hit. */
@@ -717,6 +718,372 @@ defineMonster('duelist', {
     if (aiming && Math.floor(m.animT * 12) % 2 === 0) {
       g.fillStyle = COLORS.white;
       g.fillRect(m.cx + (f === 1 ? 8.5 : -10), gy - 0.5, 1.5, 1.5);
+    }
+  },
+});
+
+/* ==================== VISE, THE WALL BEAST ==================== */
+
+/**
+ * The Riven's keeper, and the fight that argues for Wall Grip.
+ *
+ * Vise never touches the floor. It owns both walls of the shaft while
+ * the player rents four crumbling platforms, and the whole fight is the
+ * ache of watching a creature do the thing you cannot do yet. You hurt
+ * it by unmaking that grip: **its health is its limbs**. Four sever
+ * before it loses the wall, each one tearing free with a crack, each one
+ * dropping it lower and making it faster — the progress bar is a body
+ * coming apart, and the danger curve rises with it.
+ *
+ * There is no stationary punish window here. Maul taught bait → stagger;
+ * Vise damages IN MOTION, so the reachable limbs are always the ones
+ * nearest platform level while it crawls (see docs/world-design.md, "one
+ * punish grammar per Keeper").
+ */
+
+const VISE_LIMB_HP = 130;
+/** Severing this many costs it the wall — six limbs, four must go. */
+const VISE_SEVERS = 4;
+const VISE_BODY = '#2f4a72';
+const VISE_LIMB = '#8fb6d6';
+
+/** How many limbs are gone, from damage taken. */
+function severed(m: Monster): number {
+  return Math.min(VISE_SEVERS, Math.floor((m.maxHp - m.hp) / VISE_LIMB_HP));
+}
+
+/** Inner face of the wall on `side`, found by probing the room once. */
+function wallFace(m: Monster, side: -1 | 1): number {
+  const step = 8;
+  for (let d = 0; d < 900; d += step) {
+    const x = side < 0 ? m.cx - d : m.cx + d;
+    const probe = { x: x - step / 2, y: m.cy - 4, w: step, h: 8 };
+    for (const s of m.collision.solidsNear(probe)) {
+      if (s.oneWay) continue;
+      if (probe.x < s.x + s.w && probe.x + probe.w > s.x && probe.y < s.y + s.h && probe.y + probe.h > s.y) {
+        return side < 0 ? s.x + s.w : s.x;
+      }
+    }
+  }
+  return side < 0 ? 0 : m.cx + 200;
+}
+
+/** Park the body against its wall (it is always holding on). */
+function hugWall(m: Monster): void {
+  const side = m.state.side as -1 | 1;
+  const face = side < 0 ? (m.state.leftX as number) : (m.state.rightX as number);
+  m.x = side < 0 ? face : face - m.w;
+}
+
+/** Drop debris down one column — the hammering it does to its own wall. */
+function viseDebris(m: Monster, x: number): void {
+  m.game.combat.shoot(
+    {
+      x, y: m.cy - 40, vx: 0, vy: 90,
+      w: 9, h: 9, life: 4, gravity: 620,
+      strike: {
+        damage: 16, targets: 'player', attacker: m,
+        strength: 0.4, knockback: 40, popY: 0,
+        colors: ['#5b7fa8', '#22304f'],
+      },
+      draw(g, p) {
+        drawDebris(g, p.x, p.y, p.t);
+      },
+      onExpire(p) {
+        m.game.feel.burst(p.x, p.y, 5, { color: ['#5b7fa8', '#22304f'], speed: 60, life: 0.3, drag: 4 });
+      },
+    },
+    m.collision,
+  );
+}
+
+function makeViseFsm(m: Monster): FSM<Monster> {
+  const fsm: FSM<Monster> = new FSM<Monster>(m, {
+    /**
+     * Crawling the wall — and the only place damage happens. It tracks
+     * the knight's height, so the limbs in reach are always the ones
+     * nearest platform level: come to the wall's edge and take them.
+     */
+    traverse: {
+      enter(b) {
+        b.state.pick = rand(1.1, 1.9) * (1 - severed(b) * 0.12);
+      },
+      update(b) {
+        hugWall(b);
+        const p = b.player;
+        // Climb toward the knight, faster with every limb it has lost.
+        const speed = 40 + severed(b) * 16;
+        const goal = p ? p.cy - 6 : b.cy;
+        b.vy = Math.abs(goal - b.cy) < 6 ? 0 : Math.sign(goal - b.cy) * speed;
+        b.vx = 0;
+        if (fsm.t < (b.state.pick as number)) return;
+        const heavy = severed(b) >= 3;
+        return pick(heavy
+          ? ['lunge', 'lunge', 'pinSlam', 'rockfall']
+          : ['lunge', 'rockfall', 'pinSlam', 'lunge']);
+      },
+    },
+
+    /**
+     * Coil and spring flat across the shaft to the far wall. The coil is
+     * the tell; with three limbs gone it feints once first — the same
+     * shape, half the commitment.
+     */
+    lunge: {
+      enter(b) {
+        b.state.feinted = false;
+        b.state.flying = false;
+        b.vy = 0;
+        b.vx = 0;
+      },
+      update(b) {
+        const heavy = severed(b) >= 3;
+        if (!(b.state.flying as boolean)) {
+          hugWall(b);
+          // Coil: limbs bunch, and the body shivers back against the wall.
+          const coil = heavy && !(b.state.feinted as boolean) ? 0.34 : 0.5;
+          if (fsm.t > coil) {
+            if (heavy && !(b.state.feinted as boolean)) {
+              // The feint: it uncoils a hand's width and re-coils.
+              b.state.feinted = true;
+              b.game.feel.sfx.play('step');
+              return;
+            }
+            b.state.flying = true;
+            b.vx = -(b.state.side as number) * 340;
+            b.vy = 0;
+            b.game.feel.sfx.play('jump');
+            b.game.feel.shake(0.2);
+          }
+          return;
+        }
+        // In flight: a flat spring, until the far wall catches it.
+        const side = b.state.side as -1 | 1;
+        const far = side < 0 ? (b.state.rightX as number) : (b.state.leftX as number);
+        const arrived = side < 0 ? b.x + b.w >= far : b.x <= far;
+        if (arrived || fsm.t > 1.6) {
+          b.state.side = -side;
+          b.vx = 0;
+          hugWall(b);
+          b.game.feel.impact(b.cx, b.cy, { strength: 0.5, colors: [VISE_LIMB, VISE_BODY], sfx: 'land' });
+          return 'traverse';
+        }
+      },
+    },
+
+    /**
+     * Hammers its own wall; two columns come down. The third column is
+     * the answer — the debris is marked before it falls.
+     */
+    rockfall: {
+      enter(b) {
+        b.state.dropped = 0;
+        b.vy = 0;
+        const p = b.player;
+        // Two columns bracketing the knight: the gap between is the room.
+        const at = p ? p.cx : b.cx;
+        b.state.colA = at - 46;
+        b.state.colB = at + 46;
+      },
+      update(b) {
+        hugWall(b);
+        const dropped = b.state.dropped as number;
+        // Telegraph: dust off both columns before anything falls.
+        if (fsm.t < 0.5) {
+          if (Math.floor(fsm.t * 30) % 4 === 0) {
+            for (const x of [b.state.colA as number, b.state.colB as number]) {
+              b.game.feel.particles.spawn({
+                x, y: b.cy - 36, vy: 50, life: 0.3, size: 1, color: '#6d86a8', drag: 1,
+              });
+            }
+          }
+          return;
+        }
+        if (dropped < 3 && fsm.t > 0.5 + dropped * 0.38) {
+          b.state.dropped = dropped + 1;
+          viseDebris(b, b.state.colA as number);
+          viseDebris(b, b.state.colB as number);
+          b.game.feel.shake(0.25);
+          b.game.feel.sfx.play('step');
+        }
+        if (fsm.t > 1.9) return 'traverse';
+      },
+    },
+
+    /**
+     * Slams both walls at once. The shudder runs through everything
+     * bolted to them — which is every platform in the arena. Be in the
+     * air when it lands: the floor is what carries the blow.
+     */
+    pinSlam: {
+      enter(b) {
+        b.state.struck = false;
+        b.vy = 0;
+      },
+      update(b) {
+        hugWall(b);
+        // Telegraph: it hauls itself flat to the wall and trembles.
+        if (fsm.t < 0.6) {
+          if (Math.floor(fsm.t * 40) % 2) b.y += Math.sin(fsm.t * 70) * 0.6;
+          return;
+        }
+        if (!(b.state.struck as boolean)) {
+          b.state.struck = true;
+          b.game.feel.impact(b.cx, b.cy, { strength: 0.9, colors: [VISE_LIMB, COLORS.white], sfx: 'kill' });
+          b.game.feel.shake(0.7);
+          const strike = b.game.combat.strike({
+            damage: 26, targets: 'player', attacker: b,
+            strength: 0.6, knockback: 120, popY: -140,
+            colors: [VISE_LIMB, COLORS.white],
+          });
+          // The blow travels through the platforms, not the air: only
+          // whoever is STANDING on the arena takes it.
+          for (const p of b.world.actors('player')) {
+            if (p.onGround) strike.apply(p);
+          }
+          for (let i = 0; i < 2; i++) {
+            b.game.feel.burst(b.cx, b.cy, 12, {
+              color: [VISE_LIMB, VISE_BODY], speed: 150, life: 0.4,
+              angle: i === 0 ? 0 : Math.PI, spread: 0.7, drag: 2,
+            });
+          }
+        }
+        if (fsm.t > 1.1) return 'traverse';
+      },
+    },
+  }, 'traverse');
+  return fsm;
+}
+
+defineMonster('vise', {
+  hp: VISE_LIMB_HP * VISE_SEVERS,
+  damage: 22,
+  w: 30,
+  h: 26,
+  score: 9000,
+  boss: true,
+  flies: true, // it is always holding the wall; the floor is not its business
+  displayName: 'VISE, THE WALL BEAST',
+  epilogue: 'vise-fallen',
+  grants: 'wall-grip',
+  colors: [VISE_BODY, VISE_LIMB, COLORS.white],
+  drops: [
+    { id: 'coin', chance: 1 },
+    { id: 'coin', chance: 1 },
+    { id: 'potion', chance: 1 },
+    { id: 'mana-orb', chance: 1 },
+  ],
+  xp: 260,
+  init(m) {
+    m.state.side = -1;
+    m.state.leftX = wallFace(m, -1);
+    m.state.rightX = wallFace(m, 1);
+    m.state.shown = 0; // limbs already torn off on screen
+    m.state.fsm = makeViseFsm(m);
+    hugWall(m);
+  },
+  update(m, dt) {
+    // A limb tears free: the fight's whole progress display, and the
+    // moment the danger rises. It re-grips lower — nearer the platforms,
+    // nearer you — and everything it does gets quicker.
+    const gone = severed(m);
+    if (gone > (m.state.shown as number)) {
+      m.state.shown = gone;
+      m.game.feel.slowmo(0.45, 0.3);
+      m.game.feel.shake(0.6);
+      m.game.feel.sfx.play('kill');
+      m.game.feel.text(m.cx, m.y - 10, t('LIMB SEVERED'), VISE_LIMB, 2);
+      m.game.feel.burst(m.cx, m.cy, 18, {
+        color: [VISE_LIMB, VISE_BODY], speed: 130, life: 0.5, drag: 2.5,
+      });
+      m.y += 14; // it slips down the wall, closer to the platforms
+    }
+    (m.state.fsm as FSM<Monster>).update(dt);
+  },
+  draw(g, m) {
+    const side = (m.state.side as number) ?? -1;
+    const fsm = m.state.fsm as FSM<Monster> | undefined;
+    const coiling = !!fsm && fsm.is('lunge') && !(m.state.flying as boolean);
+    const left = Math.round(m.x);
+    const top = Math.round(m.y);
+    const alive = VISE_SEVERS + 2 - severed(m); // six limbs, minus what's gone
+
+    // Limbs first: they are the health bar, so they read before the body.
+    for (let i = 0; i < alive; i++) {
+      const row = i % 3;
+      const back = i >= 3;
+      const ly = top + 3 + row * 8;
+      const wave = Math.sin(m.animT * (coiling ? 12 : 4) + i * 1.3);
+      const reach = coiling ? 6 + wave * 2 : 12 + wave * 4;
+      g.fillStyle = m.flashT > 0 ? COLORS.white : (back ? VISE_BODY : VISE_LIMB);
+      // Hooked into the wall behind it, splayed into the shaft in front.
+      if (side < 0) {
+        g.fillRect(left - 4, ly, 6, 3);
+        if (!back) g.fillRect(left + m.w - 2, ly + 1, reach, 3);
+      } else {
+        g.fillRect(left + m.w - 2, ly, 6, 3);
+        if (!back) g.fillRect(left + 2 - reach, ly + 1, reach, 3);
+      }
+    }
+    // Body: a flat carapace pressed to the stone.
+    g.fillStyle = m.flashT > 0 ? COLORS.white : VISE_BODY;
+    g.fillRect(left + 2, top, m.w - 4, m.h);
+    g.fillStyle = m.flashT > 0 ? COLORS.white : '#22304f';
+    g.fillRect(left + 4, top + 3, m.w - 8, m.h - 6);
+    // Eyes down the spine, gold and unbothered.
+    g.fillStyle = m.flashT > 0 ? COLORS.white : COLORS.gold;
+    for (let i = 0; i < 3; i++) {
+      g.fillRect(left + (side < 0 ? m.w - 9 : 5), top + 5 + i * 7, 3, 2);
+    }
+  },
+});
+
+/**
+ * A nest cluster: wall matter that drips wallcrawlers until it is
+ * smashed. Clearing one is a CHOICE — fewer adds, or more time on the
+ * limbs — which is the only resource decision the fight asks for.
+ */
+defineMonster('vise-nest', {
+  hp: 90,
+  damage: 0,
+  noContactDamage: true,
+  w: 16, h: 20,
+  score: 300,
+  flies: true, // it is part of the wall
+  colors: ['#3f5f85', '#8fb6d6'],
+  init(m) {
+    m.state.spawnT = rand(3, 5);
+  },
+  update(m, dt) {
+    m.vx = 0;
+    m.vy = 0;
+    m.state.spawnT = (m.state.spawnT as number) - dt;
+    if ((m.state.spawnT as number) > 0) return;
+    m.state.spawnT = rand(5.5, 7.5);
+    // Never flood the shaft: the fight is the boss, not the swarm.
+    const crawlers = m.world.actors('enemy').filter((e) => e instanceof Monster && e.type === 'wallcrawler').length;
+    if (crawlers >= 3) return;
+    const c = m.world.spawn(new Monster('wallcrawler', m.game, m.collision, m.cx - 7, m.y + m.h));
+    m.game.feel.burst(c.cx, c.cy, 8, { color: ['#8fb6d6'], speed: 60, life: 0.3, drag: 3 });
+    m.game.feel.sfx.play('splat');
+  },
+  draw(g, m) {
+    const x = Math.round(m.x);
+    const y = Math.round(m.y);
+    g.fillStyle = m.flashT > 0 ? COLORS.white : '#2b4467';
+    g.fillRect(x, y, m.w, m.h);
+    g.fillStyle = m.flashT > 0 ? COLORS.white : '#3f5f85';
+    for (let i = 0; i < 5; i++) {
+      const cx = x + 2 + ((i * 5) % (m.w - 4));
+      const cy = y + 2 + ((i * 7) % (m.h - 5));
+      g.fillRect(cx, cy, 4, 4);
+    }
+    // Wet cells that pulse when something inside is nearly ready.
+    const ready = (m.state.spawnT as number) < 1.2;
+    g.fillStyle = m.flashT > 0 ? COLORS.white : (ready ? COLORS.gold : '#8fb6d6');
+    for (let i = 0; i < 3; i++) {
+      const p = Math.sin(m.animT * (ready ? 9 : 3) + i) * 0.5 + 0.5;
+      g.fillRect(x + 3 + i * 5, y + 4 + Math.round(p * 9), 2, 2);
     }
   },
 });

@@ -1,6 +1,10 @@
 # World design: the Undertoll
 
-Status: **design proposal, from zero**. This is the complete story, region,
+Status: **design, partly built**. Migration step 1 — **the Riven and
+Vise** — is shipped: seven rooms, the wallcrawler and the rockfall
+column, `gripstone`/`slickPanel`, and the boss that finally makes Wall
+Grip earnable in-world (see the migration section). Everything else here
+is still design. This is the complete story, region,
 room, puzzle, and boss design for the full game, written to the constraints
 in [gameplay-progression.md](gameplay-progression.md) (one boss one verb,
 verb-gates not key-gates, no input reading, no power removal, both loadouts
@@ -738,8 +742,11 @@ Nothing shipped is wasted; each room grows into its target role:
 | `grotto` | `brine-gate` |
 | well seam, portals, worldmap | unchanged mechanisms; new rooms are data |
 
-Migration order (each step shippable): 1) the Riven + Vise (Wall Grip
-finally reachable in-world), 2) Foundry + Maul (moves the Impact Drop
+Migration order (each step shippable): 1) **the Riven + Vise — BUILT**
+(Wall Grip is now earned in-world; entered by breaking the deep floor of
+today's `underground`, since the Bore does not exist yet, and it
+surfaces through `riven-flue` at Hearthstead's western edge exactly as
+designed), 2) Foundry + Maul (moves the Impact Drop
 grant), 3) Underbell + Mourn (Shockwave reachable, midpoint event), 4)
 Windspires upper + Bellwether (moves Air Step; Duelist becomes the
 rampart's mandatory gatekeeper),
@@ -749,7 +756,11 @@ rampart's mandatory gatekeeper),
 Engine extensions ride the same steps (each with its first user, per
 Part III): transient mutation with the Foundry's brittle floors (step
 2), room overlays with the midpoint event (step 3), quiet zones with
-the second half (step 6).
+the second half (step 6). Step 1 added one not on that list, for the
+same reason the list exists — the design wanted `slick` stone, and the
+engine could not answer "what kind of surface am I touching?": tilemaps
+now answer `traitAt(rect, trait)` on the collision seam, still without
+learning what any trait means.
 
 Grant moves are demo-phase save changes (AGENTS.md rule 9): owned verbs
 in old saves stay owned; only the *source* moves.

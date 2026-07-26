@@ -110,6 +110,14 @@ export class Monster extends Actor {
    * removed from it — nothing else has a slot in the room to empty.
    */
   origin = '';
+  /**
+   * Per-instance overrides the ROOM wrote for this one (`RoomEntity.props`),
+   * readable from `init`/`update`. `MonsterDef.validateProps` is what
+   * guards their shape at load, so a def that declares props gets them
+   * checked in the editor and delivered here — the two halves of the
+   * same bargain. Empty for wave, scenario, and cheat spawns.
+   */
+  props: Record<string, unknown> = {};
 
   constructor(
     public readonly type: string,
@@ -117,12 +125,17 @@ export class Monster extends Actor {
     public collision: CollisionSource,
     x: number,
     y: number,
+    /** Room overrides for this instance; `init` reads them (see `props`). */
+    props?: Record<string, unknown>,
   ) {
     super();
     this.def = monsters.get(type);
     this.team = 'enemy';
     this.x = x;
     this.y = y;
+    // Before init: a def that takes placement props needs them to exist
+    // by the time it is deciding what this instance IS.
+    if (props) this.props = props;
     this.w = this.def.w;
     this.h = this.def.h;
     this.hp = this.maxHp = this.def.hp;

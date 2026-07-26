@@ -58,6 +58,14 @@ export interface CollisionSource {
   /** Strongest hazard-tile damage under a rect (spikes, lava). Absent =
    * a harmless world. */
   hazardAt?(r: Rect): number;
+  /**
+   * Does any tile under a rect carry a content trait? The engine keeps
+   * assigning no meaning to trait ids; this is only the spatial lookup,
+   * so a controller can ask what KIND of surface it is touching (a wall
+   * too slick to grip, stone that rings) without owning the tilemap.
+   * Absent = a world with no traits to speak of.
+   */
+  traitAt?(r: Rect, trait: string): boolean;
 }
 
 /** A moving AABB. Position is top-left; velocities in px/s. */

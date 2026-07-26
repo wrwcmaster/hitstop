@@ -54,6 +54,30 @@ defineBackdrop('night', {
   ],
 });
 
+/**
+ * The Riven: looking ACROSS a crack rather than out at a sky. No moon,
+ * almost no stars — the few points of light are wet stone catching what
+ * little there is. The far wall is drawn as receding cliff layers, so
+ * depth reads sideways, and dust falls forever because in a crack it
+ * always does.
+ */
+defineBackdrop('riven', {
+  bands: ['#05070f', '#070a16', '#0a0f22', '#0d142c', '#101938', '#141f44', '#182450'],
+  stars: { dust: 90, near: 14, bright: 3 },
+  layers: [
+    { color: '#0a1024', base: 118, amp: 96, step: 176, parallaxX: 0.06, parallaxY: 0.03 },
+    { color: '#0f172f', base: 138, amp: 78, step: 118, parallaxX: 0.13, parallaxY: 0.05 },
+    { color: '#14203f', base: 156, amp: 58, step: 74, parallaxX: 0.26, parallaxY: 0.075 },
+    { color: '#1b2c53', base: 172, amp: 36, step: 46, parallaxX: 0.44, parallaxY: 0.1 },
+  ],
+  drift: {
+    color: 'rgba(143,182,214,0.34)',
+    count: 26,
+    speed: 7,
+    fall: 17,
+  },
+});
+
 defineBackdrop('mountain-pass', {
   bands: ['#070b19', '#0b1124', '#101a31', '#16243b', '#1c3047', '#274157', '#35586b'],
   stars: { dust: 230, near: 48, bright: 9 },

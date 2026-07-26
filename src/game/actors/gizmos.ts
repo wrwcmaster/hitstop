@@ -318,6 +318,108 @@ export function drawBarrier(g: CanvasRenderingContext2D, x: number, y: number, w
   g.fillRect(Math.round(x + w / 2) - 1, y, 2, h);
 }
 
+/* ---------------- rockfall column ---------------- */
+
+/**
+ * A ceiling scar that sheds debris on a fixed cadence.
+ *
+ * The Riven's clock. It is deliberately NOT random: dust trickles for a
+ * beat before every fall, and the period never changes, so the shaft can
+ * be read like a metronome and crossed on the offbeat. The debris itself
+ * is an ordinary projectile — it damages, it expires, and a co-op guest
+ * already receives it — so the column owns timing and telegraph only.
+ */
+export class Rockfall extends Entity {
+  private t: number;
+  layer = -1; // behind actors: it is part of the ceiling
+
+  constructor(
+    private game: ActorHost,
+    private collision: CollisionSource,
+    private x: number,
+    private y: number,
+    private period: number,
+    phase: number,
+    private damage: number,
+  ) {
+    super();
+    this.t = phase % period;
+  }
+
+  /** Seconds until the next fall — the telegraph reads this. */
+  private get untilDrop(): number {
+    return this.period - this.t;
+  }
+
+  update(dt: number): void {
+    this.t += dt;
+    // Dust warns for the last three-quarters of a second, every time.
+    if (this.untilDrop < 0.75 && Math.floor(this.t * 24) % 3 === 0) {
+      this.game.feel.particles.spawn({
+        x: this.x + (Math.floor(this.t * 24) % 5) * 2 - 4,
+        y: this.y + 6,
+        vy: 40, life: 0.35, size: 1, color: '#6d86a8', drag: 1,
+      });
+    }
+    if (this.t < this.period) return;
+    this.t -= this.period;
+    this.drop();
+  }
+
+  private drop(): void {
+    this.game.combat.shoot(
+      {
+        x: this.x, y: this.y + 8, vx: 0, vy: 120,
+        w: 9, h: 9, life: 4, gravity: 620,
+        strike: {
+          damage: this.damage,
+          targets: 'player',
+          // No attacker: the ceiling is not a creature, so knockback and
+          // parry resolve against the falling rock itself, not a source.
+          strength: 0.4,
+          knockback: 40,
+          popY: 0,
+          colors: ['#5b7fa8', '#22304f'],
+        },
+        draw(g, p) {
+          drawDebris(g, p.x, p.y, p.t);
+        },
+        onExpire: (p) => {
+          this.game.feel.burst(p.x, p.y, 5, {
+            color: ['#5b7fa8', '#22304f'], speed: 60, life: 0.3, drag: 4,
+          });
+          this.game.feel.sfx.play('shatter');
+        },
+      },
+      this.collision,
+    );
+    this.game.feel.sfx.play('step');
+  }
+
+  render(g: CanvasRenderingContext2D): void {
+    // The scar in the ceiling, tightening as the next fall approaches.
+    const warn = this.untilDrop < 0.75;
+    g.fillStyle = warn ? '#8fb6d6' : '#3f5170';
+    g.fillRect(Math.round(this.x - 5), Math.round(this.y), 10, 2);
+    g.fillStyle = '#22304f';
+    g.fillRect(Math.round(this.x - 3), Math.round(this.y + 2), 6, 2);
+  }
+}
+
+/** One falling chunk, drawn as tumbling rock (shared with the co-op guest). */
+export function drawDebris(g: CanvasRenderingContext2D, x: number, y: number, spin: number): void {
+  const px = Math.round(x);
+  const py = Math.round(y);
+  const s = Math.floor(spin * 12) % 2;
+  g.fillStyle = '#22304f';
+  g.fillRect(px - 4, py - 4, 9, 9);
+  g.fillStyle = '#5b7fa8';
+  g.fillRect(px - 4 + s, py - 4, 4, 3);
+  g.fillRect(px + 1 - s, py + 1, 3, 3);
+  g.fillStyle = '#8fb6d6';
+  g.fillRect(px - 3 + s, py - 3, 2, 1);
+}
+
 /** Everything the host should snapshot as a gizmo. */
 export type Gizmo = MovingPlatform | Lever | PressurePlate | Barrier;
 export function isGizmo(e: unknown): e is Gizmo {
@@ -389,6 +491,27 @@ export function registerGizmos(): void {
     spawn(ctx: PlaceableCtx, e: RoomEntity) {
       ctx.game.world.spawn(new PressurePlate(
         ctx.game, e.x, e.y, `switch:${str(e.props, 'switch', 'a')}`, e.props?.latch === true,
+      ));
+    },
+  });
+
+  definePlaceable('rockfall', {
+    label: 'ROCKFALL',
+    category: 'gizmo',
+    colors: ['#5b7fa8', '#22304f'],
+    w: 10, h: 4,
+    validateProps(props, path) {
+      rejectUnknownProps(props, ['period', 'phase', 'damage'], path);
+      optionalFiniteNumber(props, 'period', path);
+      optionalFiniteNumber(props, 'phase', path);
+      optionalFiniteNumber(props, 'damage', path);
+    },
+    spawn(ctx: PlaceableCtx, e: RoomEntity) {
+      ctx.game.world.spawn(new Rockfall(
+        ctx.game, ctx.tilemap, e.x, e.y,
+        Math.max(0.6, num(e.props, 'period', 2.6)),
+        num(e.props, 'phase', 0),
+        num(e.props, 'damage', 14),
       ));
     },
   });

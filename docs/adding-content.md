@@ -726,6 +726,10 @@ The built-ins show the three tiers, all resolving through Strikes/Projectiles so
 - **Ranged debuff** (the Slime King's sticky spit): lob a 0-damage projectile whose `onHit` applies a status. Zero-damage hits skip damage numbers and player i-frames automatically.
 - **Telegraph → lunge** (devourer, boss slam): a shiver/windup state the player can read, then the attack. Never skip the telegraph — readable attacks are what make hard fights fair.
 - **Grab mechanics** (Slime King): `MonsterDef.onPlayerContact` starts the generic held-player FSM, while the definition's `swallow` strategy owns status, release cleanup, colors, and overlay. Devourer's gear theft is likewise its own contact hook. New unusual enemies do not add branches to Player.
+- **Reading the terrain** (wallcrawler, Vise): a def may ask the collision source what KIND of surface it is touching — `collision.traitAt(rect, 'slick')` — so an enemy can obey the same wall rules the player does. The wallcrawler climbs gripstone and visibly balks at slick panels, which is how the Riven teaches Wall Grip before granting it: the creature demonstrates the rule, and no text explains it.
+- **Health as structure** (Vise): a boss's hp can be read as *components* rather than a bar. Vise's `maxHp` is four limbs' worth; `severed()` derives how many are gone from damage taken, and each new one fires its own feedback and moves the fight (it re-grips lower and speeds up). Progress is a body coming apart — see docs/world-design.md's boss law: fast pace, visible progress, expressed differently per boss.
+
+Per-instance placement data rides `RoomEntity.props` into `Monster.props` (validated by `MonsterDef.validateProps`), which is how one wallcrawler def serves both walls: `{ "type": "wallcrawler", "props": { "side": "right" } }`.
 
 ## A skill tree node
 
