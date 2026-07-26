@@ -645,6 +645,13 @@ export class Player extends Actor {
     return this.source === null;
   }
 
+  /**
+   * Room transitions keep rendering the live world while controls are
+   * suspended. Nearby actors must not advertise interactions during that
+   * limbo, especially when a failed vertical seam briefly visits a room.
+   */
+  interactionsEnabled = true;
+
   get feel() {
     return this.game.feel;
   }

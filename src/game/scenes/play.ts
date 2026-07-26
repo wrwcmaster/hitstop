@@ -67,7 +67,7 @@ interface Transition {
    * nothing to open.
    */
   open?: { left: number; x: number; y: number; w: number; h: number };
-  /** Velocity to restore on arrival — a vertical seam keeps your arc. */
+  /** Velocity to restore on arrival — connected seams keep your arc. */
   carry?: { vx: number; vy: number };
   /** Horizontal edge gaps keep the knight walking through the fade. */
   walk?: { out: -1 | 1; into: -1 | 1 };
@@ -723,9 +723,10 @@ export class PlayScene implements Scene {
       }
     }
     // Doors and portals are interaction zones (press E), not auto-fires.
-    this.interactZones = (this.room.triggers ?? []).filter(
-      (t) => t.event === 'door' || t.event === 'portal',
-    );
+    this.interactZones = (this.room.triggers ?? []).filter((t) => (
+      t.event === 'portal'
+      || (t.event === 'door' && t.props?.fallIn !== true && t.props?.leapUp !== true)
+    ));
     this.nearInteract = null;
 
     // Snap the camera so the new room doesn't smear in; with no player
@@ -820,6 +821,9 @@ export class PlayScene implements Scene {
       (tr) => tr.event === 'door' && tr.props?.room === toRoom,
     );
     const trackedSeam = back.props?.trackX === true && leaving?.props?.trackX === true;
+    const edgePair = !!leaving
+      && edgeDoorSide(this.room, leaving) !== null
+      && edgeDoorSide(dest, back) !== null;
     const pw = this.player?.w ?? 14;
     const ph = this.player?.h ?? 18;
 
@@ -887,12 +891,19 @@ export class PlayScene implements Scene {
     const roomW = Math.max(...dest.tiles.map((r) => r.length)) * dest.tileSize;
     const outward = back.x + back.w / 2 < roomW / 2 ? 1 : -1;
     const x = outward === 1 ? back.x + back.w + 2 : back.x - pw - 2;
-    const y = back.y + back.h - ph;
+    // A horizontal seam maps the exact height at which it was crossed,
+    // rather than pinning every arrival to the destination floor. Equal
+    // trigger heights preserve Y offset exactly; unequal ones scale it.
+    // Together with carried velocity below, a jump stays a jump across
+    // the room boundary and a fall keeps falling.
+    const y = edgePair && this.player && leaving && leaving.h > 0
+      ? back.y + (this.player.y - leaving.y) * (back.h / leaving.h)
+      : back.y + back.h - ph;
     // Stepping out sideways assumes a doorway you walk through. A shaft
     // you FALL down has no beside — the town well is two tiles wide with
     // rock either side — so let the caller fall back to the room's spawn
     // rather than burying you in stone.
-    return buried(x, y) ? null : { x, y };
+    return buried(x, y) ? null : { x, y, carry: edgePair };
   }
 
   private goToRoom(roomId: string, x?: number, y?: number): void {
@@ -907,10 +918,11 @@ export class PlayScene implements Scene {
       y: y ?? land?.y ?? spawn.y,
       open: this.doorwayArt(roomId) ?? undefined,
       walk: this.edgeWalk(roomId) ?? undefined,
-      // Vertical seams splice the player's arc across rooms, so capture
+      // Connected seams splice the player's arc across rooms, so capture
       // the velocity at the moment of crossing (setRoom zeroes it).
       carry: land?.carry && this.player ? { vx: this.player.vx, vy: this.player.vy } : undefined,
     };
+    if (this.player) this.player.interactionsEnabled = false;
     this.game.sfx.play(this.transition.open ? 'unlock' : 'menuOpen');
   }
 
@@ -1383,11 +1395,9 @@ export class PlayScene implements Scene {
       if (before < half && after >= half) {
         if (tr.walk && this.player) this.player.facing = tr.walk.into;
         this.setRoom(tr.roomId, tr.x, tr.y);
-        // setRoom zeroes velocity for ordinary doors; a vertical seam
-        // hands the arc back UNCHANGED, so the fall (or the jump) simply
-        // continues. Deliberately no boost for a weak jump: physics stays
-        // honest, and an arc that cannot clear the far shaft falls back
-        // through the seam to where it came from (see updateVerticalSeams).
+        // setRoom zeroes velocity for ordinary doors; a connected seam
+        // hands the arc back UNCHANGED, so a fall or jump simply continues.
+        // Deliberately no boost for a weak jump: physics stays honest.
         if (tr.carry && this.player) {
           this.player.vx = tr.carry.vx;
           this.player.vy = tr.carry.vy;
@@ -1397,6 +1407,7 @@ export class PlayScene implements Scene {
       if (tr.walk) this.walkThroughEdge(tr.walk.into, inDt);
       if (tr.t >= TRANSITION_TIME) {
         if (tr.walk && this.player) this.player.vx = 0;
+        if (this.player) this.player.interactionsEnabled = true;
         this.transition = null;
       }
       return;

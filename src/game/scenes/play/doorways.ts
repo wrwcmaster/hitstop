@@ -45,7 +45,9 @@ export function openEdgeDoorways(room: RoomDef, map: Tilemap): void {
         const id = map.tileAt(tx, ty);
         if (id === 'gate') continue;
         const def = tiles.get(id);
-        if (def.solid || def.oneWay) map.setTile(tx, ty, '');
+        // One-way tiles are valid doorway floors: they never block the
+        // horizontal crossing and give an arriving fall somewhere to land.
+        if (def.solid) map.setTile(tx, ty, '');
       }
     }
   }

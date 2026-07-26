@@ -365,6 +365,12 @@ of the old room and into the new one instead of freezing at the trigger.
 Keep true interior passages farther from the edge so they remain explicit
 interactions.
 
+Paired edge doors also map the knight's height within the source trigger
+onto the destination trigger and carry vertical velocity. Running across
+stays grounded; jumping or falling across keeps the same arc. Align each
+trigger's bottom with its doorway floor (a one-way ledge is preserved as
+a valid threshold floor) so both rooms describe the same physical seam.
+
 The interior exception matters more than it sounds. The shaft down to the grotto and the stair up to the ramparts sit in the middle of floors you have every reason to walk across; firing those on contact means you can no longer cross your own room without being swallowed. Castlevania solves it the same way — doors live at the edges, and the way down is something you choose.
 
 A trigger action decides this for itself via `TriggerAction.autoFire`, asked fresh every time because the answer changes mid-room: a barred door becomes a walk-through gap the instant you pick up its key.
