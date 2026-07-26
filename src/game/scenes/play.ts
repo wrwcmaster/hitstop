@@ -1341,6 +1341,16 @@ export class PlayScene implements Scene {
 
     this.coop?.applyInput(); // remote edges land before the world steps
     this.director.update(dt); // scripted presses land before the world steps too
+    // Cinematic protection, host-authoritative: while the director owns
+    // the stage neither knight can be hurt. The host's hands are
+    // scripted and the guest's are off (neutral input on both sides),
+    // so damage taken now would be unavoidable rather than answerable.
+    // The topped-up invuln decays within a beat of control returning.
+    if (this.director.active) {
+      for (const p of [this.player, this.coop?.guest ?? null]) {
+        if (p) p.invulnT = Math.max(p.invulnT, 0.1);
+      }
+    }
     g.world.update(dt);
     this.cutsceneInput?.endStep(); // scripted press/release edges last one step
     if (this.coop) {

@@ -376,9 +376,11 @@ frequent and short rather than rare and long, there is no invulnerable
 sulking (when one target is guarded another is reachable), and a clean
 kill runs two to three minutes — danger comes from tempo, never from a
 sponge of hit points. Second, **progress must be visible**: a deep HP
-pool feels like erosion, so every fight shows its state on the boss's
-body or on the arena itself, and the boss bar reads as segments, not a
-sliver. Everything else — breakable components, spawned minions,
+pool feels like erosion, so every fight shows its state somewhere the
+player reads directly — the boss's body, the arena, its behavior, its
+sound — and the HUD follows the fight rather than dictating to it
+(segments where health is genuinely segmented, a plain bar where it
+isn't). Everything else — breakable components, spawned minions,
 terrain destruction — is an *instrument*, never a mandate: each fight
 picks the instruments that fit it, and no two fights share a signature.
 
@@ -389,14 +391,16 @@ damaged *in motion* (limbs during traversal), Bellwether is damaged *by
 interception* (during its own offense, on the counted beat), and
 Mourn's openings are *authored by noise* (you choose where sound
 happens, and strike from the quiet side). The progress signatures
-differ the same way: Maul is **demolition** — crown and arena come
-apart together, no adds, the wrecked room is the progress bar; Vise is
-**dismemberment plus siege** — the one fight where components and adds
-both appear; Bellwether is a **pure skill-check with audible progress**
-— one bell, three cracks, an empty sky; Mourn's adds are **your tools**
-(decoy noise), and its spine-knots are the score. (Humanoid duels are
-exempt from structure entirely: the Duelist is a low-HP, high-tempo
-fencing match — people duel; monsters come apart.)
+differ the same way — and not every Keeper keeps score on its body:
+Maul is **arena-state and behavior** — no body counter at all; you read
+the fight from the wrecked room and the increasingly desperate animal;
+Vise is **dismemberment plus siege** — the one fight where components
+and adds both appear; Bellwether is a **pure skill-check with audible
+progress** — one bell, three cracks, an empty sky; Mourn's adds are
+**your tools** (decoy noise), and its spine-knots are the score. Exact
+counts and fight lengths are playtest questions, not law. (Humanoid
+duels are exempt from structure entirely: the Duelist is a low-HP,
+high-tempo fencing match — people duel; monsters come apart.)
 
 ### The Fallows (opening, tier 1)
 
@@ -426,7 +430,7 @@ fight where it matters.
 | `practice-yard` | 2w | T | The merchant's caravan, stalled in a collapsed waystation yard with slimes in the walls — the story's first favor, and every station is the rescue. Slash taught cutting the snare-ropes off the cart; the winched supply bag hung over the pit comes down to a ranged shot or a dash-attack (both loadouts get a first verb); dash taught slipping under the slumping gate-lintel to reach the trapped drover (it re-lifts on a cycle — never a softlock). Optional: the caravan guard offers a friendly bout — parry her slow, telegraphed swing to win a coin purse and her respect. No station is required; the east gate is always open, and the caravan manages without you (slower, and the guard says so). |
 | `fallows-edge` | 2w | T X | First live combat: two slimes, applying the yard's verbs. A stilled gray copse in the background — the first sight of the antagonist, unremarked. |
 | `fallows-fields` | 3w | T X | First combat mixes; a visibly cracked floor plate with a glinting cache beneath — Impact Drop foreshadow, unreachable for hours. |
-| `waystone-gate` | 1w | X | Gate miniboss: **the Slime King** (existing fight, demoted with honor and retuned to the structural rule: his bulk sheds lesser slimes as pieces are knocked off, so the first boss already teaches that progress is demolition). Teaches boss grammar: segmented boss bar, phases, arena discipline. |
+| `waystone-gate` | 1w | X | Gate miniboss: **the Slime King** (existing fight, demoted with honor and retuned so progress is visible: his bulk sheds lesser slimes as pieces are knocked off). Teaches boss grammar: boss bar, phases, arena discipline. |
 | `old-toll-road` | 2w | B C | Breather; the caravan you freed at the yard, rolled ahead and trading (first shop — gratitude priced in if you helped); a small resonant seal hides a coin cache — Shockwave foreshadow in miniature. |
 | `hearthgate` | 1w | C | Arrival framing: the well's silhouette, the chimney above town howling wind. |
 
@@ -464,11 +468,15 @@ region *demonstrates* Impact Drop before granting it), ember bat, gunner.
 
 **Maul, the Buried Hammer.** A blind forge-colossus whose head is the
 hammer; it fights by remaking the arena's floors. Arena: two `crackedRock`
-floor layers over a solid slag-pooled base. **Its health is a crown of
-four ring-plates** around the hammerhead: each `embed` punish shears one
-off with a visible clang, its slams grow faster and wilder as the head
-lightens, and the bare head's final wedge ends the fight. No adds: the
-collapsing arena is the second enemy.
+floor layers over a solid slag-pooled base. **No body counter here —
+the progress display is the room.** Its health is ordinary and modest
+(the pace law holds: clean punish windows end it fast), every slam
+permanently breaks floor, and the fight's state is readable at a
+glance from how much arena remains. Its behavior transforms with the
+ruin: more burrowing as the layers vanish, slams chaining as its
+footing shrinks, the blind head sweeping wider and wilder. No adds —
+the collapsing arena is the second enemy, and the changing animal is
+the progress bar.
 
 | State | Behavior | Counterplay |
 | --- | --- | --- |
@@ -476,8 +484,8 @@ collapsing arena is the second enemy.
 | `slam` | rears, hangs one beat, drives down — emits `plungeLand`, breaking the floor span it hits (persistent for the visit) | sidestep; the HOLE it makes is your route between layers |
 | `sweep` | low horizontal drag across one layer | jump it (aerial attack window) |
 | `burrow` | dives into the base layer, tracks under the player (dust plume telegraph), erupts | keep moving; the eruption breaks floor upward |
-| `embed` | after `slam` on already-broken ground its head sticks fast for 2.2s | the punish window — shear a ring-plate: melee pries, ranged shears the seam |
-| `enrage` (one plate left) | slams chain in twos; more floor gone | the arena is now mostly holes: fight vertically |
+| `embed` | after `slam` on already-broken ground its head sticks fast for 2.2s | the punish window — melee wails, ranged unloads |
+| `enrage` (top floor layer gone) | slams chain in twos; more floor gone | the arena is now mostly holes: fight vertically |
 
 Teaching: every mechanic *is* Impact Drop performed at you — falling
 weight breaking floors, with the reward window for reading it. Co-op: one
@@ -787,5 +795,5 @@ in old saves stay owned; only the *source* moves.
 - Open questions resolved here: midpoint event, boss 2/3 non-linearity,
   foreshadow placements, narrative frame, second-half upgrade shape
   (optional, action-enhancing: Greater Shockwave, Riposte Tempo). Still
-  deliberately open: final art direction and the exact second-half
-  room count. ✓
+  deliberately open: final art direction, and boss component counts /
+  fight lengths — playtest questions, not design law. ✓
