@@ -162,6 +162,10 @@ export class PlayScene implements Scene {
   private director = new Director<CutsceneCtx>();
   /** The scripted hands holding the player's controls while one plays. */
   private cutsceneInput: ReturnType<typeof scriptInput> | null = null;
+  /** Vertical seams the player materialized inside on arrival. They stay
+   * inert until she has actually left them — see setRoom and
+   * updateVerticalSeams for why this is kept by hand. */
+  private seamPrimed = new Set<TriggerDef>();
   /** Where the scene found the co-op guest: held there for its duration
    * so live physics can't carry an off-camera knight somewhere she
    * can't see (see the anchor block in update). */
@@ -741,6 +745,22 @@ export class PlayScene implements Scene {
       knight.vx = 0;
       knight.vy = 0;
     }
+    // ONE rule, applied to both places a door can fire from: you never
+    // fire a doorway you materialized inside. Entering means crossing the
+    // boundary, and being placed somewhere is not crossing it — without
+    // this, arriving through a seam hands you straight back the way you
+    // came. `Triggers` enforces it for everything it drives; vertical
+    // seams are polled outside that edge system (they re-test a velocity
+    // gate every frame), so they need the same memory kept here.
+    if (this.player) {
+      this.triggers.prime(this.player, (def) => def.event === 'door');
+      this.seamPrimed.clear();
+      for (const def of this.room.triggers ?? []) {
+        if (def.event !== 'door') continue;
+        if (def.props?.fallIn !== true && def.props?.leapUp !== true) continue;
+        if (overlaps(this.player, def)) this.seamPrimed.add(def);
+      }
+    }
     // Use the exact target and bounds normal follow uses. Previously this
     // clamped against worldH instead of camera.maxY (which intentionally
     // sits 16px higher to show a ground lip), then followed the player's
@@ -796,6 +816,29 @@ export class PlayScene implements Scene {
     if (!back) return null;
     const pw = this.player?.w ?? 14;
     const ph = this.player?.h ?? 18;
+
+    // NOTHING lands inside stone — that check belongs to every kind of
+    // doorway, not just the sideways one. A landing buried in rock either
+    // wedges you or squeezes you somewhere arbitrary, and the seam it
+    // arrives through makes no difference to how bad that is. The map is
+    // built WITH this run's patches, so a floor the player smashed reads
+    // as the hole it now is.
+    const map = buildTilemap(dest);
+    this.patches.applyTiles(toRoom, map);
+    const buried = (x: number, y: number): boolean => {
+      for (const s of map.solidsNear({ x, y, w: pw, h: ph })) {
+        if (!s.oneWay && x < s.x + s.w && s.x < x + pw && y < s.y + s.h && s.y < y + ph) return true;
+      }
+      return false;
+    };
+    /** Slide a vertical-seam landing along the seam until it is in air. */
+    const settle = (x: number, y: number, step: -1 | 1): { x: number; y: number } | null => {
+      for (let d = 0; d <= 4 * dest.tileSize; d++) {
+        if (!buried(x, y + step * d)) return { x, y: y + step * d };
+      }
+      return null;
+    };
+
     // A VERTICAL seam — a shaft marked fallIn/leapUp on the far side —
     // is entered along its axis, not from beside. You arrive IN the
     // opening, and `carry` keeps your velocity through the transition:
@@ -803,13 +846,19 @@ export class PlayScene implements Scene {
     // falling; jump up it and the same jump lifts you out of the well's
     // mouth on the other side. The room swap becomes a splice in one
     // continuous arc, which is what makes it read as one place.
+    const cx = back.x + back.w / 2 - pw / 2;
     if (back.props?.leapUp === true) {
-      // Their ceiling gap: appear just below it, still falling.
-      return { x: back.x + back.w / 2 - pw / 2, y: back.y + back.h, carry: true };
+      // Their ceiling gap: appear just below it, still falling — and if
+      // the gap's lip is thicker than the trigger, keep going down.
+      const at = settle(cx, back.y + back.h, 1);
+      return at && { ...at, carry: true };
     }
     if (back.props?.fallIn === true) {
-      // Their floor shaft: appear at its foot, still rising.
-      return { x: back.x + back.w / 2 - pw / 2, y: back.y + back.h - ph, carry: true };
+      // Their floor shaft: appear at its foot, still rising. A trigger
+      // drawn a little into the shaft's floor would otherwise plant you
+      // ankle-deep in it, so rise until the body is clear.
+      const at = settle(cx, back.y + back.h - ph, -1);
+      return at && { ...at, carry: true };
     }
     // Step OUT of the doorway, not into it. Landing on the trigger was
     // fine while doors waited for interact, but an open doorway now
@@ -822,13 +871,9 @@ export class PlayScene implements Scene {
     const y = back.y + back.h - ph;
     // Stepping out sideways assumes a doorway you walk through. A shaft
     // you FALL down has no beside — the town well is two tiles wide with
-    // rock either side — so check before trusting it and let the caller
-    // fall back to the room's spawn rather than burying you in stone.
-    const map = buildTilemap(dest);
-    for (const s of map.solidsNear({ x, y, w: pw, h: ph })) {
-      if (!s.oneWay && x < s.x + s.w && s.x < x + pw && y < s.y + s.h && s.y < y + ph) return null;
-    }
-    return { x, y };
+    // rock either side — so let the caller fall back to the room's spawn
+    // rather than burying you in stone.
+    return buried(x, y) ? null : { x, y };
   }
 
   private goToRoom(roomId: string, x?: number, y?: number): void {
@@ -1122,7 +1167,14 @@ export class PlayScene implements Scene {
     for (const def of this.room.triggers ?? []) {
       if (def.event !== 'door') continue;
       if (def.props?.fallIn !== true && def.props?.leapUp !== true) continue;
-      if (doorLocked(def, this.host) || !overlaps(p, def)) continue;
+      if (!overlaps(p, def)) {
+        // Left it: this seam is live again (the edge-trigger rule, kept
+        // by hand because this path polls instead of edge-detecting).
+        this.seamPrimed.delete(def);
+        continue;
+      }
+      if (this.seamPrimed.has(def)) continue; // arrived inside it
+      if (doorLocked(def, this.host)) continue;
       if (this.firesOnContact(def)) {
         triggerActions.get('door').run(def, this.host);
         return;

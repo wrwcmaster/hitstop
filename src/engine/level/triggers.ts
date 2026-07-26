@@ -57,6 +57,26 @@ export class Triggers {
   }
 
   /**
+   * Mark every trigger the probe already overlaps as entered, WITHOUT
+   * firing it. For a probe that was placed rather than moved: you
+   * materialize inside a doorway when you arrive through it, and
+   * "entering" is supposed to mean crossing the boundary. Without this
+   * the door you just used fires again the moment its condition is met
+   * and hands you straight back — the exact loop `rearm` exists to
+   * unstick from the other direction.
+   *
+   * `accept` narrows which kinds are primed, because not every trigger
+   * wants it: a conversation you are standing in on arrival SHOULD
+   * greet you.
+   */
+  prime(probe: Rect, accept?: (def: TriggerDef) => boolean): void {
+    this.defs.forEach((def, index) => {
+      if (accept && !accept(def)) return;
+      if (overlaps(probe, def)) this.inside.add(index);
+    });
+  }
+
+  /**
    * Forget that the probe is inside `index`, so the next overlap counts
    * as a fresh entry.
    *
