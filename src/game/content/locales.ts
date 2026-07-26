@@ -129,6 +129,9 @@ defineLocale('zh', {
     'On the ground, {down} + {attack} sends a wave through it.':
       '站在地面 {down} + {attack}，送出一道沿地面奔涌的力量波。',
 
+    /* ---- cutscenes ---- */
+    'THE SLIME KING': '史莱姆王',
+
     /* ---- classes & skill tree ---- */
     'KNIGHT': '骑士',
     'MAGE': '法师',

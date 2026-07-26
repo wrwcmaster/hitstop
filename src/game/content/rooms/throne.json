@@ -69,6 +69,17 @@
       }
     },
     {
+      "x": 44,
+      "y": 140,
+      "w": 12,
+      "h": 100,
+      "event": "cutscene",
+      "once": true,
+      "props": {
+        "cutscene": "slime-king-reveal"
+      }
+    },
+    {
       "x": 100,
       "y": 140,
       "w": 60,

@@ -98,12 +98,22 @@ what event marks the midpoint]**
 
 ### Delivery
 
-Story arrives through what already exists: conversations (`DialogueScene`)
-at the hub and at region thresholds, environmental murals (backdrop art)
-in antechambers, banner beats at grants, and the world's own state — the
-map lighting up at the midpoint IS the biggest story beat and costs no new
-tech. No cutscene system; the two scripted moments (the Strike, the
-ending) are a conversation plus a room patch montage.
+Story arrives through conversations (`DialogueScene`) at the hub and at
+region thresholds, environmental murals (backdrop art) in antechambers,
+banner beats at grants, the world's own state (the map lighting up at the
+midpoint is itself a story beat) — and **cutscenes**, played by the
+engine's Director over the LIVE world (`engine/director/`). A cutscene is
+the running simulation with its inputs temporarily scripted: the knight
+is driven through the same `Input` seam a co-op remote uses, so scripted
+moments are deterministic (they record and replay bit-for-bit — the
+regression suite carries a watched tape and a skipped tape), skippable
+(skip fast-forwards the timeline, so everything a cutscene does still
+lands), and free for a co-op guest to watch (the host simulates; the
+snapshots carry the motion). Content lives in `content/cutscenes.ts` and
+rooms place one with a `cutscene` trigger — no scene changes. Every boss
+reveal, each region's escape framing, the Strike, and the ending are
+Director timelines; the Slime King reveal in the throne room is the
+shipped reference.
 
 ---
 

@@ -4,6 +4,7 @@ import type { PlayHost } from './host';
 import { Monster } from '../../actors/monster';
 import { optionalString, rejectUnknownProps, requireString } from '../../content/prop-validation';
 import { provideTriggerValidators } from '../../content/room-features';
+import { cutscenes } from '../../content/cutscenes';
 
 /**
  * What each trigger `event` name means in the game. Room JSON stays pure
@@ -35,6 +36,17 @@ provideTriggerValidators(triggerActions);
 export function defineTriggerAction(event: string, action: TriggerAction): void {
   triggerActions.register(event, action);
 }
+
+defineTriggerAction('cutscene', {
+  validateProps(props, path) {
+    rejectUnknownProps(props, ['cutscene'], path);
+    const id = requireString(props, 'cutscene', path);
+    if (!cutscenes.has(id)) throw new Error(`${path}.cutscene: unknown cutscene "${id}"`);
+  },
+  run(def, host) {
+    host.playCutscene(def.props!.cutscene as string);
+  },
+});
 
 defineTriggerAction('talk', {
   validateProps(props, path) {

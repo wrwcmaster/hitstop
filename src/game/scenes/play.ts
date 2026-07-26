@@ -11,6 +11,7 @@ import {
   DialogueScene,
   Minimap,
   RoomPatches,
+  Director,
   entityKey,
   itemDef,
   items,
@@ -26,6 +27,7 @@ import { Player } from '../actors/player';
 import { Monster, monsters } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
 import { placeables, type PlaceableCtx } from '../content/placeables';
+import { cutscenes, scriptInput, type CutsceneCtx } from '../content/cutscenes';
 import { validateRoomContent } from '../content/room-features';
 import { reactToSurface } from '../content/surface-reactions';
 import { PauseScene } from './pause';
@@ -156,6 +158,11 @@ export class PlayScene implements Scene {
    * one relents while the player is standing in it. */
   private doorWasLocked = new Map<number, boolean>();
 
+  /** Scripted sequences over the live world (see content/cutscenes.ts). */
+  private director = new Director<CutsceneCtx>();
+  /** The scripted hands holding the player's controls while one plays. */
+  private cutsceneInput: ReturnType<typeof scriptInput> | null = null;
+
   private host: PlayHost;
   private waves: WaveDirector;
   private hud: Hud;
@@ -184,6 +191,7 @@ export class PlayScene implements Scene {
       openConversation: (id) => this.openConversation(id),
       hasFlag: (id) => this.flags.has(id),
       mutateTile: (tx, ty, id) => this.mutateTile(tx, ty, id),
+      playCutscene: (id) => this.playCutscene(id),
     };
     this.waves = new WaveDirector(this.host);
     this.hud = new Hud(this.host);
@@ -321,8 +329,17 @@ export class PlayScene implements Scene {
   exit(): void {
     for (const d of this.disposers) d();
     this.disposers.length = 0;
+    this.stopCutscene();
     this.coop?.close();
     this.coop = null;
+  }
+
+  /** Drop a live cutscene without running it (teardown/run reset only —
+   * in play, skipping is the correct exit). */
+  private stopCutscene(): void {
+    this.director.stop();
+    if (this.player && this.player.source === this.cutsceneInput) this.player.source = null;
+    this.cutsceneInput = null;
   }
 
   private startRoomId(): string {
@@ -373,6 +390,7 @@ export class PlayScene implements Scene {
   }
 
   private dispatchStart(start: RunStart): void {
+    this.stopCutscene(); // a run reset mid-cutscene must not strand scripted hands
     this.game.events.emit('runStart', start);
     switch (start.kind) {
       case 'new': return this.startRun(null);
@@ -615,6 +633,26 @@ export class PlayScene implements Scene {
       this.shatterCd = 0.18;
       this.game.sfx.play('shatter');
     }
+  }
+
+  /* ---------------- cutscenes ---------------- */
+
+  /**
+   * Hand the world to the director. The player's controls are swapped
+   * for a scripted Input — the SAME seam a co-op remote uses — so the
+   * knight stays a live, simulated actor throughout; nothing is faked.
+   * Ending (or skipping: a fast-forward, never an abort) hands them back.
+   */
+  private playCutscene(id: string): void {
+    if (!cutscenes.has(id) || !this.player) return;
+    const input = scriptInput();
+    this.cutsceneInput = input;
+    const ctx: CutsceneCtx = { game: this.game, host: this.host, input };
+    this.player.source = input;
+    this.director.play(cutscenes.get(id)(ctx), ctx, () => {
+      if (this.player && this.player.source === input) this.player.source = null;
+      this.cutsceneInput = null;
+    });
   }
 
   private setRoom(id: string, spawnX?: number, spawnY?: number): void {
@@ -1279,7 +1317,14 @@ export class PlayScene implements Scene {
       return;
     }
 
-    if (this.phase === 'play' && this.player && g.input.consumePress('menu')) {
+    // While the director holds the stage, menu means "skip", not
+    // "pause" — and a skip fast-forwards the timeline, so everything the
+    // cutscene was going to do still happens.
+    if (this.director.active && g.input.consumePress('menu')) {
+      this.director.skip();
+    }
+
+    if (this.phase === 'play' && this.player && !this.director.active && g.input.consumePress('menu')) {
       g.scenes.push(new PauseScene(g, this.player, {
         onRestart: () => this.beginRun({ kind: 'autosave' }),
         onTitle: () => this.returnToTitle(),
@@ -1290,7 +1335,9 @@ export class PlayScene implements Scene {
     }
 
     this.coop?.applyInput(); // remote edges land before the world steps
+    this.director.update(dt); // scripted presses land before the world steps too
     g.world.update(dt);
+    this.cutsceneInput?.endStep(); // scripted press/release edges last one step
     if (this.coop) {
       this.coop.step({
         roomId: this.roomId,
@@ -1308,7 +1355,14 @@ export class PlayScene implements Scene {
     if (this.phase === 'play') this.waves.update(dt);
     this.comboT = Math.max(0, this.comboT - dt);
     if (this.comboT <= 0) this.combo = 0;
-    if (this.phase === 'play' && this.player && this.player.hp > 0) {
+    // No trigger fires while the director holds the stage: a scripted
+    // walk crossing a talk zone would push a modal dialogue that freezes
+    // this scene (only the top scene updates) and strand the cutscene
+    // mid-step. Once-triggers only mark fired when they actually fire,
+    // so anything she is left standing in fires on the first frame after
+    // control returns — which is exactly the sequencing a reveal
+    // followed by a conversation wants.
+    if (this.phase === 'play' && this.player && this.player.hp > 0 && !this.director.active) {
       this.triggers.update(this.player, (f) => this.handleTrigger(f.def));
       // Doors & portals: stand on one and press interact to use it. Checked
       // after the world step so an NPC in range wins the key first.
@@ -1332,11 +1386,12 @@ export class PlayScene implements Scene {
       this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
     }
 
-    if (this.player) {
+    if (this.player && !this.director.active) {
       // Camera leads the player: facing offset + velocity lookahead,
       // and (with the zoomed-in view) follows vertically too, biased so
       // more of the world above the knight is visible than below.
       // With a co-op guest alive, aim at the midpoint of the two knights.
+      // While a cutscene plays the director owns the camera instead.
       const cam = g.camera;
       const target = this.cameraTarget(this.player.x, this.player.y);
       cam.follow(target.x, target.y, dt);
@@ -1372,6 +1427,7 @@ export class PlayScene implements Scene {
     this.waves.renderMarkers(ctx);
     g.world.render(ctx);
     if (this.phase === 'play') this.hud.renderGateMarker(ctx, this.gateMarker, this.uiT);
+    this.director.renderLetterbox(ctx, g.width, g.height);
     if (this.phase === 'play') this.renderDoorSigns(ctx);
     if (this.phase === 'play' && this.nearInteract) this.renderInteractPrompt(ctx, this.nearInteract);
     g.feel.renderWorld(ctx);

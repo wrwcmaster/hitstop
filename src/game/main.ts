@@ -24,6 +24,7 @@ import { registerQuests } from './content/quests';
 import { registerPortals } from './content/portals';
 import { registerEarnables } from './content/earnables';
 import { registerSurfaceReactions } from './content/surface-reactions';
+import { registerCutscenes } from './content/cutscenes';
 import { earnables } from '@engine/index';
 import { monsters } from './actors/monster';
 import { registerLocales } from './content/locales';
@@ -70,6 +71,7 @@ registerQuests();
 registerPortals();
 registerEarnables();
 registerSurfaceReactions();
+registerCutscenes();
 
 // Every reward must name a real earnable. Checked here, at boot, for the
 // same reason rooms are: the alternative is finding out from a thrown

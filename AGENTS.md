@@ -118,7 +118,8 @@ rule stays as written.
 src/engine/   core (loop/scenes/events/storage), gfx, feel, audio,
               physics, combat, FSM, input, items/stats, level, ui, debug,
               replay (deterministic record/replay — game supplies an
-              adapter), world (entities + WaveRunner),
+              adapter), director (cutscene timelines over the live world),
+              world (entities + WaveRunner),
               net (PeerLink: WebRTC DataChannel + copy-paste signaling)
 src/game/
   defs.ts     actions, keymap/gamepad map, VIEW_W/H, ActionGame type
