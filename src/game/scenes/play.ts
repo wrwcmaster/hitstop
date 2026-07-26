@@ -60,6 +60,7 @@ import { edgeDoorSide, openEdgeDoorways } from './play/doorways';
 /** A door transition in progress: fade out, swap rooms, fade in. */
 interface Transition {
   t: number;
+  fromRoomId: string;
   roomId: string;
   x: number;
   y: number;
@@ -73,6 +74,8 @@ interface Transition {
   carry?: { vx: number; vy: number };
   /** Horizontal edge gaps keep the knight moving naturally through the fade. */
   walk?: { out: -1 | 1; into: -1 | 1 };
+  /** Destination geometry used to advance a vertical seam before room swap. */
+  seamMap?: Tilemap;
 }
 
 const TRANSITION_TIME = 0.6;
@@ -797,7 +800,15 @@ export class PlayScene implements Scene {
     }
   }
 
-  /** Begin a fade transition into another room (door travel). */
+  /** Build the run's current collision view of a room before entering it. */
+  private collisionMapFor(roomId: string): Tilemap {
+    const room = this.roomById(roomId);
+    const map = buildTilemap(room);
+    this.patches.applyTiles(roomId, map);
+    openEdgeDoorways(room, map);
+    return map;
+  }
+
   /**
    * Where you come out when you walk through a doorway into `toRoom`:
    * at that room's own door back here. The two triggers stop being a
@@ -835,9 +846,7 @@ export class PlayScene implements Scene {
     // arrives through makes no difference to how bad that is. The map is
     // built WITH this run's patches, so a floor the player smashed reads
     // as the hole it now is.
-    const map = buildTilemap(dest);
-    this.patches.applyTiles(toRoom, map);
-    openEdgeDoorways(dest, map);
+    const map = this.collisionMapFor(toRoom);
     const buried = (x: number, y: number): boolean => {
       for (const s of map.solidsNear({ x, y, w: pw, h: ph })) {
         if (!s.oneWay && x < s.x + s.w && s.x < x + pw && y < s.y + s.h && s.y < y + ph) return true;
@@ -878,11 +887,13 @@ export class PlayScene implements Scene {
       return at && { ...at, carry: true };
     }
     if (back.props?.fallIn === true) {
-      // Their floor shaft: appear at its foot, still rising. The real
-      // collision map decides whether this jump clears the mouth; a weak
-      // jump or intact tile stops it naturally and the reversed arc sends
-      // the knight back through the seam.
-      const at = settle(verticalX(), back.y + back.h - ph, -1);
+      // Their floor shaft: enter just inside its lower lip, still rising.
+      // Starting at the trigger's foot made the invisible tunnel taller
+      // than a normal jump once transition-time gravity became real, so
+      // even a full jump could never clear the mouth. One pixel of overlap
+      // keeps the arrival primed while the real collision map decides the
+      // result: a strong jump clears the floor, a weak one reverses below.
+      const at = settle(verticalX(), back.y - ph + 1, -1);
       return at && { ...at, carry: true };
     }
     // Step OUT of the doorway, not into it. Landing on the trigger was
@@ -913,16 +924,20 @@ export class PlayScene implements Scene {
     // pair up with the doorway on the far side, then the room's spawn.
     const land = x === undefined && y === undefined ? this.doorLanding(roomId) : null;
     const spawn = this.roomById(roomId).playerSpawn;
+    const walk = this.edgeWalk(roomId) ?? undefined;
+    const carry = land?.carry && this.player ? { vx: this.player.vx, vy: this.player.vy } : undefined;
     this.transition = {
       t: 0,
+      fromRoomId: this.roomId,
       roomId,
       x: x ?? land?.x ?? spawn.x,
       y: y ?? land?.y ?? spawn.y,
       open: this.doorwayArt(roomId) ?? undefined,
-      walk: this.edgeWalk(roomId) ?? undefined,
+      walk,
       // Connected seams splice the player's arc across rooms, so capture
       // the velocity at the moment of crossing (setRoom zeroes it).
-      carry: land?.carry && this.player ? { vx: this.player.vx, vy: this.player.vy } : undefined,
+      carry,
+      seamMap: carry && !walk ? this.collisionMapFor(roomId) : undefined,
     };
     if (this.player) this.player.interactionsEnabled = false;
     this.game.sfx.play(this.transition.open ? 'unlock' : 'menuOpen');
@@ -971,6 +986,80 @@ export class PlayScene implements Scene {
     p.vx = direction * EDGE_WALK_SPEED;
     p.x += p.vx * dt;
     p.animT += dt;
+  }
+
+  /**
+   * Advance a vertical seam while the rest of the room waits behind the
+   * fade. Before the swap, advance a logical body through the destination
+   * geometry while its displacement animates the still-visible source
+   * knight. That prevents a long fade from skipping the first far-side
+   * platform. After the swap the real body continues the same simulation.
+   * Room bounds stay open along the seam so they cannot erase the velocity
+   * needed to return.
+   */
+  private moveThroughVerticalSeam(tr: Transition, dt: number, beforeSwap: boolean): void {
+    const p = this.player;
+    if (!p || dt <= 0) return;
+    if (beforeSwap) {
+      const visualX = p.x;
+      const visualY = p.y;
+      const oldVx = p.vx;
+      const logicalY = tr.y;
+      p.x = tr.x;
+      p.y = logicalY;
+      p.vx = 0;
+      applyGravity(p, dt);
+      moveAndCollide(p, dt, {
+        solidsNear: (rect) => tr.seamMap?.solidsNear(rect) ?? [],
+      });
+      tr.y = this.reversedVerticalSeamY(tr, tr.roomId, p.y, p.vy) ?? p.y;
+      p.x = visualX;
+      p.y = visualY + tr.y - logicalY;
+      p.vx = oldVx;
+      return;
+    }
+
+    const oldX = p.x;
+    const oldVx = p.vx;
+    p.vx = 0;
+    applyGravity(p, dt);
+    moveAndCollide(p, dt, {
+      solidsNear: (rect) => p.collision.solidsNear(rect),
+    });
+    p.x = oldX;
+    p.vx = oldVx;
+    this.holdReversedVerticalSeam(tr);
+  }
+
+  /**
+   * A weak vertical crossing can reverse during the fade. Keep the knight
+   * on the destination threshold instead of letting her fall beyond the
+   * room extent; the ordinary seam poll will send her naturally back on
+   * the next simulation step, with the gravity-grown velocity intact.
+   */
+  private reversedVerticalSeamY(
+    tr: Transition,
+    roomId: string,
+    y: number,
+    vy: number,
+  ): number | null {
+    const back = this.roomById(roomId).triggers?.find(
+      (def) => def.event === 'door' && def.props?.room === tr.fromRoomId,
+    );
+    const p = this.player;
+    if (!back || !p) return null;
+    if (back.props?.fallIn === true && vy > 40 && y + p.h >= back.y + back.h) {
+      return back.y + back.h - p.h;
+    }
+    if (back.props?.leapUp === true && vy < -40 && y <= back.y) return back.y;
+    return null;
+  }
+
+  private holdReversedVerticalSeam(tr: Transition): void {
+    const p = this.player;
+    if (!p) return;
+    const y = this.reversedVerticalSeamY(tr, this.roomId, p.y, p.vy);
+    if (y !== null) p.y = y;
   }
 
   /**
@@ -1409,6 +1498,7 @@ export class PlayScene implements Scene {
       const after = Math.min(TRANSITION_TIME, before + dt);
       const outDt = Math.max(0, Math.min(after, half) - Math.min(before, half));
       if (tr.walk) this.moveThroughEdge(tr.walk.out, outDt);
+      else if (tr.carry) this.moveThroughVerticalSeam(tr, outDt, true);
       tr.t = after;
       if (before < half && after >= half) {
         // The fade-out half may have advanced a jump or fall. Re-map that
@@ -1416,7 +1506,7 @@ export class PlayScene implements Scene {
         // when the transition began, then carry the current velocity into
         // the new room. This keeps both halves of the arc continuous.
         const liveLanding = tr.walk ? this.doorLanding(tr.roomId) : null;
-        const liveCarry = tr.walk && tr.carry && this.player
+        const liveCarry = tr.carry && this.player
           ? { vx: this.player.vx, vy: this.player.vy }
           : tr.carry;
         if (tr.walk && this.player) this.player.facing = tr.walk.into;
@@ -1431,7 +1521,9 @@ export class PlayScene implements Scene {
       }
       const inDt = Math.max(0, after - half) - Math.max(0, before - half);
       if (tr.walk) this.moveThroughEdge(tr.walk.into, inDt);
+      else if (tr.carry) this.moveThroughVerticalSeam(tr, inDt, false);
       if (tr.t >= TRANSITION_TIME) {
+        if (tr.carry && !tr.walk) this.holdReversedVerticalSeam(tr);
         if (tr.walk && this.player) this.player.vx = 0;
         if (this.player) this.player.interactionsEnabled = true;
         this.transition = null;
