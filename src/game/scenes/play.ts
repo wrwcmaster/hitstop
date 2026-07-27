@@ -1004,31 +1004,32 @@ export class PlayScene implements Scene {
     if (beforeSwap) {
       const visualX = p.x;
       const visualY = p.y;
-      const oldVx = p.vx;
+      const logicalX = tr.x;
       const logicalY = tr.y;
-      p.x = tr.x;
+      p.x = logicalX;
       p.y = logicalY;
-      p.vx = 0;
+      // BOTH axes stay live through the fade. Gravity has been honest
+      // here since the arc-splice work, but x used to be pinned — which
+      // silently confiscated every pixel of horizontal travel the jump
+      // had left, however faithfully vx itself was carried. A diagonal
+      // leap into a shaft kept rising but stopped drifting, and arrived
+      // as if it had been fired straight up. The destination map is the
+      // wall that says where drift stops, same as it does for the fall.
       p.advanceTransitionAir(dt);
       moveAndCollide(p, dt, {
         solidsNear: (rect) => tr.seamMap?.solidsNear(rect) ?? [],
       });
+      tr.x = p.x;
       tr.y = this.reversedVerticalSeamY(tr, tr.roomId, p.y, p.vy) ?? p.y;
-      p.x = visualX;
+      p.x = visualX + tr.x - logicalX;
       p.y = visualY + tr.y - logicalY;
-      p.vx = oldVx;
       return;
     }
 
-    const oldX = p.x;
-    const oldVx = p.vx;
-    p.vx = 0;
     p.advanceTransitionAir(dt);
     moveAndCollide(p, dt, {
       solidsNear: (rect) => p.collision.solidsNear(rect),
     });
-    p.x = oldX;
-    p.vx = oldVx;
     this.holdReversedVerticalSeam(tr);
   }
 
