@@ -157,18 +157,30 @@ function requireSolidBasement(room: RoomDef, path: string): void {
       && t.props.key === undefined && t.props.flag === undefined && t.props.bossSeal === undefined,
   );
   const cols = Math.max(...room.tiles.map((row) => row.length));
+  const covered = (c: number): boolean => passThrough.some(
+    (t) => c >= Math.floor(t.x / ts) && c <= Math.floor((t.x + t.w - 1) / ts),
+  );
   for (let c = 0; c < cols; c++) {
     for (const r of [rows - 2, rows - 1]) {
       if (!solidAt(r, c) || solidAt(r - 1, c)) continue; // not a standing surface
-      const covered = passThrough.some(
-        (t) => c >= Math.floor(t.x / ts) && c <= Math.floor((t.x + t.w - 1) / ts),
-      );
-      if (!covered) {
+      if (!covered(c)) {
         throw new Error(
           `${path}: standable floor at col ${c}, row ${r} sits in the camera's 16px basement reserve — `
           + 'fill the pit, deepen the room, or cover it with an unlock-free fall-in door',
         );
       }
+    }
+    // A column open at the very bottom has an INVISIBLE floor: the
+    // physics backstop stops bodies at the room extent whether or not a
+    // tile is drawn there, so a bare-to-the-boundary pit strands the
+    // knight standing at worldH — deeper into the camera's blind rows
+    // than any authored floor could be. Same rule, same exemption: only
+    // a guaranteed fall-in seam may own such a column.
+    if (!solidAt(rows - 1, c) && !covered(c)) {
+      throw new Error(
+        `${path}: col ${c} is open at the room's bottom boundary — the physics backstop becomes an `
+        + 'invisible floor below the camera; close the column or cover it with an unlock-free fall-in door',
+      );
     }
   }
 }
@@ -181,23 +193,21 @@ function requireSolidBasement(room: RoomDef, path: string): void {
  * turn absurd: hopping in place on solid ground teleports you through
  * the floor. Town's dig pocket shipped exactly that.
  *
- * The offending shape, exactly: a surface where a knight standing on it
- * has her body inside the trigger band. A floor well below a high
- * fall-in is fine — falling through the band always fires the seam
- * first, so that ground is only ever reached from elsewhere and standing
- * on it touches no seam (the vise-approach drop is built this way).
- * LOCKED fall-ins are the opposite shape by design (the shaft catches
- * you while the way is shut, like the rubble-choked flue) and
- * requireSolidBasement already keeps their floors out of the camera's
- * blind rows.
+ * The offending shape, under far-edge firing: a SOLID floor inside the
+ * trigger band. The seam fires when the body's motion crosses the
+ * band's far edge, so solid ground in the band stops the fall short of
+ * the plane and the door simply never fires — a passage that dead-ends
+ * in silence. Ground below the plane is unreachable (the crossing fires
+ * first), ground above the band is the shaft's own lip (the breakable
+ * cap), and ONE-WAY ledges anywhere are legal by the same physics:
+ * they catch a descent, and drop-through resumes it — a rest, not a
+ * blockage. LOCKED fall-ins are the opposite shape by design (the
+ * shaft catches you while the way is shut, like the rubble-choked
+ * flue) and requireSolidBasement keeps their floors out of the
+ * camera's blind rows.
  */
 function requirePassThroughShaft(room: RoomDef, path: string): void {
   const ts = room.tileSize;
-  const rows = room.tiles.length;
-  // The knight's standing height. Content knowing an actor metric is a
-  // necessary smell here: "can a body at rest touch this seam" is a
-  // geometric question about the body.
-  const KNIGHT_H = 18;
   const solidAt = (r: number, c: number): boolean => {
     const id = room.legend[(room.tiles[r] ?? '')[c] ?? ''] ?? '';
     return id !== '' && !!tiles.get(id).solid;
@@ -207,14 +217,14 @@ function requirePassThroughShaft(room: RoomDef, path: string): void {
     if (door.props.key !== undefined || door.props.flag !== undefined || door.props.bossSeal !== undefined) continue;
     const c0 = Math.floor(door.x / ts);
     const c1 = Math.floor((door.x + door.w - 1) / ts);
+    const r0 = Math.floor(door.y / ts);
+    const r1 = Math.floor((door.y + door.h - 1) / ts);
     for (let c = c0; c <= c1; c++) {
-      for (let r = 1; r < rows; r++) {
-        if (!solidAt(r, c) || solidAt(r - 1, c)) continue; // not a standing surface
-        const feet = r * ts;
-        if (feet > door.y && feet - KNIGHT_H < door.y + door.h) {
+      for (let r = Math.max(0, r0); r <= r1; r++) {
+        if (solidAt(r, c)) {
           throw new Error(
-            `${path}: a knight standing at col ${c}, row ${r} is inside the fall-in seam to "${String(door.props.room)}" — `
-            + 'a seam must stay pass-through; open the shaft deeper or lock the door while a floor exists',
+            `${path}: solid ground at col ${c}, row ${r} sits inside the fall-in band to "${String(door.props.room)}" — `
+            + 'the fall can never reach the seam plane there; open the shaft or lock the door while a floor exists',
           );
         }
       }

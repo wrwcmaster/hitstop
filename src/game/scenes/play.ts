@@ -136,15 +136,6 @@ export class PlayScene implements Scene {
    * also break the scenery, the same rule has to cover the rubble.
    */
   private sandbox = false;
-  /**
-   * A quiet scenario never opens conversation dialogue — talk triggers,
-   * NPC chatter, boss epilogues all stay shut. Probe scripts and verb
-   * fixtures used to burn ~90 sim steps of confirm-tapping to clear an
-   * entry conversation before the actual test could start; `quiet: true`
-   * in the scenario is that boilerplate, deleted. Rides the recorded
-   * runStart like every other scenario field, so replays agree.
-   */
-  private quiet = false;
   /** A mutation landed this frame; rebake the minimap once, in update. */
   private minimapDirty = false;
   /** Debounce for the wave's per-tile shatter reports (see waveSurface). */
@@ -483,7 +474,7 @@ export class PlayScene implements Scene {
       g.world.spawn(knight);
     }
     this.sandbox = false;
-    this.quiet = false;
+    this.game.quietDialogue = false;
     if (save) {
       restorePlayer(this.player, save.player);
       this.flags = new Set(save.flags);
@@ -515,7 +506,7 @@ export class PlayScene implements Scene {
     g.world.spawn(this.player);
 
     this.sandbox = true;
-    this.quiet = false;
+    this.game.quietDialogue = false;
     this.flags.clear();
     this.firedTriggers = {};
     this.patches.clear();
@@ -559,7 +550,9 @@ export class PlayScene implements Scene {
     if (pl.hp != null) this.player.hp = clamp(pl.hp, 1, this.player.maxHp);
 
     this.sandbox = true;
-    this.quiet = s.quiet === true;
+    // Rides the recorded runStart like every other scenario field, so
+    // replays agree. See ActionGame.quietDialogue for why it lives there.
+    this.game.quietDialogue = s.quiet === true;
     this.flags.clear();
     this.firedTriggers = {};
     this.patches.clear();
@@ -1407,7 +1400,7 @@ export class PlayScene implements Scene {
   }
 
   private openConversation(id: string): void {
-    if (this.quiet) return; // a quiet scenario reads the world, not the script
+    if (this.game.quietDialogue) return; // a quiet scenario reads the world, not the script
     this.game.scenes.push(
       new DialogueScene<Action>(this.game, id, {
         confirm: 'confirm',
@@ -1567,7 +1560,21 @@ export class PlayScene implements Scene {
     // control returns — which is exactly the sequencing a reveal
     // followed by a conversation wants.
     if (this.phase === 'play' && this.player && this.player.hp > 0 && !this.director.active) {
-      this.triggers.update(this.player, (f) => this.handleTrigger(f.def), (def) => this.assembled(def));
+      // Vertical seams gate their ENTRY on the motion test, not just the
+      // firing: brushing a seam below falling speed must not consume the
+      // edge, or a locked shaft spends its one refusal silently — you
+      // stood on the choked flue's rubble and never read the sign. Held
+      // at the threshold, the entry lands the moment the motion is real,
+      // and a locked door then refuses once per approach as designed.
+      const seamStillApproaching = (def: TriggerDef): boolean =>
+        def.event === 'door'
+        && (def.props?.fallIn === true || def.props?.leapUp === true)
+        && !this.firesOnContact(def);
+      this.triggers.update(
+        this.player,
+        (f) => this.handleTrigger(f.def),
+        (def) => this.assembled(def) && !seamStillApproaching(def),
+      );
       // Doors & portals: stand on one and press interact to use it. Checked
       // after the world step so an NPC in range wins the key first.
       const p = this.player;

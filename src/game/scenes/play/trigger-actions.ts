@@ -139,17 +139,19 @@ const STEP = 1 / 60;
 
 function fallingIn(def: TriggerDef, host: PlayHost): boolean {
   const p = host.player;
-  // The seam fires at the trigger's FAR edge along the travel direction —
-  // the plane where this room's drawn shaft actually ends — not on first
-  // touching the band. Firing on touch swapped rooms while the knight
-  // was still visibly short of the opening, which read as the room
-  // cutting away early; and it made standing anywhere inside a shaft a
-  // hair-trigger. Reaching the boundary is the crossing — tested against
-  // THIS step's motion, because the plane usually coincides with the
-  // room edge, where the bounds backstop clamps position and zeroes
-  // velocity before an at-the-edge test could ever see both at once.
-  return def.props?.fallIn === true && !!p && p.vy > FALLING
-    && p.y + p.h + p.vy * STEP >= def.y + def.h;
+  if (def.props?.fallIn !== true || !p || p.vy <= FALLING) return false;
+  // The seam fires at a plane, tested against THIS step's motion (the
+  // plane often coincides with the room edge, where the bounds backstop
+  // clamps position and zeroes velocity before an at-the-plane test
+  // could see both at once). An OPEN shaft's plane is the band's far
+  // edge — the point where this room's drawn shaft actually ends;
+  // firing on first touch used to swap rooms while the knight was
+  // visibly short of the opening. A LOCKED shaft is full (the choked
+  // flue's rubble IS the blockage), so its far edge is unreachable by
+  // construction: its plane is the near edge, where falling onto it
+  // constitutes the attempt the refusal answers.
+  const plane = doorLocked(def, host) ? def.y : def.y + def.h;
+  return p.y + p.h + p.vy * STEP >= plane;
 }
 
 /**
@@ -160,10 +162,12 @@ function fallingIn(def: TriggerDef, host: PlayHost): boolean {
  */
 function leapingUp(def: TriggerDef, host: PlayHost): boolean {
   const p = host.player;
-  // Far-edge rule, upward: the head reaching the trigger's top — the
-  // ceiling plane — is the crossing. Sub-step, per fallingIn.
-  return def.props?.leapUp === true && !!p && p.vy < -FALLING
-    && p.y + p.vy * STEP <= def.y;
+  if (def.props?.leapUp !== true || !p || p.vy >= -FALLING) return false;
+  // The same planes as fallingIn, mirrored upward: open = the band's
+  // top (the ceiling plane), locked = the band's bottom, where rising
+  // into the blocked gap is the attempt.
+  const plane = doorLocked(def, host) ? def.y + def.h : def.y;
+  return p.y + p.vy * STEP <= plane;
 }
 
 /**
