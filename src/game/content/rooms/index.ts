@@ -8,6 +8,7 @@ import vaultJson from './vault.json';
 import rampartsJson from './ramparts.json';
 import testRoomJson from './test_room.json';
 import corridorJson from './corridor.json';
+import eastGateJson from './east_gate.json';
 import mountainJson from './mountain.json';
 import mountainPassageJson from './mountain_passage.json';
 import undergroundJson from './underground.json';
@@ -33,6 +34,9 @@ export const ROOMS: Record<string, RoomDef> = {
   ramparts: validateRoom(rampartsJson),
   test_room: validateRoom(testRoomJson),
   corridor: validateRoom(corridorJson),
+  // Hearthstead's east wall: the built threshold between the town's
+  // open ground and the walled pass beyond it.
+  'east-gate': validateRoom(eastGateJson),
   mountain: validateRoom(mountainJson),
   mountain_passage: validateRoom(mountainPassageJson),
   underground: validateRoom(undergroundJson),

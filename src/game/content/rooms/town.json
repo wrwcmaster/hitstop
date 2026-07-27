@@ -117,7 +117,7 @@
       "event": "door",
       "once": false,
       "props": {
-        "room": "mountain"
+        "room": "east-gate"
       }
     },
     {

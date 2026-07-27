@@ -1,0 +1,95 @@
+{
+  "name": "The Eastgate",
+  "tileSize": 8,
+  "legend": {
+    "#": "wallStone",
+    "M": "wallCap",
+    "A": "archStone",
+    "B": "wallBack",
+    "T": "sconce",
+    "L": "wallLedge",
+    "P": "wallWalk",
+    "%": "rockTop",
+    "=": "rock",
+    "s": "alpineRockTop",
+    "a": "alpineRock",
+    "~": "snowTuft",
+    "c": "cairn"
+  },
+  "tiles": [
+    "............................................",
+    ".......................................aaaaa",
+    ".......................................aaaaa",
+    "....MMMMMMMMMMMMMMMMMMMMMMMM...........aaaaa",
+    "....########################...........aaaaa",
+    "....########################............aaaa",
+    "....########################............aaaa",
+    "....########################.............aaa",
+    "....########################.............aaa",
+    "....####BBBB################..............aa",
+    "....####BBBB################..............aa",
+    "....####BBBB################...............a",
+    "....AAAALLLLAAAAAAAAAAAAAAAA...............a",
+    "....BBTBBBBBBBBTBBBBBBBBBTBB................",
+    "....BBBBBBBBBBBBBBBBBBBBBBBB................",
+    "....BBBBBBBBBBBBBBBBBBBBBBBB................",
+    "....BBBBBBBBBBBBBBBBBBBBBBBB..c.....~..~..~.",
+    "%%%%PPPPPPPPPPPPPPPPPPPPPPPP%%%%%%ssssssssss",
+    "====########################======aaaaaaaaaa",
+    "====########################======aaaaaaaaaa"
+  ],
+  "playerSpawn": {
+    "x": 16,
+    "y": 118
+  },
+  "entities": [
+    {
+      "type": "chest",
+      "x": 74,
+      "y": 87
+    }
+  ],
+  "triggers": [
+    {
+      "x": 0,
+      "y": 104,
+      "w": 8,
+      "h": 32,
+      "event": "door",
+      "once": false,
+      "props": {
+        "room": "town"
+      }
+    },
+    {
+      "x": 344,
+      "y": 104,
+      "w": 8,
+      "h": 32,
+      "event": "door",
+      "once": false,
+      "props": {
+        "room": "mountain"
+      }
+    },
+    {
+      "x": 96,
+      "y": 96,
+      "w": 88,
+      "h": 40,
+      "event": "talk",
+      "once": true,
+      "props": {
+        "conversation": "eastgate-entry"
+      }
+    }
+  ],
+  "props": {
+    "backdrop": "mountain-pass",
+    "music": "overworld",
+    "map": {
+      "x": 16,
+      "y": 2
+    }
+  }
+}
