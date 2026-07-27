@@ -22,6 +22,20 @@ export function edgeDoorSide(room: RoomDef, door: TriggerDef): -1 | 1 | null {
 }
 
 /**
+ * What a threshold cut through a wall shows: unlit stone, never sky.
+ *
+ * Opening a doorway means taking solid tiles out of the room's outer
+ * wall, and whatever is behind that wall is the parallax backdrop — so
+ * every edge door stood beside a hole with the night sky through it, and
+ * the wall it was cut into read as a cardboard cutout. `wallBack` is the
+ * Eastgate's answer to exactly this, a wall's far side in shadow; using
+ * it here says "the passage carries on, unlit", which is what a doorway
+ * looks like from inside a room. It has no bearing on collision — the
+ * tile is non-solid, so the threshold stays as passable as before.
+ */
+const THRESHOLD_BACKING = 'wallBack';
+
+/**
  * An edge-door trigger is the source of truth for a passable threshold.
  * Clear ordinary collision tiles between that trigger and the map edge,
  * while preserving authored gate tiles so real doors can still open.
@@ -47,7 +61,7 @@ export function openEdgeDoorways(room: RoomDef, map: Tilemap): void {
         const def = tiles.get(id);
         // One-way tiles are valid doorway floors: they never block the
         // horizontal crossing and give an arriving fall somewhere to land.
-        if (def.solid) map.setTile(tx, ty, '');
+        if (def.solid) map.setTile(tx, ty, THRESHOLD_BACKING);
       }
     }
   }
