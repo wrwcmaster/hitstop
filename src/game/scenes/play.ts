@@ -854,10 +854,19 @@ export class PlayScene implements Scene {
       }
       return false;
     };
-    /** Slide a vertical-seam landing along the seam until it is in air. */
-    const settle = (x: number, y: number, step: -1 | 1): { x: number; y: number } | null => {
+    /**
+     * Nudge a vertical-seam landing out of any lip it overlaps — always
+     * DOWNWARD, the near side for both arrival kinds (rising into a floor
+     * shaft, falling out of a ceiling gap). Stepping the other way once
+     * "found air" on the far side of an unsmashed cap, which teleported
+     * the knight through a tile of solid rock; sliding down only ever
+     * expels her from the face she is already touching. If the mouth is
+     * blocked, she arrives beneath the blockage, bonks, and the seam
+     * sends her honestly back the way she came.
+     */
+    const settle = (x: number, y: number): { x: number; y: number } | null => {
       for (let d = 0; d <= 4 * dest.tileSize; d++) {
-        if (!buried(x, y + step * d)) return { x, y: y + step * d };
+        if (!buried(x, y + d)) return { x, y: y + d };
       }
       return null;
     };
@@ -884,7 +893,7 @@ export class PlayScene implements Scene {
     if (back.props?.leapUp === true) {
       // Their ceiling gap: appear just below it, still falling — and if
       // the gap's lip is thicker than the trigger, keep going down.
-      const at = settle(verticalX(), back.y + back.h, 1);
+      const at = settle(verticalX(), back.y + back.h);
       return at && { ...at, carry: true };
     }
     if (back.props?.fallIn === true) {
@@ -893,8 +902,10 @@ export class PlayScene implements Scene {
       // than a normal jump once transition-time gravity became real, so
       // even a full jump could never clear the mouth. One pixel of overlap
       // keeps the arrival primed while the real collision map decides the
-      // result: a strong jump clears the floor, a weak one reverses below.
-      const at = settle(verticalX(), back.y - ph + 1, -1);
+      // result: a strong jump clears the mouth, a blocked or thick lip
+      // leaves her beneath it (settle slides down, never through), and a
+      // weak jump reverses below.
+      const at = settle(verticalX(), back.y - ph + 1);
       return at && { ...at, carry: true };
     }
     // Step OUT of the doorway, not into it. Landing on the trigger was
