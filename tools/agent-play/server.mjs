@@ -12,6 +12,9 @@
  *   GET  /screenshot                        → PNG of the game canvas;
  *                    ?around=player&r=80&scale=2 for a small clip instead
  *                    (cheap probes: prefer /tiles, then a clipped shot)
+ *   GET  /snapshot                          → the live moment as a
+ *                    TestScenario (+ what a scenario can't carry);
+ *                    POST it back to /scenario to re-enter it
  *   GET  /recording                         → the session's replayable log
  *   POST /save       {name?}                → write recording to recordings/
  *   POST /shutdown                          → close browser and exit
@@ -23,7 +26,10 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { launchBrowser, openSession, step, state, recording, tileGrid, snapWorld } from './lib.mjs';
+import {
+  launchBrowser, openSession, step, state, recording,
+  tileGrid, snapWorld, snapshotScenario,
+} from './lib.mjs';
 
 const PORT = Number(process.env.AGENT_PLAY_PORT ?? 8791);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -107,6 +113,10 @@ async function handle(req, res, body) {
       res.writeHead(200, { 'Content-Type': 'image/png' });
       res.end(png);
       return null;
+    }
+    case 'GET /snapshot': {
+      const s = await ensureSession();
+      return snapshotScenario(s.page);
     }
     case 'GET /recording': {
       const s = await ensureSession();

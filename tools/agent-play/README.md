@@ -50,6 +50,15 @@ The same probes exist on the bridge for a live session: `GET /tiles`
 (`?room=` for any room, bare for the CURRENT room, patches and all) and
 `GET /screenshot?around=player&r=80&scale=2` for a targeted clip.
 
+`GET /snapshot` freezes the live moment as a TestScenario — the room,
+the knight's position/kit/gold/earned, and every monster the room won't
+respawn by itself, carried in `spawn` at live positions. POST the
+`scenario` field back to `/scenario` to re-enter the situation. It is
+equivalent, not bit-exact (that's what recordings are for): a room's
+own entities respawn fresh at authored spots (`deadAuthored` lists any
+that were dead), and progression/skills/class don't fit a scenario
+(`dropped` reports what was lost).
+
 Scenarios accept `"quiet": true` to mute all conversation dialogue
 (entry talks, NPC chatter, boss epilogues) — probe scripts and verb
 fixtures no longer need a blind confirm-tap loop before the test starts.

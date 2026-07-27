@@ -175,6 +175,63 @@ export function doorReport(page, room) {
 }
 
 /**
+ * Freeze the live moment as a TestScenario: room, the knight's position
+ * and kit, and every monster the ROOM ITSELF won't respawn, carried as
+ * `spawn` entries at their live positions. POST the result to /scenario
+ * (or feed it to beginScenario) to re-enter an equivalent situation.
+ *
+ * Equivalent, not bit-exact — that's the recording's job. Two honest
+ * gaps, reported rather than hidden: a room's authored entities respawn
+ * fresh at their authored spots (a moved boss re-enters at home; a dead
+ * one comes back — `deadAuthored` lists those), and TestScenario has no
+ * fields for progression/skills/class (`dropped` carries what was lost).
+ */
+export function snapshotScenario(page) {
+  return page.evaluate(async () => {
+    const { ROOMS } = await import('/src/game/content/rooms/index.ts');
+    const sc = window.hitstop.scenes.all().find((s) => s.constructor.name === 'PlayScene');
+    const p = sc?.player;
+    if (!p) throw new Error('no run in progress — nothing to snapshot');
+    const st = window.__harness.state();
+
+    // Subtract the room's own entities by type: setRoom respawns those,
+    // so carrying them in `spawn` would double them on re-entry.
+    const live = [...st.monsters];
+    const deadAuthored = [];
+    for (const e of ROOMS[st.roomId]?.entities ?? []) {
+      const i = live.findIndex((m) => m.type === e.type);
+      if (i >= 0) live.splice(i, 1);
+      else deadAuthored.push(e.type);
+    }
+
+    const scenario = {
+      room: st.roomId,
+      quiet: true,
+      player: {
+        x: Math.round(st.player.x),
+        y: Math.round(st.player.y),
+        hp: p.hp,
+        gold: p.gold,
+        give: p.inventory.slots.flatMap((s) => Array(s.count ?? 1).fill(s.id)),
+        equip: p.equipment.slots().map(([, id]) => id),
+        earned: p.earned.list(),
+      },
+      spawn: live.map((m) => ({ type: m.type, x: Math.round(m.x), y: Math.round(m.y) })),
+    };
+    if (!scenario.spawn.length) delete scenario.spawn;
+
+    const out = { scenario };
+    if (deadAuthored.length) out.deadAuthored = deadAuthored;
+    const prog = p.progression.snapshot();
+    const skills = [...p.skills.known];
+    if (p.classId !== 'knight' || prog.level > 1 || skills.length) {
+      out.dropped = { classId: p.classId, level: prog.level, skills };
+    }
+    return out;
+  });
+}
+
+/**
  * A small PNG of the world around a point, composed in-page at a fixed
  * output scale — so a probe image is a few hundred px on a side no
  * matter what the game's display zoom is. `at` is 'player' or {x, y} in
