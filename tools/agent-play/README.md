@@ -17,8 +17,31 @@ npm run agent-play                # HTTP bridge for turn-based (agent) play
 npm run replay                    # verify EVERY recording in recordings/
 npm run replay -- path/run.json   # verify one recording
 npm run replay -- --rerecord path/run.json   # accept a deliberate change
+npm run bugtest                   # semantic bug-tape suite (see below)
 node tools/agent-play/inspect.mjs # one-shot text probes (see below)
 ```
+
+## Bug tapes: a report becomes a regression test
+
+A player's SAVE REPLAY file attached to a bug report is one command
+away from being a permanent test:
+
+```bash
+node tools/agent-play/bugtest.mjs --new ~/Downloads/hitstop-run-XXX.json short-name
+```
+
+Fix the bug FIRST, then mint: `--new` plays the tape on the current
+build and writes `bugs/<name>.json` pinning what the tape now does —
+the room journey, in-bounds every frame, no same-room warps beyond
+physics, and the final resting place. Fill in the `issue` field, then
+`npm run bugtest` verifies every tape forever.
+
+This is deliberately NOT the checkpoint-hash suite. Hashes assert the
+whole sim bit-for-bit and diverge on every intentional feel change —
+and `--rerecord` refreshes them without ever asking whether the bug is
+still gone. A bug tape asserts only the semantics the report was about,
+so it survives tuning and still screams if the knight ever again lands
+outside a room, warps through a cap, or stops reaching the vault.
 
 ## Cheap inspection: text first, pixels last
 
