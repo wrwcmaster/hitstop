@@ -176,10 +176,6 @@ export class PlayScene implements Scene {
   private director = new Director<CutsceneCtx>();
   /** The scripted hands holding the player's controls while one plays. */
   private cutsceneInput: ReturnType<typeof scriptInput> | null = null;
-  /** Vertical seams the player materialized inside on arrival. They stay
-   * inert until she has actually left them — see setRoom and
-   * updateVerticalSeams for why this is kept by hand. */
-  private seamPrimed = new Set<TriggerDef>();
   /** Where the scene found the co-op guest: held there for its duration
    * so live physics can't carry an off-camera knight somewhere she
    * can't see (see the anchor block in update). */
@@ -766,22 +762,14 @@ export class PlayScene implements Scene {
       knight.vx = 0;
       knight.vy = 0;
     }
-    // ONE rule, applied to both places a door can fire from: you never
-    // fire a doorway you materialized inside. Entering means crossing the
-    // boundary, and being placed somewhere is not crossing it — without
-    // this, arriving through a seam hands you straight back the way you
-    // came. `Triggers` enforces it for everything it drives; vertical
-    // seams are polled outside that edge system (they re-test a velocity
-    // gate every frame), so they need the same memory kept here.
-    if (this.player) {
-      this.triggers.prime(this.player, (def) => def.event === 'door');
-      this.seamPrimed.clear();
-      for (const def of this.room.triggers ?? []) {
-        if (def.event !== 'door') continue;
-        if (def.props?.fallIn !== true && def.props?.leapUp !== true) continue;
-        if (overlaps(this.player, def)) this.seamPrimed.add(def);
-      }
-    }
+    // You never fire a doorway you materialized inside. `Triggers`
+    // enforces it for the edge-driven doors it runs. Vertical seams need
+    // no such memory: their velocity gate IS the protection — you arrive
+    // in a fall-in rising and a leap-up falling, so the seam you came
+    // through fails its own gate by construction, and the moment the arc
+    // genuinely reverses, firing again (back the way you came) is the
+    // splice behaving correctly, not a bug to suppress.
+    if (this.player) this.triggers.prime(this.player, (def) => def.event === 'door');
     // Use the exact target and bounds normal follow uses. Previously this
     // clamped against worldH instead of camera.maxY (which intentionally
     // sits 16px higher to show a ground lip), then followed the player's
@@ -1314,16 +1302,7 @@ export class PlayScene implements Scene {
     for (const def of this.room.triggers ?? []) {
       if (def.event !== 'door') continue;
       if (def.props?.fallIn !== true && def.props?.leapUp !== true) continue;
-      if (!overlaps(p, def)) {
-        // Left it: this seam is live again (the edge-trigger rule, kept
-        // by hand because this path polls instead of edge-detecting).
-        this.seamPrimed.delete(def);
-        continue;
-      }
-      if (this.seamPrimed.has(def)) {
-        if (!this.firesOnContact(def)) continue; // still travelling into this room
-        this.seamPrimed.delete(def); // the arc reversed before leaving the seam
-      }
+      if (!overlaps(p, def)) continue;
       if (doorLocked(def, this.host)) continue;
       if (this.firesOnContact(def)) {
         triggerActions.get('door').run(def, this.host);

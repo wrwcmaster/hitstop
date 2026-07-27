@@ -173,6 +173,55 @@ function requireSolidBasement(room: RoomDef, path: string): void {
   }
 }
 
+/**
+ * A fall-in seam is a passage you can only ever occupy while falling —
+ * every rule around it (fire on downward motion, re-fire on a reversed
+ * arc, land just inside the far lip) assumes transit. Give its shaft a
+ * floor and a player can STAND inside a live seam, where those rules
+ * turn absurd: hopping in place on solid ground teleports you through
+ * the floor. Town's dig pocket shipped exactly that.
+ *
+ * The offending shape, exactly: a surface where a knight standing on it
+ * has her body inside the trigger band. A floor well below a high
+ * fall-in is fine — falling through the band always fires the seam
+ * first, so that ground is only ever reached from elsewhere and standing
+ * on it touches no seam (the vise-approach drop is built this way).
+ * LOCKED fall-ins are the opposite shape by design (the shaft catches
+ * you while the way is shut, like the rubble-choked flue) and
+ * requireSolidBasement already keeps their floors out of the camera's
+ * blind rows.
+ */
+function requirePassThroughShaft(room: RoomDef, path: string): void {
+  const ts = room.tileSize;
+  const rows = room.tiles.length;
+  // The knight's standing height. Content knowing an actor metric is a
+  // necessary smell here: "can a body at rest touch this seam" is a
+  // geometric question about the body.
+  const KNIGHT_H = 18;
+  const solidAt = (r: number, c: number): boolean => {
+    const id = room.legend[(room.tiles[r] ?? '')[c] ?? ''] ?? '';
+    return id !== '' && !!tiles.get(id).solid;
+  };
+  for (const door of room.triggers ?? []) {
+    if (door.event !== 'door' || door.props?.fallIn !== true) continue;
+    if (door.props.key !== undefined || door.props.flag !== undefined || door.props.bossSeal !== undefined) continue;
+    const c0 = Math.floor(door.x / ts);
+    const c1 = Math.floor((door.x + door.w - 1) / ts);
+    for (let c = c0; c <= c1; c++) {
+      for (let r = 1; r < rows; r++) {
+        if (!solidAt(r, c) || solidAt(r - 1, c)) continue; // not a standing surface
+        const feet = r * ts;
+        if (feet > door.y && feet - KNIGHT_H < door.y + door.h) {
+          throw new Error(
+            `${path}: a knight standing at col ${c}, row ${r} is inside the fall-in seam to "${String(door.props.room)}" — `
+            + 'a seam must stay pass-through; open the shaft deeper or lock the door while a floor exists',
+          );
+        }
+      }
+    }
+  }
+}
+
 /** Validate open content bags after all game registries have been filled. */
 export function validateRoomContent(room: RoomDef, id = room.name): RoomDef {
   const root = `room "${id}"`;
@@ -187,6 +236,7 @@ export function validateRoomContent(room: RoomDef, id = room.name): RoomDef {
   // spirit, and frozen verbatim inside existing recordings, so holding it
   // to a framing rule would invalidate every verb tape for no one's eyes.
   if (id !== 'test') requireSolidBasement(room, root);
+  if (id !== 'test') requirePassThroughShaft(room, root);
 
   room.entities.forEach((entity, index) => {
     const path = `${root}.entities[${index}] (${entity.type}).props`;
