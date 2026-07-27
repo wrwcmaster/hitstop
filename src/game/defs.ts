@@ -191,6 +191,13 @@ export interface TestScenario {
   };
   /** Extra monsters/placeables to spawn, on top of the room's own. */
   spawn?: { type: string; x: number; y?: number; props?: Record<string, unknown> }[];
+  /**
+   * Mute all conversation dialogue (talk triggers, NPC chatter, boss
+   * epilogues) for this run. For probes and fixtures: entry dialogue
+   * otherwise costs every script a blind confirm-tap loop before the
+   * test proper can begin.
+   */
+  quiet?: boolean;
 }
 
 /**

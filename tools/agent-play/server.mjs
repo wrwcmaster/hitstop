@@ -7,7 +7,11 @@
  *   POST /session    {seed?}                → fresh deterministic session
  *   POST /step       {down?: string[], frames?: number} → play, get state
  *   GET  /state                             → current state, no time passes
- *   GET  /screenshot                        → PNG of the game canvas
+ *   GET  /tiles      ?room=&c0=&c1=&r0=&r1= → resolved tilemap as ASCII;
+ *                    no ?room reads the LIVE room, patches and all
+ *   GET  /screenshot                        → PNG of the game canvas;
+ *                    ?around=player&r=80&scale=2 for a small clip instead
+ *                    (cheap probes: prefer /tiles, then a clipped shot)
  *   GET  /recording                         → the session's replayable log
  *   POST /save       {name?}                → write recording to recordings/
  *   POST /shutdown                          → close browser and exit
@@ -19,7 +23,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { launchBrowser, openSession, step, state, recording } from './lib.mjs';
+import { launchBrowser, openSession, step, state, recording, tileGrid, snapWorld } from './lib.mjs';
 
 const PORT = Number(process.env.AGENT_PLAY_PORT ?? 8791);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -75,9 +79,31 @@ async function handle(req, res, body) {
       const s = await ensureSession();
       return state(s.page);
     }
+    case 'GET /tiles': {
+      const s = await ensureSession();
+      const q = url.searchParams;
+      const range = ['c0', 'c1', 'r0', 'r1'].every((k) => q.has(k))
+        ? [Number(q.get('c0')), Number(q.get('c1')), Number(q.get('r0')), Number(q.get('r1'))]
+        : null;
+      return tileGrid(s.page, q.get('room'), range);
+    }
     case 'GET /screenshot': {
       const s = await ensureSession();
-      const png = await s.page.locator('canvas#game').screenshot();
+      const q = url.searchParams;
+      let png;
+      if (q.has('around')) {
+        // A targeted clip: reading a whole frame to answer a local
+        // question is the expensive habit this endpoint replaces.
+        const around = q.get('around');
+        const at = around === 'player'
+          ? 'player'
+          : { x: Number(around.split(',')[0]), y: Number(around.split(',')[1]) };
+        const r = Math.min(Number(q.get('r') ?? 80), 200);
+        const scale = Math.min(Number(q.get('scale') ?? 2), 4);
+        png = await snapWorld(s.page, { at, r, scale });
+      } else {
+        png = await s.page.locator('canvas#game').screenshot();
+      }
       res.writeHead(200, { 'Content-Type': 'image/png' });
       res.end(png);
       return null;
