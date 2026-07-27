@@ -147,6 +147,13 @@ defineConversation('vault-entry', {
   ],
 });
 
+defineConversation('eastgate-entry', {
+  lines: [
+    { speaker: 'VOICE', text: 'Somebody stacked this. Course by course, against something.' },
+    { speaker: 'VOICE', text: 'The town keeps its grass because the wall keeps the wind. Past the arch it is all mountain.' },
+  ],
+});
+
 defineConversation('ramparts-entry', {
   lines: [
     { speaker: 'VOICE', text: 'The wall walk. The town below sleeps because she paces here.' },

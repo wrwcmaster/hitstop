@@ -220,6 +220,18 @@ home.*
    story gates sit only behind true verb-locks, never behind a
    merely-hard jump.
 
+8. **Neighbouring rooms must agree about the world.** A door is a cut,
+   and the two frames either side of it have to belong to the same
+   place: ground at the same height, the same material under the
+   knight's feet, the same weather. When two rooms genuinely disagree —
+   open town grass on one side, a cliff-walled pass on the other — the
+   disagreement is not a texture problem, it is a **missing room**, and
+   the fix is to build the beat that earns the change rather than to
+   repaint either end. `east-gate` is the worked example: the wall is
+   the reason the town has grass and the pass has snow, and you watch
+   the palette hand over inside one screen. This rule is why room
+   boundaries are checked by walking them, not by reading the JSON.
+
 ### Room budget
 
 First half ≈ 40 rooms (opening 7 — of which 2 are the tutorial belt —
@@ -736,8 +748,9 @@ Nothing shipped is wasted; each room grows into its target role:
 | Today | Becomes |
 | --- | --- |
 | `town` | `hearthstead` (add well-as-Bore-mouth, Eastern Seal, chimney) |
+| `east-gate` | **BUILT** — Hearthstead's east wall, the threshold between the town's open ground and the walled pass. Built ahead of its migration step because the world read wrong without it: you stepped off flat grass and were suddenly inside a cliff-walled ascent with nothing in between. Becomes the Eastern Seal's outer arch when Hearthstead lands. |
 | `arena`, `cavern`, `corridor`, `throne` | the Fallows band; Slime King demotes to `waystone-gate` miniboss (his Impact Drop grant moves to Maul) |
-| `mountain`, `mountain_passage`, `ramparts` | Windspires lower third; the Duelist becomes the rival who bars the rampart bridge (her Air Step grant moves to Bellwether) |
+| `mountain`, `mountain_passage`, `ramparts` | Windspires lower third; the Duelist becomes the rival who bars the rampart bridge (her Air Step grant moves to Bellwether). `ramparts` is already rethemed to masonry under a mountain sky — it was grass under a town sky, which is rule 8's defect two rooms above the snowline, and its boss seal now has a barred gate to look at |
 | `underground`, `vault` | Foundry top layer (the cracked cache stays as-is) |
 | `grotto` | `brine-gate` |
 | well seam, portals, worldmap | unchanged mechanisms; new rooms are data |

@@ -132,6 +132,183 @@ tiles.register('alpineLedge', {
   },
 });
 
+/* ------------- the Eastgate: stone somebody quarried and stacked -------------
+ *
+ * Hearthstead's eastern wall, and the first BUILT terrain in the game.
+ * Everything else the knight walks on is geology: rock, alpine rock,
+ * riven rock. This is masonry — dressed courses, a running bond, an
+ * arched vault over the road — and it reads that way at a glance, which
+ * is the whole point. The wall is why the town is a town, and why the
+ * pass beyond it is a pass.
+ */
+
+const WALL_FACE = '#454f66';
+const WALL_LIT = '#5c6880';
+const WALL_JOINT = '#2a3145';
+
+/** Dressed courses in running bond: one block per tile, joints offset row to row. */
+function drawWallStone(
+  g: CanvasRenderingContext2D,
+  px: number,
+  py: number,
+  size: number,
+  tx: number,
+  ty: number,
+): void {
+  g.fillStyle = WALL_FACE;
+  g.fillRect(px, py, size, size);
+  // A lit top edge on every course is what makes stacked stone read as
+  // stacked rather than as one flat slab.
+  g.fillStyle = WALL_LIT;
+  g.fillRect(px, py + 1, size, 1);
+  g.fillStyle = WALL_JOINT;
+  g.fillRect(px, py + size - 1, size, 1);
+  // Running bond: the vertical joint shifts half a block every course,
+  // so no seam ever runs the wall's full height.
+  g.fillRect(px + (ty % 2) * Math.floor(size / 2), py, 1, size - 1);
+  if ((tx * 5 + ty * 3) % 7 === 0) {
+    g.fillStyle = '#3b4359';
+    g.fillRect(px + 2, py + 3, 3, 1);
+  }
+}
+
+tiles.register('wallStone', {
+  solid: true,
+  traits: ['resonant'],
+  draw(g, px, py, size, tx, ty) {
+    drawWallStone(g, px, py, size, tx, ty);
+  },
+});
+
+/**
+ * The walking surface: flagged paving over the courses.
+ *
+ * Masonry's `rockTop` — same relationship, same reason. Bulk stone is
+ * `wallStone`; the face you actually stand on is this, and it carries
+ * `rebound` so an Impact Drop answers off a rampart exactly as it does
+ * off ground.
+ */
+tiles.register('wallWalk', {
+  solid: true,
+  traits: ['resonant', 'rebound'],
+  draw(g, px, py, size, tx, ty) {
+    drawWallStone(g, px, py, size, tx, ty);
+    g.fillStyle = '#6b7893';
+    g.fillRect(px, py, size, 2);
+    g.fillStyle = '#7f8da8';
+    g.fillRect(px, py, size, 1);
+    // Flagstone seam: a paving joint every other tile, off the course
+    // grid below, so the surface reads as laid rather than quarried.
+    g.fillStyle = WALL_JOINT;
+    if (tx % 2 === 0) g.fillRect(px, py, 1, 2);
+  },
+});
+
+/** The battlement course: merlons, embrasures, and a lip of old snow. */
+tiles.register('wallCap', {
+  solid: true,
+  traits: ['resonant', 'rebound'],
+  draw(g, px, py, size, tx, ty) {
+    drawWallStone(g, px, py, size, tx, ty);
+    if (tx % 2 === 0) {
+      // Merlon: the tooth, capped with weather.
+      g.fillStyle = WALL_LIT;
+      g.fillRect(px, py, size, 3);
+      g.fillStyle = '#b8d6d5';
+      g.fillRect(px, py, size, 1);
+    } else {
+      // Embrasure: the gap you shoot through, in shadow.
+      g.fillStyle = WALL_JOINT;
+      g.fillRect(px, py, size, 3);
+      g.fillStyle = '#1d2233';
+      g.fillRect(px + 1, py, size - 2, 2);
+    }
+  },
+});
+
+/** The gate vault: wedge stones seen from beneath, flagged on top. */
+tiles.register('archStone', {
+  solid: true,
+  traits: ['resonant'],
+  draw(g, px, py, size, tx, ty) {
+    drawWallStone(g, px, py, size, tx, ty);
+    // Soffit: a pale band of voussoirs with a radial joint per wedge, so
+    // the tunnel's ceiling curves even though the tiles are square.
+    g.fillStyle = WALL_LIT;
+    g.fillRect(px, py + size - 4, size, 4);
+    g.fillStyle = WALL_JOINT;
+    g.fillRect(px, py + size - 4, size, 1);
+    g.fillRect(px + (tx % 2 === 0 ? 1 : size - 2), py + size - 3, 1, 3);
+  },
+});
+
+/** A corbelled shelf: jump-through masonry, the built answer to alpineLedge. */
+tiles.register('wallLedge', {
+  oneWay: true,
+  traits: ['resonant', 'rebound'],
+  draw(g, px, py, size, tx) {
+    g.fillStyle = WALL_LIT;
+    g.fillRect(px, py, size, 3);
+    g.fillStyle = '#7686a0';
+    g.fillRect(px, py, size, 1);
+    g.fillStyle = WALL_FACE;
+    g.fillRect(px, py + 3, size, 2);
+    g.fillStyle = WALL_JOINT;
+    g.fillRect(px, py + 3, size, 1);
+    // Corbels: stepped brackets carrying the shelf, every other tile, so
+    // the ledge reads as built out of the wall rather than laid on it.
+    if (tx % 2 === 0) {
+      g.fillStyle = WALL_FACE;
+      g.fillRect(px + 2, py + 5, size - 4, 2);
+      g.fillStyle = WALL_JOINT;
+      g.fillRect(px + 3, py + 7, size - 6, 1);
+    }
+  },
+});
+
+/**
+ * Backing stone: the inside of the gate passage, non-solid.
+ *
+ * Without it the parallax sky shows through the tunnel and the wall
+ * reads as a cardboard cutout with stars behind it. This is the wall's
+ * far side, in shadow, and it is the reason the passage feels enclosed.
+ */
+tiles.register('wallBack', {
+  draw(g, px, py, size, tx, ty) {
+    g.fillStyle = '#1d2233';
+    g.fillRect(px, py, size, size);
+    g.fillStyle = '#252c41';
+    g.fillRect(px, py + 1, size, 1);
+    g.fillStyle = '#161a28';
+    g.fillRect(px, py + size - 1, size, 1);
+    g.fillRect(px + (ty % 2) * Math.floor(size / 2), py, 1, size - 1);
+    if ((tx + ty) % 5 === 0) {
+      g.fillStyle = '#2b3349';
+      g.fillRect(px + 3, py + 4, 2, 1);
+    }
+  },
+});
+
+/** A bracket torch on the passage wall: the only warm light for a screen. */
+tiles.register('sconce', {
+  draw(g, px, py, size) {
+    // Phase by position so a row of them never flickers in unison.
+    const t = performance.now() / 1000 + px * 0.37;
+    const lick = Math.sin(t * 9) * 0.5 + Math.sin(t * 5.3) * 0.5;
+    const rise = Math.round(lick);
+    g.fillStyle = COLORS.outline;
+    g.fillRect(px + 2, py + size - 3, 4, 3);
+    g.fillStyle = COLORS.steelDark;
+    g.fillRect(px + 1, py + size - 4, 6, 1);
+    g.fillStyle = COLORS.redDark;
+    g.fillRect(px + 2, py + size - 8 - rise, 4, 5);
+    g.fillStyle = COLORS.gold;
+    g.fillRect(px + 3, py + size - 7 - rise, 2, 4);
+    g.fillStyle = COLORS.white;
+    g.fillRect(px + 3, py + size - 5, 1, 2);
+  },
+});
+
 /* ---------------- the Riven: a crack in the world's frame ----------------
  *
  * The region's whole grammar is READING A WALL. Three stones say three
