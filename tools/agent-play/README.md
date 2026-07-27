@@ -19,6 +19,7 @@ npm run replay -- path/run.json   # verify one recording
 npm run replay -- --rerecord path/run.json   # accept a deliberate change
 npm run bugtest                   # semantic bug-tape suite (see below)
 node tools/agent-play/inspect.mjs # one-shot text probes (see below)
+node tools/agent-play/sweep.mjs   # cross every door by its natural verb
 ```
 
 ## Bug tapes: a report becomes a regression test
