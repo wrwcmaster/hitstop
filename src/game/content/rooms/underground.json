@@ -59,7 +59,8 @@
       "props": {
         "room": "town",
         "leapUp": true
-      }
+      },
+      "once": false
     },
     {
       "x": 464,
@@ -69,13 +70,14 @@
       "event": "door",
       "props": {
         "room": "vault"
-      }
+      },
+      "once": false
     },
     {
       "x": 368,
       "y": 184,
       "w": 72,
-      "h": 40,
+      "h": 8,
       "event": "door",
       "once": false,
       "props": {

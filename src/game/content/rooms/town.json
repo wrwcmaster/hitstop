@@ -125,7 +125,7 @@
       "x": 200,
       "y": 240,
       "w": 32,
-      "h": 32,
+      "h": 16,
       "event": "door",
       "once": false,
       "props": {

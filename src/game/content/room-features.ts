@@ -261,6 +261,14 @@ export function validateRoomContent(room: RoomDef, id = room.name): RoomDef {
       throw new Error(`${path}.assemble: expected a boolean`);
     }
     if (triggerValidators.has(trigger.event)) triggerValidators.get(trigger.event).validateProps?.(props, path);
+    // A trigger fires once unless it says otherwise, and a one-shot door
+    // welds itself shut: it fires, is recorded into the save as spent,
+    // and every later visit finds it dead. Underground's vault door
+    // shipped exactly that — omitted `once`, worked exactly once per
+    // save. Passages must always declare themselves repeating.
+    if ((trigger.event === 'door' || trigger.event === 'portal') && trigger.once !== false) {
+      throw new Error(`${root}.triggers[${index}]: a ${trigger.event} must declare "once": false — a one-shot passage welds itself shut after first use`);
+    }
     if (trigger.event === 'door') requireReachable(room, trigger, `${root}.triggers[${index}]`);
   });
   return room;

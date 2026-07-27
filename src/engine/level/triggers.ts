@@ -101,8 +101,19 @@ export class Triggers {
     return [...this.fired];
   }
 
-  /** Restore fired state from a save file. */
+  /**
+   * Restore fired state from a save file.
+   *
+   * Saves store INDICES, and a room's trigger list can change between
+   * the build that wrote the save and the build loading it. A repeating
+   * trigger can never legitimately be in the fired set (update() only
+   * records once-triggers), so any imported index that lands on one is
+   * stale by definition — from a room whose triggers have since been
+   * reordered — and keeping it would permanently kill that trigger for
+   * this save. That was a door once: an old save's indices landed on
+   * the vault doorway and quietly welded it shut.
+   */
   importFired(indices: number[]): void {
-    this.fired = new Set(indices);
+    this.fired = new Set(indices.filter((i) => this.defs[i]?.once !== false));
   }
 }

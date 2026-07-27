@@ -134,8 +134,22 @@ const FALLING = 40;
  * The grotto shaft could take the same prop, but that one is a hole you
  * cross a room past, so it stays a deliberate press for now.
  */
+/** The simulation's fixed step: crossings are resolved sub-step against it. */
+const STEP = 1 / 60;
+
 function fallingIn(def: TriggerDef, host: PlayHost): boolean {
-  return def.props?.fallIn === true && !!host.player && host.player.vy > FALLING;
+  const p = host.player;
+  // The seam fires at the trigger's FAR edge along the travel direction —
+  // the plane where this room's drawn shaft actually ends — not on first
+  // touching the band. Firing on touch swapped rooms while the knight
+  // was still visibly short of the opening, which read as the room
+  // cutting away early; and it made standing anywhere inside a shaft a
+  // hair-trigger. Reaching the boundary is the crossing — tested against
+  // THIS step's motion, because the plane usually coincides with the
+  // room edge, where the bounds backstop clamps position and zeroes
+  // velocity before an at-the-edge test could ever see both at once.
+  return def.props?.fallIn === true && !!p && p.vy > FALLING
+    && p.y + p.h + p.vy * STEP >= def.y + def.h;
 }
 
 /**
@@ -145,7 +159,11 @@ function fallingIn(def: TriggerDef, host: PlayHost): boolean {
  * genuine motion so brushing the opening never counts.
  */
 function leapingUp(def: TriggerDef, host: PlayHost): boolean {
-  return def.props?.leapUp === true && !!host.player && host.player.vy < -FALLING;
+  const p = host.player;
+  // Far-edge rule, upward: the head reaching the trigger's top — the
+  // ceiling plane — is the crossing. Sub-step, per fallingIn.
+  return def.props?.leapUp === true && !!p && p.vy < -FALLING
+    && p.y + p.vy * STEP <= def.y;
 }
 
 /**
