@@ -1073,23 +1073,11 @@ export class PlayScene implements Scene {
     );
     if (!leaving) return null;
     const ts = this.tilemap.tileSize;
-    const c0 = Math.round(leaving.x / ts);
-    const c1 = Math.floor((leaving.x + leaving.w - 1) / ts);
+    const col = Math.round(leaving.x / ts);
     const r0 = Math.floor(leaving.y / ts);
     const r1 = Math.floor((leaving.y + leaving.h - 1) / ts);
-    // The opening is however wide the trigger is: a postern is one column,
-    // a carriage gate several. Anything less than a full leaf across is a
-    // bare gap with some scenery in it, not a door that can swing.
-    for (let c = c0; c <= c1; c++) {
-      if (this.tilemap.tileAt(c, r0) !== 'gate') return null;
-    }
-    return {
-      left: DOOR_OPEN_TIME,
-      x: c0 * ts,
-      y: r0 * ts,
-      w: (c1 - c0 + 1) * ts,
-      h: (r1 - r0 + 1) * ts,
-    };
+    if (this.tilemap.tileAt(col, r0) !== 'gate') return null;
+    return { left: DOOR_OPEN_TIME, x: col * ts, y: r0 * ts, w: ts, h: (r1 - r0 + 1) * ts };
   }
 
   /** Boss rooms play the boss theme while the boss lives; otherwise the room's track. */
@@ -1400,10 +1388,8 @@ export class PlayScene implements Scene {
     ctx.fillRect(o.x, o.y, o.w, o.h);
     const lift = Math.round(p * (o.h + ts));
     const gate = tiles.get('gate');
-    for (let cx = 0; cx * ts < o.w; cx++) {
-      for (let i = 0; i * ts < o.h + ts; i++) {
-        gate.draw?.(ctx, o.x + cx * ts, o.y + i * ts - lift, ts, cx, i);
-      }
+    for (let i = 0; i * ts < o.h + ts; i++) {
+      gate.draw?.(ctx, o.x, o.y + i * ts - lift, ts, 0, i);
     }
     ctx.restore();
   }
