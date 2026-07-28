@@ -240,6 +240,12 @@ export function moveAndCollide(
       );
       b.y = lvl.y + lvl.h - b.h;
       if (b.vy > 0) b.vy = 0;
+      // Standing on the level floor IS standing. This used to record the
+      // contact and leave onGround false, so the two answers to "are my
+      // feet on something" disagreed: contacts said yes, the flag said
+      // no. Anything reading the flag — jumping, coyote time, the
+      // landing animation — treated a body at rest as falling forever.
+      b.onGround = true;
     }
   }
   b.lastCollision = result;

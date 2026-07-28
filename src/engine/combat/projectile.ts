@@ -2,7 +2,7 @@ import { Entity } from '../world/entity';
 import type { Strike, StrikeOptions } from './combat';
 import { Feel } from '../feel/feel';
 import { CollisionSource } from '../physics/body';
-import { Rect } from '../math/rect';
+import { Rect, overlaps, sweepEntry, union } from '../math/rect';
 
 /**
  * Projectiles: bullets, arrows, magic bolts, thrown rocks.
@@ -108,28 +108,56 @@ export class Projectile extends Entity {
     if (this.life <= 0) return this.expire();
 
     this.vy += (this.opts.gravity ?? 0) * dt;
+    const from = this.box;
     this.x += this.vx * dt;
     this.y += this.vy * dt;
+    // What this shot occupied THIS step is the path it swept, not the
+    // point it stopped at. A body can be tested where it lands because a
+    // body is bigger than its step — 14px wide, at most 7.7px of fall per
+    // tick, so its footprints always overlap. A shot is the opposite: the
+    // flintlock's 4px ball travels 10.7px a tick and leaves 6.7px between
+    // consecutive footprints. Today the smallest wall is 8px and the
+    // fastest shot is 640, so nothing quite slips through the gap — a
+    // 1.3px margin nobody chose, protecting the rule that a bullet cannot
+    // pass through stone. Sweeping states the rule instead of relying on
+    // the numbers to stay lucky, and it costs one union per step.
+    const swept = union(from, this.box);
 
-    // Walls.
+    // Walls. Of everything the sweep crossed, the one it reached FIRST
+    // is the one that stopped it — and the shot dies against that face,
+    // not wherever the step happened to end. A bullet whose sparks burst
+    // on the far side of the stone it hit is the same lie as a body
+    // colliding at a position it never occupied.
     if (!this.opts.ghost) {
-      for (const s of this.collision.solidsNear(this.box)) {
-        if (s.oneWay) continue;
-        const b = this.box;
-        if (b.x < s.x + s.w && b.x + b.w > s.x && b.y < s.y + s.h && b.y + b.h > s.y) {
-          this.feel.burst(this.x, this.y, 5, {
-            color: '#94b0c2', speed: 60, life: 0.2, drag: 4,
-          });
-          return this.expire();
-        }
+      const dx = this.x - (from.x + from.w / 2);
+      const dy = this.y - (from.y + from.h / 2);
+      let firstT: number | null = null;
+      for (const s of this.collision.solidsNear(swept)) {
+        if (s.oneWay || !overlaps(swept, s)) continue;
+        const t = sweepEntry(from, dx, dy, s);
+        if (t !== null && (firstT === null || t < firstT)) firstT = t;
+      }
+      if (firstT !== null) {
+        this.x = from.x + from.w / 2 + dx * firstT;
+        this.y = from.y + from.h / 2 + dy * firstT;
+        this.feel.burst(this.x, this.y, 5, {
+          color: '#94b0c2', speed: 60, life: 0.2, drag: 4,
+        });
+        return this.expire();
       }
     }
-    // Gone: travelled clear of the level (a margin past its edge).
+    // Gone: travelled clear of the level and cannot come back. Sideways
+    // and downward are one-way exits; ABOVE is not, because an arrow's
+    // arc leaves the room and returns, and expiring it there would
+    // delete the shot mid-flight.
     const lvl = this.collision.bounds;
-    if (lvl && (this.x < lvl.x - 20 || this.x > lvl.x + lvl.w + 20)) return this.expire();
+    if (lvl && (this.x < lvl.x - 20 || this.x > lvl.x + lvl.w + 20
+      || this.y > lvl.y + lvl.h + 20)) return this.expire();
 
-    // Targets — the strike brings the full feedback bundle with it.
-    const hits = this.strike.apply(this.box);
+    // Targets — the strike brings the full feedback bundle with it. Same
+    // swept region: a shot that crossed a body this step hit it, whether
+    // or not it happened to stop inside.
+    const hits = this.strike.apply(swept);
     if (hits.length) {
       if (this.opts.onHit) for (const t of hits) this.opts.onHit(t, this);
       this.pierceLeft -= hits.length;
