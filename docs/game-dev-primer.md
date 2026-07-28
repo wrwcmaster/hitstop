@@ -30,11 +30,12 @@ When something feels subtly wrong (jitter, one-frame lag), the bug is almost alw
 
 ## 4. Collision: everything is rectangles until proven otherwise
 
-AABB (axis-aligned bounding box) overlap tests + axis-separated movement (move X, resolve; move Y, resolve) handle a platformer completely — `physics/body.ts` is ~80 lines. Concepts worth knowing:
+AABB (axis-aligned bounding box) overlap tests + axis-separated movement (move X, resolve; move Y, resolve) handle a platformer completely — `physics/body.ts` is a couple hundred lines. Concepts worth knowing:
 
 - **One-way platforms**: only collide when falling onto them from above.
 - **Hitbox vs hurtbox**: the area your attack covers vs the area where you can be hit. Decoupling them is a balance tool (generous hitboxes for the player, forgiving hurtboxes against enemies = "fair").
-- **Tunneling**: fast object skips over a thin wall between steps. Fixed timestep + speed caps (`MAX_FALL`) is our answer; real engines also sweep.
+- **Tunneling**: a fast object skips over a thin wall between steps. Each axis pass here is a **sweep** over the travel path rather than a move-then-test, so correctness does not depend on the step being small — a body can neither pass through a solid nor come to rest inside one at any speed. Speed caps like `MAX_FALL` are a feel choice, not a safety net.
+- **Assigning position is not physics.** The resolver above only ever pushes a body that moves INTO a solid from outside. A body *placed* inside one is invisible to it: every overlap test is already true, so nothing reads as a new contact and it strolls through the wall. This is the single most productive collision bug in a 2D engine, and the fix is structural — one door into "where a body may be" (`placeBody`), and mechanisms that push with velocity instead of teleporting. See the laws at the top of `physics/body.ts`.
 
 ## 5. "Game feel" is a real discipline
 

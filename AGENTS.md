@@ -65,7 +65,21 @@ npm run agent-play     # HTTP bridge for turn-based (LLM-agent) play
 9. **Saves are not sacred yet.** The game is in **demo phase**, so old
    save data does not constrain design. Do NOT hand-write migration code
    in the game. See "Save compatibility" below before touching `SaveData`.
-10. **Rooms are immutable content.** A `RoomDef` is rebuilt from JSON on
+10. **One physics — never assign `.x`/`.y` on a body.** Position changes
+    by integrating velocity through `moveAndCollide`, or by `placeBody`,
+    and by nothing else. The mover only resolves a body moving INTO a
+    solid from outside; one that STARTS inside is invisible to it, so a
+    hand-assigned position is how a body ends up walking through rock.
+    Express mechanisms as impulses instead: a hold or a pin is a velocity
+    toward the target (`(target - pos) / dt`), a platform ride is
+    `carryBody`, a spawn or an arrival is `placeBody` (it returns `false`
+    when the spot is solid, so fall back rather than trust it), and a
+    shiver or bob is a **render offset** (`Monster.tremorX/Y`), never a
+    write to the coordinates physics reads. The four laws are stated at
+    the top of `engine/physics/body.ts`. The one exemption is net
+    replication (`game/net/guest.ts`), which mirrors the host's
+    authoritative simulation rather than running a second one.
+11. **Rooms are immutable content.** A `RoomDef` is rebuilt from JSON on
     every visit, so gameplay must never call `tilemap.setTile` — that
     edits a copy that is about to be thrown away. Change geometry through
     `PlayHost.mutateTile`, which also records a room patch, and retire a
