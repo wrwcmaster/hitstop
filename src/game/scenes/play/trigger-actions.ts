@@ -1,4 +1,4 @@
-import { Registry, conversations, items, type TriggerDef } from '@engine/index';
+import { GRAVITY, MAX_FALL, Registry, conversations, items, type TriggerDef } from '@engine/index';
 import { COLORS } from '../../content/palette';
 import type { PlayHost } from './host';
 import { Monster } from '../../actors/monster';
@@ -123,6 +123,32 @@ function inOuterWall(def: TriggerDef, host: PlayHost): boolean {
 /** Below this you are settling on a ledge; above it you are falling. */
 const FALLING = 40;
 
+/** The simulation's fixed step: crossings are resolved sub-step against it. */
+const STEP = 1 / 60;
+
+/**
+ * The downward motion this frame's crossing test should believe.
+ *
+ * Two corrections over reading `vy`, both about the fact that this runs
+ * BEFORE the player's own step:
+ *
+ * - The step will apply gravity before moving, so the fall covers
+ *   `(vy + g·dt)·dt`, not `vy·dt`. Predicting with the smaller number
+ *   under-reaches the plane by a third of a pixel every time.
+ * - If the LAST step already ended against the level boundary, the
+ *   backstop clamped the body and zeroed vy — erasing the very motion
+ *   that proves a crossing. Where a shaft runs to the room's edge (the
+ *   vise-approach drop: plane 296, worldH 296) the wall and the seam sit
+ *   at the same coordinate, so losing that evidence would strand the
+ *   knight on the boundary with no velocity left to fire the seam ever
+ *   again. The contact recorded the speed it stopped, so use it.
+ */
+function fallSpeed(p: NonNullable<PlayHost['player']>): number {
+  const ground = p.lastCollision?.ground;
+  if (ground?.boundary && p.vy === 0) return ground.impactVelocity;
+  return Math.min(p.vy + GRAVITY * STEP, MAX_FALL);
+}
+
 /**
  * A shaft you drop into — the town well — taken by falling, not by
  * pressing a key.
@@ -131,27 +157,22 @@ const FALLING = 40;
  * interior passage, and gated on actually DESCENDING. Walking over the
  * mouth of a shaft while grounded leaves you standing on the lip; you go
  * down it because you jumped in, which is the whole appeal of a well.
- * The grotto shaft could take the same prop, but that one is a hole you
- * cross a room past, so it stays a deliberate press for now.
  */
-/** The simulation's fixed step: crossings are resolved sub-step against it. */
-const STEP = 1 / 60;
-
 function fallingIn(def: TriggerDef, host: PlayHost): boolean {
   const p = host.player;
-  if (def.props?.fallIn !== true || !p || p.vy <= FALLING) return false;
-  // The seam fires at a plane, tested against THIS step's motion (the
-  // plane often coincides with the room edge, where the bounds backstop
-  // clamps position and zeroes velocity before an at-the-plane test
-  // could see both at once). An OPEN shaft's plane is the band's far
-  // edge — the point where this room's drawn shaft actually ends;
-  // firing on first touch used to swap rooms while the knight was
-  // visibly short of the opening. A LOCKED shaft is full (the choked
-  // flue's rubble IS the blockage), so its far edge is unreachable by
-  // construction: its plane is the near edge, where falling onto it
-  // constitutes the attempt the refusal answers.
+  if (def.props?.fallIn !== true || !p) return false;
+  const vy = fallSpeed(p);
+  if (vy <= FALLING) return false;
+  // The seam fires at a plane, tested against the motion this step will
+  // actually make. An OPEN shaft's plane is the band's far edge — the
+  // point where this room's drawn shaft ends; firing on first touch used
+  // to swap rooms while the knight was visibly short of the opening. A
+  // LOCKED shaft is full (the choked flue's rubble IS the blockage), so
+  // its far edge is unreachable by construction: its plane is the near
+  // edge, where falling onto it constitutes the attempt the refusal
+  // answers.
   const plane = doorLocked(def, host) ? def.y : def.y + def.h;
-  return p.y + p.h + p.vy * STEP >= plane;
+  return p.y + p.h + vy * STEP >= plane;
 }
 
 /**
@@ -162,12 +183,19 @@ function fallingIn(def: TriggerDef, host: PlayHost): boolean {
  */
 function leapingUp(def: TriggerDef, host: PlayHost): boolean {
   const p = host.player;
-  if (def.props?.leapUp !== true || !p || p.vy >= -FALLING) return false;
+  if (def.props?.leapUp !== true || !p) return false;
+  // Mirror of fallSpeed: gravity works AGAINST a rise, so this step
+  // climbs `(vy + g·dt)·dt` — less than vy·dt, and predicting with the
+  // larger number would fire the seam for a jump that dies short of the
+  // ceiling. A rise stopped by the boundary is the room's own roof,
+  // which is a bonk, not a crossing, so there is nothing to recover.
+  const vy = p.vy + GRAVITY * STEP;
+  if (vy >= -FALLING) return false;
   // The same planes as fallingIn, mirrored upward: open = the band's
   // top (the ceiling plane), locked = the band's bottom, where rising
   // into the blocked gap is the attempt.
   const plane = doorLocked(def, host) ? def.y + def.h : def.y;
-  return p.y + p.vy * STEP <= plane;
+  return p.y + vy * STEP <= plane;
 }
 
 /**

@@ -33,35 +33,35 @@ import { launchBrowser, openSession } from './lib.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const bugDir = path.join(here, 'bugs');
 
-/** Play a recording's tape frame by frame IN PAGE, returning a compact trace. */
+/**
+ * Play a recording through the REAL replay path and sample it each step.
+ *
+ * Not a hand-rolled tape loop: `replayRun` arms the engine's own player,
+ * so the tape drives the simulation on exactly the clock it was recorded
+ * on, and touch/tap events (which a d/u-only reader silently drops) are
+ * delivered at their recorded coordinates. A bug test that replayed the
+ * inputs a few steps late, or without the taps, would be checking a
+ * different run than the one the player reported.
+ */
 async function traceTape(browser, recording) {
   const { page, errors } = await openSession(browser, recording.seed, {
     storage: recording.storage ?? {},
   });
-  const trace = await page.evaluate(async (rec) => {
-    window.__harness.beginRun(rec.start);
-    window.__harness.step([], 1);
-    const edges = rec.tape.filter((e) => e[1] === 'd' || e[1] === 'u');
-    const held = new Set();
-    let cursor = 0;
+  await page.evaluate((rec) => window.__harness.replayRun(rec), recording);
+  const trace = await page.evaluate((end) => {
     const rooms = [];
     const frames = [];
-    for (let f = 1; f <= rec.end; f++) {
-      while (cursor < edges.length && edges[cursor][0] === f) {
-        const [, kind, action] = edges[cursor];
-        if (kind === 'd') held.add(action); else held.delete(action);
-        cursor++;
-      }
-      const st = window.__harness.step([...held], 1);
+    for (let f = 1; f <= end; f++) {
+      const st = window.__harness.runTo(f);
       const sc = window.hitstop.scenes.all().find((s) => s.constructor.name === 'PlayScene');
-      const p = st.player;
+      const p = st?.player;
       if (!p) continue;
       if (!rooms.length || rooms[rooms.length - 1] !== st.roomId) rooms.push(st.roomId);
       frames.push([st.roomId, p.x, p.y, sc?.tilemap?.worldW ?? 0, sc?.tilemap?.worldH ?? 0]);
     }
     const last = frames[frames.length - 1];
     return { rooms, frames, end: { room: last[0], x: last[1], y: last[2] } };
-  }, recording);
+  }, recording.end);
   await page.context().close();
   return { trace, errors };
 }

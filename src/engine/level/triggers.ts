@@ -44,9 +44,16 @@ export class Triggers {
       const hit = overlaps(probe, def);
       const wasInside = this.inside.has(index);
       if (hit && !wasInside) {
-        if (gate && !this.fired.has(index) && !gate(def)) return;
+        // `fired` means "this ONCE-trigger is spent". It only ever
+        // records once-triggers, so consulting it for a repeating one is
+        // a category error — and not a harmless one: it is the mechanism
+        // by which a stale saved index welds a door shut forever, since
+        // nothing can ever remove an entry. A repeating trigger fires
+        // whenever it is entered, full stop.
+        const spent = def.once !== false && this.fired.has(index);
+        if (gate && !spent && !gate(def)) return;
         this.inside.add(index);
-        if (!this.fired.has(index)) {
+        if (!spent) {
           if (def.once !== false) this.fired.add(index);
           fire({ def, index });
         }
@@ -104,16 +111,15 @@ export class Triggers {
   /**
    * Restore fired state from a save file.
    *
-   * Saves store INDICES, and a room's trigger list can change between
-   * the build that wrote the save and the build loading it. A repeating
-   * trigger can never legitimately be in the fired set (update() only
-   * records once-triggers), so any imported index that lands on one is
-   * stale by definition — from a room whose triggers have since been
-   * reordered — and keeping it would permanently kill that trigger for
-   * this save. That was a door once: an old save's indices landed on
-   * the vault doorway and quietly welded it shut.
+   * Indices are only meaningful against the trigger list that wrote
+   * them. Reordering or retyping a room's triggers invalidates the save,
+   * and the save layer says so by version rather than being second-
+   * guessed here — a filter that reinterprets old indices against new
+   * definitions can only ever fix the cases it thought of, while stale
+   * indices that happen to land on another once-trigger sail through and
+   * silently suppress unrelated content.
    */
   importFired(indices: number[]): void {
-    this.fired = new Set(indices.filter((i) => this.defs[i]?.once !== false));
+    this.fired = new Set(indices);
   }
 }
