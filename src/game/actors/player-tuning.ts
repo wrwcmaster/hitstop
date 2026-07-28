@@ -81,7 +81,7 @@ export const PLAYER_TUNING = {
   // second, so hesitating between kicks gave back most of what the last
   // one won. 16 lets you hold a position and pick your moment, which is
   // what makes a climb feel like a decision rather than a scramble.
-  clingSlide: 16,
+  clingSlide: 0,
   // Two kicks, chosen by what you are holding at the moment you press.
   //
   // LEAP (neutral, or away from the wall): the old single kick, thrown
@@ -93,8 +93,8 @@ export const PLAYER_TUNING = {
   // and steering back, so every grab lands lower than the last. Holding
   // INTO the stone says you mean to go up it, so the kick obliges and
   // only unsticks her. Same verb, two readings, no mode to toggle.
-  wallClimbX: 70,
-  wallClimbY: 420,
+  wallClimbX: 35,
+  wallClimbY: 620,
   // Long enough to leave the wall behind while still holding toward it,
   // short enough that the grab on the FAR side still lands. A narrow
   // shaft is the binding case: 32px crossed at wallJumpX takes about

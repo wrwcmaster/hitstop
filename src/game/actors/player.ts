@@ -1361,6 +1361,13 @@ export class Player extends Actor {
     // Gravity + jump physics (dash overrides velocity; the dead still fall).
     if (!this.fsm.is('dash')) {
       applyGravity(this, dt);
+      // A grip decides its own descent, so the cap goes AFTER gravity.
+      // clingUpdate sets it before, and gravity then added a frame's
+      // worth right back on top — so the slide was always clingSlide+25
+      // however the number was tuned, and setting it to 0 still slid at
+      // 25px/s. Water already caps its velocities on this side of the
+      // call for the same reason; the wall was the odd one out.
+      if (this.fsm.is('cling')) this.vy = Math.min(this.vy, PLAYER_TUNING.clingSlide);
       if (swimming) {
         // The mechanism (buoyancy, ascend/dive, drag, caps) lives in the
         // engine; here we supply the tuning. Sink slowly by default, hold
