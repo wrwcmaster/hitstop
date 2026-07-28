@@ -55,6 +55,16 @@ export interface CollisionSource {
   /** Fraction (0..1) of a rect covered by water, if this source has any
    * (tilemaps do). Absent = a dry world. */
   submersion?(r: Rect): number;
+  /**
+   * Is this exact point water? The point-sized companion to `submersion`,
+   * for probing a line rather than weighing an area — finding the
+   * waterline a flier should stay above, say.
+   *
+   * Declared here because it was already being used: callers cast the
+   * collision source to reach a method the seam did not admit to having,
+   * which is a dependency either way, just an unchecked one.
+   */
+  waterAt?(x: number, y: number): boolean;
   /** Strongest hazard-tile damage under a rect (spikes, lava). Absent =
    * a harmless world. */
   hazardAt?(r: Rect): number;

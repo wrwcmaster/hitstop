@@ -18,11 +18,11 @@ import { Player } from './player';
  * there's no water below (so callers can `Math.min` it with a free target).
  */
 function waterlineAbove(m: Monster, x: number): number {
-  const tm = m.collision as { waterAt?: (x: number, y: number) => boolean };
-  if (!tm.waterAt) return Infinity;
+  const waterAt = m.collision.waterAt;
+  if (!waterAt) return Infinity;
   const cx = x + m.w / 2;
   for (let y = m.y; y < m.y + 420; y += 4) {
-    if (tm.waterAt(cx, y)) return y - m.h - 4;
+    if (waterAt.call(m.collision, cx, y)) return y - m.h - 4;
   }
   return Infinity;
 }
