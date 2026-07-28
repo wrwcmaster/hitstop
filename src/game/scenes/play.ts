@@ -719,15 +719,22 @@ export class PlayScene implements Scene {
     this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
     this.triggers = new Triggers(this.room.triggers ?? []);
     this.triggers.importFired(this.firedTriggers[id] ?? []);
-    // The frame reaches the room's true bottom. It used to stop 16px
-    // short, to crop the padding rows every room carried from before the
-    // camera could scroll down at all — but a constant cannot know how
-    // much foundation a room drew, so the visible strip ranged 8px to
-    // 59px and the crop was inert in the two rooms with the most dead
-    // rock. Each room now authors the foundation it wants seen. The band
-    // that constant created — reachable by physics, not by the camera —
-    // is what cut the knight's feet off at the bottom of the flue.
-    g.camera.setBounds(0, -30, this.tilemap.worldW, this.tilemap.worldH);
+    // The frame is the room, exactly — no margin at either end.
+    //
+    // It used to stop 16px above the bottom and extend 30px past the top.
+    // Both were crops around content, and both lied. The bottom reserve
+    // hid padding rows rooms carried from before the camera could scroll
+    // down at all; a constant cannot know how much foundation a room drew,
+    // so the visible strip ranged 8px to 59px, and the band it created —
+    // reachable by physics, not by the camera — is what cut the knight's
+    // feet off in the flue. The top margin was the same shape upside
+    // down: 30px of void above every ceiling, so a ceiling door's sign
+    // had somewhere to render. Riven-lip's roof floated under a strip of
+    // nothing instead of reading as the underside of underground's floor.
+    //
+    // Rooms author their own sky and their own foundation. Signs render
+    // inside the room (see renderDoorSigns).
+    g.camera.setBounds(0, 0, this.tilemap.worldW, this.tilemap.worldH);
 
     g.world.retain((e) => e === this.player || e === this.coop?.guest);
     g.feel.particles.clear();
@@ -1311,7 +1318,16 @@ export class PlayScene implements Scene {
       ));
       ctx.globalAlpha = near ? 1 : 0.45;
       const lineHeight = 8;
-      const textY = z.y - 9 - (lines.length - 1) * lineHeight - (besidePortal ? 14 : 0);
+      // Above the doorway by preference — but a ceiling door's "above" is
+      // outside the room, and the frame no longer extends past the roof to
+      // cover for it. Clamp into the room the same way the line above
+      // clamps horizontally, so the sign drops below the lintel instead
+      // of demanding a strip of void to live in.
+      const top = Math.max(0, this.game.camera.y) + 2;
+      const bottom = Math.min(this.tilemap.worldH, this.game.camera.y + this.game.camera.viewH)
+        - lines.length * lineHeight - 2;
+      const wanted = z.y - 9 - (lines.length - 1) * lineHeight - (besidePortal ? 14 : 0);
+      const textY = top <= bottom ? clamp(wanted, top, bottom) : wanted;
       lines.forEach((line, index) => {
         drawText(ctx, line, textX, textY + index * lineHeight, near ? COLORS.gold : COLORS.steel, 1, 'center');
       });
