@@ -134,8 +134,24 @@ const FALLING = 40;
  * The grotto shaft could take the same prop, but that one is a hole you
  * cross a room past, so it stays a deliberate press for now.
  */
+/** The simulation's fixed step: crossings are resolved sub-step against it. */
+const STEP = 1 / 60;
+
 function fallingIn(def: TriggerDef, host: PlayHost): boolean {
-  return def.props?.fallIn === true && !!host.player && host.player.vy > FALLING;
+  const p = host.player;
+  if (def.props?.fallIn !== true || !p || p.vy <= FALLING) return false;
+  // The seam fires at a plane, tested against THIS step's motion (the
+  // plane often coincides with the room edge, where the bounds backstop
+  // clamps position and zeroes velocity before an at-the-plane test
+  // could see both at once). An OPEN shaft's plane is the band's far
+  // edge — the point where this room's drawn shaft actually ends;
+  // firing on first touch used to swap rooms while the knight was
+  // visibly short of the opening. A LOCKED shaft is full (the choked
+  // flue's rubble IS the blockage), so its far edge is unreachable by
+  // construction: its plane is the near edge, where falling onto it
+  // constitutes the attempt the refusal answers.
+  const plane = doorLocked(def, host) ? def.y : def.y + def.h;
+  return p.y + p.h + p.vy * STEP >= plane;
 }
 
 /**
@@ -145,7 +161,13 @@ function fallingIn(def: TriggerDef, host: PlayHost): boolean {
  * genuine motion so brushing the opening never counts.
  */
 function leapingUp(def: TriggerDef, host: PlayHost): boolean {
-  return def.props?.leapUp === true && !!host.player && host.player.vy < -FALLING;
+  const p = host.player;
+  if (def.props?.leapUp !== true || !p || p.vy >= -FALLING) return false;
+  // The same planes as fallingIn, mirrored upward: open = the band's
+  // top (the ceiling plane), locked = the band's bottom, where rising
+  // into the blocked gap is the attempt.
+  const plane = doorLocked(def, host) ? def.y + def.h : def.y;
+  return p.y + p.vy * STEP <= plane;
 }
 
 /**

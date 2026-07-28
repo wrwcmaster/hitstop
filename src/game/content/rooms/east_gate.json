@@ -29,7 +29,7 @@
     "....####BBBB################..............aa",
     "....####BBBB################..............aa",
     "....####BBBB################...............a",
-    "....AAAALLLLAAAAAAAAAAAAAAAA...............a",
+    "....AAAALLAAAAAAAAAAAAAAAAAA...............a",
     "....BBTBBBBBBBBTBBBBBBBBBTBB................",
     "....BBBBBBBBBBBBBBBBBBBBBBBB................",
     "....BBBBBBBBBBBBBBBBBBBBBBBB................",
@@ -45,8 +45,8 @@
   "entities": [
     {
       "type": "chest",
-      "x": 74,
-      "y": 87
+      "x": 80,
+      "y": 80
     }
   ],
   "triggers": [

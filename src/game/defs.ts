@@ -254,7 +254,17 @@ export interface GameEvents extends Record<string, unknown> {
 
 /** The game plus its polled gamepad (attached in main.ts, used by the
  * controls UI for button rebinding). */
-export type ActionGame = Game<Action, GameEvents> & { pad?: GamepadInput<Action> };
+export type ActionGame = Game<Action, GameEvents> & {
+  pad?: GamepadInput<Action>;
+  /**
+   * A quiet scenario's mute for ALL conversation dialogue. Lives on the
+   * game rather than the scene because dialogue opens from two layers:
+   * PlayScene (talk triggers, epilogues) and Npc.talk (an actor pushing
+   * its own DialogueScene). One flag, both gates — set by scenario
+   * starts, cleared by every ordinary run start.
+   */
+  quietDialogue?: boolean;
+};
 
 /**
  * The narrow view of the game the simulation layer is allowed to touch —

@@ -1,0 +1,155 @@
+{
+ "name": "vault-return",
+ "issue": "Jumping out of the vault mapped the exit height from a wall-ejected ghost position, landing the knight 72px above the ceiling, frozen outside the world.",
+ "expect": {
+  "rooms": [
+   "underground",
+   "vault",
+   "underground"
+  ],
+  "inBounds": true,
+  "maxWarp": 15,
+  "end": {
+   "room": "underground",
+   "y": 142
+  }
+ },
+ "recording": {
+  "v": 3,
+  "seed": 3798081345,
+  "mode": "live",
+  "created": "2026-07-27T18:35:51.157Z",
+  "start": {
+   "kind": "autosave"
+  },
+  "storage": {
+   "hitstop.save": "{\"v\":4,\"data\":{\"roomId\":\"underground\",\"best\":2125,\"savedAt\":1785177562740,\"flags\":[\"visited:arena\",\"visited:cavern\",\"visited:grotto\",\"visited:corridor\",\"visited:throne\",\"bossDefeated\",\"slain:slime-king\",\"visited:town\",\"visited:underground\",\"visited:east-gate\",\"visited:riven-lip\",\"visited:vault\",\"switch:vault-a\",\"visited:mountain\"],\"firedTriggers\":{\"arena\":[0],\"cavern\":[2],\"grotto\":[],\"corridor\":[],\"throne\":[1,2],\"town\":[2],\"underground\":[],\"east-gate\":[2],\"riven-lip\":[2],\"vault\":[1],\"mountain\":[]},\"patches\":{\"underground\":{\"tiles\":{\"48,20\":\"\",\"49,20\":\"\",\"50,20\":\"\",\"39,20\":\"\",\"40,20\":\"\"},\"removed\":[\"chest@278,183\"]},\"vault\":{\"removed\":[\"chest@820,210\",\"chest@856,210\",\"chest@780,210\"]},\"east-gate\":{\"removed\":[\"chest@74,87\"]}},\"player\":{\"inventory\":[{\"id\":\"rusty-sword\",\"count\":1},{\"id\":\"potion\",\"count\":5},{\"id\":\"iron-helmet\",\"count\":1},{\"id\":\"gate-key\",\"count\":1},{\"id\":\"hunting-bow\",\"count\":1},{\"id\":\"flintlock\",\"count\":1},{\"id\":\"potion\",\"count\":2}],\"equipped\":[[\"helmet\",\"iron-helmet\"]],\"skills\":[\"fireball\",\"ice-shard\"],\"gold\":160,\"progression\":{\"xp\":136,\"level\":7,\"skillPoints\":6},\"classId\":\"knight\",\"trees\":{\"knight\":[]},\"quests\":{\"active\":[],\"done\":[]},\"forgeLevel\":0,\"armorWear\":{\"iron-helmet\":168},\"earned\":[\"impact-drop\"]}}}",
+   "hitstop.settings": "{\"v\":3,\"data\":{\"master\":1,\"music\":0,\"sfx\":1,\"locale\":\"en\"}}"
+  },
+  "tape": [
+   [
+    96,
+    "d",
+    "right"
+   ],
+   [
+    230,
+    "d",
+    "jump"
+   ],
+   [
+    238,
+    "u",
+    "jump"
+   ],
+   [
+    266,
+    "d",
+    "jump"
+   ],
+   [
+    274,
+    "u",
+    "jump"
+   ],
+   [
+    321,
+    "d",
+    "jump"
+   ],
+   [
+    330,
+    "u",
+    "jump"
+   ],
+   [
+    345,
+    "u",
+    "right"
+   ],
+   [
+    378,
+    "d",
+    "left"
+   ],
+   [
+    388,
+    "d",
+    "jump"
+   ],
+   [
+    397,
+    "u",
+    "jump"
+   ],
+   [
+    423,
+    "u",
+    "left"
+   ],
+   [
+    578,
+    "d",
+    "menu"
+   ],
+   [
+    584,
+    "u",
+    "menu"
+   ],
+   [
+    635,
+    "t",
+    209.7,
+    148.94
+   ]
+  ],
+  "checks": [
+   [
+    60,
+    2558246864
+   ],
+   [
+    120,
+    2990872476
+   ],
+   [
+    180,
+    2289506644
+   ],
+   [
+    240,
+    2520853129
+   ],
+   [
+    300,
+    2856803497
+   ],
+   [
+    360,
+    1724128582
+   ],
+   [
+    420,
+    3557149548
+   ],
+   [
+    480,
+    1419901708
+   ],
+   [
+    540,
+    924030377
+   ],
+   [
+    600,
+    4268534210
+   ],
+   [
+    635,
+    3121945130
+   ]
+  ],
+  "end": 635
+ }
+}

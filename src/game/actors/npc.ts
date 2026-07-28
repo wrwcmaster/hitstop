@@ -112,6 +112,10 @@ export class Npc extends Actor {
       if (p) this.game.scenes.push(new SpawnerScene(this.game, p, this.collision));
       return;
     }
+    // A quiet scenario mutes NPC chatter too — this push is the one
+    // dialogue that doesn't go through PlayScene.openConversation, so it
+    // reads the same game-level flag that gate does.
+    if (this.game.quietDialogue) return;
     const ctx = this.ctx();
     if (!ctx) return;
     const greet = typeof this.def.greet === 'function' ? this.def.greet(ctx) : this.def.greet;

@@ -1,1 +1,1 @@
-{"v":3,"seed":2654435770,"mode":"harness","created":"2026-07-26T18:22:49.439Z","start":{"kind":"scenario","scenario":{"player":{"y":214,"x":600},"room":"town"}},"storage":{},"tape":[[38,"d","right"],[49,"d","jump"],[57,"u","jump"]],"checks":[[60,3896118200],[92,2898401122]],"end":92}
+{"v":3,"seed":2654435770,"mode":"harness","created":"2026-07-26T18:22:49.439Z","start":{"kind":"scenario","scenario":{"player":{"y":214,"x":600},"room":"town"}},"storage":{},"tape":[[38,"d","right"],[49,"d","jump"],[57,"u","jump"]],"checks":[[60,3896118200],[92,2613318526]],"end":92}
