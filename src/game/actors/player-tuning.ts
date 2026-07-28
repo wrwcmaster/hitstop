@@ -76,7 +76,12 @@ export const PLAYER_TUNING = {
   // parked, and the drift tells you the grip is a moment you spend
   // rather than a place you live. No stamina meter — the design brief
   // asks for forgiving, and gravity already sets the clock.
-  clingSlide: 34,
+  //
+  // Slow enough now that the clock is generous: at 34 a grip bled 34px a
+  // second, so hesitating between kicks gave back most of what the last
+  // one won. 16 lets you hold a position and pick your moment, which is
+  // what makes a climb feel like a decision rather than a scramble.
+  clingSlide: 16,
   // Two kicks, chosen by what you are holding at the moment you press.
   //
   // LEAP (neutral, or away from the wall): the old single kick, thrown
@@ -89,7 +94,7 @@ export const PLAYER_TUNING = {
   // INTO the stone says you mean to go up it, so the kick obliges and
   // only unsticks her. Same verb, two readings, no mode to toggle.
   wallClimbX: 70,
-  wallClimbY: 360,
+  wallClimbY: 420,
   // Long enough to leave the wall behind while still holding toward it,
   // short enough that the grab on the FAR side still lands. A narrow
   // shaft is the binding case: 32px crossed at wallJumpX takes about
