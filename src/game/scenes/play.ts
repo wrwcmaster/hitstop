@@ -721,7 +721,9 @@ export class PlayScene implements Scene {
     this.triggers = new Triggers(this.room.triggers ?? []);
     this.triggers.importFired(this.firedTriggers[id] ?? []);
     // Stop the view 16px above the room's true bottom so the frame shows
-    // a lip of ground, not a wall of underground rock.
+    // a lip of ground, not a wall of underground rock. This makes the
+    // bottom two tile rows a contract — nothing standable lives there —
+    // enforced at boot by requireSolidBasement in content/room-features.
     g.camera.setBounds(0, -30, this.tilemap.worldW, this.tilemap.worldH - 16);
 
     g.world.retain((e) => e === this.player || e === this.coop?.guest);

@@ -126,6 +126,53 @@ function requireReachable(room: RoomDef, door: TriggerDef, path: string): void {
   );
 }
 
+/**
+ * The camera never shows a room's bottom 16px — PlayScene reserves them
+ * as a cropped basement so ground reads as a lip of stone instead of a
+ * wall of rock (see setRoom's camera bounds). That is a CONTRACT: the
+ * bottom two tile rows are scenery, and a floor the player can stand on
+ * down there is ground the camera cannot reach — the knight walks along
+ * the screen's bottom edge with her feet cut off.
+ *
+ * This was found live, not imagined: town's riven-flue shaft was dug
+ * with a standable floor on the last row, and a knight dropping into
+ * the choked shaft stood clipped at the frame's edge.
+ *
+ * One shape of basement floor is fine: a surface fully covered by an
+ * unlock-free fall-in door. That seam fires mid-fall, every time, so
+ * the surface below it is pure pass-through — nobody can ever stand on
+ * it. A LOCKABLE fall-in gives no such guarantee (locked = the shaft
+ * catches you), which is exactly the case this rule exists to reject.
+ */
+function requireSolidBasement(room: RoomDef, path: string): void {
+  const rows = room.tiles.length;
+  if (rows < 4) return;
+  const ts = room.tileSize;
+  const solidAt = (r: number, c: number): boolean => {
+    const id = room.legend[(room.tiles[r] ?? '')[c] ?? ''] ?? '';
+    return id !== '' && !!tiles.get(id).solid;
+  };
+  const passThrough = (room.triggers ?? []).filter(
+    (t) => t.event === 'door' && t.props?.fallIn === true
+      && t.props.key === undefined && t.props.flag === undefined && t.props.bossSeal === undefined,
+  );
+  const cols = Math.max(...room.tiles.map((row) => row.length));
+  for (let c = 0; c < cols; c++) {
+    for (const r of [rows - 2, rows - 1]) {
+      if (!solidAt(r, c) || solidAt(r - 1, c)) continue; // not a standing surface
+      const covered = passThrough.some(
+        (t) => c >= Math.floor(t.x / ts) && c <= Math.floor((t.x + t.w - 1) / ts),
+      );
+      if (!covered) {
+        throw new Error(
+          `${path}: standable floor at col ${c}, row ${r} sits in the camera's 16px basement reserve — `
+          + 'fill the pit, deepen the room, or cover it with an unlock-free fall-in door',
+        );
+      }
+    }
+  }
+}
+
 /** Validate open content bags after all game registries have been filled. */
 export function validateRoomContent(room: RoomDef, id = room.name): RoomDef {
   const root = `room "${id}"`;
@@ -134,6 +181,12 @@ export function validateRoomContent(room: RoomDef, id = room.name): RoomDef {
     if (!roomFeatures.has(key)) throw new Error(`${root}.props.${key}: unknown room feature`);
     roomFeatures.get(key).validate(value, room, `${root}.props.${key}`);
   }
+
+  // The basement contract guards rooms a player will look at. The 'test'
+  // slot is a scenario's inline lab bench — synthetic, camera-less in
+  // spirit, and frozen verbatim inside existing recordings, so holding it
+  // to a framing rule would invalidate every verb tape for no one's eyes.
+  if (id !== 'test') requireSolidBasement(room, root);
 
   room.entities.forEach((entity, index) => {
     const path = `${root}.entities[${index}] (${entity.type}).props`;
