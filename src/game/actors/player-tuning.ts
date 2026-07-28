@@ -77,11 +77,15 @@ export const PLAYER_TUNING = {
   // rather than a place you live. No stamina meter — the design brief
   // asks for forgiving, and gravity already sets the clock.
   //
-  // Slow enough now that the clock is generous: at 34 a grip bled 34px a
-  // second, so hesitating between kicks gave back most of what the last
-  // one won. 16 lets you hold a position and pick your moment, which is
-  // what makes a climb feel like a decision rather than a scramble.
-  clingSlide: 0,
+  // This IS the slide rate now, exactly — the cap is applied after
+  // gravity (see player.ts), where before it ran before and a frame's
+  // worth was added straight back, making the real drift clingSlide+25
+  // and 0 a 25px/s slide. Tune it as the literal px/s you want.
+  //
+  // 34 (the old value, a true 59px/s) gave back most of what a kick won
+  // if you hesitated; 16 lets you hold a position and pick your moment,
+  // which is what makes a climb feel like a decision, not a scramble.
+  clingSlide: 16,
   // Two kicks, chosen by what you are holding at the moment you press.
   //
   // LEAP (neutral, or away from the wall): the old single kick, thrown
