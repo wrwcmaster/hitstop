@@ -719,11 +719,15 @@ export class PlayScene implements Scene {
     this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
     this.triggers = new Triggers(this.room.triggers ?? []);
     this.triggers.importFired(this.firedTriggers[id] ?? []);
-    // Stop the view 16px above the room's true bottom so the frame shows
-    // a lip of ground, not a wall of underground rock. This makes the
-    // bottom two tile rows a contract — nothing standable lives there —
-    // enforced at boot by requireSolidBasement in content/room-features.
-    g.camera.setBounds(0, -30, this.tilemap.worldW, this.tilemap.worldH - 16);
+    // The frame reaches the room's true bottom. It used to stop 16px
+    // short, to crop the padding rows every room carried from before the
+    // camera could scroll down at all — but a constant cannot know how
+    // much foundation a room drew, so the visible strip ranged 8px to
+    // 59px and the crop was inert in the two rooms with the most dead
+    // rock. Each room now authors the foundation it wants seen. The band
+    // that constant created — reachable by physics, not by the camera —
+    // is what cut the knight's feet off at the bottom of the flue.
+    g.camera.setBounds(0, -30, this.tilemap.worldW, this.tilemap.worldH);
 
     g.world.retain((e) => e === this.player || e === this.coop?.guest);
     g.feel.particles.clear();

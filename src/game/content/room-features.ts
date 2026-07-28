@@ -127,26 +127,25 @@ function requireReachable(room: RoomDef, door: TriggerDef, path: string): void {
 }
 
 /**
- * The camera never shows a room's bottom 16px — PlayScene reserves them
- * as a cropped basement so ground reads as a lip of stone instead of a
- * wall of rock (see setRoom's camera bounds). That is a CONTRACT: the
- * bottom two tile rows are scenery, and a floor the player can stand on
- * down there is ground the camera cannot reach — the knight walks along
- * the screen's bottom edge with her feet cut off.
+ * A column left open at the room's bottom edge has an INVISIBLE floor.
+ * The physics backstop stops bodies at the room extent whether or not a
+ * tile is drawn there, so the knight ends up standing on nothing — no
+ * stone under her feet, at the very edge of the frame.
  *
- * This was found live, not imagined: town's riven-flue shaft was dug
- * with a standable floor on the last row, and a knight dropping into
- * the choked shaft stood clipped at the frame's edge.
+ * This is a room bug at any camera setting, which is the whole reason
+ * it outlived the 16px reserve it was first written against: that
+ * constant cropped the bottom rows, so the invisible floor was also an
+ * unseeable one. The crop is gone (rooms author their own foundation
+ * now) and the rule is simply "draw the ground you stand on".
  *
- * One shape of basement floor is fine: a surface fully covered by an
- * unlock-free fall-in door. That seam fires mid-fall, every time, so
- * the surface below it is pure pass-through — nobody can ever stand on
- * it. A LOCKABLE fall-in gives no such guarantee (locked = the shaft
- * catches you), which is exactly the case this rule exists to reject.
+ * One exemption: a column fully covered by an unlock-free fall-in door.
+ * That seam fires mid-fall every time, so nobody can ever stand there.
+ * A LOCKABLE fall-in gives no such guarantee — locked, the shaft
+ * catches you — which is exactly the case this rejects.
  */
-function requireSolidBasement(room: RoomDef, path: string): void {
+function requireDrawnFloor(room: RoomDef, path: string): void {
   const rows = room.tiles.length;
-  if (rows < 4) return;
+  if (rows < 2) return;
   const ts = room.tileSize;
   const solidAt = (r: number, c: number): boolean => {
     const id = room.legend[(room.tiles[r] ?? '')[c] ?? ''] ?? '';
@@ -157,29 +156,15 @@ function requireSolidBasement(room: RoomDef, path: string): void {
       && t.props.key === undefined && t.props.flag === undefined && t.props.bossSeal === undefined,
   );
   const cols = Math.max(...room.tiles.map((row) => row.length));
-  const covered = (c: number): boolean => passThrough.some(
-    (t) => c >= Math.floor(t.x / ts) && c <= Math.floor((t.x + t.w - 1) / ts),
-  );
   for (let c = 0; c < cols; c++) {
-    for (const r of [rows - 2, rows - 1]) {
-      if (!solidAt(r, c) || solidAt(r - 1, c)) continue; // not a standing surface
-      if (!covered(c)) {
-        throw new Error(
-          `${path}: standable floor at col ${c}, row ${r} sits in the camera's 16px basement reserve — `
-          + 'fill the pit, deepen the room, or cover it with an unlock-free fall-in door',
-        );
-      }
-    }
-    // A column open at the very bottom has an INVISIBLE floor: the
-    // physics backstop stops bodies at the room extent whether or not a
-    // tile is drawn there, so a bare-to-the-boundary pit strands the
-    // knight standing at worldH — deeper into the camera's blind rows
-    // than any authored floor could be. Same rule, same exemption: only
-    // a guaranteed fall-in seam may own such a column.
-    if (!solidAt(rows - 1, c) && !covered(c)) {
+    if (solidAt(rows - 1, c)) continue;
+    const covered = passThrough.some(
+      (t) => c >= Math.floor(t.x / ts) && c <= Math.floor((t.x + t.w - 1) / ts),
+    );
+    if (!covered) {
       throw new Error(
-        `${path}: col ${c} is open at the room's bottom boundary — the physics backstop becomes an `
-        + 'invisible floor below the camera; close the column or cover it with an unlock-free fall-in door',
+        `${path}: col ${c} is open at the room's bottom edge — the physics backstop becomes an `
+        + 'invisible floor there; draw ground in the last row or cover the column with an unlock-free fall-in door',
       );
     }
   }
@@ -203,8 +188,7 @@ function requireSolidBasement(room: RoomDef, path: string): void {
  * they catch a descent, and drop-through resumes it — a rest, not a
  * blockage. LOCKED fall-ins are the opposite shape by design (the
  * shaft catches you while the way is shut, like the rubble-choked
- * flue) and requireSolidBasement keeps their floors out of the
- * camera's blind rows.
+ * flue) — being caught is the point.
  */
 function requirePassThroughShaft(room: RoomDef, path: string): void {
   const ts = room.tileSize;
@@ -245,7 +229,7 @@ export function validateRoomContent(room: RoomDef, id = room.name): RoomDef {
   // slot is a scenario's inline lab bench — synthetic, camera-less in
   // spirit, and frozen verbatim inside existing recordings, so holding it
   // to a framing rule would invalidate every verb tape for no one's eyes.
-  if (id !== 'test') requireSolidBasement(room, root);
+  if (id !== 'test') requireDrawnFloor(room, root);
   if (id !== 'test') requirePassThroughShaft(room, root);
 
   room.entities.forEach((entity, index) => {
