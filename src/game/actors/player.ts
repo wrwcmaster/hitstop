@@ -1145,8 +1145,15 @@ export class Player extends Actor {
     // held direction cannot immediately drag her back on.
     if (this.jumpBuf.active) {
       this.jumpBuf.consume();
-      this.vx = -side * T.wallJumpX;
-      this.vy = -T.wallJumpY;
+      // Still leaning into the stone? Then you are climbing it, and the
+      // kick is almost pure lift. Let go, or push off, and it is the wide
+      // leap that crosses a shaft. The axis is read at the instant of the
+      // press — this branch runs before the let-go check below, so a
+      // player who taps away+jump together gets the leap, and one who
+      // holds in gets the climb.
+      const climbing = this.input.axis('left', 'right') === side;
+      this.vx = -side * (climbing ? T.wallClimbX : T.wallJumpX);
+      this.vy = -(climbing ? T.wallClimbY : T.wallJumpY);
       this.facing = -side === 1 ? 1 : -1;
       this.regripT = T.regripLock;
       this.squash = 1.4;
@@ -1403,6 +1410,15 @@ export class Player extends Actor {
         this.jumpBuf.consume();
         this.coyote.consume();
         this.vy = -T.jumpSpeed;
+        // Leaving the ground beside a wall you are pressing into is a
+        // JUMP, not a grab. Without this the grip fired on the very next
+        // frame and beginCling zeroed the launch — a 53px leap became a
+        // standstill and a slide, so a wall could never be climbed from
+        // its base. The same lockout a wall kick already takes: long
+        // enough to get clear of the stone, short enough that the grab
+        // still lands while she is rising, which is what banks the
+        // height on both a single wall and the far side of a shaft.
+        if (this.grippableSide() !== 0) this.regripT = T.regripLock;
         this.squash = 1.35;
         this.feel.sfx.play('jump');
         this.feel.burst(this.cx, this.y + this.h, 5, {

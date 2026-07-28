@@ -77,10 +77,19 @@ export const PLAYER_TUNING = {
   // rather than a place you live. No stamina meter — the design brief
   // asks for forgiving, and gravity already sets the clock.
   clingSlide: 34,
-  // The kick: horizontal enough to clear the wall and cross a shaft,
-  // vertical enough to gain height on each side of one.
+  // Two kicks, chosen by what you are holding at the moment you press.
+  //
+  // LEAP (neutral, or away from the wall): the old single kick, thrown
+  // wide enough to clear a shaft and land the grab on the far side.
   wallJumpX: 190,
   wallJumpY: 300,
+  // CLIMB (still holding into the wall): barely any push, most of it up.
+  // A wide kick cannot climb one wall — the rise is spent drifting out
+  // and steering back, so every grab lands lower than the last. Holding
+  // INTO the stone says you mean to go up it, so the kick obliges and
+  // only unsticks her. Same verb, two readings, no mode to toggle.
+  wallClimbX: 70,
+  wallClimbY: 360,
   // Long enough to leave the wall behind while still holding toward it,
   // short enough that the grab on the FAR side still lands. A narrow
   // shaft is the binding case: 32px crossed at wallJumpX takes about
