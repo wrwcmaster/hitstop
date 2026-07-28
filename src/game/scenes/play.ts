@@ -22,6 +22,7 @@ import {
   overlaps,
   t,
   moveAndCollide,
+  placeBody,
 } from '@engine/index';
 import { menuLine, prettyCode, prettyButton, promptText, REPLAY_PENDING_KEY, type ActionGame, type Action, type RunStart, type TestScenario } from '../defs';
 import { Player } from '../actors/player';
@@ -761,18 +762,25 @@ export class PlayScene implements Scene {
     // yet (title screen), aim at the spawn point.
     const aimX = this.player ? (spawnX ?? this.room.playerSpawn.x) : this.room.playerSpawn.x;
     const aimY = this.player ? (spawnY ?? this.room.playerSpawn.y) : this.room.playerSpawn.y;
+    // Arrivals go through placement, not assignment — a body may only be
+    // put where a body could have moved. If the computed spot is buried
+    // (a door landing that lands in rock), fall back to the room's own
+    // spawn rather than leaving her inside the wall, where collision
+    // cannot see her and she would walk straight through it.
     if (this.player) {
       this.player.collision = this.tilemap;
-      this.player.x = aimX;
-      this.player.y = aimY;
+      if (!placeBody(this.player, aimX, aimY, this.tilemap)) {
+        placeBody(this.player, this.room.playerSpawn.x, this.room.playerSpawn.y, this.tilemap);
+      }
       this.player.vx = 0;
       this.player.vy = 0;
     }
     const knight = this.coop?.guest;
     if (knight) {
       knight.collision = this.tilemap;
-      knight.x = aimX + 14; // beside the host, not inside them
-      knight.y = aimY;
+      if (!placeBody(knight, aimX + 14, aimY, this.tilemap)) { // beside the host, not inside them
+        placeBody(knight, this.room.playerSpawn.x, this.room.playerSpawn.y, this.tilemap);
+      }
       knight.vx = 0;
       knight.vy = 0;
     }

@@ -95,6 +95,66 @@ export interface Body extends Rect {
 export const GRAVITY = 1500;
 export const MAX_FALL = 460;
 
+/**
+ * Put a body somewhere, legally.
+ *
+ * Assigning `.x`/`.y` is not physics: `moveAndCollide` only ever resolves
+ * a body moving INTO a solid from outside, so one that STARTS inside is
+ * invisible to it — every overlap test is already true, no contact is
+ * new, and it walks through stone as if the wall were scenery. Anywhere
+ * position was set by hand (room arrivals, spawns) could therefore put a
+ * body somewhere movement would never have allowed, and nothing
+ * downstream could tell.
+ *
+ * So placement resolves too. The push per direction is the MAXIMUM over
+ * every overlapping solid, which is what clears a contiguous run of
+ * tiles in one move — pushing out of one tile at a time just shoves the
+ * body into its neighbour and the two fight. Then take the shortest of
+ * the four, and repeat, because leaving one span can enter another.
+ *
+ * Returns false if it could not find open space, so a caller with a
+ * fallback (a room's spawn point) can use it rather than trust a lie.
+ */
+export function placeBody(
+  b: Body,
+  x: number,
+  y: number,
+  world: CollisionSource,
+  maxPasses = 4,
+): boolean {
+  b.x = x;
+  b.y = y;
+  for (let pass = 0; pass < maxPasses; pass++) {
+    let hit = false;
+    let outLeft = 0;
+    let outRight = 0;
+    let outUp = 0;
+    let outDown = 0;
+    for (const s of world.solidsNear(b)) {
+      if (s.oneWay) continue;
+      if (!(b.x < s.x + s.w && b.x + b.w > s.x && b.y < s.y + s.h && b.y + b.h > s.y)) continue;
+      hit = true;
+      outRight = Math.max(outRight, s.x + s.w - b.x);
+      outLeft = Math.max(outLeft, b.x + b.w - s.x);
+      outDown = Math.max(outDown, s.y + s.h - b.y);
+      outUp = Math.max(outUp, b.y + b.h - s.y);
+    }
+    if (!hit) return true;
+    const shortest = Math.min(outLeft, outRight, outUp, outDown);
+    if (shortest === outUp) b.y -= outUp;
+    else if (shortest === outDown) b.y += outDown;
+    else if (shortest === outLeft) b.x -= outLeft;
+    else b.x += outRight;
+  }
+  // Still buried after several passes: the spot is solid rock, not a
+  // near miss. Say so.
+  for (const s of world.solidsNear(b)) {
+    if (s.oneWay) continue;
+    if (b.x < s.x + s.w && b.x + b.w > s.x && b.y < s.y + s.h && b.y + b.h > s.y) return false;
+  }
+  return true;
+}
+
 export function applyGravity(b: Body, dt: number): void {
   if (b.flies) return;
   b.vy += GRAVITY * dt;

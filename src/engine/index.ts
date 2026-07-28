@@ -80,6 +80,7 @@ export {
 export {
   applyGravity,
   moveAndCollide,
+  placeBody,
   GRAVITY,
   MAX_FALL,
   type Body,
