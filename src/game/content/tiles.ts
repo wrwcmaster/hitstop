@@ -574,3 +574,31 @@ tiles.register('spikes', {
     for (let i = 0; i < size; i += 8) g.fillRect(px + i + 1, py + 3, 1, 1);
   },
 });
+
+/**
+ * The same teeth, hanging. `spikes` is a floor hazard — its base sits at
+ * the bottom of the tile and the points rise out of it — so a room that
+ * hung it beneath an overhang drew points stabbing UP into the rock they
+ * were meant to hang from. A ceiling needs its own tile rather than a
+ * flipped comment: base at the top, points descending into the space
+ * below, which is where the knight's head is.
+ */
+tiles.register('spikesDown', {
+  hazard: 20,
+  draw(g, px, py, size, tx) {
+    g.fillStyle = COLORS.navyDark;
+    g.fillRect(px, py, size, 2);
+    g.fillStyle = COLORS.steel;
+    const tall = tx % 2 === 0;
+    for (let i = 0; i < size; i += 4) {
+      const h = tall && i % 8 === 0 ? size - 1 : size - 4;
+      g.beginPath();
+      g.moveTo(px + i, py);
+      g.lineTo(px + i + 2, py + h);
+      g.lineTo(px + i + 4, py);
+      g.fill();
+    }
+    g.fillStyle = COLORS.white;
+    for (let i = 0; i < size; i += 8) g.fillRect(px + i + 1, py + size - 4, 1, 1);
+  },
+});
