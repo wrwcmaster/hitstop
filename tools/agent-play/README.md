@@ -17,7 +17,56 @@ npm run agent-play                # HTTP bridge for turn-based (agent) play
 npm run replay                    # verify EVERY recording in recordings/
 npm run replay -- path/run.json   # verify one recording
 npm run replay -- --rerecord path/run.json   # accept a deliberate change
+node tools/agent-play/inspect.mjs # one-shot text probes (see below)
 ```
+
+## Cheap inspection: text first, pixels last
+
+Most debugging questions are structural, and a screenshot is the most
+expensive possible way to answer one (~1000+ tokens into an agent's
+context vs ~100 for text). `inspect.mjs` answers them as text, against
+the same resolved world the game builds:
+
+```bash
+node tools/agent-play/inspect.mjs grid ramparts 0 6 19 27   # ASCII tilemap
+node tools/agent-play/inspect.mjs doors ramparts            # door facts
+node tools/agent-play/inspect.mjs cross ramparts 60 200 left  # CROSSED/STAYED
+node tools/agent-play/inspect.mjs shot ramparts 56 170 out.png  # small PNG
+```
+
+- `grid` prints the room in its own legend characters, with anything the
+  runtime inserted (doorway backing, patches) picked up under fallback
+  characters — so "is the door actually in the wall?" is nine short rows,
+  not a render.
+- `doors` lists each door trigger's destination, tile footprint, firing
+  rule (edge walk-through / seam / press-E), lock props, and the tiles
+  under it (`bare air` = a doorway with nothing drawn in it).
+- `cross` starts a quiet scenario, walks at the door, and prints
+  CROSSED or STAYED with positions — the doorway question with no image.
+- `shot` is for when only pixels will do: a ~320px PNG centred on the
+  player, dialogue muted, instead of a full frame.
+
+The same probes exist on the bridge for a live session: `GET /tiles`
+(`?room=` for any room, bare for the CURRENT room, patches and all) and
+`GET /screenshot?around=player&r=80&scale=2` for a targeted clip.
+
+`GET /snapshot` freezes the live moment as a TestScenario — the room,
+the knight's position/kit/gold/earned, and every monster the room won't
+respawn by itself, carried in `spawn` at live positions. POST the
+`scenario` field back to `/scenario` to re-enter the situation. It is
+equivalent, not bit-exact (that's what recordings are for): a room's
+own entities respawn fresh at authored spots (`deadAuthored` lists any
+that were dead), and progression/skills/class don't fit a scenario
+(`dropped` reports what was lost).
+
+Scenarios accept `"quiet": true` to mute all conversation dialogue
+(entry talks, NPC chatter, boss epilogues) — probe scripts and verb
+fixtures no longer need a blind confirm-tap loop before the test starts.
+The flag rides the recorded runStart, so quiet runs replay exactly.
+
+The debugging etiquette that keeps sessions cheap: diagnose with `grid`
+/ `doors` / `cross` / `state`, and spend at most two images per bug —
+one to see it, one to prove it fixed.
 
 `--rerecord` replays the tape and writes the hashes it produces back into
 the file. Reach for it ONLY when the divergence is a change you meant to
