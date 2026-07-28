@@ -79,6 +79,7 @@ export {
 
 export {
   applyGravity,
+  carryBody,
   moveAndCollide,
   placeBody,
   GRAVITY,

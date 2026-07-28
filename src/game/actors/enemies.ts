@@ -236,8 +236,9 @@ defineMonster('devourer', {
         m.vx = 0;
       }
     } else if (mode === 'windup') {
-      // The tell: shiver in place before the lunge.
-      if (Math.floor((m.state.modeT as number) * 30) % 2) m.x += Math.sin((m.state.modeT as number) * 60) * 0.6;
+      // The tell: shiver in place before the lunge — drawn, not simulated.
+      const wt = m.state.modeT as number;
+      m.tremorX = Math.floor(wt * 30) % 2 ? Math.sin(wt * 60) * 0.6 : 0;
       if ((m.state.modeT as number) > 0.45) {
         m.state.mode = 'lunge';
         m.state.modeT = 0;

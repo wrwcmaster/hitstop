@@ -4,6 +4,7 @@ import {
   Statuses,
   applyGravity,
   moveAndCollide,
+  placeBody,
   whiteOf,
   rand,
   type CollisionSource,
@@ -119,6 +120,15 @@ export class Monster extends Actor {
    */
   props: Record<string, unknown> = {};
 
+  /**
+   * Presentation law: a shiver is drawn, not simulated. Defs write these
+   * every frame they want the body to tremble (cleared each update);
+   * render applies them as a translate. They never touch x/y, so a
+   * windup tell can no longer walk a body into a wall 0.6px at a time.
+   */
+  tremorX = 0;
+  tremorY = 0;
+
   constructor(
     public readonly type: string,
     public game: ActorHost,
@@ -131,13 +141,16 @@ export class Monster extends Actor {
     super();
     this.def = monsters.get(type);
     this.team = 'enemy';
-    this.x = x;
-    this.y = y;
     // Before init: a def that takes placement props needs them to exist
     // by the time it is deciding what this instance IS.
     if (props) this.props = props;
     this.w = this.def.w;
     this.h = this.def.h;
+    // Placement law: a spawn authored a few pixels into the floor is
+    // resolved the way the mover would have left it, never born buried
+    // where collision cannot see it. (Size must be known first, which is
+    // why placement follows the def lookup.)
+    placeBody(this, x, y, collision);
     this.hp = this.maxHp = this.def.hp;
     this.mass = this.def.mass ?? 1;
     this.flies = this.def.flies ?? false;
@@ -159,6 +172,8 @@ export class Monster extends Actor {
 
   update(dt: number): void {
     this.tickTimers(dt);
+    this.tremorX = 0;
+    this.tremorY = 0;
     this.statuses.update(dt);
     // A halting status (frozen, stunned) stops the brain but not physics —
     // a frozen bat still falls out of the sky. A parry-stagger (hitstun)
@@ -175,7 +190,13 @@ export class Monster extends Actor {
   }
 
   render(g: CanvasRenderingContext2D): void {
+    const trembling = this.tremorX !== 0 || this.tremorY !== 0;
+    if (trembling) {
+      g.save();
+      g.translate(this.tremorX, this.tremorY);
+    }
     this.def.draw(g, this);
+    if (trembling) g.restore();
     // Encasing veil (ice, amber): a translucent block over the body.
     for (const s of this.statuses.list()) {
       if (!s.def.veil) continue;

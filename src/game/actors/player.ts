@@ -8,6 +8,7 @@ import {
   Tilemap,
   applyGravity,
   moveAndCollide,
+  placeBody,
   type CollisionResult,
   type CollisionContact,
   friction,
@@ -333,8 +334,8 @@ export class Player extends Actor {
     y: number,
   ) {
     super();
-    this.x = x;
-    this.y = y;
+    // Placement law: born where a body could have moved, never buried.
+    placeBody(this, x, y, collision);
     this.layer = 10;
     // Starting kit: a weapon in hand, a potion in the bag, and the
     // starting class's base modifiers + known spells.
@@ -542,14 +543,15 @@ export class Player extends Actor {
     this.game.events.emit('playerSwallowed', {});
   }
 
-  swallowedUpdate(): string | void {
+  swallowedUpdate(dt: number): string | void {
     const m = this.swallowedBy;
     if (!m || m.dead || this.hp <= 0) return this.releaseFromSwallow(false);
-    // Pinned inside the beast.
-    this.x = m.cx - this.w / 2;
-    this.y = m.cy - this.h / 2;
-    this.vx = 0;
-    this.vy = 0;
+    // Pinned inside the beast — by carry velocity, not assignment. The
+    // grip is an impulse toward the beast's center each step and the
+    // mover integrates it, so even a gulp cannot place a knight inside
+    // stone the beast is pressed against; she rides at its face instead.
+    this.vx = (m.cx - this.w / 2 - this.x) / dt;
+    this.vy = (m.cy - this.h / 2 - this.y) / dt;
     // Mash anything to struggle free.
     let mashed = 0;
     if (this.input.consumePress('attack')) mashed++;
@@ -570,6 +572,10 @@ export class Player extends Actor {
   private releaseFromSwallow(burst: boolean): string {
     const m = this.swallowedBy;
     this.swallowedBy = null;
+    // The carry impulse dies with the grip — without this a quiet
+    // release (beast slain) inherits one frame of (target - pos) / dt.
+    this.vx = 0;
+    this.vy = 0;
     const effect = m?.def.swallow;
     if (effect?.status) this.statuses.remove(effect.status);
     if (burst && m && !m.dead) {
@@ -1333,9 +1339,15 @@ export class Player extends Actor {
     this.statuses.update(dt);
     this.squash += (1 - this.squash) * Math.min(1, dt * 10);
 
-    // Inside a Devourer: no physics, no buffers — just the struggle.
+    // Inside a Devourer: no input pipeline, no buffers — but physics
+    // still runs. The state sets a carry velocity; the mover has the
+    // last word on where the beast may hold her (never inside stone).
+    // Gravity is deliberately absent: the grip is the one force here.
     if (this.fsm.is('swallowed')) {
       this.fsm.update(dt);
+      if (this.fsm.is('swallowed')) {
+        this.contacts = moveAndCollide(this, dt, this.collision);
+      }
       return;
     }
 
@@ -1630,6 +1642,6 @@ const PLAYER_STATES: Record<string, StateDef<Player>> = {
     },
   },
   swallowed: {
-    update: (p) => p.swallowedUpdate(),
+    update: (p, dt) => p.swallowedUpdate(dt),
   },
 };

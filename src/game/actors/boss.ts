@@ -1,4 +1,4 @@
-import { FSM, rand, pick, frameAt, ballisticVelocity, t } from '@engine/index';
+import { FSM, rand, pick, frameAt, ballisticVelocity, carryBody, placeBody, t } from '@engine/index';
 import { defineMonster, Monster } from './monster';
 import { SLIME1, SLIME2, TEXEL, DUELIST_ANIMS, duelistSprite } from '../content/sprites';
 import { tintOf, whiteOf } from '@engine/index';
@@ -119,8 +119,8 @@ function makeFsm(m: Monster): FSM<Monster> {
         const t = fsm.t;
         const phase = b.state.slamPhase as number;
         if (phase === 0) {
-          // Telegraph: shiver in place — readable and dodgeable.
-          if (Math.floor(t * 30) % 2) b.x += Math.sin(t * 60) * 0.5;
+          // Telegraph: shiver in place — drawn, not simulated.
+          b.tremorX = Math.floor(t * 30) % 2 ? Math.sin(t * 60) * 0.5 : 0;
           if (t > 0.55) {
             b.state.slamPhase = 1;
             b.vy = -380;
@@ -768,11 +768,18 @@ function wallFace(m: Monster, side: -1 | 1): number {
   return side < 0 ? 0 : m.cx + 200;
 }
 
-/** Park the body against its wall (it is always holding on). */
-function hugWall(m: Monster): void {
+/**
+ * Press the body toward its wall (it is always holding on). The press is
+ * a velocity and the mover does the parking — flush at the face it
+ * measured, or against whatever intervenes. Setting `m.x` to the face
+ * directly was the old way, and assignment is not physics: nothing
+ * checked the parking spot against the world it was parking in.
+ */
+function hugWall(m: Monster, dt: number): void {
   const side = m.state.side as -1 | 1;
   const face = side < 0 ? (m.state.leftX as number) : (m.state.rightX as number);
-  m.x = side < 0 ? face : face - m.w;
+  const target = side < 0 ? face : face - m.w;
+  m.vx = (target - m.x) / dt;
 }
 
 /** Drop debris down one column — the hammering it does to its own wall. */
@@ -808,14 +815,13 @@ function makeViseFsm(m: Monster): FSM<Monster> {
       enter(b) {
         b.state.pick = rand(1.1, 1.9) * (1 - severed(b) * 0.12);
       },
-      update(b) {
-        hugWall(b);
+      update(b, dt) {
+        hugWall(b, dt); // the press IS this state's vx
         const p = b.player;
         // Climb toward the knight, faster with every limb it has lost.
         const speed = 40 + severed(b) * 16;
         const goal = p ? p.cy - 6 : b.cy;
         b.vy = Math.abs(goal - b.cy) < 6 ? 0 : Math.sign(goal - b.cy) * speed;
-        b.vx = 0;
         if (fsm.t < (b.state.pick as number)) return;
         const heavy = severed(b) >= 3;
         return pick(heavy
@@ -836,10 +842,10 @@ function makeViseFsm(m: Monster): FSM<Monster> {
         b.vy = 0;
         b.vx = 0;
       },
-      update(b) {
+      update(b, dt) {
         const heavy = severed(b) >= 3;
         if (!(b.state.flying as boolean)) {
-          hugWall(b);
+          hugWall(b, dt);
           // Coil: limbs bunch, and the body shivers back against the wall.
           const coil = heavy && !(b.state.feinted as boolean) ? 0.34 : 0.5;
           if (fsm.t > coil) {
@@ -863,8 +869,7 @@ function makeViseFsm(m: Monster): FSM<Monster> {
         const arrived = side < 0 ? b.x + b.w >= far : b.x <= far;
         if (arrived || fsm.t > 1.6) {
           b.state.side = -side;
-          b.vx = 0;
-          hugWall(b);
+          hugWall(b, dt);
           b.game.feel.impact(b.cx, b.cy, { strength: 0.5, colors: [VISE_LIMB, VISE_BODY], sfx: 'land' });
           return 'traverse';
         }
@@ -885,8 +890,8 @@ function makeViseFsm(m: Monster): FSM<Monster> {
         b.state.colA = at - 46;
         b.state.colB = at + 46;
       },
-      update(b) {
-        hugWall(b);
+      update(b, dt) {
+        hugWall(b, dt);
         const dropped = b.state.dropped as number;
         // Telegraph: dust off both columns before anything falls.
         if (fsm.t < 0.5) {
@@ -920,11 +925,12 @@ function makeViseFsm(m: Monster): FSM<Monster> {
         b.state.struck = false;
         b.vy = 0;
       },
-      update(b) {
-        hugWall(b);
-        // Telegraph: it hauls itself flat to the wall and trembles.
+      update(b, dt) {
+        hugWall(b, dt);
+        // Telegraph: it hauls itself flat to the wall and trembles —
+        // drawn, not simulated.
         if (fsm.t < 0.6) {
-          if (Math.floor(fsm.t * 40) % 2) b.y += Math.sin(fsm.t * 70) * 0.6;
+          b.tremorY = Math.floor(fsm.t * 40) % 2 ? Math.sin(fsm.t * 70) * 0.6 : 0;
           return;
         }
         if (!(b.state.struck as boolean)) {
@@ -980,7 +986,11 @@ defineMonster('vise', {
     m.state.rightX = wallFace(m, 1);
     m.state.shown = 0; // limbs already torn off on screen
     m.state.fsm = makeViseFsm(m);
-    hugWall(m);
+    // Spawn-time positioning is PLACEMENT, not a press: put it at the
+    // wall it will spend the fight holding, resolved like any placement.
+    const side = m.state.side as -1 | 1;
+    const face = m.state.leftX as number;
+    placeBody(m, side < 0 ? face : face - m.w, m.y, m.collision);
   },
   update(m, dt) {
     // A limb tears free: the fight's whole progress display, and the
@@ -996,7 +1006,10 @@ defineMonster('vise', {
       m.game.feel.burst(m.cx, m.cy, 18, {
         color: [VISE_LIMB, VISE_BODY], speed: 130, life: 0.5, drag: 2.5,
       });
-      m.y += 14; // it slips down the wall, closer to the platforms
+      // It slips down the wall, closer to the platforms — a swept lurch,
+      // so a floor or a platform under it stops the slip like it would
+      // stop anything else.
+      carryBody(m, 0, 14, m.collision);
     }
     (m.state.fsm as FSM<Monster>).update(dt);
   },

@@ -181,7 +181,6 @@ export class PlayScene implements Scene {
   /** Where the scene found the co-op guest: held there for its duration
    * so live physics can't carry an off-camera knight somewhere she
    * can't see (see the anchor block in update). */
-  private cineAnchor: { x: number; y: number } | null = null;
 
   private host: PlayHost;
   private waves: WaveDirector;
@@ -1542,24 +1541,18 @@ export class PlayScene implements Scene {
         p.cineShield = cine;
         if (cine) p.invulnT = Math.max(p.invulnT, 0.1);
       }
-      // The guest knight is also ANCHORED for the scene's duration. The
-      // host knight is the cutscene author's to stage (scripted hands),
-      // but the guest is nobody's — stood down, camera elsewhere — and
-      // neutral input under live gravity could carry her off a ledge, a
-      // moving platform, or a one-way she cannot see. So she is held
-      // where the scene found her (restored after the world steps,
-      // velocities zeroed), and released the moment control returns.
-      if (cine && guest) this.cineAnchor ??= { x: guest.x, y: guest.y };
-      else this.cineAnchor = null;
+      // The guest knight is STOOD DOWN for the scene's duration, not
+      // frozen: her drive is zeroed each step (an impulse, which
+      // mechanisms may apply) and physics keeps running. On solid
+      // ground that is indistinguishable from the old position anchor;
+      // mid-air she falls and lands like a body, because a cutscene is
+      // a camera choice, not an exemption from gravity. The anchor this
+      // replaces restored her coordinates after the world stepped —
+      // the exact kind of position-setting that puts bodies where
+      // movement never could.
+      if (cine && guest) guest.vx = 0;
     }
     g.world.update(dt);
-    if (this.cineAnchor && this.coop?.guest) {
-      const knight = this.coop.guest;
-      knight.x = this.cineAnchor.x;
-      knight.y = this.cineAnchor.y;
-      knight.vx = 0;
-      knight.vy = 0;
-    }
     this.cutsceneInput?.endStep(); // scripted press/release edges last one step
     if (this.coop) {
       this.coop.step({

@@ -263,6 +263,44 @@ function requirePassThroughShaft(room: RoomDef, path: string): void {
   }
 }
 
+/**
+ * The placement law, enforced at authoring time: an entity must not be
+ * born overlapping solid rock. The engine's placeBody would shove it to
+ * the nearest open face at spawn, but a silent shove is the room lying
+ * about where its furniture is — grotto shipped a chest entombed in a
+ * rock pillar that "rested" inside the stone for as long as the old
+ * mover happened to bury it stably. Flush contact is legal (a chest ON
+ * a floor, a rockfall hanging FROM a ceiling); strict overlap is not.
+ * One-ways don't bury anything — a body inside one falls free.
+ */
+function requireUnburiedEntities(room: RoomDef, path: string): void {
+  const ts = room.tileSize;
+  const buriedIn = (r: number, c: number): boolean => {
+    const id = room.legend[(room.tiles[r] ?? '')[c] ?? ''] ?? '';
+    if (id === '') return false;
+    const def = tiles.get(id);
+    return !!def.solid && !def.oneWay;
+  };
+  (room.entities ?? []).forEach((e, i) => {
+    if (!placeables.has(e.type)) return; // unknown types fail loudly elsewhere
+    const p = placeables.get(e.type);
+    const c0 = Math.floor(e.x / ts);
+    const c1 = Math.ceil((e.x + p.w) / ts) - 1;
+    const r0 = Math.floor(e.y / ts);
+    const r1 = Math.ceil((e.y + p.h) / ts) - 1;
+    for (let r = Math.max(0, r0); r <= r1; r++) {
+      for (let c = Math.max(0, c0); c <= c1; c++) {
+        if (buriedIn(r, c)) {
+          throw new Error(
+            `${path}.entities[${i}] (${e.type}): body ${p.w}x${p.h} at (${e.x},${e.y}) overlaps solid tile at col ${c}, row ${r} — `
+            + 'entities must be placed where a body could stand, not inside rock',
+          );
+        }
+      }
+    }
+  });
+}
+
 /** Validate open content bags after all game registries have been filled. */
 export function validateRoomContent(room: RoomDef, id = room.name): RoomDef {
   const root = `room "${id}"`;
@@ -278,6 +316,7 @@ export function validateRoomContent(room: RoomDef, id = room.name): RoomDef {
   // to a framing rule would invalidate every verb tape for no one's eyes.
   if (id !== 'test') requireDrawnFloor(room, root);
   if (id !== 'test') requirePassThroughShaft(room, root);
+  if (id !== 'test') requireUnburiedEntities(room, root);
 
   room.entities.forEach((entity, index) => {
     const path = `${root}.entities[${index}] (${entity.type}).props`;
