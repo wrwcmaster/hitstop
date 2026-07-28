@@ -107,23 +107,70 @@ defineRoomFeature('map', {
  * until a boss-seal test had the knight standing still against a door
  * that was never there.
  */
-function requireReachable(room: RoomDef, door: TriggerDef, path: string): void {
+function requireReachable(room: RoomDef, doors: TriggerDef[], path: string): void {
   const ts = room.tileSize;
-  const c0 = Math.floor(door.x / ts);
-  const c1 = Math.floor((door.x + door.w - 1) / ts);
-  const r0 = Math.floor(door.y / ts);
-  const r1 = Math.floor((door.y + door.h - 1) / ts);
-  for (let r = r0; r <= r1; r++) {
-    for (let c = c0; c <= c1; c++) {
-      const ch = (room.tiles[r] ?? '')[c] ?? '';
-      const id = room.legend[ch] ?? '';
-      if (!id || !tiles.get(id).solid) return; // somewhere to stand
+  const cols = Math.max(...room.tiles.map((r) => r.length));
+  const rows = room.tiles.length;
+  const solid = (x: number, y: number): boolean => {
+    const c = Math.floor(x / ts);
+    const r = Math.floor(y / ts);
+    if (c < 0 || r < 0 || c >= cols || r >= rows) return true;
+    const id = room.legend[(room.tiles[r] ?? '')[c] ?? ''] ?? '';
+    if (id === '') return false;
+    const def = tiles.get(id);
+    // Breakable stone is a door with extra steps, not a wall: the riven
+    // dig site is sealed under a cracked cap until an Impact Drop opens
+    // it. Counting it as passable is what keeps this rule about geometry
+    // that can never yield, rather than about what the knight has earned.
+    if (def.traits?.includes('breakable')) return false;
+    return !!def.solid;
+  };
+  // A knight-sized box, sampled on a 2px lattice — fine enough that no
+  // 8px tile can hide between samples.
+  const W = 14;
+  const H = 18;
+  const free = (x: number, y: number): boolean => {
+    if (x < 0 || y < 0 || x + W > cols * ts || y + H > rows * ts) return false;
+    for (let dx = 0; dx < W; dx += 2) {
+      for (let dy = 0; dy < H; dy += 2) if (solid(x + dx, y + dy)) return false;
+    }
+    return true;
+  };
+  // Free flight from the spawn: no gravity, no jump limit. That is far
+  // more generous than the knight really is, which is the point —
+  // anything THIS cannot reach is unreachable beyond argument, so the
+  // rule never fails a room over a jump that is merely hard.
+  const step = 2;
+  const seen = new Set<number>();
+  const key = (x: number, y: number): number => y * cols * ts + x;
+  const start: [number, number] = [room.playerSpawn.x, room.playerSpawn.y];
+  const queue: [number, number][] = [start];
+  seen.add(key(...start));
+  while (queue.length) {
+    const [x, y] = queue.pop()!;
+    for (const [nx, ny] of [[x + step, y], [x - step, y], [x, y + step], [x, y - step]] as [number, number][]) {
+      if (seen.has(key(nx, ny)) || !free(nx, ny)) continue;
+      seen.add(key(nx, ny));
+      queue.push([nx, ny]);
     }
   }
-  throw new Error(
-    `${path}: doorway to "${String(door.props?.room)}" is walled in — `
-    + `every tile in cols ${c0}-${c1}, rows ${r0}-${r1} is solid, so the door cannot be reached`,
-  );
+  for (const door of doors) {
+    let reached = false;
+    for (const k of seen) {
+      const x = k % (cols * ts);
+      const y = (k - x) / (cols * ts);
+      if (x < door.x + door.w && x + W > door.x && y < door.y + door.h && y + H > door.y) {
+        reached = true;
+        break;
+      }
+    }
+    if (!reached) {
+      throw new Error(
+        `${path}: doorway to "${String(door.props?.room)}" cannot be reached from the spawn — `
+        + 'its tiles may be clear, but no path of open space leads to them',
+      );
+    }
+  }
 }
 
 /**
@@ -263,7 +310,10 @@ export function validateRoomContent(room: RoomDef, id = room.name): RoomDef {
     if ((trigger.event === 'door' || trigger.event === 'portal') && trigger.once !== false) {
       throw new Error(`${root}.triggers[${index}]: a ${trigger.event} must declare "once": false — a one-shot passage welds itself shut after first use`);
     }
-    if (trigger.event === 'door') requireReachable(room, trigger, `${root}.triggers[${index}]`);
   });
+
+  // One flood fill answers for every door at once, rather than per door.
+  const doors = (room.triggers ?? []).filter((t) => t.event === 'door');
+  if (doors.length) requireReachable(room, doors, root);
   return room;
 }

@@ -79,9 +79,14 @@ const world = await page.evaluate(async () => {
 
 // Passages whose approach needs a verb or dig this harness cannot
 // perform; their seams are covered by the riven fixtures and bug tapes.
+// `riven-lip>riven-descent` used to be listed here as "needs a wall-grip
+// climb". It did not: the door was sealed behind a two-column gripstone
+// wall and could not be entered at all. Gating a case the harness cannot
+// perform is reasonable; gating one because it FAILED turns a bug into a
+// skip, which is how that door stayed sealed. Only list a passage here
+// when the approach provably needs a verb, and say which.
 const VERB_GATED = {
-  'riven-lip>riven-descent': 'wall-grip climb',
-  'underground>riven-lip': 'impact-drop dig through the cap',
+  'underground>riven-lip': 'impact-drop dig through the cracked cap',
 };
 
 console.log(`${world.length} door cases\n`);
