@@ -51,7 +51,7 @@
     {
       "type": "lever",
       "x": 64,
-      "y": 192,
+      "y": 198,
       "props": {
         "switch": "span-a"
       }
@@ -69,7 +69,7 @@
     {
       "type": "lever",
       "x": 216,
-      "y": 144,
+      "y": 150,
       "props": {
         "switch": "span-b"
       }
@@ -87,7 +87,7 @@
     {
       "type": "plate",
       "x": 368,
-      "y": 136,
+      "y": 140,
       "props": {
         "switch": "vault",
         "latch": true
@@ -129,7 +129,7 @@
     {
       "type": "rockfall",
       "x": 216,
-      "y": 48,
+      "y": 24,
       "props": {
         "period": 2.4,
         "phase": 1.1
@@ -164,8 +164,8 @@
     "music": "depths",
     "backdrop": "riven",
     "map": {
-      "x": 14,
-      "y": 10
+      "x": 17,
+      "y": 8
     }
   }
 }

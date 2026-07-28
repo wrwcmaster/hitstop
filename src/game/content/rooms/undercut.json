@@ -45,7 +45,7 @@
     {
       "type": "rockfall",
       "x": 136,
-      "y": 120,
+      "y": 112,
       "props": {
         "period": 2.2,
         "phase": 0
@@ -54,7 +54,7 @@
     {
       "type": "rockfall",
       "x": 200,
-      "y": 120,
+      "y": 112,
       "props": {
         "period": 2.2,
         "phase": 0.55
@@ -63,7 +63,7 @@
     {
       "type": "rockfall",
       "x": 264,
-      "y": 120,
+      "y": 112,
       "props": {
         "period": 2.2,
         "phase": 1.1
@@ -72,7 +72,7 @@
     {
       "type": "rockfall",
       "x": 328,
-      "y": 120,
+      "y": 112,
       "props": {
         "period": 2.2,
         "phase": 1.65
@@ -125,8 +125,8 @@
     "music": "depths",
     "backdrop": "riven",
     "map": {
-      "x": 12,
-      "y": 10
+      "x": 19,
+      "y": 8
     }
   }
 }
