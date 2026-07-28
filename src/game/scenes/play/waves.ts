@@ -31,9 +31,19 @@ export class WaveDirector {
             y: Math.max(20, g.camera.y + 16) + rand(0, g.camera.viewH * 0.35),
           };
         }
+        // Walk in from one of the two edges — whichever actually has
+        // floor to stand on. A room can be walled at one end, and a
+        // spawn with nowhere to rest used to be placed inside the
+        // scenery rather than skipped.
         const tilemap = this.host.tilemap;
-        const x = chance(0.5) ? 24 : tilemap.worldW - 24 - def.w;
-        return { x, y: tilemap.groundY(x) - def.h };
+        const near = 24;
+        const far = tilemap.worldW - 24 - def.w;
+        const sides = chance(0.5) ? [near, far] : [far, near];
+        for (const x of sides) {
+          const y = tilemap.restingY(x, def.w, def.h);
+          if (y !== null) return { x, y };
+        }
+        return null;
       },
 
       spawn: (type, x, y) => {

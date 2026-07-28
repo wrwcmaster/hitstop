@@ -26,8 +26,14 @@ export interface Telegraph<S> {
 export interface WaveRunnerConfig<S> {
   /** The specs wave `n` should spawn (append order = spawn order). */
   compose(wave: number): S[];
-  /** Where the next spec appears (roll randomness here). */
-  place(spec: S): { x: number; y: number };
+  /**
+   * Where the next spec appears (roll randomness here), or null if this
+   * level has nowhere to put it. Returning null re-queues the spec for
+   * the next spawn tick instead of forcing a position — a level with no
+   * room for a spawn should keep the wave waiting, not bury the monster
+   * in scenery.
+   */
+  place(spec: S): { x: number; y: number } | null;
   /** Materialize a telegraphed spec into the world. */
   spawn(spec: S, x: number, y: number): void;
   /** Anything from this wave still alive? */
@@ -95,8 +101,12 @@ export class WaveRunner<S> {
     if (this.queue.length && this.spawnT <= 0) {
       this.spawnT = this.config.timing().spawnInterval;
       const spec = this.queue.shift()!;
-      const { x, y } = this.config.place(spec);
-      this.pending.push({ t: this.config.timing().telegraphTime, x, y, spec });
+      const at = this.config.place(spec);
+      // No room for it right now: put it back at the head of the queue
+      // and try again next tick. The wave stalls rather than spawning
+      // something inside a wall.
+      if (!at) this.queue.unshift(spec);
+      else this.pending.push({ t: this.config.timing().telegraphTime, x: at.x, y: at.y, spec });
     }
 
     // Telegraphs mature into the world.
