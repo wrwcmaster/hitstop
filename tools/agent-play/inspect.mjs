@@ -40,6 +40,36 @@ const playerRow = (game) => {
   return p && {
     room: sc.roomId, x: p.x, y: p.y, vx: p.vx, vy: p.vy,
     grounded: p.onGround, state: p.fsm?.current ?? '?',
+    worldW: sc.tilemap?.worldW ?? 0, worldH: sc.tilemap?.worldH ?? 0,
+  };
+};
+
+/**
+ * The TRANSIENT properties a bug tape asserts: did the body ever leave
+ * the world, and did it ever jump further in one step than physics
+ * allows. Both are invisible at the end of a run — the riven seam clip
+ * ended in the right room at the right height while having clipped
+ * through a ceiling on the way — so a checker that only reads the final
+ * frame passes exactly the regressions these tapes exist to catch.
+ *
+ * Thresholds mirror bugtest.mjs deliberately: edge walks carry the
+ * knight ~22px past the side boundary mid-transition, and vertical
+ * arrivals legally touch y=0 and feet=worldH.
+ */
+const makeSampler = () => {
+  let outOfBounds = null;
+  let maxWarp = 0;
+  let prev = null;
+  return {
+    sample(r) {
+      if (!r) return;
+      if (r.worldW && (r.x < -26 || r.y < -2 || r.x > r.worldW - 14 + 26 || r.y > r.worldH - 17)) {
+        outOfBounds ??= `${r.room} (${Math.round(r.x)},${Math.round(r.y)}) vs ${r.worldW}x${r.worldH}`;
+      }
+      if (prev && prev.room === r.room) maxWarp = Math.max(maxWarp, Math.hypot(r.x - prev.x, r.y - prev.y));
+      prev = r;
+    },
+    get result() { return { outOfBounds, maxWarp }; },
   };
 };
 
@@ -126,12 +156,15 @@ async function runHeadless(cmd, args, usage) {
     const rooms = [];
     let bad = 0;
     const wanted = new Map(rec.checks ?? []);
+    const sampler = makeSampler();
     for (let f = 1; f <= rec.end; f++) {
       harness.runTo(f);
       const r = playerRow(game);
+      sampler.sample(r);
       if (r && rooms[rooms.length - 1] !== r.room) rooms.push(r.room);
       if (wanted.has(f) && harness.hashNow() !== wanted.get(f)) bad++;
     }
+    const stats = sampler.result;
     console.log(`${file}: ${rec.end} steps in ${Date.now() - t0}ms`);
     console.log(`  journey: ${rooms.join(' > ')}`);
     console.log(`  end:     ${fmt(playerRow(game))}`);
@@ -139,15 +172,30 @@ async function runHeadless(cmd, args, usage) {
       // A BUG tape. Its recording was captured on the broken build, so its
       // hashes are supposed to differ now — that is what fixing the bug
       // means. The tape asserts semantics instead; check those.
+      // Every expectation the tape carries, on bugtest.mjs's terms — the
+      // transient ones included, since those are the whole reason a bug
+      // tape exists rather than an end-state assertion.
       const want = raw.expect ?? {};
       const end = playerRow(game);
-      const journeyOk = !want.rooms || want.rooms.join('>') === rooms.join('>');
-      const endOk = !want.end
-        || (end && end.room === want.end.room && Math.abs(end.y - want.end.y) < 0.5);
-      console.log(`  expects: journey ${journeyOk ? 'ok' : `MISMATCH (wanted ${want.rooms?.join(' > ')})`}`
-        + `, end ${endOk ? 'ok' : `MISMATCH (wanted ${JSON.stringify(want.end)})`}`);
+      const fails = [];
+      if (want.rooms && want.rooms.join('>') !== rooms.join('>')) {
+        fails.push(`journey ${rooms.join(' > ')} != expected ${want.rooms.join(' > ')}`);
+      }
+      if (want.inBounds && stats.outOfBounds) fails.push(`left the world at ${stats.outOfBounds}`);
+      if (want.maxWarp != null && stats.maxWarp > want.maxWarp) {
+        fails.push(`same-room warp of ${stats.maxWarp.toFixed(1)}px (allowed ${want.maxWarp})`);
+      }
+      if (want.end?.room && end?.room !== want.end.room) {
+        fails.push(`ends in ${end?.room}, expected ${want.end.room}`);
+      }
+      if (want.end?.y != null && end && Math.abs(end.y - want.end.y) > (want.end.tolerance ?? 8)) {
+        fails.push(`ends at y=${Math.round(end.y)}, expected ~${want.end.y}`);
+      }
+      console.log(`  worst:   ${stats.maxWarp.toFixed(1)}px same-room step`
+        + `, ${stats.outOfBounds ? 'LEFT THE WORLD at ' + stats.outOfBounds : 'stayed in bounds'}`);
+      console.log(fails.length ? `  FAILED:  ${fails.join('; ')}` : '  expects: all ok');
       console.log('  (hashes not compared: a bug tape was recorded on the broken build)');
-      if (!journeyOk || !endOk) process.exitCode = 1;
+      if (fails.length) process.exitCode = 1;
       return;
     }
     console.log(`  hashes:  ${(rec.checks?.length ?? 0) - bad}/${rec.checks?.length ?? 0} matched`
@@ -184,7 +232,12 @@ if (!cmd) usage();
 if (HEADLESS.has(cmd)) {
   await runHeadless(cmd, args, usage);
   await closeHeadless();
-  process.exit(0);
+  // The vite server keeps the event loop alive, so the exit has to be
+  // explicit — but it must carry the verdict. `process.exit(0)` here
+  // turned every MISMATCH and DIVERGED into a green exit status, which
+  // is the one defect a verification tool must never have: a check that
+  // cannot fail is not a check.
+  process.exit(process.exitCode ?? 0);
 }
 
 const browser = await launchBrowser();
