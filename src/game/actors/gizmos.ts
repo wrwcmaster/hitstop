@@ -1,6 +1,7 @@
 import {
   Entity,
   Tilemap,
+  carryBody,
   drawText,
   type CollisionSource,
   type Solid,
@@ -55,7 +56,7 @@ export class MovingPlatform extends Entity {
 
   constructor(
     _game: ActorHost,
-    collision: CollisionSource,
+    private collision: CollisionSource,
     private x0: number,
     private y0: number,
     w: number,
@@ -81,19 +82,28 @@ export class MovingPlatform extends Entity {
     const ddx = nx - this.solid.x;
     const ddy = ny - this.solid.y;
     // Carry riders: anyone standing on the old top surface moves with it.
-    for (const a of this.world.actors('player')) {
-      const standing =
+    // Through the mover, not by assignment — a platform gliding toward a
+    // wall used to shove its rider INTO the wall, where collision could
+    // no longer see them. Carried into stone, the rider now stops at the
+    // face like any other body while the platform slides on.
+    //
+    // Riders are noted against the OLD surface but carried after the
+    // solid moves: carrying first would sweep them against the platform's
+    // own not-yet-moved top, and a descending platform would block its
+    // own passenger. With the solid already at its new spot, the carry
+    // lands each rider flush on it — rising platforms resolve the brief
+    // overlap upward via the dynamic-solid rule, exactly like any other
+    // moving solid.
+    const riders = [...this.world.actors('player')].filter(
+      (a) =>
         Math.abs(a.y + a.h - this.solid.y) < 2 &&
         a.x + a.w > this.solid.x - 1 &&
         a.x < this.solid.x + this.solid.w + 1 &&
-        a.vy >= 0;
-      if (standing) {
-        a.x += ddx;
-        a.y += ddy;
-      }
-    }
+        a.vy >= 0,
+    );
     this.solid.x = nx;
     this.solid.y = ny;
+    for (const a of riders) carryBody(a, ddx, ddy, this.collision);
   }
 
   render(g: CanvasRenderingContext2D): void {

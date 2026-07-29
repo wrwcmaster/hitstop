@@ -9,6 +9,7 @@ import {
   type ConversationChoice,
   type CollisionSource,
   type LoadedSprite,
+  placeBody,
 } from '@engine/index';
 import { blit, merchantSprite } from '../content/sprites';
 import { COLORS } from '../content/palette';
@@ -73,8 +74,8 @@ export class Npc extends Actor {
     this.def = npcs.get(type);
     this.w = this.def.sprite.hitbox.w;
     this.h = this.def.sprite.hitbox.h;
-    this.x = x;
-    this.y = y;
+    // Placement law: born where a body could have moved, never buried.
+    placeBody(this, x, y, collision);
     this.layer = 2;
   }
 
@@ -112,6 +113,10 @@ export class Npc extends Actor {
       if (p) this.game.scenes.push(new SpawnerScene(this.game, p, this.collision));
       return;
     }
+    // A quiet scenario mutes NPC chatter too — this push is the one
+    // dialogue that doesn't go through PlayScene.openConversation, so it
+    // reads the same game-level flag that gate does.
+    if (this.game.quietDialogue) return;
     const ctx = this.ctx();
     if (!ctx) return;
     const greet = typeof this.def.greet === 'function' ? this.def.greet(ctx) : this.def.greet;

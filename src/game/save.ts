@@ -60,7 +60,14 @@ export const SAVE_SLOT_COUNT = 3;
 // legacy `bossDefeated` flag rather than keep code to translate them. Old
 // saves invalidate cleanly here, which is the demo-phase bargain: see
 // "Save compatibility" in AGENTS.md.
-const vault = new SlotVault<SaveData>('hitstop.save', 4, SAVE_SLOT_COUNT, (d) => d.savedAt ?? 0);
+//
+// Version 5: `firedTriggers` stores INDICES into a room's trigger list,
+// and underground's doors changed from fire-once to repeating. A v4 save
+// therefore carries indices that mean something else now — which is what
+// welded the vault door shut for a veteran knight. The same bargain
+// applies: invalidate, rather than teach the loader to guess which old
+// indices are still meaningful.
+const vault = new SlotVault<SaveData>('hitstop.save', 5, SAVE_SLOT_COUNT, (d) => d.savedAt ?? 0);
 
 /** The autosave (checkpoints). Slot 0 in the slots UI. */
 export const saveStore = vault.store(0);

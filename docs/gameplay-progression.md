@@ -298,6 +298,15 @@ before returning to the wider map.
 
 ## Source audit and implementation requirements
 
+> **Delivered.** Everything in this section shipped, and the audit below
+> reads as the historical record of what was missing at the time. The
+> physics half went further than asked: `moveAndCollide` now reports
+> contacts *and* sweeps its travel path, and the engine states four laws
+> (integration, placement, impulse, presentation) that forbid the
+> position-assignment this section did not know to rule out. See
+> `engine/physics/body.ts` and the physics row in
+> [architecture.md](architecture.md).
+
 The current engine is already sufficient for four mechanically distinct
 bosses. `MonsterDef`, boss FSMs, `Strike`, `Projectile`, hitstun, knockback,
 hitstop, screenshake, rooms, triggers, and registries provide the main combat

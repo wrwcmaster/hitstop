@@ -74,13 +74,24 @@ export class Strike {
    * Test `box` against all live actors of the target team and apply hits.
    * Call every update while the attack is active. Returns actors hit
    * this update.
+   *
+   * `reached` is an optional second opinion for callers whose real shape
+   * is not the box they can pass. A box is the widest thing this seam
+   * can express, and for anything travelling diagonally the box is a
+   * generous lie: the rectangle spanning a step's start and end includes
+   * the two corners the mover never visited. The engine has no opinion
+   * about why a candidate might be exempt — it just asks — so a caller
+   * that knows its true path (a projectile, which can sweep) can reject
+   * the corners while a caller whose hitbox really is a rectangle (a
+   * sword swing) passes nothing and behaves exactly as before.
    */
-  apply(box: Rect): Actor[] {
+  apply(box: Rect, reached?: (hurtbox: Rect) => boolean): Actor[] {
     const hits: Actor[] = [];
     for (const target of this.combat.world.actors(this.opts.targets)) {
       if (this.hitSet.has(target)) continue;
       if (!this.opts.pierceInvuln && target.invulnT > 0) continue;
       if (!overlaps(box, target.hurtbox)) continue;
+      if (reached && !reached(target.hurtbox)) continue;
       this.hitSet.add(target);
       this.combat.hit(target, this.opts, box);
       hits.push(target);

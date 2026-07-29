@@ -18,11 +18,11 @@ import { Player } from './player';
  * there's no water below (so callers can `Math.min` it with a free target).
  */
 function waterlineAbove(m: Monster, x: number): number {
-  const tm = m.collision as { waterAt?: (x: number, y: number) => boolean };
-  if (!tm.waterAt) return Infinity;
+  const waterAt = m.collision.waterAt;
+  if (!waterAt) return Infinity;
   const cx = x + m.w / 2;
   for (let y = m.y; y < m.y + 420; y += 4) {
-    if (tm.waterAt(cx, y)) return y - m.h - 4;
+    if (waterAt.call(m.collision, cx, y)) return y - m.h - 4;
   }
   return Infinity;
 }
@@ -236,8 +236,9 @@ defineMonster('devourer', {
         m.vx = 0;
       }
     } else if (mode === 'windup') {
-      // The tell: shiver in place before the lunge.
-      if (Math.floor((m.state.modeT as number) * 30) % 2) m.x += Math.sin((m.state.modeT as number) * 60) * 0.6;
+      // The tell: shiver in place before the lunge — drawn, not simulated.
+      const wt = m.state.modeT as number;
+      m.tremorX = Math.floor(wt * 30) % 2 ? Math.sin(wt * 60) * 0.6 : 0;
       if ((m.state.modeT as number) > 0.45) {
         m.state.mode = 'lunge';
         m.state.modeT = 0;

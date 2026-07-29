@@ -79,7 +79,9 @@ export {
 
 export {
   applyGravity,
+  carryBody,
   moveAndCollide,
+  placeBody,
   GRAVITY,
   MAX_FALL,
   type Body,

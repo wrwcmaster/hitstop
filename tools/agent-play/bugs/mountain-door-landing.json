@@ -1,0 +1,91 @@
+{
+  "name": "mountain-door-landing",
+  "issue": "Walking back from Cliffside Passage to Windswept Ascent dropped the knight off the landing. Not the room: the walked transition carries her OUT past the room edge for the fade, the floor tiles stop at that boundary, so for the last frames of every walked crossing she was falling off the end of the world — 110 -> 114.2 here. The swap then re-maps her CURRENT height (deliberately, to keep a jump continuous) and faithfully turned that accidental fall into an arrival 4px low, past the lip of the one-way ledge meant to catch her. A threshold now has a floor while she walks it, so a grounded crossing stays grounded and the round trip is exact (14 -> 110 -> 14, was 14 -> 110 -> 134).",
+  "expect": {
+    "rooms": [
+      "mountain_passage",
+      "mountain"
+    ],
+    "inBounds": true,
+    "maxWarp": 10,
+    "end": {
+      "room": "mountain",
+      "y": 14
+    }
+  },
+  "recording": {
+    "v": 3,
+    "seed": 85873822,
+    "mode": "live",
+    "created": "2026-07-29T15:43:41.608Z",
+    "start": {
+      "kind": "autosave"
+    },
+    "storage": {
+      "hitstop.save": "{\"v\":5,\"data\":{\"roomId\":\"mountain_passage\",\"best\":0,\"savedAt\":1785340035238,\"flags\":[\"visited:arena\",\"visited:cavern\",\"visited:corridor\",\"visited:throne\",\"bossDefeated\",\"slain:slime-king\",\"visited:town\",\"visited:east-gate\",\"visited:mountain\",\"visited:mountain_passage\"],\"firedTriggers\":{\"arena\":[0],\"cavern\":[2],\"corridor\":[],\"throne\":[1,2],\"town\":[2],\"east-gate\":[2],\"mountain\":[],\"mountain_passage\":[]},\"patches\":{\"mountain\":{\"removed\":[\"chest@306,350\"]}},\"player\":{\"inventory\":[{\"id\":\"rusty-sword\",\"count\":1},{\"id\":\"potion\",\"count\":5},{\"id\":\"great-sword\",\"count\":1},{\"id\":\"iron-helmet\",\"count\":1},{\"id\":\"gate-key\",\"count\":1}],\"equipped\":[[\"weapon\",\"great-sword\"],[\"helmet\",\"iron-helmet\"]],\"skills\":[\"fireball\",\"ice-shard\"],\"gold\":75,\"progression\":{\"xp\":110,\"level\":6,\"skillPoints\":5},\"classId\":\"knight\",\"trees\":{\"knight\":[]},\"quests\":{\"active\":[],\"done\":[]},\"forgeLevel\":0,\"armorWear\":{\"iron-helmet\":184},\"earned\":[\"impact-drop\"]}}}",
+      "hitstop.settings": "{\"v\":3,\"data\":{\"master\":1,\"music\":1.3877787807814457e-16,\"sfx\":1,\"locale\":\"en\"}}",
+      "hitstop.name": "{\"v\":1,\"data\":\"Scott\"}",
+      "hitstop.save.slot1": "{\"v\":5,\"data\":{\"roomId\":\"mountain_passage\",\"best\":0,\"savedAt\":1785340039746,\"flags\":[\"visited:arena\",\"visited:cavern\",\"visited:corridor\",\"visited:throne\",\"bossDefeated\",\"slain:slime-king\",\"visited:town\",\"visited:east-gate\",\"visited:mountain\",\"visited:mountain_passage\"],\"firedTriggers\":{\"arena\":[0],\"cavern\":[2],\"corridor\":[],\"throne\":[1,2],\"town\":[2],\"east-gate\":[2],\"mountain\":[],\"mountain_passage\":[]},\"patches\":{\"mountain\":{\"removed\":[\"chest@306,350\"]}},\"player\":{\"inventory\":[{\"id\":\"rusty-sword\",\"count\":1},{\"id\":\"potion\",\"count\":5},{\"id\":\"great-sword\",\"count\":1},{\"id\":\"iron-helmet\",\"count\":1},{\"id\":\"gate-key\",\"count\":1}],\"equipped\":[[\"weapon\",\"great-sword\"],[\"helmet\",\"iron-helmet\"]],\"skills\":[\"fireball\",\"ice-shard\"],\"gold\":75,\"progression\":{\"xp\":110,\"level\":6,\"skillPoints\":5},\"classId\":\"knight\",\"trees\":{\"knight\":[]},\"quests\":{\"active\":[],\"done\":[]},\"forgeLevel\":0,\"armorWear\":{\"iron-helmet\":184},\"earned\":[\"impact-drop\"]}}}",
+      "hitstop.save.slot2": "{\"v\":3,\"data\":{\"roomId\":\"town\",\"best\":20875,\"savedAt\":1784725309218,\"flags\":[\"visited:arena\",\"visited:cavern\",\"visited:corridor\",\"visited:throne\",\"bossDefeated\",\"slain:slime-king\",\"visited:town\"],\"firedTriggers\":{\"arena\":[0],\"cavern\":[2],\"corridor\":[],\"throne\":[1],\"town\":[2]},\"player\":{\"inventory\":[{\"id\":\"rusty-sword\",\"count\":1},{\"id\":\"potion\",\"count\":5},{\"id\":\"great-sword\",\"count\":1},{\"id\":\"great-sword\",\"count\":1},{\"id\":\"gate-key\",\"count\":1}],\"equipped\":[[\"weapon\",\"great-sword\"]],\"skills\":[\"fireball\",\"ice-shard\"],\"gold\":30,\"progression\":{\"xp\":26,\"level\":7,\"skillPoints\":6},\"tree\":[],\"classId\":\"knight\",\"trees\":{\"knight\":[]},\"quests\":{\"active\":[],\"done\":[]},\"forgeLevel\":0,\"armorWear\":{}}}}"
+    },
+    "tape": [
+      [
+        142,
+        "d",
+        "left"
+      ],
+      [
+        167,
+        "u",
+        "left"
+      ],
+      [
+        190,
+        "d",
+        "menu"
+      ],
+      [
+        198,
+        "u",
+        "menu"
+      ],
+      [
+        382,
+        "t",
+        220.47,
+        153.12
+      ]
+    ],
+    "checks": [
+      [
+        60,
+        1750098156
+      ],
+      [
+        120,
+        3725282457
+      ],
+      [
+        180,
+        1859716521
+      ],
+      [
+        240,
+        3738786092
+      ],
+      [
+        300,
+        4218393865
+      ],
+      [
+        360,
+        3132804495
+      ],
+      [
+        382,
+        3323961427
+      ]
+    ],
+    "end": 382
+  }
+}

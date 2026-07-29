@@ -278,14 +278,42 @@ export class Tilemap implements CollisionSource {
     return false;
   }
 
-  /** Top of the first solid tile scanning down column `x` (spawn placement). */
-  groundY(x: number): number {
+  /**
+   * Where a body `w` x `h` dropped down column `x` comes to rest: the y
+   * of its TOP when standing, or null if the column has nowhere to stand.
+   *
+   * This replaces a `groundY` that returned the first solid tile scanning
+   * down from y=0 — which in any room with a roof is the CEILING. It was
+   * right only because its one caller spawns waves, and the one room with
+   * waves happens to be open at the top; measured against the four roofed
+   * rooms it was wrong in all four. Standing needs a surface AND the room
+   * to stand in, so this checks both rather than trusting the first solid
+   * thing it meets.
+   */
+  restingY(x: number, w: number, h: number, fromY = 0): number | null {
     const ts = this.tileSize;
-    const tx = Math.min(Math.max(Math.floor(x / ts), 0), this.cols - 1);
-    for (let ty = 0; ty < this.rows; ty++) {
-      if (tiles.get(this.grid[ty][tx]).solid) return ty * ts;
+    const c0 = Math.min(Math.max(Math.floor(x / ts), 0), this.cols - 1);
+    const c1 = Math.min(Math.max(Math.floor((x + w - 1) / ts), 0), this.cols - 1);
+    const standable = (ty: number): boolean => {
+      for (let tx = c0; tx <= c1; tx++) {
+        const def = tiles.get(this.grid[ty][tx]);
+        if (def.solid || def.oneWay) return true;
+      }
+      return false;
+    };
+    for (let ty = Math.max(0, Math.floor(fromY / ts)); ty < this.rows; ty++) {
+      if (!standable(ty)) continue;
+      const top = ty * ts - h;
+      if (top < 0) continue; // a surface too close to the roof to stand under
+      let clear = true;
+      for (let by = Math.floor(top / ts); by < ty && clear; by++) {
+        for (let tx = c0; tx <= c1 && clear; tx++) {
+          if (tiles.get(this.grid[by][tx]).solid) clear = false;
+        }
+      }
+      if (clear) return top;
     }
-    return this.worldH - ts;
+    return null;
   }
 
   *solidsNear(r: Rect): Iterable<Solid> {

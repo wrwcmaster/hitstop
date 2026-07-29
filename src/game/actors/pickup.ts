@@ -9,6 +9,7 @@ import {
   t,
   type Body,
   type CollisionSource,
+  placeBody,
 } from '@engine/index';
 import { COLORS } from '../content/palette';
 import { TEXEL, blit } from '../content/sprites';
@@ -24,8 +25,8 @@ import { Player, nearestPlayer } from './player';
  * inventory (with a name toast so the player knows what they got).
  */
 export class Pickup extends Entity implements Body {
-  x: number;
-  y: number;
+  x = 0; // real position assigned by placeBody in the constructor
+  y = 0;
   w = 6;
   h = 6;
   vx: number;
@@ -50,8 +51,10 @@ export class Pickup extends Entity implements Body {
       this.w = icon.width / TEXEL;
       this.h = icon.height / TEXEL;
     }
-    this.x = x - this.w / 2;
-    this.y = y - this.h / 2;
+    // Placement law: born where a body could have moved, never buried —
+    // a drop from a monster dying flush against a wall used to start
+    // half inside it.
+    placeBody(this, x - this.w / 2, y - this.h / 2, collision);
     // Pop out of the kill with a random hop.
     this.vx = rand(-60, 60);
     this.vy = rand(-160, -100);
@@ -85,10 +88,6 @@ export class Pickup extends Entity implements Body {
     if (!this.flies) {
       applyGravity(this, dt);
       this.vx *= Math.pow(0.05, dt);
-      if (this.onGround && this.vy >= 0) {
-        // Gentle bob while resting.
-        this.y += Math.sin(this.age * 4) * 0.15;
-      }
     }
     moveAndCollide(this, dt, this.collision, { ignoreOneWay: this.flies });
 
@@ -149,12 +148,15 @@ export class Pickup extends Entity implements Body {
   render(g: CanvasRenderingContext2D): void {
     // Blink during the final 2 seconds before despawn.
     if (this.ttl - this.age < 2 && Math.floor(this.age * 8) % 2) return;
+    // The resting bob is presentation — drawn, never written into the
+    // body, which stays planted on the ground it landed on.
+    const bob = this.onGround && !this.flies ? Math.sin(this.age * 4) * 1.2 : 0;
     const icon = itemDef(this.itemId).icon;
     if (icon) {
-      blit(g, icon, this.x, this.y);
+      blit(g, icon, this.x, this.y + bob);
     } else {
       g.fillStyle = COLORS.gold;
-      g.fillRect(Math.round(this.x), Math.round(this.y), this.w, this.h);
+      g.fillRect(Math.round(this.x), Math.round(this.y + bob), this.w, this.h);
     }
   }
 }

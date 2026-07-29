@@ -195,6 +195,16 @@ Or edit the JSON directly — it's designed to be hand-editable:
 }
 ```
 
+An entity's `x`/`y` is the **top-left of its body**, and the room won't
+load if that body overlaps a solid tile — `requireUnburiedEntities`
+throws at boot naming the room, the entity, and the offending tile.
+Resting flush is fine (a chest ON a floor, a rockfall hanging FROM a
+ceiling); overlap is not. The engine would quietly shove a buried body
+to the nearest open face at spawn, and a silent shove is a room lying
+about where its furniture is — grotto shipped a chest entombed inside a
+rock pillar for exactly as long as the old collision happened to bury it
+stably. If the validator fires, move the entity, don't work around it.
+
 ## A new sound
 
 In `src/game/content/sfx.ts` — compose the two synth primitives:
@@ -600,7 +610,11 @@ barriers read live. Puzzle state persists in saves for free.
 - **platform** glides a sine path (`dx/dy` offset over `period` seconds,
   eased at both ends; `phase` staggers pairs) and carries whoever stands
   on it. Its `Solid` lives in `Tilemap.extraSolids`, so normal physics
-  collides with it.
+  collides with it. The ride goes through `carryBody`, so a platform that
+  glides toward a wall leaves its passenger at the face and slides on
+  underneath rather than pushing them into the rock — worth knowing when
+  you author a `dx` that ends inside geometry, because the platform will
+  happily go where the rider cannot follow.
 - **lever** latches: interact (E) toggles its flag either way.
 - **plate** holds its flag only while someone stands on it
   (`latch: true` makes the press permanent). In co-op, both knights press
@@ -740,8 +754,8 @@ Shops are ware lists (`content/shops.ts`): `{ item, price }[]` — prices in gol
 The built-ins show the three tiers, all resolving through Strikes/Projectiles so feedback stays uniform:
 
 - **Ranged debuff** (the Slime King's sticky spit): lob a 0-damage projectile whose `onHit` applies a status. Zero-damage hits skip damage numbers and player i-frames automatically.
-- **Telegraph → lunge** (devourer, boss slam): a shiver/windup state the player can read, then the attack. Never skip the telegraph — readable attacks are what make hard fights fair.
-- **Grab mechanics** (Slime King): `MonsterDef.onPlayerContact` starts the generic held-player FSM, while the definition's `swallow` strategy owns status, release cleanup, colors, and overlay. Devourer's gear theft is likewise its own contact hook. New unusual enemies do not add branches to Player.
+- **Telegraph → lunge** (devourer, boss slam): a shiver/windup state the player can read, then the attack. Never skip the telegraph — readable attacks are what make hard fights fair. Write the shiver to `m.tremorX`/`m.tremorY`, which `Monster.render` applies as a draw-time translate and clears every update. Do **not** nudge `m.x` — a tremor written into the body is real movement, and a windup that jitters 0.6px per frame walks the monster into whatever it is standing beside.
+- **Grab mechanics** (Slime King): `MonsterDef.onPlayerContact` starts the generic held-player FSM, while the definition's `swallow` strategy owns status, release cleanup, colors, and overlay. Devourer's gear theft is likewise its own contact hook. New unusual enemies do not add branches to Player. The hold itself is an *impulse*, not a pin: the state sets a velocity toward the captor each step and the mover integrates it, so a beast pressed against stone holds its victim at the wall's face instead of inside it (measured: 0.4px from the captor's center in open air).
 - **Reading the terrain** (wallcrawler, Vise): a def may ask the collision source what KIND of surface it is touching — `collision.traitAt(rect, 'slick')` — so an enemy can obey the same wall rules the player does. The wallcrawler climbs gripstone and visibly balks at slick panels, which is how the Riven teaches Wall Grip before granting it: the creature demonstrates the rule, and no text explains it.
 - **Health as structure** (Vise): a boss's hp can be read as *components* rather than a bar. Vise's `maxHp` is four limbs' worth; `severed()` derives how many are gone from damage taken, and each new one fires its own feedback and moves the fight (it re-grips lower and speeds up). Progress is a body coming apart — see docs/world-design.md's boss law: fast pace, visible progress, expressed differently per boss.
 
@@ -817,3 +831,4 @@ game.events.on('waveClear', ({ wave }) => { /* heal, offer upgrade */ });
 - Content files register at import time and export nothing; `main.ts` imports them for their side effects.
 - Keep every tunable number in the def or a `*_TUNING` object — the whole point is finding the fun by twiddling.
 - If two monsters share behavior, extract a helper function in the content file — resist adding engine features until the third use.
+- **Never assign `.x`/`.y` on anything with a body.** Push with velocity, ride with `carryBody`, spawn or teleport with `placeBody`, shiver with `tremorX/Y`. Assignment is the one way to put a body somewhere the physics would never have allowed, and once it is inside a solid the collision resolver cannot see it — it walks through the wall. The laws are at the top of `engine/physics/body.ts`.

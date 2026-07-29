@@ -84,9 +84,24 @@ export const WORLD_MAP_CELLS: WorldMapCell[] = Object.keys(ROOMS).flatMap((id) =
  * A door is emitted once per room pair (the first side seen wins), so the
  * two ends of one passage draw a single mark on the boundary they share.
  */
-export const WORLD_MAP_DOORS: WorldMapDoor[] = (() => {
+/** Do two placed rooms share an edge on the grid? */
+function adjacent(a: string, b: string): boolean {
+  const ma = placementOf(a);
+  const mb = placementOf(b);
+  if (!ma || !mb) return false;
+  const sa = spanOf(a);
+  const sb = spanOf(b);
+  const xOverlap = ma.x < mb.x + sb.w && mb.x < ma.x + sa.w;
+  const yOverlap = ma.y < mb.y + sb.h && mb.y < ma.y + sa.h;
+  const xTouch = ma.x + sa.w === mb.x || mb.x + sb.w === ma.x;
+  const yTouch = ma.y + sa.h === mb.y || mb.y + sb.h === ma.y;
+  return (xOverlap && yTouch) || (yOverlap && xTouch);
+}
+
+const CONNECTIONS = (() => {
   const seen = new Set<string>();
-  const out: WorldMapDoor[] = [];
+  const doors: WorldMapDoor[] = [];
+  const links: [string, string][] = [];
   for (const [id, def] of Object.entries(ROOMS)) {
     const m = placementOf(id);
     if (!m) continue;
@@ -101,16 +116,32 @@ export const WORLD_MAP_DOORS: WorldMapDoor[] = (() => {
       const key = [id, to].sort().join(' ');
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({
-        a: id,
-        b: to,
-        x: m.x + ((tr.x + tr.w / 2) / roomW) * span.w,
-        y: m.y + ((tr.y + tr.h / 2) / roomH) * span.h,
-      });
+      // A pip belongs ON a shared edge. When two rooms do not touch, there
+      // is no shared edge to put one on, and drawing it anyway plants a
+      // mark in empty space that means nothing — which is most of why the
+      // map read as wrong. Those get a line instead, which is the honest
+      // shape for what they are: the riven flue is a long shaft climbing
+      // from the depths back up to town, and no grid can seat it beside
+      // both ends at once. A line also makes a MISPLACED room obvious,
+      // since a passage that ought to be a pip shows up as a wire.
+      if (adjacent(id, to)) {
+        doors.push({
+          a: id,
+          b: to,
+          x: m.x + ((tr.x + tr.w / 2) / roomW) * span.w,
+          y: m.y + ((tr.y + tr.h / 2) / roomH) * span.h,
+        });
+      } else {
+        links.push([id, to]);
+      }
     }
   }
-  return out;
+  return { doors, links };
 })();
+
+export const WORLD_MAP_DOORS: WorldMapDoor[] = CONNECTIONS.doors;
+/** Connections whose rooms do not touch: drawn as a line, not a pip. */
+export const WORLD_MAP_LINKS: readonly (readonly [string, string])[] = CONNECTIONS.links;
 
 /** Display name for a room, falling back to its id. */
 export function roomLabel(id: string): string {

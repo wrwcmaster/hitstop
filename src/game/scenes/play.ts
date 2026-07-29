@@ -22,6 +22,8 @@ import {
   overlaps,
   t,
   moveAndCollide,
+  placeBody,
+  type Solid,
 } from '@engine/index';
 import { menuLine, prettyCode, prettyButton, promptText, REPLAY_PENDING_KEY, type ActionGame, type Action, type RunStart, type TestScenario } from '../defs';
 import { Player } from '../actors/player';
@@ -69,17 +71,37 @@ interface Transition {
    * nothing to open.
    */
   open?: { left: number; x: number; y: number; w: number; h: number };
-  /** Velocity to restore on arrival — connected seams keep your arc. */
-  carry?: { vx: number; vy: number };
   /** Horizontal edge gaps keep the knight moving naturally through the fade. */
   walk?: { out: -1 | 1; into: -1 | 1 };
-  /** Destination geometry used to advance a vertical seam before room swap. */
-  seamMap?: Tilemap;
+  /**
+   * The surface the knight was standing on when this crossing began, if
+   * she was standing at all. A threshold HAS a floor: the two rooms' floors
+   * meet at the doorway, and she is on both while she walks through. Only
+   * one room is loaded at a time, so past the edge the tiles simply stop —
+   * and she was falling off the end of the world for the last frames of
+   * every walked crossing. Absent when she crosses airborne, because then
+   * there is no floor under her and the arc is the truth.
+   */
+  thresholdY?: number;
 }
 
 const TRANSITION_TIME = 0.6;
+/**
+ * A vertical seam does not use Transition at all: the room swaps at the
+ * exact step of the crossing and the simulation never pauses, so every
+ * collision after the crossing happens — and RENDERS — in the room that
+ * owns it. The fade is pure cosmetics over live play. The previous
+ * design paused the sim and advanced a hidden proxy body in the far
+ * room while still drawing the knight in the old one; every mismatch
+ * between those two worlds surfaced as a lie on screen, most famously
+ * being "blocked by air" in one room by a ceiling that exists in the
+ * other.
+ */
+const SEAM_FADE = 0.25;
 /** Fast enough to clear the threshold before the screen reaches black. */
 const EDGE_WALK_SPEED = 72;
+/** How far the threshold floor reaches past the boundary (see moveThroughEdge). */
+const THRESHOLD_RUN = 128;
 /** How long a door takes to haul itself up out of the way. */
 const DOOR_OPEN_TIME = 0.35;
 
@@ -128,15 +150,6 @@ export class PlayScene implements Scene {
    * also break the scenery, the same rule has to cover the rubble.
    */
   private sandbox = false;
-  /**
-   * A quiet scenario never opens conversation dialogue — talk triggers,
-   * NPC chatter, boss epilogues all stay shut. Probe scripts and verb
-   * fixtures used to burn ~90 sim steps of confirm-tapping to clear an
-   * entry conversation before the actual test could start; `quiet: true`
-   * in the scenario is that boilerplate, deleted. Rides the recorded
-   * runStart like every other scenario field, so replays agree.
-   */
-  private quiet = false;
   /** A mutation landed this frame; rebake the minimap once, in update. */
   private minimapDirty = false;
   /** Debounce for the wave's per-tile shatter reports (see waveSurface). */
@@ -176,14 +189,11 @@ export class PlayScene implements Scene {
   private director = new Director<CutsceneCtx>();
   /** The scripted hands holding the player's controls while one plays. */
   private cutsceneInput: ReturnType<typeof scriptInput> | null = null;
-  /** Vertical seams the player materialized inside on arrival. They stay
-   * inert until she has actually left them — see setRoom and
-   * updateVerticalSeams for why this is kept by hand. */
-  private seamPrimed = new Set<TriggerDef>();
+  /** Seconds of cosmetic fade left after an instant vertical-seam swap. */
+  private seamFade = 0;
   /** Where the scene found the co-op guest: held there for its duration
    * so live physics can't carry an off-camera knight somewhere she
    * can't see (see the anchor block in update). */
-  private cineAnchor: { x: number; y: number } | null = null;
 
   private host: PlayHost;
   private waves: WaveDirector;
@@ -477,7 +487,7 @@ export class PlayScene implements Scene {
       g.world.spawn(knight);
     }
     this.sandbox = false;
-    this.quiet = false;
+    this.game.quietDialogue = false;
     if (save) {
       restorePlayer(this.player, save.player);
       this.flags = new Set(save.flags);
@@ -509,7 +519,7 @@ export class PlayScene implements Scene {
     g.world.spawn(this.player);
 
     this.sandbox = true;
-    this.quiet = false;
+    this.game.quietDialogue = false;
     this.flags.clear();
     this.firedTriggers = {};
     this.patches.clear();
@@ -553,7 +563,9 @@ export class PlayScene implements Scene {
     if (pl.hp != null) this.player.hp = clamp(pl.hp, 1, this.player.maxHp);
 
     this.sandbox = true;
-    this.quiet = s.quiet === true;
+    // Rides the recorded runStart like every other scenario field, so
+    // replays agree. See ActionGame.quietDialogue for why it lives there.
+    this.game.quietDialogue = s.quiet === true;
     this.flags.clear();
     this.firedTriggers = {};
     this.patches.clear();
@@ -720,9 +732,22 @@ export class PlayScene implements Scene {
     this.minimap = new Minimap(this.tilemap, { maxW: 64, maxH: 22 });
     this.triggers = new Triggers(this.room.triggers ?? []);
     this.triggers.importFired(this.firedTriggers[id] ?? []);
-    // Stop the view 16px above the room's true bottom so the frame shows
-    // a lip of ground, not a wall of underground rock.
-    g.camera.setBounds(0, -30, this.tilemap.worldW, this.tilemap.worldH - 16);
+    // The frame is the room, exactly — no margin at either end.
+    //
+    // It used to stop 16px above the bottom and extend 30px past the top.
+    // Both were crops around content, and both lied. The bottom reserve
+    // hid padding rows rooms carried from before the camera could scroll
+    // down at all; a constant cannot know how much foundation a room drew,
+    // so the visible strip ranged 8px to 59px, and the band it created —
+    // reachable by physics, not by the camera — is what cut the knight's
+    // feet off in the flue. The top margin was the same shape upside
+    // down: 30px of void above every ceiling, so a ceiling door's sign
+    // had somewhere to render. Riven-lip's roof floated under a strip of
+    // nothing instead of reading as the underside of underground's floor.
+    //
+    // Rooms author their own sky and their own foundation. Signs render
+    // inside the room (see renderDoorSigns).
+    g.camera.setBounds(0, 0, this.tilemap.worldW, this.tilemap.worldH);
 
     g.world.retain((e) => e === this.player || e === this.coop?.guest);
     g.feel.particles.clear();
@@ -749,37 +774,36 @@ export class PlayScene implements Scene {
     // yet (title screen), aim at the spawn point.
     const aimX = this.player ? (spawnX ?? this.room.playerSpawn.x) : this.room.playerSpawn.x;
     const aimY = this.player ? (spawnY ?? this.room.playerSpawn.y) : this.room.playerSpawn.y;
+    // Arrivals go through placement, not assignment — a body may only be
+    // put where a body could have moved. If the computed spot is buried
+    // (a door landing that lands in rock), fall back to the room's own
+    // spawn rather than leaving her inside the wall, where collision
+    // cannot see her and she would walk straight through it.
     if (this.player) {
       this.player.collision = this.tilemap;
-      this.player.x = aimX;
-      this.player.y = aimY;
+      if (!placeBody(this.player, aimX, aimY, this.tilemap)) {
+        placeBody(this.player, this.room.playerSpawn.x, this.room.playerSpawn.y, this.tilemap);
+      }
       this.player.vx = 0;
       this.player.vy = 0;
     }
     const knight = this.coop?.guest;
     if (knight) {
       knight.collision = this.tilemap;
-      knight.x = aimX + 14; // beside the host, not inside them
-      knight.y = aimY;
+      if (!placeBody(knight, aimX + 14, aimY, this.tilemap)) { // beside the host, not inside them
+        placeBody(knight, this.room.playerSpawn.x, this.room.playerSpawn.y, this.tilemap);
+      }
       knight.vx = 0;
       knight.vy = 0;
     }
-    // ONE rule, applied to both places a door can fire from: you never
-    // fire a doorway you materialized inside. Entering means crossing the
-    // boundary, and being placed somewhere is not crossing it — without
-    // this, arriving through a seam hands you straight back the way you
-    // came. `Triggers` enforces it for everything it drives; vertical
-    // seams are polled outside that edge system (they re-test a velocity
-    // gate every frame), so they need the same memory kept here.
-    if (this.player) {
-      this.triggers.prime(this.player, (def) => def.event === 'door');
-      this.seamPrimed.clear();
-      for (const def of this.room.triggers ?? []) {
-        if (def.event !== 'door') continue;
-        if (def.props?.fallIn !== true && def.props?.leapUp !== true) continue;
-        if (overlaps(this.player, def)) this.seamPrimed.add(def);
-      }
-    }
+    // You never fire a doorway you materialized inside. `Triggers`
+    // enforces it for the edge-driven doors it runs. Vertical seams need
+    // no such memory: their velocity gate IS the protection — you arrive
+    // in a fall-in rising and a leap-up falling, so the seam you came
+    // through fails its own gate by construction, and the moment the arc
+    // genuinely reverses, firing again (back the way you came) is the
+    // splice behaving correctly, not a bug to suppress.
+    if (this.player) this.triggers.prime(this.player, (def) => def.event === 'door');
     // Use the exact target and bounds normal follow uses. Previously this
     // clamped against worldH instead of camera.maxY (which intentionally
     // sits 16px higher to show a ground lip), then followed the player's
@@ -864,10 +888,19 @@ export class PlayScene implements Scene {
       }
       return false;
     };
-    /** Slide a vertical-seam landing along the seam until it is in air. */
-    const settle = (x: number, y: number, step: -1 | 1): { x: number; y: number } | null => {
+    /**
+     * Nudge a vertical-seam landing out of any lip it overlaps — always
+     * DOWNWARD, the near side for both arrival kinds (rising into a floor
+     * shaft, falling out of a ceiling gap). Stepping the other way once
+     * "found air" on the far side of an unsmashed cap, which teleported
+     * the knight through a tile of solid rock; sliding down only ever
+     * expels her from the face she is already touching. If the mouth is
+     * blocked, she arrives beneath the blockage, bonks, and the seam
+     * sends her honestly back the way she came.
+     */
+    const settle = (x: number, y: number): { x: number; y: number } | null => {
       for (let d = 0; d <= 4 * dest.tileSize; d++) {
-        if (!buried(x, y + step * d)) return { x, y: y + step * d };
+        if (!buried(x, y + d)) return { x, y: y + d };
       }
       return null;
     };
@@ -891,20 +924,22 @@ export class PlayScene implements Scene {
       const along = clamp((this.player.cx - leaving.x) / leaving.w, 0, 1);
       return clamp(back.x + back.w * along - pw / 2, back.x, back.x + back.w - pw);
     };
+    // Vertical seams fire at the source trigger's far edge (the plane
+    // where that room's drawn shaft ends) and arrive at the far edge of
+    // the destination's own trigger — its matching boundary. Between the
+    // two rooms every drawn pixel of both shafts gets flown through, in
+    // the room that draws it: leave through the ceiling and you enter
+    // the far shaft from its very bottom, still rising; drop out of a
+    // floor and you fall in from the far ceiling's top. What stops you
+    // is whatever solid geometry the shaft actually contains — a
+    // breakable lid stops a weak jump ON SCREEN, not in an invisible
+    // elsewhere.
     if (back.props?.leapUp === true) {
-      // Their ceiling gap: appear just below it, still falling — and if
-      // the gap's lip is thicker than the trigger, keep going down.
-      const at = settle(verticalX(), back.y + back.h, 1);
+      const at = settle(verticalX(), back.y);
       return at && { ...at, carry: true };
     }
     if (back.props?.fallIn === true) {
-      // Their floor shaft: enter just inside its lower lip, still rising.
-      // Starting at the trigger's foot made the invisible tunnel taller
-      // than a normal jump once transition-time gravity became real, so
-      // even a full jump could never clear the mouth. One pixel of overlap
-      // keeps the arrival primed while the real collision map decides the
-      // result: a strong jump clears the floor, a weak one reverses below.
-      const at = settle(verticalX(), back.y - ph + 1, -1);
+      const at = settle(verticalX(), back.y + back.h - ph);
       return at && { ...at, carry: true };
     }
     // Step OUT of the doorway, not into it. Landing on the trigger was
@@ -919,10 +954,17 @@ export class PlayScene implements Scene {
     // rather than pinning every arrival to the destination floor. Equal
     // trigger heights preserve Y offset exactly; unequal ones scale it.
     // Together with carried velocity below, a jump stays a jump across
-    // the room boundary and a fall keeps falling.
-    const y = edgePair && this.player && leaving && leaving.h > 0
-      ? back.y + (this.player.y - leaving.y) * (back.h / leaving.h)
-      : back.y + back.h - ph;
+    // the room boundary and a fall keeps falling. The clamp is the same
+    // backstop every body obeys, applied to a placement: whatever height
+    // the mapping proposes, you arrive inside the room.
+    const destH = dest.tiles.length * dest.tileSize;
+    const y = clamp(
+      edgePair && this.player && leaving && leaving.h > 0
+        ? back.y + (this.player.y - leaving.y) * (back.h / leaving.h)
+        : back.y + back.h - ph,
+      0,
+      destH - ph,
+    );
     // Stepping out sideways assumes a doorway you walk through. A shaft
     // you FALL down has no beside — the town well is two tiles wide with
     // rock either side — so let the caller fall back to the room's spawn
@@ -936,7 +978,19 @@ export class PlayScene implements Scene {
     const land = x === undefined && y === undefined ? this.doorLanding(roomId) : null;
     const spawn = this.roomById(roomId).playerSpawn;
     const walk = this.edgeWalk(roomId) ?? undefined;
-    const carry = land?.carry && this.player ? { vx: this.player.vx, vy: this.player.vy } : undefined;
+    // A VERTICAL seam (carry without a walk — edge pairs carry velocity
+    // too, but walk their fade) swaps rooms at the exact step of the
+    // crossing — see SEAM_FADE. The arc continues unbroken: setRoom
+    // zeroes velocity for ordinary doors, so hand it back across the call.
+    if (land?.carry && !walk && this.player) {
+      const vx = this.player.vx;
+      const vy = this.player.vy;
+      this.setRoom(roomId, land.x, land.y);
+      this.player.vx = vx;
+      this.player.vy = vy;
+      this.seamFade = SEAM_FADE;
+      return;
+    }
     this.transition = {
       t: 0,
       fromRoomId: this.roomId,
@@ -945,10 +999,7 @@ export class PlayScene implements Scene {
       y: y ?? land?.y ?? spawn.y,
       open: this.doorwayArt(roomId) ?? undefined,
       walk,
-      // Connected seams splice the player's arc across rooms, so capture
-      // the velocity at the moment of crossing (setRoom zeroes it).
-      carry,
-      seamMap: carry && !walk ? this.collisionMapFor(roomId) : undefined,
+      thresholdY: walk && this.player?.onGround ? this.player.y + this.player.h : undefined,
     };
     if (this.player) this.player.interactionsEnabled = false;
     this.game.sfx.play(this.transition.open ? 'unlock' : 'menuOpen');
@@ -979,98 +1030,49 @@ export class PlayScene implements Scene {
     if (!p || dt <= 0) return;
 
     // The rest of the world pauses behind the fade, but the crossing
-    // knight does not. Keep gravity and vertical collision live so a
-    // jump traces one continuous arc instead of floating at its entry Y.
+    // knight does not: real position, real gravity, real solids. The
+    // only licence an edge-walk takes is dropping the level's x-backstop
+    // (via a boundless solids-only source), because crossing the
+    // boundary is the entire point of this moment.
     //
-    // Horizontal travel remains explicit: moveAndCollide's level
-    // backstop quite correctly keeps ordinary actors inside a room, while
-    // this is the one moment the knight must walk beyond that boundary.
-    p.advanceTransitionAir(dt);
-    const oldX = p.x;
-    const bounds = p.collision.bounds;
-    if (bounds) p.x = clamp(p.x, bounds.x, bounds.x + bounds.w - p.w);
-    p.vx = 0;
-    moveAndCollide(p, dt, p.collision);
-    p.x = oldX;
-
+    // It used to clamp x INTO the room, collide there, and restore x —
+    // and colliding at a made-up position meant the resolver could find
+    // a wall that the real body never touched. Jump out through the
+    // vault's doorway and the clamped ghost stood inside the solid wall
+    // ABOVE the door; the resolver ejected it upward one tile per frame,
+    // riding the wall to the ceiling, and the door then faithfully
+    // mapped that height to a landing outside the far room. Real
+    // position, honest answer: a wall above the door stops you until
+    // you drop into the opening, then you walk through it.
+    // The threshold's own floor, for the frames she is outside the room.
+    // Walking out is the point of this moment, but the tiles end at the
+    // boundary, so a knight who WALKED through a doorway used to walk off
+    // the end of the world and fall — and the height re-map at the swap
+    // then faithfully carried that accidental fall into the next room
+    // (110 -> 114.2 -> arriving 4px low, every walked edge door). She is
+    // standing on a floor that continues; the engine just cannot see the
+    // half of it that belongs to the room being loaded. This is that half,
+    // and only that half: it lies entirely outside the boundary, so no
+    // real hole in either room is ever paved over by it.
+    const floorY = this.transition?.thresholdY;
+    const slab: Solid | null = floorY === undefined ? null : {
+      x: direction === -1 ? -THRESHOLD_RUN : this.tilemap.worldW,
+      y: floorY,
+      w: THRESHOLD_RUN,
+      h: this.tilemap.tileSize,
+    };
     p.facing = direction;
     p.vx = direction * EDGE_WALK_SPEED;
-    p.x += p.vx * dt;
-    p.animT += dt;
-  }
-
-  /**
-   * Advance a vertical seam while the rest of the room waits behind the
-   * fade. Before the swap, advance a logical body through the destination
-   * geometry while its displacement animates the still-visible source
-   * knight. That prevents a long fade from skipping the first far-side
-   * platform. After the swap the real body continues the same simulation.
-   * Room bounds stay open along the seam so they cannot erase the velocity
-   * needed to return.
-   */
-  private moveThroughVerticalSeam(tr: Transition, dt: number, beforeSwap: boolean): void {
-    const p = this.player;
-    if (!p || dt <= 0) return;
-    if (beforeSwap) {
-      const visualX = p.x;
-      const visualY = p.y;
-      const oldVx = p.vx;
-      const logicalY = tr.y;
-      p.x = tr.x;
-      p.y = logicalY;
-      p.vx = 0;
-      p.advanceTransitionAir(dt);
-      moveAndCollide(p, dt, {
-        solidsNear: (rect) => tr.seamMap?.solidsNear(rect) ?? [],
-      });
-      tr.y = this.reversedVerticalSeamY(tr, tr.roomId, p.y, p.vy) ?? p.y;
-      p.x = visualX;
-      p.y = visualY + tr.y - logicalY;
-      p.vx = oldVx;
-      return;
-    }
-
-    const oldX = p.x;
-    const oldVx = p.vx;
-    p.vx = 0;
     p.advanceTransitionAir(dt);
     moveAndCollide(p, dt, {
-      solidsNear: (rect) => p.collision.solidsNear(rect),
+      solidsNear: (rect) => {
+        const near = [...p.collision.solidsNear(rect)];
+        if (slab && rect.x < slab.x + slab.w && slab.x < rect.x + rect.w
+          && rect.y < slab.y + slab.h && slab.y < rect.y + rect.h) near.push(slab);
+        return near;
+      },
     });
-    p.x = oldX;
-    p.vx = oldVx;
-    this.holdReversedVerticalSeam(tr);
-  }
-
-  /**
-   * A weak vertical crossing can reverse during the fade. Keep the knight
-   * on the destination threshold instead of letting her fall beyond the
-   * room extent; the ordinary seam poll will send her naturally back on
-   * the next simulation step, with the gravity-grown velocity intact.
-   */
-  private reversedVerticalSeamY(
-    tr: Transition,
-    roomId: string,
-    y: number,
-    vy: number,
-  ): number | null {
-    const back = this.roomById(roomId).triggers?.find(
-      (def) => def.event === 'door' && def.props?.room === tr.fromRoomId,
-    );
-    const p = this.player;
-    if (!back || !p) return null;
-    if (back.props?.fallIn === true && vy > 40 && y + p.h >= back.y + back.h) {
-      return back.y + back.h - p.h;
-    }
-    if (back.props?.leapUp === true && vy < -40 && y <= back.y) return back.y;
-    return null;
-  }
-
-  private holdReversedVerticalSeam(tr: Transition): void {
-    const p = this.player;
-    if (!p) return;
-    const y = this.reversedVerticalSeamY(tr, this.roomId, p.y, p.vy);
-    if (y !== null) p.y = y;
+    p.animT += dt;
   }
 
   /**
@@ -1312,16 +1314,7 @@ export class PlayScene implements Scene {
     for (const def of this.room.triggers ?? []) {
       if (def.event !== 'door') continue;
       if (def.props?.fallIn !== true && def.props?.leapUp !== true) continue;
-      if (!overlaps(p, def)) {
-        // Left it: this seam is live again (the edge-trigger rule, kept
-        // by hand because this path polls instead of edge-detecting).
-        this.seamPrimed.delete(def);
-        continue;
-      }
-      if (this.seamPrimed.has(def)) {
-        if (!this.firesOnContact(def)) continue; // still travelling into this room
-        this.seamPrimed.delete(def); // the arc reversed before leaving the seam
-      }
+      if (!overlaps(p, def)) continue;
       if (doorLocked(def, this.host)) continue;
       if (this.firesOnContact(def)) {
         triggerActions.get('door').run(def, this.host);
@@ -1370,7 +1363,16 @@ export class PlayScene implements Scene {
       ));
       ctx.globalAlpha = near ? 1 : 0.45;
       const lineHeight = 8;
-      const textY = z.y - 9 - (lines.length - 1) * lineHeight - (besidePortal ? 14 : 0);
+      // Above the doorway by preference — but a ceiling door's "above" is
+      // outside the room, and the frame no longer extends past the roof to
+      // cover for it. Clamp into the room the same way the line above
+      // clamps horizontally, so the sign drops below the lintel instead
+      // of demanding a strip of void to live in.
+      const top = Math.max(0, this.game.camera.y) + 2;
+      const bottom = Math.min(this.tilemap.worldH, this.game.camera.y + this.game.camera.viewH)
+        - lines.length * lineHeight - 2;
+      const wanted = z.y - 9 - (lines.length - 1) * lineHeight - (besidePortal ? 14 : 0);
+      const textY = top <= bottom ? clamp(wanted, top, bottom) : wanted;
       lines.forEach((line, index) => {
         drawText(ctx, line, textX, textY + index * lineHeight, near ? COLORS.gold : COLORS.steel, 1, 'center');
       });
@@ -1463,7 +1465,7 @@ export class PlayScene implements Scene {
   }
 
   private openConversation(id: string): void {
-    if (this.quiet) return; // a quiet scenario reads the world, not the script
+    if (this.game.quietDialogue) return; // a quiet scenario reads the world, not the script
     this.game.scenes.push(
       new DialogueScene<Action>(this.game, id, {
         confirm: 'confirm',
@@ -1480,6 +1482,7 @@ export class PlayScene implements Scene {
   update(dt: number): void {
     const g = this.game;
     this.uiT += dt;
+    this.seamFade = Math.max(0, this.seamFade - dt);
 
     // A queued run start lands here, on a step boundary, and takes the
     // whole tick (the world's first sim step is the NEXT update) — the
@@ -1510,32 +1513,30 @@ export class PlayScene implements Scene {
       const after = Math.min(TRANSITION_TIME, before + dt);
       const outDt = Math.max(0, Math.min(after, half) - Math.min(before, half));
       if (tr.walk) this.moveThroughEdge(tr.walk.out, outDt);
-      else if (tr.carry) this.moveThroughVerticalSeam(tr, outDt, true);
       tr.t = after;
       if (before < half && after >= half) {
         // The fade-out half may have advanced a jump or fall. Re-map that
         // CURRENT height at the threshold instead of using the Y captured
-        // when the transition began, then carry the current velocity into
-        // the new room. This keeps both halves of the arc continuous.
+        // when the transition began, keeping both halves of the arc
+        // continuous.
         const liveLanding = tr.walk ? this.doorLanding(tr.roomId) : null;
-        const liveCarry = tr.carry && this.player
-          ? { vx: this.player.vx, vy: this.player.vy }
-          : tr.carry;
         if (tr.walk && this.player) this.player.facing = tr.walk.into;
+        // The arc's SPEED has to survive the swap too. setRoom zeroes
+        // velocity — right for an ordinary door, where you arrive at a
+        // standstill — but an edge pair is one continuous threshold, and
+        // the instant-swap branch in goToRoom already hands velocity back
+        // across the same call. Without this the height was re-mapped
+        // (above) while the fall that produced it was thrown away, so a
+        // jump or a drop through the opening restarted from rest on the
+        // far side. Horizontal speed stays the transition's to own: the
+        // walk drives it, and tr.t >= TRANSITION_TIME zeroes it on purpose.
+        const carriedVy = liveLanding?.carry && this.player ? this.player.vy : null;
         this.setRoom(tr.roomId, liveLanding?.x ?? tr.x, liveLanding?.y ?? tr.y);
-        // setRoom zeroes velocity for ordinary doors; a connected seam
-        // hands the arc back UNCHANGED, so a fall or jump simply continues.
-        // Deliberately no boost for a weak jump: physics stays honest.
-        if (liveCarry && this.player) {
-          this.player.vx = liveCarry.vx;
-          this.player.vy = liveCarry.vy;
-        }
+        if (carriedVy !== null && this.player) this.player.vy = carriedVy;
       }
       const inDt = Math.max(0, after - half) - Math.max(0, before - half);
       if (tr.walk) this.moveThroughEdge(tr.walk.into, inDt);
-      else if (tr.carry) this.moveThroughVerticalSeam(tr, inDt, false);
       if (tr.t >= TRANSITION_TIME) {
-        if (tr.carry && !tr.walk) this.holdReversedVerticalSeam(tr);
         if (tr.walk && this.player) this.player.vx = 0;
         if (this.player) this.player.interactionsEnabled = true;
         this.transition = null;
@@ -1589,24 +1590,18 @@ export class PlayScene implements Scene {
         p.cineShield = cine;
         if (cine) p.invulnT = Math.max(p.invulnT, 0.1);
       }
-      // The guest knight is also ANCHORED for the scene's duration. The
-      // host knight is the cutscene author's to stage (scripted hands),
-      // but the guest is nobody's — stood down, camera elsewhere — and
-      // neutral input under live gravity could carry her off a ledge, a
-      // moving platform, or a one-way she cannot see. So she is held
-      // where the scene found her (restored after the world steps,
-      // velocities zeroed), and released the moment control returns.
-      if (cine && guest) this.cineAnchor ??= { x: guest.x, y: guest.y };
-      else this.cineAnchor = null;
+      // The guest knight is STOOD DOWN for the scene's duration, not
+      // frozen: her drive is zeroed each step (an impulse, which
+      // mechanisms may apply) and physics keeps running. On solid
+      // ground that is indistinguishable from the old position anchor;
+      // mid-air she falls and lands like a body, because a cutscene is
+      // a camera choice, not an exemption from gravity. The anchor this
+      // replaces restored her coordinates after the world stepped —
+      // the exact kind of position-setting that puts bodies where
+      // movement never could.
+      if (cine && guest) guest.vx = 0;
     }
     g.world.update(dt);
-    if (this.cineAnchor && this.coop?.guest) {
-      const knight = this.coop.guest;
-      knight.x = this.cineAnchor.x;
-      knight.y = this.cineAnchor.y;
-      knight.vx = 0;
-      knight.vy = 0;
-    }
     this.cutsceneInput?.endStep(); // scripted press/release edges last one step
     if (this.coop) {
       this.coop.step({
@@ -1635,7 +1630,21 @@ export class PlayScene implements Scene {
     // control returns — which is exactly the sequencing a reveal
     // followed by a conversation wants.
     if (this.phase === 'play' && this.player && this.player.hp > 0 && !this.director.active) {
-      this.triggers.update(this.player, (f) => this.handleTrigger(f.def), (def) => this.assembled(def));
+      // Vertical seams gate their ENTRY on the motion test, not just the
+      // firing: brushing a seam below falling speed must not consume the
+      // edge, or a locked shaft spends its one refusal silently — you
+      // stood on the choked flue's rubble and never read the sign. Held
+      // at the threshold, the entry lands the moment the motion is real,
+      // and a locked door then refuses once per approach as designed.
+      const seamStillApproaching = (def: TriggerDef): boolean =>
+        def.event === 'door'
+        && (def.props?.fallIn === true || def.props?.leapUp === true)
+        && !this.firesOnContact(def);
+      this.triggers.update(
+        this.player,
+        (f) => this.handleTrigger(f.def),
+        (def) => this.assembled(def) && !seamStillApproaching(def),
+      );
       // Doors & portals: stand on one and press interact to use it. Checked
       // after the world step so an NPC in range wins the key first.
       const p = this.player;
@@ -1735,6 +1744,12 @@ export class PlayScene implements Scene {
       const half = TRANSITION_TIME / 2;
       const a = tr.t < half ? tr.t / half : (TRANSITION_TIME - tr.t) / half;
       ctx.globalAlpha = clamp(a, 0, 1);
+      ctx.fillStyle = '#07070d';
+      ctx.fillRect(0, 0, g.width, g.height);
+      ctx.globalAlpha = 1;
+    } else if (this.seamFade > 0) {
+      // The seam's fade-in: cosmetic only, over a live, running world.
+      ctx.globalAlpha = clamp(this.seamFade / SEAM_FADE, 0, 1);
       ctx.fillStyle = '#07070d';
       ctx.fillRect(0, 0, g.width, g.height);
       ctx.globalAlpha = 1;

@@ -8,6 +8,7 @@ import {
   Tilemap,
   applyGravity,
   moveAndCollide,
+  placeBody,
   type CollisionResult,
   type CollisionContact,
   friction,
@@ -333,8 +334,8 @@ export class Player extends Actor {
     y: number,
   ) {
     super();
-    this.x = x;
-    this.y = y;
+    // Placement law: born where a body could have moved, never buried.
+    placeBody(this, x, y, collision);
     this.layer = 10;
     // Starting kit: a weapon in hand, a potion in the bag, and the
     // starting class's base modifiers + known spells.
@@ -542,14 +543,15 @@ export class Player extends Actor {
     this.game.events.emit('playerSwallowed', {});
   }
 
-  swallowedUpdate(): string | void {
+  swallowedUpdate(dt: number): string | void {
     const m = this.swallowedBy;
     if (!m || m.dead || this.hp <= 0) return this.releaseFromSwallow(false);
-    // Pinned inside the beast.
-    this.x = m.cx - this.w / 2;
-    this.y = m.cy - this.h / 2;
-    this.vx = 0;
-    this.vy = 0;
+    // Pinned inside the beast — by carry velocity, not assignment. The
+    // grip is an impulse toward the beast's center each step and the
+    // mover integrates it, so even a gulp cannot place a knight inside
+    // stone the beast is pressed against; she rides at its face instead.
+    this.vx = (m.cx - this.w / 2 - this.x) / dt;
+    this.vy = (m.cy - this.h / 2 - this.y) / dt;
     // Mash anything to struggle free.
     let mashed = 0;
     if (this.input.consumePress('attack')) mashed++;
@@ -570,6 +572,10 @@ export class Player extends Actor {
   private releaseFromSwallow(burst: boolean): string {
     const m = this.swallowedBy;
     this.swallowedBy = null;
+    // The carry impulse dies with the grip — without this a quiet
+    // release (beast slain) inherits one frame of (target - pos) / dt.
+    this.vx = 0;
+    this.vy = 0;
     const effect = m?.def.swallow;
     if (effect?.status) this.statuses.remove(effect.status);
     if (burst && m && !m.dead) {
@@ -1145,8 +1151,15 @@ export class Player extends Actor {
     // held direction cannot immediately drag her back on.
     if (this.jumpBuf.active) {
       this.jumpBuf.consume();
-      this.vx = -side * T.wallJumpX;
-      this.vy = -T.wallJumpY;
+      // Still leaning into the stone? Then you are climbing it, and the
+      // kick is almost pure lift. Let go, or push off, and it is the wide
+      // leap that crosses a shaft. The axis is read at the instant of the
+      // press — this branch runs before the let-go check below, so a
+      // player who taps away+jump together gets the leap, and one who
+      // holds in gets the climb.
+      const climbing = this.input.axis('left', 'right') === side;
+      this.vx = -side * (climbing ? T.wallClimbX : T.wallJumpX);
+      this.vy = -(climbing ? T.wallClimbY : T.wallJumpY);
       this.facing = -side === 1 ? 1 : -1;
       this.regripT = T.regripLock;
       this.squash = 1.4;
@@ -1326,9 +1339,15 @@ export class Player extends Actor {
     this.statuses.update(dt);
     this.squash += (1 - this.squash) * Math.min(1, dt * 10);
 
-    // Inside a Devourer: no physics, no buffers — just the struggle.
+    // Inside a Devourer: no input pipeline, no buffers — but physics
+    // still runs. The state sets a carry velocity; the mover has the
+    // last word on where the beast may hold her (never inside stone).
+    // Gravity is deliberately absent: the grip is the one force here.
     if (this.fsm.is('swallowed')) {
       this.fsm.update(dt);
+      if (this.fsm.is('swallowed')) {
+        this.contacts = moveAndCollide(this, dt, this.collision);
+      }
       return;
     }
 
@@ -1354,6 +1373,13 @@ export class Player extends Actor {
     // Gravity + jump physics (dash overrides velocity; the dead still fall).
     if (!this.fsm.is('dash')) {
       applyGravity(this, dt);
+      // A grip decides its own descent, so the cap goes AFTER gravity.
+      // clingUpdate sets it before, and gravity then added a frame's
+      // worth right back on top — so the slide was always clingSlide+25
+      // however the number was tuned, and setting it to 0 still slid at
+      // 25px/s. Water already caps its velocities on this side of the
+      // call for the same reason; the wall was the odd one out.
+      if (this.fsm.is('cling')) this.vy = Math.min(this.vy, PLAYER_TUNING.clingSlide);
       if (swimming) {
         // The mechanism (buoyancy, ascend/dive, drag, caps) lives in the
         // engine; here we supply the tuning. Sink slowly by default, hold
@@ -1403,6 +1429,15 @@ export class Player extends Actor {
         this.jumpBuf.consume();
         this.coyote.consume();
         this.vy = -T.jumpSpeed;
+        // Leaving the ground beside a wall you are pressing into is a
+        // JUMP, not a grab. Without this the grip fired on the very next
+        // frame and beginCling zeroed the launch — a 53px leap became a
+        // standstill and a slide, so a wall could never be climbed from
+        // its base. The same lockout a wall kick already takes: long
+        // enough to get clear of the stone, short enough that the grab
+        // still lands while she is rising, which is what banks the
+        // height on both a single wall and the far side of a shaft.
+        if (this.grippableSide() !== 0) this.regripT = T.regripLock;
         this.squash = 1.35;
         this.feel.sfx.play('jump');
         this.feel.burst(this.cx, this.y + this.h, 5, {
@@ -1607,6 +1642,6 @@ const PLAYER_STATES: Record<string, StateDef<Player>> = {
     },
   },
   swallowed: {
-    update: (p) => p.swallowedUpdate(),
+    update: (p, dt) => p.swallowedUpdate(dt),
   },
 };

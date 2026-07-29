@@ -1,7 +1,7 @@
 import { type Scene, drawPanel, drawText, drawWorldMap, t } from '@engine/index';
 import type { ActionGame } from '../defs';
 import { COLORS } from '../content/palette';
-import { WORLD_MAP_CELLS, WORLD_MAP_DOORS, roomLabel } from '../content/worldmap';
+import { WORLD_MAP_CELLS, WORLD_MAP_DOORS, WORLD_MAP_LINKS, roomLabel } from '../content/worldmap';
 
 /**
  * The world map: an overlay scene, so the run freezes behind it and
@@ -56,14 +56,21 @@ export class MapScene implements Scene {
     drawPanel(g, x, y, bw, bh);
     drawText(g, t('MAP'), W / 2, y + 8, COLORS.gold, 2, 'center');
 
-    // The current room blinks so it reads apart from plain "explored"
-    // even at one cell wide.
-    const blink = Math.floor(this.uiT * 3) % 2 === 0;
-    drawWorldMap(g, WORLD_MAP_CELLS, {
+    // The current room is ALWAYS gold. It used to blink at 3Hz by being
+    // handed `null` on the off beat — so for half of every second the map
+    // showed no you-are-here at all, and opening it on the wrong frame
+    // read as simply not marking your room. A pulse should add emphasis,
+    // never subtract the answer, so the beat rides the ring around it.
+    const pulse = Math.floor(this.uiT * 3) % 2 === 0;
+    const cellSize = drawWorldMap(g, WORLD_MAP_CELLS, {
       box: { x: x + 12, y: y + 26, w: bw - 24, h: bh - 56 },
       explored: (id) => id === this.view.current || this.view.explored(id),
-      current: blink ? this.view.current : null,
+      current: this.view.current,
       doors: WORLD_MAP_DOORS,
+      // Connections whose rooms do not touch on the grid — a shaft that
+      // climbs half the map. Drawn as a wire, since there is no shared
+      // edge to sit a doorway pip on.
+      links: WORLD_MAP_LINKS,
       style: {
         explored: COLORS.navyLight,
         current: COLORS.gold,
@@ -72,6 +79,7 @@ export class MapScene implements Scene {
         door: COLORS.gold,
       },
     });
+    this.pulseCurrent(g, x, y, bw, bh, cellSize, pulse);
 
     const seen = WORLD_MAP_CELLS.filter((c) => c.id === this.view.current || this.view.explored(c.id)).length;
     drawText(g, t(roomLabel(this.view.current)), W / 2, y + bh - 26, COLORS.white, 1, 'center');
@@ -81,5 +89,39 @@ export class MapScene implements Scene {
       W / 2, y + bh - 17, COLORS.steel, 1, 'center',
     );
     drawText(g, t('M / Esc: close'), W / 2, y + bh - 9, COLORS.steelDark, 1, 'center');
+  }
+
+  /**
+   * A ring around the room you are standing in, on the beat.
+   *
+   * drawWorldMap returns the cell size it chose and lays cells out from
+   * the same fixed frame every time, so the ring can be placed on that
+   * grid without the widget needing to know what a "you are here" pulse
+   * is. At one cell wide a filled gold block alone is easy to lose among
+   * explored neighbours; the ring is what carries the eye.
+   */
+  private pulseCurrent(
+    g: CanvasRenderingContext2D,
+    x: number, y: number, bw: number, bh: number,
+    size: number, on: boolean,
+  ): void {
+    if (!on || size <= 0) return;
+    const cell = WORLD_MAP_CELLS.find((c) => c.id === this.view.current);
+    if (!cell) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const c of WORLD_MAP_CELLS) {
+      minX = Math.min(minX, c.x);
+      minY = Math.min(minY, c.y);
+      maxX = Math.max(maxX, c.x + (c.w ?? 1));
+      maxY = Math.max(maxY, c.y + (c.h ?? 1));
+    }
+    const box = { x: x + 12, y: y + 26, w: bw - 24, h: bh - 56 };
+    const originX = Math.round(box.x + (box.w - (maxX - minX) * size) / 2);
+    const originY = Math.round(box.y + (box.h - (maxY - minY) * size) / 2);
+    const rx = originX + (cell.x - minX) * size;
+    const ry = originY + (cell.y - minY) * size;
+    g.strokeStyle = COLORS.white;
+    g.lineWidth = 1;
+    g.strokeRect(rx - 0.5, ry - 0.5, (cell.w ?? 1) * size + 1, (cell.h ?? 1) * size + 1);
   }
 }

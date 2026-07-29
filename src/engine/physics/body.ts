@@ -55,6 +55,16 @@ export interface CollisionSource {
   /** Fraction (0..1) of a rect covered by water, if this source has any
    * (tilemaps do). Absent = a dry world. */
   submersion?(r: Rect): number;
+  /**
+   * Is this exact point water? The point-sized companion to `submersion`,
+   * for probing a line rather than weighing an area — finding the
+   * waterline a flier should stay above, say.
+   *
+   * Declared here because it was already being used: callers cast the
+   * collision source to reach a method the seam did not admit to having,
+   * which is a dependency either way, just an unchecked one.
+   */
+  waterAt?(x: number, y: number): boolean;
   /** Strongest hazard-tile damage under a rect (spikes, lava). Absent =
    * a harmless world. */
   hazardAt?(r: Rect): number;
@@ -85,6 +95,66 @@ export interface Body extends Rect {
 export const GRAVITY = 1500;
 export const MAX_FALL = 460;
 
+/**
+ * Put a body somewhere, legally.
+ *
+ * Assigning `.x`/`.y` is not physics: `moveAndCollide` only ever resolves
+ * a body moving INTO a solid from outside, so one that STARTS inside is
+ * invisible to it — every overlap test is already true, no contact is
+ * new, and it walks through stone as if the wall were scenery. Anywhere
+ * position was set by hand (room arrivals, spawns) could therefore put a
+ * body somewhere movement would never have allowed, and nothing
+ * downstream could tell.
+ *
+ * So placement resolves too. The push per direction is the MAXIMUM over
+ * every overlapping solid, which is what clears a contiguous run of
+ * tiles in one move — pushing out of one tile at a time just shoves the
+ * body into its neighbour and the two fight. Then take the shortest of
+ * the four, and repeat, because leaving one span can enter another.
+ *
+ * Returns false if it could not find open space, so a caller with a
+ * fallback (a room's spawn point) can use it rather than trust a lie.
+ */
+export function placeBody(
+  b: Body,
+  x: number,
+  y: number,
+  world: CollisionSource,
+  maxPasses = 4,
+): boolean {
+  b.x = x;
+  b.y = y;
+  for (let pass = 0; pass < maxPasses; pass++) {
+    let hit = false;
+    let outLeft = 0;
+    let outRight = 0;
+    let outUp = 0;
+    let outDown = 0;
+    for (const s of world.solidsNear(b)) {
+      if (s.oneWay) continue;
+      if (!(b.x < s.x + s.w && b.x + b.w > s.x && b.y < s.y + s.h && b.y + b.h > s.y)) continue;
+      hit = true;
+      outRight = Math.max(outRight, s.x + s.w - b.x);
+      outLeft = Math.max(outLeft, b.x + b.w - s.x);
+      outDown = Math.max(outDown, s.y + s.h - b.y);
+      outUp = Math.max(outUp, b.y + b.h - s.y);
+    }
+    if (!hit) return true;
+    const shortest = Math.min(outLeft, outRight, outUp, outDown);
+    if (shortest === outUp) b.y -= outUp;
+    else if (shortest === outDown) b.y += outDown;
+    else if (shortest === outLeft) b.x -= outLeft;
+    else b.x += outRight;
+  }
+  // Still buried after several passes: the spot is solid rock, not a
+  // near miss. Say so.
+  for (const s of world.solidsNear(b)) {
+    if (s.oneWay) continue;
+    if (b.x < s.x + s.w && b.x + b.w > s.x && b.y < s.y + s.h && b.y + b.h > s.y) return false;
+  }
+  return true;
+}
+
 export function applyGravity(b: Body, dt: number): void {
   if (b.flies) return;
   b.vy += GRAVITY * dt;
@@ -92,8 +162,147 @@ export function applyGravity(b: Body, dt: number): void {
 }
 
 /**
+ * THE LAWS. One physics, no exceptions:
+ *
+ *  1. INTEGRATION — a body's position changes only by integrating its
+ *     velocity through the mover below, and the mover is correct at any
+ *     speed: it sweeps the path, so nothing passes through or ends
+ *     inside a solid however fast it travels.
+ *  2. PLACEMENT — the only other way a body acquires a position is
+ *     `placeBody`, which resolves overlap the way the mover would have.
+ *     A body may only be put where a body could have moved.
+ *  3. IMPULSE — mechanisms (jumps, kicks, knockback, being swallowed,
+ *     cutscene holds, platform carries) express themselves as velocity
+ *     or as a swept carry, never by assigning position.
+ *  4. PRESENTATION — shakes, shivers and bobs are render offsets; they
+ *     never touch the coordinates physics reads.
+ *
+ * (Net replication mirrors the host's authoritative simulation and is
+ * exempt: it copies the results of this physics, it is not a second one.)
+ */
+
+/**
+ * Sweep one X step: how far toward `b.x + dx` the body may travel, and
+ * what stopped it. Reads geometry only — mutates nothing.
+ *
+ * The path rect (not the body rect) is what gets queried: a fast step
+ * must see every solid it would cross, not just the ones beside it.
+ */
+function sweepX(
+  b: Body,
+  dx: number,
+  world: CollisionSource,
+): { stop: number; solid: Solid | null } {
+  let stop = b.x + dx;
+  let hit: Solid | null = null;
+  if (dx === 0) return { stop, solid: null };
+  const path: Rect = { x: Math.min(b.x, stop), y: b.y, w: b.w + Math.abs(dx), h: b.h };
+  for (const s of world.solidsNear(path)) {
+    if (s.oneWay) continue;
+    if (!(b.y < s.y + s.h && b.y + b.h > s.y)) continue;
+    const startOverlap = b.x < s.x + s.w && b.x + b.w > s.x;
+    // A body overlapping a STATIC solid before it moves is a placement
+    // fault, and placement law (placeBody) is the cure. The mover does
+    // not guess its way out — ejecting by velocity sign is how a buried
+    // body used to "walk through" a wall one tile face at a time.
+    if (startOverlap && !s.dynamic) continue;
+    if (s.dynamic) {
+      // A moving solid may have entered the body between its updates.
+      // When the intrusion is shallower vertically, leave it for the Y
+      // pass; treating it as a wall would eject a jumper sideways from
+      // beneath a descending platform.
+      const ox = Math.min(b.x + dx + b.w, s.x + s.w) - Math.max(b.x + dx, s.x);
+      const oy = Math.min(b.y + b.h, s.y + s.h) - Math.max(b.y, s.y);
+      if (ox > 0 && oy < ox) continue;
+    }
+    if (dx > 0) {
+      if (!startOverlap && s.x + s.w <= b.x + b.w) continue; // behind or beside
+      const c = s.x - b.w;
+      if (c < stop) {
+        stop = c;
+        hit = s;
+      }
+    } else {
+      if (!startOverlap && s.x >= b.x) continue;
+      const c = s.x + s.w;
+      if (c > stop) {
+        stop = c;
+        hit = s;
+      }
+    }
+  }
+  return { stop, solid: hit };
+}
+
+/** Sweep one Y step. Same contract as sweepX, plus one-way platforms. */
+function sweepY(
+  b: Body,
+  dy: number,
+  world: CollisionSource,
+  opts: { ignoreOneWay?: boolean; dropThrough?: boolean },
+): { stop: number; solid: Solid | null; side: 'ground' | 'ceiling' | null } {
+  let stop = b.y + dy;
+  let hit: Solid | null = null;
+  let side: 'ground' | 'ceiling' | null = null;
+  const prevTop = b.y;
+  const prevBottom = b.y + b.h;
+  const path: Rect = { x: b.x, y: Math.min(b.y, stop), w: b.w, h: b.h + Math.abs(dy) };
+  for (const s of world.solidsNear(path)) {
+    if (!(b.x < s.x + s.w && b.x + b.w > s.x)) continue;
+    if (s.oneWay) {
+      if (opts.ignoreOneWay || opts.dropThrough) continue;
+      // Land only when falling onto it from above (1px of grace for a
+      // foot resting fractionally into the surface).
+      if (dy > 0 && prevBottom <= s.y + 1) {
+        const c = s.y - b.h;
+        if (c < stop) {
+          stop = c;
+          hit = s;
+          side = 'ground';
+        }
+      }
+      continue;
+    }
+    const wasOverlapping = prevTop < s.y + s.h && prevBottom > s.y;
+    if (wasOverlapping && !s.dynamic) continue; // placement law's jurisdiction
+    if (wasOverlapping) {
+      // A dynamic solid moved into the body since its last update, so
+      // velocity cannot identify the contacted side. Preserve the side
+      // the body already occupied: a descending platform keeps a player
+      // below it instead of teleporting them onto its top.
+      if (prevTop + b.h / 2 < s.y + s.h / 2) {
+        stop = s.y - b.h;
+        hit = s;
+        side = 'ground';
+      } else {
+        stop = s.y + s.h;
+        hit = s;
+        side = 'ceiling';
+      }
+      continue;
+    }
+    if (dy > 0 && prevBottom <= s.y) {
+      const c = s.y - b.h;
+      if (c < stop) {
+        stop = c;
+        hit = s;
+        side = 'ground';
+      }
+    } else if (dy < 0 && prevTop >= s.y + s.h) {
+      const c = s.y + s.h;
+      if (c > stop) {
+        stop = c;
+        hit = s;
+        side = 'ceiling';
+      }
+    }
+  }
+  return { stop, solid: hit, side };
+}
+
+/**
  * Move a body and resolve collisions against a collision source.
- * Axis-separated AABB sweep: X first (walls), then Y (floor/ceiling).
+ * Axis-separated swept AABB: X first (walls), then Y (floor/ceiling).
  * One-way platforms only collide when falling onto them from above,
  * and can be dropped through with `dropThrough`.
  */
@@ -129,67 +338,29 @@ export function moveAndCollide(
     result[side] = contact;
   };
 
-  // X axis. Fliers collide here too: letting them drift into rock left
-  // them embedded in a wall, and the Y pass below would then "land" them
-  // on top of the topmost wall tile — outside the room entirely.
-  b.x += b.vx * dt;
-  for (const s of world.solidsNear(b)) {
-    if (s.oneWay) continue;
-    if (b.x < s.x + s.w && b.x + b.w > s.x && b.y < s.y + s.h && b.y + b.h > s.y) {
-      const overlapX = Math.min(b.x + b.w, s.x + s.w) - Math.max(b.x, s.x);
-      const overlapY = Math.min(b.y + b.h, s.y + s.h) - Math.max(b.y, s.y);
-      // A moving solid may have entered the body between its updates. When
-      // that intrusion is shallower vertically, leave it for the Y pass;
-      // treating it as a wall would eject a jumper sideways from beneath a
-      // descending platform.
-      if (s.dynamic && overlapY < overlapX) continue;
-      if (b.vx > 0) {
-        addContact('right', s, { x: -1, y: 0 }, b.vx);
-        b.x = s.x - b.w;
-      } else if (b.vx < 0) {
-        addContact('left', s, { x: 1, y: 0 }, b.vx);
-        b.x = s.x + s.w;
-      }
-      b.vx = 0;
-    }
+  // X axis. Fliers collide here too: flying means ignoring the ground,
+  // not phasing through rock.
+  const xr = sweepX(b, b.vx * dt, world);
+  if (xr.solid) {
+    // The blocked side is the side the body was traveling toward; dx = 0
+    // produces no hit, so the sign is always meaningful here.
+    if (b.vx > 0) addContact('right', xr.solid, { x: -1, y: 0 }, b.vx);
+    else addContact('left', xr.solid, { x: 1, y: 0 }, b.vx);
   }
+  b.x = xr.stop;
+  if (xr.solid) b.vx = 0;
 
   // Y axis
-  const prevTop = b.y;
-  const prevBottom = b.y + b.h;
-  b.y += b.vy * dt;
+  const yr = sweepY(b, b.vy * dt, world, opts);
+  b.y = yr.stop;
   b.onGround = false;
-  for (const s of world.solidsNear(b)) {
-    if (!(b.x < s.x + s.w && b.x + b.w > s.x && b.y < s.y + s.h && b.y + b.h > s.y)) continue;
-    if (s.oneWay) {
-      const landing = b.vy > 0 && prevBottom <= s.y + 1;
-      if (landing && !opts.ignoreOneWay && !opts.dropThrough) {
-        addContact('ground', s, { x: 0, y: -1 }, b.vy);
-        b.y = s.y - b.h;
-        b.vy = 0;
-        b.onGround = true;
-      }
-    } else {
-      const wasOverlapping = prevTop < s.y + s.h && prevBottom > s.y;
-      // If a dynamic solid moved into the body since the previous body
-      // update, velocity alone cannot identify the contacted side. Preserve
-      // the side the body already occupied so a descending platform keeps a
-      // player below it instead of teleporting them onto its top.
-      const dynamicOverlap = s.dynamic === true && wasOverlapping;
-      const resolveGround = dynamicOverlap
-        ? prevTop + b.h / 2 < s.y + s.h / 2
-        : b.vy > 0;
-      if (resolveGround) {
-        addContact('ground', s, { x: 0, y: -1 }, b.vy);
-        b.y = s.y - b.h;
-        b.vy = 0;
-        b.onGround = true;
-      } else if (b.vy < 0 || dynamicOverlap) {
-        addContact('ceiling', s, { x: 0, y: 1 }, b.vy);
-        b.y = s.y + s.h;
-        b.vy = 0;
-      }
-    }
+  if (yr.solid && yr.side === 'ground') {
+    addContact('ground', yr.solid, { x: 0, y: -1 }, b.vy);
+    b.vy = 0;
+    b.onGround = true;
+  } else if (yr.solid && yr.side === 'ceiling') {
+    addContact('ceiling', yr.solid, { x: 0, y: 1 }, b.vy);
+    b.vy = 0;
   }
 
   // Backstop: keep the body inside the level's extent. Solids do the real
@@ -240,8 +411,31 @@ export function moveAndCollide(
       );
       b.y = lvl.y + lvl.h - b.h;
       if (b.vy > 0) b.vy = 0;
+      // Standing on the level floor IS standing. This used to record the
+      // contact and leave onGround false, so the two answers to "are my
+      // feet on something" disagreed: contacts said yes, the flag said
+      // no. Anything reading the flag — jumping, coyote time, the
+      // landing animation — treated a body at rest as falling forever.
+      b.onGround = true;
     }
   }
   b.lastCollision = result;
   return result;
+}
+
+/**
+ * Carry a body by a displacement that is not its own — a platform moving
+ * whoever stands on it. The same sweeps as the mover, so a carry is
+ * stopped by walls exactly like a walk would be; what it does NOT do is
+ * touch velocity or contacts, because the ride is the platform's motion,
+ * not the rider's, and the rider's own move this frame still happens.
+ */
+export function carryBody(b: Body, dx: number, dy: number, world: CollisionSource): void {
+  b.x = sweepX(b, dx, world).stop;
+  b.y = sweepY(b, dy, world, {}).stop;
+  const lvl = world.bounds;
+  if (lvl) {
+    b.x = Math.min(Math.max(b.x, lvl.x), lvl.x + lvl.w - b.w);
+    b.y = Math.min(Math.max(b.y, lvl.y), lvl.y + lvl.h - b.h);
+  }
 }

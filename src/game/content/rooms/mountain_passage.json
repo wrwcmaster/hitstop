@@ -30,7 +30,6 @@
     "....c..............................~..D#",
     "ssssssssssssssssssssssssssssssssssssssss",
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   ],
   "playerSpawn": {
@@ -40,8 +39,8 @@
   "entities": [
     {
       "type": "healing-chest",
-      "x": 150,
-      "y": 64
+      "x": 132,
+      "y": 71
     }
   ],
   "triggers": [
