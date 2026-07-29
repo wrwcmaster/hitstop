@@ -14,13 +14,60 @@ for bit. A saved playthrough doubles as a deterministic regression test.
 ```bash
 npm run dev                       # the game
 npm run agent-play                # HTTP bridge for turn-based (agent) play
-npm run replay                    # verify EVERY recording in recordings/
+npm run replay                    # verify EVERY recording (browser: gold gate)
+npm run replay:headless           # same verdicts, no browser, ~10x faster
 npm run replay -- path/run.json   # verify one recording
 npm run replay -- --rerecord path/run.json   # accept a deliberate change
 npm run bugtest                   # semantic bug-tape suite (see below)
 node tools/agent-play/inspect.mjs # one-shot text probes (see below)
 node tools/agent-play/sweep.mjs   # cross every door by its natural verb
 ```
+
+## Agents play here cheaply
+
+The bridge is headless — the simulation runs in the bridge's own process,
+no browser and no dev server — so the game is no longer what a play
+session costs. Measured on the arena:
+
+| | cost |
+| --- | --- |
+| boot | 2.1s, once |
+| a turn in-process | 0.8ms |
+| a turn over HTTP, **with a look** | 14.5ms, ~245 tokens |
+| agent's session → tape → replay | bit-exact |
+
+An agent's bill is now its own thinking: ~245 tokens of world per turn
+plus one LLM round-trip, against 14.5ms of game. Whatever it plays is a
+normal recording, so a session that goes wrong becomes a regression test
+by the bug-tape route below.
+
+```bash
+curl -sX POST localhost:8791/session -d '{"seed":7,"look":true,
+  "scenario":{"room":"arena","quiet":true,"player":{"x":230,"y":192}}}'
+curl -sX POST localhost:8791/step -d '{"down":["right","jump"],"frames":6,"look":true}'
+curl -sX POST localhost:8791/save -d '{"name":"my-run"}'
+```
+
+`look: true` rides along with the state, so seeing costs no extra round
+trip. Looking was never the expensive part — half a million tile reads
+take 2ms — it was *starting a process to ask*: a one-shot `inspect.mjs`
+boots vite (~600ms) to answer once. Inside a live session the same view
+is 0.002ms, which is why an agent can afford one every turn.
+
+```
+.....................   # solid          @ you
+--------.............   - platform       e enemy / B boss
+.....................   ^ hazard         $ pickup
+..........@..........   ~ water          n npc
+.....................   . air  , decor   / outside the room
+#####################
+```
+
+The glyphs say what a tile DOES, not what it is painted like: an agent
+deciding whether to jump cares that something is solid or pass-through,
+never which rock texture the room chose — and the view stays valid
+across art changes. Pixels are the one thing the bridge cannot serve
+(no canvas); for those use `inspect.mjs shot`.
 
 ## Bug tapes: a report becomes a regression test
 

@@ -64,9 +64,17 @@ function installHost() {
     /** Replace the whole store — a recording's embedded save. */
     load(obj) { store.clear(); for (const [k, v] of Object.entries(obj ?? {})) store.set(k, v); },
   };
+  // The harness reads its boot seed off the query string (bootReplay), so
+  // this is where a session's seed lives. `setSeed` rewrites it, and only
+  // matters before main.ts is evaluated — hence `bootGame({ fresh: true })`
+  // for a second session on a different seed.
   const location = {
     href: 'http://localhost/?harness=1&seed=1', search: '?harness=1&seed=1',
     pathname: '/', reload: NOOP, replace: NOOP, assign: NOOP,
+    setSeed(seed) {
+      this.search = `?harness=1&seed=${seed >>> 0 || 1}`;
+      this.href = `http://localhost/${this.search}`;
+    },
   };
   const document = {
     ...listeners(), location, hidden: false,
@@ -76,6 +84,9 @@ function installHost() {
     documentElement: { style: {} },
   };
   globalThis.localStorage = storage;
+  globalThis.sessionStorage = {
+    getItem: () => null, setItem: NOOP, removeItem: NOOP, clear: NOOP, key: () => null, length: 0,
+  };
   globalThis.location = location;
   globalThis.document = document;
   globalThis.window = {
@@ -101,6 +112,74 @@ function installHost() {
   };
   globalThis.__hitstopHost = { storage };
   return storage;
+}
+
+/**
+ * What the knight can see, as text.
+ *
+ * Looking is not expensive — half a million tile reads take 2ms. What is
+ * expensive is STARTING A PROCESS to ask: `inspect.mjs grid` boots vite
+ * (~600ms), answers once, and exits. Inside a live session the same
+ * answer is 0.002ms, so an agent can afford to look every single turn.
+ *
+ * The characters describe what a tile DOES, not what it is painted like:
+ * an agent deciding whether to jump cares that something is solid, or a
+ * platform it can rise through, or spikes — never which rock texture the
+ * room chose. That also keeps the view stable across art changes.
+ */
+export function lookAround(game, { r = 10, rows: rh = 7, tiles } = {}) {
+  const sc = game.scenes.all().find((s) => s.constructor.name === 'PlayScene');
+  const p = sc?.player;
+  if (!sc || !p) return null;
+  const map = sc.tilemap;
+  const ts = map.tileSize;
+  const cx = Math.floor((p.x + p.w / 2) / ts);
+  const cy = Math.floor((p.y + p.h / 2) / ts);
+  const c0 = cx - r;
+  const c1 = cx + r;
+  const r0 = cy - rh;
+  const r1 = cy + rh;
+
+  const glyph = (col, row) => {
+    if (col < 0 || row < 0 || col >= map.cols || row >= map.rows) return '/'; // outside the room
+    const id = map.tileAt(col, row);
+    if (!id) return '.';
+    const d = tiles.get(id);
+    if (d.hazard) return '^';
+    if (d.water) return '~';
+    if (d.solid && d.oneWay) return '-';
+    if (d.solid) return '#';
+    if (d.oneWay) return '-';
+    return ',';                       // drawn but passable (decor)
+  };
+
+  // Actors go on top of the terrain: the agent needs both in one glance.
+  const marks = new Map();
+  for (const a of game.world.all()) {
+    if (a === p || a.dead) continue;
+    const kind = a.constructor.name;
+    const ch = kind === 'Monster' ? (a.def?.boss ? 'B' : 'e')
+      : kind === 'Pickup' ? '$'
+        : kind === 'Npc' ? 'n' : null;
+    if (!ch) continue;
+    marks.set(`${Math.floor((a.x + a.w / 2) / ts)},${Math.floor((a.y + (a.h ?? 0) / 2) / ts)}`, ch);
+  }
+
+  const out = [];
+  for (let row = r0; row <= r1; row++) {
+    let line = '';
+    for (let col = c0; col <= c1; col++) {
+      line += (col === cx && row === cy) ? '@' : (marks.get(`${col},${row}`) ?? glyph(col, row));
+    }
+    out.push(line);
+  }
+  return {
+    room: sc.roomId,
+    origin: { col: c0, row: r0, tileSize: ts },
+    player: { col: cx, row: cy },
+    legend: '# solid, - platform (pass up through), ^ hazard, ~ water, . air, , decor, / outside, @ you, e enemy, B boss, $ pickup, n npc',
+    rows: out,
+  };
 }
 
 let server = null;
@@ -143,10 +222,12 @@ export async function loadEngine() {
  * gets the isolation a new page gives it for free. It costs ~1.5s, so
  * only pay it when a previous run has already dirtied this process.
  */
-export async function bootGame({ fresh = false, storage: initial } = {}) {
+export async function bootGame({ fresh = false, storage: initial, seed } = {}) {
   const store = installHost();
   const s = await viteServer();
   if (fresh) s.moduleGraph.invalidateAll();
+  // Must precede main.ts: the harness reads its seed once, at boot.
+  if (seed !== undefined) globalThis.location.setSeed(seed);
   if (initial !== undefined) store.load(initial);
   await s.ssrLoadModule('/src/game/main.ts');
   const harness = globalThis.window.__harness ?? globalThis.__harness;
