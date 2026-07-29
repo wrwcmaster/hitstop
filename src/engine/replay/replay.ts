@@ -285,6 +285,13 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
    * run-start event routes back into runStarted, which pins the
    * recording's seed before the starter draws a single random number. */
   private startPlayback(rec: Recording<A, Start>): void {
+    // Every key up first. A fresh page gives a replay this for free; a
+    // reused process does not, and a tape is free to END mid-hold (walk
+    // off through a door and the recording stops with `right` down).
+    // A stuck key is doubly poisonous to the NEXT tape: the knight walks
+    // on her own, and press() on an already-held action emits no edge,
+    // so the tape's own `down` events silently vanish.
+    for (const a of this.config.actions) this.game.input.release(a);
     this.playback = { rec, offset: 0, cursor: 0, armed: false };
     this.config.beginRun(rec.start);
   }
@@ -335,6 +342,24 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
       },
       replayRun: (rec) => {
         this.startPlayback(rec as Recording<A, Start>);
+        // A run never begins mid-frame: the start is QUEUED, and the game
+        // dispatches it from its own update. Until that happens the
+        // playback is unarmed, so it has no offset and `relStep` still
+        // counts the PREVIOUS run — which leaves runTo measuring from a
+        // stale base. On a fresh page that base is 0 and the arithmetic
+        // works by luck; reuse the process for a second tape and runTo
+        // sees a clock already past its target, advances nothing, and the
+        // old run just keeps playing while the caller believes a new one
+        // started. Step until it really has begun, so every later runTo
+        // measures from THIS run's zero.
+        //
+        // Nothing is consumed by these steps: applyDue ignores an unarmed
+        // playback, so no tape event can fire early.
+        let spins = 0;
+        while (this.playback && !this.playback.armed) {
+          game.loop.advance(STEP);
+          if (++spins > 600) throw new Error('replayRun: the run never started');
+        }
         return this.config.state();
       },
       runTo,

@@ -391,6 +391,40 @@ multiplayer-adjacent code, keep the single-player path byte-identical —
 
 ## Verification playbook
 
+**Reach for `tools/agent-play/inspect.mjs` before writing a probe of your
+own.** A hand-rolled Playwright script is the most expensive way to ask a
+question and the least reliable: it re-derives the scaffolding every time,
+and its failure mode is a clean-looking number that is simply wrong (a
+probe sampling the knight as 14x18 when she is 10x18 invented 154
+"embedded" frames; one that hardcoded a hurtbox size read "no bug" both
+before AND after a real fix). The verbs are tested once and then keep
+being right.
+
+```
+# headless — no browser, no dev server, ~0.6s
+inspect.mjs drop <room> <x> <y>              where a body comes to rest, and on WHAT tile
+inspect.mjs trace <room> <x> <y> <keys> <n>  per-frame x/y/vy/grounded/state
+inspect.mjs roundtrip <room> <x> <y> <dir>   walk A->B->A; asserts a == a'
+inspect.mjs replay <recording|bugtape>       journey, end state, hashes
+# browser (needs npm run dev)
+inspect.mjs grid|doors|shot|cross <room> ...
+```
+
+The headless verbs run the game's own modules in Node through
+`tools/agent-play/headless.mjs` (vite `ssrLoadModule`; `offscreen()`
+returns a drawing sink when there is no document). All 22 recordings
+replay bit-exactly that way. Use the browser only for what a page
+actually buys: rendering, input devices, and feel.
+
+Two habits worth keeping:
+- **`roundtrip` before blaming content.** If a doorway misbehaves, check
+  the invariant first — a room fix that makes the symptom vanish can hide
+  an engine bug affecting every instance (that is exactly how the
+  threshold-floor bug hid behind a Windswept Ascent ledge).
+- **Prove a probe can fail.** Before believing a passing check, run it
+  against reverted code (`git checkout HEAD -- <file>`, re-run, restore).
+  A verification that never fails is not evidence.
+
 Chromium for Playwright is preinstalled — launch with
 `executablePath: '/opt/pw-browsers/chromium'`. Start `npm run dev` (pick
 a port with `-- --port 5174`), then drive the real game:

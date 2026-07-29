@@ -1,6 +1,6 @@
 {
   "name": "hitstop",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "A 2D action game engine where game feel is a first-class primitive.",
   "type": "module",
   "scripts": {
@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "replay": "node tools/agent-play/replay.mjs",
     "agent-play": "node tools/agent-play/server.mjs",
-    "bugtest": "node tools/agent-play/bugtest.mjs"
+    "bugtest": "node tools/agent-play/bugtest.mjs",
+    "replay:headless": "node tools/agent-play/replay-headless.mjs"
   },
   "devDependencies": {
     "playwright": "^1.61.1",

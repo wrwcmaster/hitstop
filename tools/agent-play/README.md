@@ -58,6 +58,27 @@ node tools/agent-play/inspect.mjs cross ramparts 60 200 left  # CROSSED/STAYED
 node tools/agent-play/inspect.mjs shot ramparts 56 170 out.png  # small PNG
 ```
 
+Physics questions have their own verbs, and these need **no browser and
+no dev server** — they run the game's modules in Node (~0.6s):
+
+```bash
+node tools/agent-play/inspect.mjs drop mountain 324 18.2      # where does a body land, on WHAT
+node tools/agent-play/inspect.mjs trace mountain 324 14 left,jump 20
+node tools/agent-play/inspect.mjs roundtrip mountain 320 14 right   # asserts a == a'
+node tools/agent-play/inspect.mjs replay bugs/mountain-door-landing.json
+```
+
+- `drop` settles a knight-sized body and names the tile it came to rest
+  on, with its `solid`/`oneWay` flags — which is usually the answer. A
+  landing that is one-way cannot catch a body that starts below its lip.
+- `trace` prints per-frame x/y/vy/grounded/state: the "what actually
+  happened on frame 4" question, without a bespoke script.
+- `roundtrip` walks A→B→A through a doorway and checks you come back to
+  the same height. Run it before concluding a seam bug is room design.
+- `replay` plays a recording or a bug tape and reports journey, end
+  state, and hashes (a bug tape's hashes are *expected* to differ — it was
+  recorded on the broken build, so it is checked against its `expect`).
+
 - `grid` prints the room in its own legend characters, with anything the
   runtime inserted (doorway backing, patches) picked up under fallback
   characters — so "is the door actually in the wall?" is nine short rows,
