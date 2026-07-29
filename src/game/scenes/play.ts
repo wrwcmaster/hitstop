@@ -418,6 +418,15 @@ export class PlayScene implements Scene {
    * fresh per-run tape before the starter draws a single random number.
    */
   beginRun(start: RunStart): void {
+    // A run begins from a clean stack. Overlays — dialogue, the map, a
+    // shop — sit ABOVE this scene and stop it updating, and the start is
+    // only QUEUED here (dispatched from update, so a run never begins
+    // mid-frame). Queue one under an open conversation and it would wait
+    // forever while the previous run kept playing underneath: the world,
+    // the room and the step counter all still the old run's. Same
+    // reasoning as the stopCutscene() in dispatchStart — starting a run
+    // must not leave anything from the last one holding the controls.
+    while (this.game.scenes.top && this.game.scenes.top !== this) this.game.scenes.pop();
     this.pendingStart = start;
   }
 
