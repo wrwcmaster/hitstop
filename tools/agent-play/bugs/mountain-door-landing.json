@@ -1,6 +1,6 @@
 {
   "name": "mountain-door-landing",
-  "issue": "Returning from Cliffside Passage to Windswept Ascent dropped the knight off the landing. The door sits on the room top edge and the arrival puts her feet at y=36.2, but the shelf under it was a one-way ledge with its surface at y=32 — and a one-way cannot catch a body that starts below its lip, so she fell the height of the room toward the spikes at row 18. The shelf under the doorway is solid rock now; she lands at y=14 instead of falling to y=134.",
+  "issue": "Walking back from Cliffside Passage to Windswept Ascent dropped the knight off the landing. Not the room: the walked transition carries her OUT past the room edge for the fade, the floor tiles stop at that boundary, so for the last frames of every walked crossing she was falling off the end of the world — 110 -> 114.2 here. The swap then re-maps her CURRENT height (deliberately, to keep a jump continuous) and faithfully turned that accidental fall into an arrival 4px low, past the lip of the one-way ledge meant to catch her. A threshold now has a floor while she walks it, so a grounded crossing stays grounded and the round trip is exact (14 -> 110 -> 14, was 14 -> 110 -> 134).",
   "expect": {
     "rooms": [
       "mountain_passage",

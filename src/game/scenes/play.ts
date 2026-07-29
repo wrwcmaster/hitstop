@@ -23,6 +23,7 @@ import {
   t,
   moveAndCollide,
   placeBody,
+  type Solid,
 } from '@engine/index';
 import { menuLine, prettyCode, prettyButton, promptText, REPLAY_PENDING_KEY, type ActionGame, type Action, type RunStart, type TestScenario } from '../defs';
 import { Player } from '../actors/player';
@@ -72,6 +73,16 @@ interface Transition {
   open?: { left: number; x: number; y: number; w: number; h: number };
   /** Horizontal edge gaps keep the knight moving naturally through the fade. */
   walk?: { out: -1 | 1; into: -1 | 1 };
+  /**
+   * The surface the knight was standing on when this crossing began, if
+   * she was standing at all. A threshold HAS a floor: the two rooms' floors
+   * meet at the doorway, and she is on both while she walks through. Only
+   * one room is loaded at a time, so past the edge the tiles simply stop —
+   * and she was falling off the end of the world for the last frames of
+   * every walked crossing. Absent when she crosses airborne, because then
+   * there is no floor under her and the arc is the truth.
+   */
+  thresholdY?: number;
 }
 
 const TRANSITION_TIME = 0.6;
@@ -89,6 +100,8 @@ const TRANSITION_TIME = 0.6;
 const SEAM_FADE = 0.25;
 /** Fast enough to clear the threshold before the screen reaches black. */
 const EDGE_WALK_SPEED = 72;
+/** How far the threshold floor reaches past the boundary (see moveThroughEdge). */
+const THRESHOLD_RUN = 128;
 /** How long a door takes to haul itself up out of the way. */
 const DOOR_OPEN_TIME = 0.35;
 
@@ -986,6 +999,7 @@ export class PlayScene implements Scene {
       y: y ?? land?.y ?? spawn.y,
       open: this.doorwayArt(roomId) ?? undefined,
       walk,
+      thresholdY: walk && this.player?.onGround ? this.player.y + this.player.h : undefined,
     };
     if (this.player) this.player.interactionsEnabled = false;
     this.game.sfx.play(this.transition.open ? 'unlock' : 'menuOpen');
@@ -1030,10 +1044,34 @@ export class PlayScene implements Scene {
     // mapped that height to a landing outside the far room. Real
     // position, honest answer: a wall above the door stops you until
     // you drop into the opening, then you walk through it.
+    // The threshold's own floor, for the frames she is outside the room.
+    // Walking out is the point of this moment, but the tiles end at the
+    // boundary, so a knight who WALKED through a doorway used to walk off
+    // the end of the world and fall — and the height re-map at the swap
+    // then faithfully carried that accidental fall into the next room
+    // (110 -> 114.2 -> arriving 4px low, every walked edge door). She is
+    // standing on a floor that continues; the engine just cannot see the
+    // half of it that belongs to the room being loaded. This is that half,
+    // and only that half: it lies entirely outside the boundary, so no
+    // real hole in either room is ever paved over by it.
+    const floorY = this.transition?.thresholdY;
+    const slab: Solid | null = floorY === undefined ? null : {
+      x: direction === -1 ? -THRESHOLD_RUN : this.tilemap.worldW,
+      y: floorY,
+      w: THRESHOLD_RUN,
+      h: this.tilemap.tileSize,
+    };
     p.facing = direction;
     p.vx = direction * EDGE_WALK_SPEED;
     p.advanceTransitionAir(dt);
-    moveAndCollide(p, dt, { solidsNear: (rect) => p.collision.solidsNear(rect) });
+    moveAndCollide(p, dt, {
+      solidsNear: (rect) => {
+        const near = [...p.collision.solidsNear(rect)];
+        if (slab && rect.x < slab.x + slab.w && slab.x < rect.x + rect.w
+          && rect.y < slab.y + slab.h && slab.y < rect.y + rect.h) near.push(slab);
+        return near;
+      },
+    });
     p.animT += dt;
   }
 
