@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "replay": "node tools/agent-play/replay.mjs",
     "agent-play": "node tools/agent-play/server.mjs",
-    "bugtest": "node tools/agent-play/bugtest.mjs"
+    "bugtest": "node tools/agent-play/bugtest.mjs",
+    "replay:headless": "node tools/agent-play/replay-headless.mjs"
   },
   "devDependencies": {
     "playwright": "^1.61.1",

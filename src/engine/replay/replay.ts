@@ -285,6 +285,13 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
    * run-start event routes back into runStarted, which pins the
    * recording's seed before the starter draws a single random number. */
   private startPlayback(rec: Recording<A, Start>): void {
+    // Every key up first. A fresh page gives a replay this for free; a
+    // reused process does not, and a tape is free to END mid-hold (walk
+    // off through a door and the recording stops with `right` down).
+    // A stuck key is doubly poisonous to the NEXT tape: the knight walks
+    // on her own, and press() on an already-held action emits no edge,
+    // so the tape's own `down` events silently vanish.
+    for (const a of this.config.actions) this.game.input.release(a);
     this.playback = { rec, offset: 0, cursor: 0, armed: false };
     this.config.beginRun(rec.start);
   }

@@ -202,11 +202,21 @@ export class PlayScene implements Scene {
   /** Everything to unhook when the scene leaves the stack (see exit). */
   private disposers: (() => void)[] = [];
 
+  /**
+   * The page-level `?room=local` world, if any. `testRoom` is restored to
+   * this at every run start, because scenarios may install their own
+   * inline room into it and a scenario's lab bench lasts exactly ONE run
+   * — it used to last the whole page, so pressing NEW GAME after any
+   * inline-roomDef scenario began the game inside the leftover test room.
+   */
+  private readonly pageRoom?: RoomDef;
+
   constructor(
     private game: ActionGame,
     /** Level-editor test rooms replace the whole world with one room. */
     private testRoom?: RoomDef,
   ) {
+    this.pageRoom = testRoom;
     this.bg = new Background(game.width, game.height);
     this.debug = new DebugOverlay(game as never);
 
@@ -432,6 +442,14 @@ export class PlayScene implements Scene {
 
   private dispatchStart(start: RunStart): void {
     this.stopCutscene(); // a run reset mid-cutscene must not strand scripted hands
+    // ...and a run reset mid-DOOR-FADE must not leave the old crossing
+    // driving the new world. The transition block early-returns update,
+    // so the fresh run's deferred spawns never flush — a run with no
+    // knight in it — and the fade's halfway setRoom would then carry the
+    // new run into the OLD run's destination doorway.
+    this.transition = null;
+    // A scenario's inline room lasts exactly one run (see pageRoom).
+    this.testRoom = this.pageRoom;
     this.game.events.emit('runStart', start);
     switch (start.kind) {
       case 'new': return this.startRun(null);
