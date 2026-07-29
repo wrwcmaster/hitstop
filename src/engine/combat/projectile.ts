@@ -157,7 +157,17 @@ export class Projectile extends Entity {
     // Targets — the strike brings the full feedback bundle with it. Same
     // swept region: a shot that crossed a body this step hit it, whether
     // or not it happened to stop inside.
-    const hits = this.strike.apply(swept);
+    //
+    // But the union is only the BROAD phase. It is the rectangle spanning
+    // where the shot began and where it ended, and a diagonal shot never
+    // visits two of that rectangle's corners — so used alone it damages
+    // actors standing beside the arc rather than in it, which the walls
+    // above were already too honest to do. The same sweepEntry decides
+    // both now: one shot, one answer about what it passed through.
+    const hits = this.strike.apply(
+      swept,
+      (hurtbox) => sweepEntry(from, this.x - (from.x + from.w / 2), this.y - (from.y + from.h / 2), hurtbox) !== null,
+    );
     if (hits.length) {
       if (this.opts.onHit) for (const t of hits) this.opts.onHit(t, this);
       this.pierceLeft -= hits.length;

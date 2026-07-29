@@ -1483,7 +1483,18 @@ export class PlayScene implements Scene {
         // continuous.
         const liveLanding = tr.walk ? this.doorLanding(tr.roomId) : null;
         if (tr.walk && this.player) this.player.facing = tr.walk.into;
+        // The arc's SPEED has to survive the swap too. setRoom zeroes
+        // velocity — right for an ordinary door, where you arrive at a
+        // standstill — but an edge pair is one continuous threshold, and
+        // the instant-swap branch in goToRoom already hands velocity back
+        // across the same call. Without this the height was re-mapped
+        // (above) while the fall that produced it was thrown away, so a
+        // jump or a drop through the opening restarted from rest on the
+        // far side. Horizontal speed stays the transition's to own: the
+        // walk drives it, and tr.t >= TRANSITION_TIME zeroes it on purpose.
+        const carriedVy = liveLanding?.carry && this.player ? this.player.vy : null;
         this.setRoom(tr.roomId, liveLanding?.x ?? tr.x, liveLanding?.y ?? tr.y);
+        if (carriedVy !== null && this.player) this.player.vy = carriedVy;
       }
       const inDt = Math.max(0, after - half) - Math.max(0, before - half);
       if (tr.walk) this.moveThroughEdge(tr.walk.into, inDt);
