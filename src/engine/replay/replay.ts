@@ -335,6 +335,24 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
       },
       replayRun: (rec) => {
         this.startPlayback(rec as Recording<A, Start>);
+        // A run never begins mid-frame: the start is QUEUED, and the game
+        // dispatches it from its own update. Until that happens the
+        // playback is unarmed, so it has no offset and `relStep` still
+        // counts the PREVIOUS run — which leaves runTo measuring from a
+        // stale base. On a fresh page that base is 0 and the arithmetic
+        // works by luck; reuse the process for a second tape and runTo
+        // sees a clock already past its target, advances nothing, and the
+        // old run just keeps playing while the caller believes a new one
+        // started. Step until it really has begun, so every later runTo
+        // measures from THIS run's zero.
+        //
+        // Nothing is consumed by these steps: applyDue ignores an unarmed
+        // playback, so no tape event can fire early.
+        let spins = 0;
+        while (this.playback && !this.playback.armed) {
+          game.loop.advance(STEP);
+          if (++spins > 600) throw new Error('replayRun: the run never started');
+        }
         return this.config.state();
       },
       runTo,
