@@ -19,7 +19,8 @@ npm run typecheck      # tsc --noEmit — run after every change
 npm run build          # typecheck + multi-page production build
 npm run build:single   # everything → hitstop.html (also copies it to the repo root)
 npm run replay         # replay saved runs, verify each reproduces exactly (regression guard)
-npm run agent-play     # HTTP bridge for turn-based (LLM-agent) play
+npm run replay:headless # same verdicts in Node, no browser, ~10x faster (iterate here)
+npm run agent-play     # HTTP bridge for turn-based (LLM-agent) play — headless
 ```
 
 ## Hard rules
@@ -409,6 +410,13 @@ inspect.mjs replay <recording|bugtape>       journey, end state, hashes
 # browser (needs npm run dev)
 inspect.mjs grid|doors|shot|cross <room> ...
 ```
+
+Playing the game is cheap too: `npm run agent-play` runs the sim in the
+bridge's own process (no browser, no dev server) at ~0.8ms a turn, and
+`look: true` on `/session`, `/scenario` and `/step` returns a local ASCII
+view **with** the state — so an agent sees the geometry ahead for ~150
+extra tokens and no extra round trip. Looking was never expensive;
+starting a process to ask was.
 
 The headless verbs run the game's own modules in Node through
 `tools/agent-play/headless.mjs` (vite `ssrLoadModule`; `offscreen()`
