@@ -24,6 +24,19 @@ export function registerSounds(sfx: Sfx): void {
     s.tone(950, 320, 0.1, 'sawtooth', 0.05);
   });
   sfx.define('land', (s) => s.hiss(0.04, 0.09));
+  /**
+   * A dull scuff of weight shifting on stone.
+   *
+   * Four things ask for this and all four mean the same beat: the knight's
+   * foot leaving a platform she drops through, a ceiling grinding before it
+   * sheds debris, and Vise re-gripping or letting go. Quieter and shorter
+   * than `land`, because it fires as a texture rather than as an event —
+   * it should be felt under the action, not heard over it.
+   */
+  sfx.define('step', (s) => {
+    s.hiss(0.03, 0.05);
+    s.tone(120, 80, 0.05, 'triangle', 0.05);
+  });
   // The ground taking a blow and answering: a deep thud running out.
   sfx.define('quake', (s) => {
     s.tone(150, 40, 0.4, 'sawtooth', 0.22);

@@ -1,0 +1,20 @@
+# `build:single` inlines index.html verbatim into hitstop.html, so the two
+# must agree on line endings or every rebuild rewrites the wrapper — and
+# rule 5 says rebuild the committed bundle on every game change, which
+# turns that into constant noise.
+#
+# The pairing is deliberate, and not symmetric:
+#
+#   index.html   LF   — the build's INPUT. vite-plugin-singlefile removes
+#                       the <script> line and does not take the newline
+#                       before it with it, so a CRLF source leaves a stray
+#                       CR: `</div>\r` + CRLF. Git's clean filter then
+#                       stores that first CR as CONTENT, and no checkout
+#                       can round-trip it — a fresh clone is dirty the
+#                       moment anything re-stats the file. Feed the build
+#                       LF and the artifact never appears.
+#   hitstop.html CRLF — the build's OUTPUT, and what the committed bundle
+#                       has always carried. Stored LF, checked out CRLF on
+#                       every platform.
+index.html   text eol=lf
+hitstop.html text eol=crlf
