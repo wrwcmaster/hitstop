@@ -270,14 +270,29 @@ function sweepY(
       // velocity cannot identify the contacted side. Preserve the side
       // the body already occupied: a descending platform keeps a player
       // below it instead of teleporting them onto its top.
+      //
+      // Depenetration is a BOUND on where the body may end up, never a
+      // replacement for where it was going. Assigning the face outright
+      // discards the step the body just integrated, so a platform that
+      // keeps re-touching a body every frame keeps re-parking it at the
+      // same face — the body reads as glued to the platform and travels
+      // at its speed instead of its own. Clamped instead, a body already
+      // clear of the face on its own keeps its position, and one still
+      // inside is pushed just far enough to be out.
       if (prevTop + b.h / 2 < s.y + s.h / 2) {
-        stop = s.y - b.h;
-        hit = s;
-        side = 'ground';
+        const c = s.y - b.h;
+        if (c < stop) {
+          stop = c;
+          hit = s;
+          side = 'ground';
+        }
       } else {
-        stop = s.y + s.h;
-        hit = s;
-        side = 'ceiling';
+        const c = s.y + s.h;
+        if (c > stop) {
+          stop = c;
+          hit = s;
+          side = 'ceiling';
+        }
       }
       continue;
     }
@@ -354,13 +369,26 @@ export function moveAndCollide(
   const yr = sweepY(b, b.vy * dt, world, opts);
   b.y = yr.stop;
   b.onGround = false;
+  // A contact cancels the velocity INTO the surface, and nothing else.
+  //
+  // Zeroing vy outright reads as the same thing while every contact comes
+  // from the body's own motion — you only meet a ceiling going up. It
+  // stops being the same thing once a DYNAMIC solid can arrive at a body
+  // that was not moving toward it: a descending platform pushes whoever
+  // is under it downward and, with an unconditional reset, deletes their
+  // fall on the way. Gravity re-earns a few px/s, the platform overlaps
+  // them again next frame, and the reset lands again — so the body never
+  // outpaces the platform and rides its underside down, glued to it.
+  // Cancelling only the component pointing into the surface leaves the
+  // fall intact, and the body separates the moment it drops faster than
+  // the platform descends.
   if (yr.solid && yr.side === 'ground') {
     addContact('ground', yr.solid, { x: 0, y: -1 }, b.vy);
-    b.vy = 0;
+    if (b.vy > 0) b.vy = 0;
     b.onGround = true;
   } else if (yr.solid && yr.side === 'ceiling') {
     addContact('ceiling', yr.solid, { x: 0, y: 1 }, b.vy);
-    b.vy = 0;
+    if (b.vy < 0) b.vy = 0;
   }
 
   // Backstop: keep the body inside the level's extent. Solids do the real
