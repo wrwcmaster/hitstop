@@ -258,6 +258,25 @@ export class Player extends Actor {
   private wallSeenT = 0;
 
   /**
+   * How much noise she is putting into the stone, 0..1.
+   *
+   * Sound is a first-class fact about the knight because a Keeper listens
+   * to it: Mourn is blind and hunts the last loud thing it felt. The rule
+   * is the one a player can feel without being told — RUNNING ON
+   * RESONANT STONE IS LOUD; standing still is quiet, and so is being in
+   * the air, because nothing you are touching can carry the sound.
+   *
+   * It rises fast and falls slow: a footfall is instant, but stone rings
+   * on after you stop, so freezing does not make you invisible for a
+   * beat. That decay is what makes "go quiet and flank" a real move with
+   * a real cost rather than a toggle.
+   */
+  noise = 0;
+  /** Where she was last genuinely loud — what a listening thing aims at. */
+  lastNoiseAt: { x: number; y: number } | null = null;
+  private rippleT = 0;
+
+  /**
    * Which side has a wall worth gripping: -1 left, +1 right, 0 none.
    *
    * Symmetric by construction — it asks the collision result for a
@@ -267,6 +286,47 @@ export class Player extends Actor {
    * and the level-extent backstop is not either, or you could cling to
    * the sky at the edge of the world.
    */
+  /**
+   * Update how loud she is, and show it.
+   *
+   * The tell is diegetic and needs no HUD: loud running pushes ripples
+   * out along the stone she is standing on, in the same visual language
+   * as a Shockwave crest, so "the floor is carrying me" is something the
+   * player watches rather than reads. Quiet emits nothing at all — the
+   * absence IS the feedback, which is what makes creeping up on a blind
+   * thing feel like creeping.
+   */
+  private updateNoise(dt: number): void {
+    const feet = { x: this.x, y: this.y + this.h, w: this.w, h: 2 };
+    // Only stone that RINGS carries you. Standing on something dead is as
+    // quiet as standing on nothing — which is exactly what a deadstone
+    // rest in Mourn's arena is for.
+    const carrying = this.onGround && (this.collision.traitAt?.(feet, 'resonant') ?? false);
+    const speed = Math.abs(this.vx) / PLAYER_TUNING.runSpeed;
+    const made = carrying ? Math.min(1, speed) : 0;
+
+    // Instant to rise, slow to fade: stone rings on after the footfall.
+    this.noise = made > this.noise ? made : Math.max(0, this.noise - dt * 1.6);
+    // The PLACE is pinned to the footfall that made the sound, never to
+    // the decaying tail — otherwise leaping away would drag the echo with
+    // her, and a listener would track her through the air. What rings on
+    // is the stone she left, which is the whole point of going quiet.
+    if (made > 0.45) this.lastNoiseAt = { x: this.cx, y: this.y + this.h };
+
+    if (made <= 0.45) { this.rippleT = 0; return; }
+    // Ripples pace with the noise, so a sprint reads louder than a walk.
+    this.rippleT -= dt;
+    if (this.rippleT > 0) return;
+    this.rippleT = 0.16 - 0.08 * made;
+    for (const dir of [-1, 1]) {
+      this.feel.particles.spawn({
+        x: this.cx + dir * (this.w / 2), y: this.y + this.h - 1,
+        vx: dir * (30 + 40 * made), vy: 0,
+        life: 0.28, size: 1, color: COLORS.steel, drag: 2.5,
+      });
+    }
+  }
+
   private grippableSide(): -1 | 0 | 1 {
     const c = this.contacts;
     if (!c) return 0;
@@ -1520,6 +1580,8 @@ export class Player extends Actor {
       this.wallSeenT = Math.max(0, this.wallSeenT - dt);
       if (this.wallSeenT === 0) this.wallSeenSide = 0;
     }
+
+    this.updateNoise(dt);
 
     // Hazard tiles (spikes): a bite of health and a launch clear of the danger.
     // Dashing skims across; i-frames blink through.
