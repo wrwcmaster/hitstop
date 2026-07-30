@@ -1,12 +1,30 @@
 import {
+  Actor,
   Entity,
   type Strike,
+  type Team,
   type TileRef,
   type Tilemap,
 } from '@engine/index';
 import { COLORS } from '../content/palette';
 import type { ActorHost } from '../defs';
-import type { Player } from './player';
+
+/** Anything that can strike a surface: the knight, or a Keeper. */
+export type WaveOwner = Actor;
+
+/**
+ * What a particular wave means. The MECHANISM — follow a connected
+ * resonant surface, bite what stands on it — is the same for everyone;
+ * only who it hurts and how hard is content.
+ */
+export interface WaveOptions {
+  /** Whose side it is against. Default 'enemy' (the knight's verb). */
+  targets?: Team;
+  damage?: number;
+  range?: number;
+  speed?: number;
+  colors?: string[];
+}
 
 /** How the wave behaves. Tuned as one object so playtest has one place to go. */
 export const SHOCKWAVE_TUNING = {
@@ -55,22 +73,36 @@ export class Shockwave extends Entity {
   private strike: Strike;
   /** Seconds since the front ran out of surface, for the wake's fade. */
   private fade = 0;
+  private readonly range: number;
+  private readonly speed: number;
+  private readonly colors: string[];
 
   constructor(
     private game: ActorHost,
     private tilemap: Tilemap,
-    owner: Player,
-    /** Where it runs: the knight's facing at the moment she struck. */
+    /**
+     * Whoever struck the ground. Any body will do — the wave only needs
+     * where its feet are. The knight's verb and Mourn's toll-wave are the
+     * SAME mechanism aimed at different teams: a boss that carried its
+     * own copy of "follow a connected surface" would drift away from the
+     * player's the first time either was tuned.
+     */
+    owner: WaveOwner,
+    /** Where it runs: the striker's facing at the moment they struck. */
     dir: 1 | -1,
+    opts: WaveOptions = {},
   ) {
     super();
     this.layer = 2;
     const T = SHOCKWAVE_TUNING;
-    // Start from the tile under her feet — the surface she just hit.
+    this.range = opts.range ?? T.range;
+    this.speed = opts.speed ?? T.speed;
+    this.colors = opts.colors ?? [COLORS.gold, COLORS.white];
+    // Start from the tile under their feet — the surface just struck.
     const start = tilemap.tileAtPoint(owner.cx, owner.y + owner.h + 1);
     this.path = start
       ? tilemap.traceSurface(start, dir, {
-          maxDistance: T.range,
+          maxDistance: this.range,
           stepUp: T.stepUp,
           stepDown: T.stepDown,
           // A wave runs through stone that rings, not through everything
@@ -80,21 +112,21 @@ export class Shockwave extends Entity {
         }).tiles
       : [];
     // One Strike for the whole wave: its hit set is what guarantees each
-    // enemy is caught at most once no matter how many frames it overlaps.
+    // target is caught at most once no matter how many frames it overlaps.
     this.strike = this.game.combat.strike({
       attacker: owner,
-      targets: 'enemy',
-      damage: T.damage,
+      targets: opts.targets ?? 'enemy',
+      damage: opts.damage ?? T.damage,
       strength: 0.8,
       knockback: 190,
-      colors: [COLORS.gold, COLORS.white],
+      colors: this.colors,
     });
     if (!this.path.length) this.dead = true;
   }
 
   update(dt: number): void {
     const T = SHOCKWAVE_TUNING;
-    this.travelled += T.speed * dt;
+    this.travelled += this.speed * dt;
     const ts = this.tilemap.tileSize;
 
     // Everything the front has newly reached, in order — so a fast wave
@@ -110,7 +142,7 @@ export class Shockwave extends Entity {
       // opinion — see content/surface-reactions.ts.
       this.game.events.emit('surfaceWave', { tx: tile.tx, ty: tile.ty });
       this.game.feel.burst(tile.rect.x + tile.rect.w / 2, tile.rect.y, 2, {
-        color: [COLORS.gold, COLORS.white], speed: 55, life: 0.3,
+        color: this.colors, speed: 55, life: 0.3,
         angle: -Math.PI / 2, spread: 1.5, drag: 3, grav: 260,
       });
       this.reached = i;

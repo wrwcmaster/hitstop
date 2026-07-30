@@ -8,6 +8,7 @@ import {
   whiteOf,
   rand,
   type CollisionSource,
+  type StrikeOptions,
 } from '@engine/index';
 import type { ActorHost } from '../defs';
 import { nearestPlayer, type Player } from './player';
@@ -80,6 +81,13 @@ export interface MonsterDef {
   contactInset?: number;
   /** Definition-owned unusual contact. Return true to suppress normal damage. */
   onPlayerContact?(m: Monster, player: Player): boolean | void;
+  /**
+   * Transform an incoming blow before it lands (see Entity.mitigate).
+   * A def-level hook because "how much this creature feels a hit" is
+   * content: Mourn is braced on the side its ear is pinned to and open
+   * on the other, which is its entire damage model.
+   */
+  mitigate?(m: Monster, damage: number, opts: StrikeOptions): number;
   /** Strategy for holding and presenting a swallowed player. */
   swallow?: SwallowDef;
   /** XP granted on kill (default: score / 20). */
@@ -168,6 +176,11 @@ export class Monster extends Actor {
   /** The nearest living player (AI targeting helper — co-op aware). */
   get player(): Actor | undefined {
     return nearestPlayer(this.world, this.cx, this.cy) ?? undefined;
+  }
+
+  /** Defs decide how a blow lands on them; by default it lands whole. */
+  mitigate(damage: number, opts: StrikeOptions): number {
+    return this.def.mitigate ? this.def.mitigate(this, damage, opts) : damage;
   }
 
   update(dt: number): void {
