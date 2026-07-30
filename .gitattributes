@@ -1,0 +1,10 @@
+# `build:single` inlines index.html verbatim into hitstop.html, so the two
+# must agree on line endings or every rebuild produces a spurious 25-line
+# diff across the wrapper — on a repo whose rule 5 says to rebuild the
+# committed bundle on every game change, that noise is constant.
+#
+# Pinned to CRLF, which is what the committed bundle already carries.
+# Stored LF, checked out CRLF on every platform, so the build reads CRLF
+# and writes CRLF wherever it runs.
+index.html   text eol=crlf
+hitstop.html text eol=crlf

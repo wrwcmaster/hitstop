@@ -51,7 +51,40 @@ function installHost() {
     createRadialGradient: () => ({ addColorStop: NOOP }),
   }, { get: (t, p) => (p in t ? t[p] : NOOP), set: () => true });
   const listeners = () => ({ addEventListener: NOOP, removeEventListener: NOOP, dispatchEvent: () => true });
-  const canvas = () => ({ width: 0, height: 0, style: {}, getContext: () => ctx2d(), ...listeners() });
+  /**
+   * One element sink, canvas included.
+   *
+   * Presentation code builds real DOM trees — the co-op lobby puts up a
+   * panel of divs and buttons — and none of it feeds the simulation, so
+   * this only has to ACCEPT every call a tree-builder makes. It did not:
+   * `createElement` handed back a canvas-shaped object with no
+   * `appendChild`, so walking the title menu onto CO-OP died with
+   * "el.appendChild is not a function" and took the session with it.
+   * A sink that throws is not a sink.
+   */
+  const element = () => {
+    const el = {
+      ...listeners(),
+      style: { cssText: '', setProperty: NOOP, removeProperty: NOOP },
+      children: [], textContent: '', value: '', disabled: false, onclick: null,
+      width: 0, height: 0,
+      appendChild(child) { el.children.push(child); return child; },
+      removeChild(child) {
+        const i = el.children.indexOf(child);
+        if (i >= 0) el.children.splice(i, 1);
+        return child;
+      },
+      remove: NOOP, focus: NOOP, blur: NOOP, select: NOOP, click: NOOP,
+      setAttribute: NOOP, removeAttribute: NOOP, getAttribute: () => null,
+      classList: { add: NOOP, remove: NOOP, toggle: NOOP, contains: () => false },
+      getBoundingClientRect: () => ({
+        x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0,
+      }),
+      getContext: () => ctx2d(),
+    };
+    return el;
+  };
+  const canvas = element;
 
   const store = new Map();
   const storage = {
@@ -78,9 +111,9 @@ function installHost() {
   };
   const document = {
     ...listeners(), location, hidden: false,
-    getElementById: () => canvas(), createElement: () => canvas(),
+    getElementById: () => element(), createElement: () => element(),
     querySelector: () => null, querySelectorAll: () => [],
-    body: { ...listeners(), appendChild: NOOP, style: {} },
+    body: element(),
     documentElement: { style: {} },
   };
   globalThis.localStorage = storage;
@@ -127,6 +160,35 @@ function installHost() {
  * platform it can rise through, or spikes — never which rock texture the
  * room chose. That also keeps the view stable across art changes.
  */
+/**
+ * Cells covered by the tilemap's dynamic solids, as "col,row" -> glyph.
+ *
+ * Moving platforms and closed barriers are real collision geometry, but
+ * they live in `extraSolids` rather than in the tile grid — so any view
+ * built from `tileAt` alone draws air exactly where a platform is about
+ * to carry the knight or a barrier is blocking her, and an agent plans
+ * against a room the simulation does not have.
+ *
+ * `=` rather than `#` on purpose: the agent needs to know both that the
+ * cell is solid AND that it is a mechanism, because a mechanism's
+ * geometry is only true for the frame it was read in.
+ */
+export function dynamicSolidCells(map) {
+  const cells = new Map();
+  const ts = map?.tileSize;
+  if (!ts) return cells;
+  for (const s of map.extraSolids ?? []) {
+    const c0 = Math.floor(s.x / ts);
+    const c1 = Math.floor((s.x + s.w - 0.001) / ts);
+    const r0 = Math.floor(s.y / ts);
+    const r1 = Math.floor((s.y + s.h - 0.001) / ts);
+    for (let row = r0; row <= r1; row++) {
+      for (let col = c0; col <= c1; col++) cells.set(`${col},${row}`, s.oneWay ? '-' : '=');
+    }
+  }
+  return cells;
+}
+
 export function lookAround(game, { r = 10, rows: rh = 7, tiles } = {}) {
   const sc = game.scenes.all().find((s) => s.constructor.name === 'PlayScene');
   const p = sc?.player;
@@ -165,11 +227,18 @@ export function lookAround(game, { r = 10, rows: rh = 7, tiles } = {}) {
     marks.set(`${Math.floor((a.x + a.w / 2) / ts)},${Math.floor((a.y + (a.h ?? 0) / 2) / ts)}`, ch);
   }
 
+  // Gizmo geometry sits between the actors and the terrain: it is not a
+  // creature, but it is not part of the room either.
+  const dyn = dynamicSolidCells(map);
+
   const out = [];
   for (let row = r0; row <= r1; row++) {
     let line = '';
     for (let col = c0; col <= c1; col++) {
-      line += (col === cx && row === cy) ? '@' : (marks.get(`${col},${row}`) ?? glyph(col, row));
+      const key = `${col},${row}`;
+      line += (col === cx && row === cy)
+        ? '@'
+        : (marks.get(key) ?? dyn.get(key) ?? glyph(col, row));
     }
     out.push(line);
   }
@@ -177,7 +246,8 @@ export function lookAround(game, { r = 10, rows: rh = 7, tiles } = {}) {
     room: sc.roomId,
     origin: { col: c0, row: r0, tileSize: ts },
     player: { col: cx, row: cy },
-    legend: '# solid, - platform (pass up through), ^ hazard, ~ water, . air, , decor, / outside, @ you, e enemy, B boss, $ pickup, n npc',
+    legend: '# solid, - platform (pass up through), = moving platform or closed barrier (this frame), '
+      + '^ hazard, ~ water, . air, , decor, / outside, @ you, e enemy, B boss, $ pickup, n npc',
     rows: out,
   };
 }

@@ -59,14 +59,22 @@ is 0.002ms, which is why an agent can afford one every turn.
 --------.............   - platform       e enemy / B boss
 .....................   ^ hazard         $ pickup
 ..........@..........   ~ water          n npc
-.....................   . air  , decor   / outside the room
-#####################
+.......=====.........   . air  , decor   / outside the room
+#####################   = moving platform or closed barrier
 ```
 
 The glyphs say what a tile DOES, not what it is painted like: an agent
 deciding whether to jump cares that something is solid or pass-through,
 never which rock texture the room chose — and the view stays valid
-across art changes. Pixels are the one thing the bridge cannot serve
+across art changes.
+
+`=` is the exception that proves the rule: moving platforms and closed
+barriers are collision geometry that lives in `tilemap.extraSolids`
+rather than in the grid, so a view built from tile reads alone drew air
+exactly where the vault's lifts and gates are. It gets its own glyph
+rather than `#` because its geometry is only true for the frame it was
+read in — the agent needs to know both that the cell is solid and that
+it will not stay that way. Pixels are the one thing the bridge cannot serve
 (no canvas); for those use `inspect.mjs shot`.
 
 ## Bug tapes: a report becomes a regression test

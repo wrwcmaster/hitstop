@@ -35,7 +35,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bootGame, lookAround, close } from './headless.mjs';
+import { bootGame, lookAround, dynamicSolidCells, close } from './headless.mjs';
 
 const PORT = Number(process.env.AGENT_PLAY_PORT ?? 8791);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -48,12 +48,19 @@ let booted = false;
 async function newSession(seed) {
   // A second session gets a fresh module graph, which is the isolation a
   // new browser page used to provide. The first needs no such reset.
-  sess = await bootGame({ fresh: booted, seed });
+  //
+  // The localStorage stand-in is NOT part of that module graph — it hangs
+  // off globalThis and outlives every reset — so a session that autosaved
+  // would hand its `hitstop.save` and settings to the next one, and
+  // /session is documented as fresh. An empty snapshot is what a new
+  // browser context used to give for free.
+  sess = await bootGame({ fresh: booted, seed, storage: {} });
   booted = true;
   const engine = await sess.server.ssrLoadModule('/src/engine/index.ts');
   sess.tiles = engine.tiles;
   sess.ROOMS = (await sess.server.ssrLoadModule('/src/game/content/rooms/index.ts')).ROOMS;
   sess.buildTilemap = engine.buildTilemap;
+  sess.openEdgeDoorways = (await sess.server.ssrLoadModule('/src/game/scenes/play/doorways.ts')).openEdgeDoorways;
   return sess;
 }
 
@@ -79,14 +86,29 @@ function tileGrid(roomId, range) {
   const s = need();
   const room = roomId ? s.ROOMS[roomId] : null;
   if (roomId && !room) throw new Error(`no such room "${roomId}"`);
-  const map = room ? s.buildTilemap(room) : s.game.scenes.all()
-    .find((x) => x.constructor.name === 'PlayScene')?.tilemap;
+  let map;
+  if (room) {
+    map = s.buildTilemap(room);
+    // Doorway geometry is DERIVED, not authored: every room load recreates
+    // it (PlayScene.setRoom, collisionMapFor, the guest scene, lib.mjs and
+    // sweep.mjs all do). Reading a room without it reports solid stone
+    // where the game has an open threshold, so a structural probe decides
+    // a door is walled off — the exact wrong answer to the exact question
+    // this endpoint exists to answer.
+    s.openEdgeDoorways(room, map);
+  } else {
+    map = s.game.scenes.all().find((x) => x.constructor.name === 'PlayScene')?.tilemap;
+  }
   if (!map) throw new Error('no room to read');
+  // Only the live map has gizmos in it; a freshly built room has none.
+  const dyn = dynamicSolidCells(map);
   const [c0, c1, r0, r1] = range ?? [0, map.cols - 1, 0, map.rows - 1];
   const rows = [];
   for (let r = Math.max(0, r0); r <= Math.min(map.rows - 1, r1); r++) {
     let line = '';
     for (let c = Math.max(0, c0); c <= Math.min(map.cols - 1, c1); c++) {
+      const moving = dyn.get(`${c},${r}`);
+      if (moving) { line += moving; continue; }
       const id = map.tileAt(c, r);
       if (!id) { line += '.'; continue; }
       const d = s.tiles.get(id);
@@ -97,7 +119,8 @@ function tileGrid(roomId, range) {
   return {
     room: roomId ?? 'live', cols: map.cols, rows: map.rows,
     range: [Math.max(0, c0), Math.min(map.cols - 1, c1), Math.max(0, r0), Math.min(map.rows - 1, r1)],
-    legend: '# solid, - platform, ^ hazard, ~ water, . air, , decor',
+    legend: '# solid, - platform, = moving platform or closed barrier (this frame), '
+      + '^ hazard, ~ water, . air, , decor',
     grid: rows,
   };
 }
