@@ -19,6 +19,8 @@ import undercutJson from './undercut.json';
 import viseApproachJson from './vise_approach.json';
 import viseArenaJson from './vise_arena.json';
 import rivenFlueJson from './riven_flue.json';
+import mournApproachJson from './mourn_approach.json';
+import mournArenaJson from './mourn_arena.json';
 
 /**
  * The world's rooms, by id. Door triggers reference these ids
@@ -49,6 +51,10 @@ export const ROOMS: Record<string, RoomDef> = {
   'vise-approach': validateRoom(viseApproachJson),
   'vise-arena': validateRoom(viseArenaJson),
   'riven-flue': validateRoom(rivenFlueJson),
+  // The Underbell: through the Riven's floor to the bell's shoulder,
+  // where the Keeper of the voice hands over Shockwave.
+  'mourn-approach': validateRoom(mournApproachJson),
+  'mourn-arena': validateRoom(mournArenaJson),
 };
 
 export const START_ROOM = 'arena';

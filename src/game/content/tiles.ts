@@ -602,3 +602,39 @@ tiles.register('spikesDown', {
     for (let i = 0; i < size; i += 8) g.fillRect(px + i + 1, py + size - 4, 1, 1);
   },
 });
+
+/**
+ * Deadstone: the one stone in the world that does not ring.
+ *
+ * Everything else the knight can stand on is `resonant`, and two systems
+ * already read that trait — her own footsteps (she is only loud on stone
+ * that carries the sound) and `traceSurface` (a Shockwave only travels
+ * where it rings). So a tile that simply omits the trait is, for free
+ * and without a line of special-case code:
+ *
+ *   - SILENT to stand on — the quiet ground Mourn cannot hear you from
+ *   - a BREAK in any wave — Mourn's toll dies at its edge, so it is also
+ *     the safe hold the fight is built around
+ *
+ * That is the whole reason the Underbell's rests read as rests. It is
+ * also why deadstone is drawn cold and matte: it should look like
+ * something sound goes into and does not come out of.
+ */
+tiles.register('deadstone', {
+  solid: true,
+  // Deliberately no 'resonant'. `grip` so the arena's rests double as
+  // wall holds — a quiet place to hang is the point of them.
+  traits: ['grip'],
+  draw(g, px, py, size, tx, ty) {
+    g.fillStyle = '#2b2836';
+    g.fillRect(px, py, size, size);
+    // Matte, sound-swallowing pocks rather than the glinting facets the
+    // ringing stones get.
+    g.fillStyle = '#232030';
+    const n = (tx * 5 + ty * 11) % 4;
+    g.fillRect(px + n, py + 2 + ((tx + ty) % 3), 3, 2);
+    g.fillRect(px + (n + 3) % (size - 2), py + size - 4, 2, 2);
+    g.fillStyle = '#39344a';
+    g.fillRect(px + (tx * 3 + ty * 2) % (size - 1), py + (ty * 7) % (size - 1), 1, 1);
+  },
+});
