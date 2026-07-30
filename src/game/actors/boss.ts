@@ -1304,8 +1304,14 @@ function makeMournFsm(m: Monster): FSM<Monster> {
         if (!(b.state.called as boolean)) {
           b.state.called = true;
           b.game.feel.sfx.play('kill');
-          for (let i = 0; i < 2; i++) {
-            b.world.spawn(new Monster('bat', b.game, b.collision, b.cx + (i ? 26 : -26), b.y - 20));
+          // Call them into open air ABOVE it, not blindly out to the
+          // sides: a ±26px offset is inside the wall whenever Mourn is
+          // fighting near one. Placement still has the final say (a bat
+          // with nowhere to go is stillborn rather than embedded), but
+          // asking for a sane spot means it rarely has to exercise it.
+          for (const dx of [-18, 18]) {
+            const bat = new Monster('bat', b.game, b.collision, b.cx + dx, b.y - 26);
+            if (!bat.dead) b.world.spawn(bat);
           }
         }
         if (fsm.t > 1.1) return 'listen';

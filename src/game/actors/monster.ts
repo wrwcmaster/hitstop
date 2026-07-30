@@ -158,7 +158,14 @@ export class Monster extends Actor {
     // resolved the way the mover would have left it, never born buried
     // where collision cannot see it. (Size must be known first, which is
     // why placement follows the def lookup.)
-    placeBody(this, x, y, collision);
+    //
+    // And when there is genuinely nowhere to stand, it does not exist.
+    // Ignoring this verdict is how Mourn's keen put an echo bat inside
+    // the arena's east wall: a blind ±26px offset landed in three
+    // columns of stone, placement said "no" and the caller spawned it
+    // anyway. A monster in a wall is worse than a monster that never
+    // arrived — it cannot be fought, and collision cannot see it.
+    if (!placeBody(this, x, y, collision)) this.dead = true;
     this.hp = this.maxHp = this.def.hp;
     this.mass = this.def.mass ?? 1;
     this.flies = this.def.flies ?? false;
