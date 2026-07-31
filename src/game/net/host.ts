@@ -176,6 +176,9 @@ export class CoopHost {
         snap.mobs.push({
           id: this.id(e), type: e.type, x: r(e.x), y: r(e.y), facing: e.facing,
           animT: r(e.animT), hp: e.hp, maxHp: e.maxHp,
+          // A tell only travels if the def says it has one that a puppet
+          // cannot infer from position and facing alone.
+          ...(e.def.tell ? { tell: e.def.tell(e).map(r) } : {}),
         });
       } else if (e instanceof Pickup) {
         snap.picks.push({ id: this.id(e), item: e.itemId, x: r(e.x), y: r(e.y) });

@@ -1152,11 +1152,27 @@ function earSide(m: Monster): -1 | 1 {
   return attention(m).x < m.cx ? -1 : 1;
 }
 
-/** Listen. The only sense it has. */
+/**
+ * Listen. The only sense it has.
+ *
+ * It hears the LOUDEST knight, not the nearest — `m.player` answers
+ * "who is closest", which is the wrong question for a blind thing. In
+ * co-op that difference is the whole mechanic: a partner sprinting on
+ * the far side of the arena must be able to pull its attention away
+ * while you creep in from the quiet, and picking by distance would let a
+ * silent knight standing nearer swallow the decoy entirely.
+ */
 function mournListen(m: Monster, dt: number): void {
-  const p = m.player as Player | undefined;
-  if (p && !p.dead && p.noise > 0.45 && p.lastNoiseAt) {
-    m.state.earAt = { x: p.lastNoiseAt.x, y: p.lastNoiseAt.y };
+  let loudest: Player | null = null;
+  for (const a of m.world.actors('player')) {
+    const p = a as Player;
+    if (p.dead || p.noise <= 0.45 || !p.lastNoiseAt) continue;
+    if (!loudest || p.noise > loudest.noise) loudest = p;
+  }
+  // While the chamber hums, footfalls are lost inside it (see `humming`):
+  // the free approach the last knot is supposed to buy.
+  if (loudest && !humming(m) && loudest.lastNoiseAt) {
+    m.state.earAt = { x: loudest.lastNoiseAt.x, y: loudest.lastNoiseAt.y };
     m.state.earSure = 1;
   } else {
     // A knight who is still, airborne, or on deadstone tells it nothing,
@@ -1164,6 +1180,19 @@ function mournListen(m: Monster, dt: number): void {
     m.state.earSure = Math.max(0, ((m.state.earSure as number) ?? 0) - dt * 0.5);
   }
   m.facing = earSide(m);
+}
+
+/**
+ * Is the chamber ringing right now?
+ *
+ * On the last knot Mourn hums on a rhythm, and a hum loud enough to
+ * shake the room is loud enough to hide a footstep in. The masked window
+ * is the gap BETWEEN beats resolving — deliberately most of the cycle,
+ * because the promise is "the brave get free approaches", and a promise
+ * the code does not keep is worse than no promise.
+ */
+function humming(m: Monster): boolean {
+  return (m.state.humMask as number ?? 0) > 0;
 }
 
 /** A toll: the knight's own verb, aimed the other way. */
@@ -1356,6 +1385,23 @@ defineMonster('mourn', {
     const side = from.cx < m.cx ? -1 : 1;
     return side === earSide(m) ? damage * 0.15 : damage;
   },
+  /**
+   * What a co-op guest needs to READ this fight: how sure the ear is, and
+   * whether it is fixated. Both live in internal state a puppet never
+   * simulates, and both are the safe-opening signal — without them the
+   * second knight sees a dim ear forever and is playing blind against a
+   * blind thing.
+   */
+  tell(m) {
+    const fsm = m.state.fsm as FSM<Monster> | undefined;
+    return [attention(m).sure, fsm?.is('fixate') ? 1 : 0];
+  },
+  readTell(m, [sure, fixated]) {
+    m.state.earSure = sure;
+    // The puppet has no FSM of its own worth trusting; the flag drives
+    // the draw directly.
+    m.state.remoteFixate = fixated === 1;
+  },
   init(m) {
     m.state.earAt = { x: m.cx, y: m.cy };
     m.state.earSure = 0;
@@ -1376,16 +1422,30 @@ defineMonster('mourn', {
         color: [MOURN_KNOT, MOURN_BODY], speed: 140, life: 0.5, drag: 2.5,
       });
     }
-    (m.state.fsm as FSM<Monster>).update(dt);
-    // Last knot: the chamber hums on a rhythm. The hum also masks the
-    // knight's footsteps, so the brave get free approaches between beats.
+    // Last knot: the chamber hums on a rhythm, and the hum genuinely
+    // MASKS footsteps (see `humming`) — the free approach the phase is
+    // supposed to buy. It is not a kindness: the same beat throws a toll
+    // wave, so the cover you walk under is also what is hunting you. The
+    // window shuts for a breath around each beat, which is when it can
+    // hear you again.
+    //
+    // This runs BEFORE the FSM, because the FSM is what listens. Setting
+    // the mask afterwards left `listen` reading the previous frame's
+    // value, and one footstep per cycle leaked through on the boundary —
+    // measured at exactly 1 refresh in 129 masked frames, which is the
+    // kind of "almost" that turns into a bug report later.
+    m.state.humMask = 0;
     if (gone >= MOURN_KNOTS - 1) {
-      m.state.hum = ((m.state.hum as number) ?? 0) + dt;
-      if ((m.state.hum as number) > 1.6) {
+      const hum = ((m.state.hum as number) ?? 0) + dt;
+      m.state.hum = hum;
+      // Deaf except for a short breath on either side of the beat.
+      m.state.humMask = hum > 0.35 && hum < 1.35 ? 1 : 0;
+      if (hum > 1.6) {
         m.state.hum = 0;
         tollWave(m, m.facing as 1 | -1);
       }
     }
+    (m.state.fsm as FSM<Monster>).update(dt);
   },
   draw(g, m) {
     const fsm = m.state.fsm as FSM<Monster>;
@@ -1410,7 +1470,13 @@ defineMonster('mourn', {
     // enough to move, and the one thing the player must learn to read.
     const ex = m.facing < 0 ? m.x + 1 : m.x + m.w - 4;
     g.globalAlpha = 0.35 + 0.65 * attention(m).sure;
-    g.fillStyle = fsm.is('fixate') ? COLORS.white : MOURN_EAR;
+    // A guest's puppet DOES have an FSM — `init` ran there too — it is
+    // simply never stepped, so asking it would report `listen` forever.
+    // The wire value is therefore the authority whenever one has arrived.
+    const fixated = m.state.remoteFixate !== undefined
+      ? m.state.remoteFixate === true
+      : fsm.is('fixate');
+    g.fillStyle = fixated ? COLORS.white : MOURN_EAR;
     g.fillRect(ex, m.y + 8, 3, 7);
     g.globalAlpha = 1;
   },

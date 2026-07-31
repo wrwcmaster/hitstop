@@ -224,6 +224,10 @@ export class CoopGuestScene implements Scene {
       mob.animT = m.animT;
       mob.hp = m.hp;
       mob.maxHp = m.maxHp;
+      // A puppet never runs its own brain, so a tell that lives in
+      // internal state must be handed to it or the guest cannot read the
+      // fight at all — Mourn's ear IS the safe-opening signal.
+      if (m.tell && mob.def.readTell) mob.def.readTell(mob, m.tell);
     }
     for (const pk of s.picks) {
       seen.add(pk.id);

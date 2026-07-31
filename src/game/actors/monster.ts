@@ -92,6 +92,16 @@ export interface MonsterDef {
   swallow?: SwallowDef;
   /** XP granted on kill (default: score / 20). */
   xp?: number;
+  /**
+   * Presentation state a co-op guest needs in order to READ this monster,
+   * as a few plain numbers (rides `MobSnap.tell`). Only for tells that
+   * live in internal state rather than in position and facing — a boss
+   * whose safe-opening signal is an internal value is unreadable on a
+   * guest's screen without this. Omit it and nothing is sent.
+   */
+  tell?(m: Monster): number[];
+  /** Apply a `tell` on the guest's puppet, which is never simulated. */
+  readTell?(m: Monster, tell: number[]): void;
   /** One-time setup; stash per-instance state on the monster. */
   init?(m: Monster): void;
   /** Behavior. Physics (gravity + collide) runs after this. */
