@@ -36,6 +36,10 @@ const arg = (name, fallback) => {
 const seeds = arg('--seeds', '1,7,42,99,2024').split(',').map(Number);
 const policyPath = arg('--policy', './policies/untouchable.mjs');
 const why = process.argv.includes('--why');
+// How many frames pass per decision. A code policy decides every frame;
+// an LLM over the bridge decides perhaps once a second. Same game, very
+// different problem, and this is the knob that tells them apart.
+const every = Number(arg('--every', '1'));
 const CAP = 40000; // ~11 minutes of game time: a stall, not a slow win
 
 const policy = await import(policyPath);
@@ -73,7 +77,9 @@ async function trial(seed) {
       const k = near.length ? near.sort().join('+') : 'ranged';
       blame[k] = (blame[k] ?? 0) + 1;
     }
-    harness.step(policy.decide(globalThis.window.__observe()), 1);
+    const keys = policy.decide(globalThis.window.__observe());
+    harness.step(keys, every);
+    f += every - 1;
   }
   const p = play()?.player;
   await close();

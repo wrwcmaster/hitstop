@@ -418,6 +418,17 @@ view **with** the state — so an agent sees the geometry ahead for ~150
 extra tokens and no extra round trip. Looking was never expensive;
 starting a process to ask was.
 
+Two things exist so that numbers about play are measured rather than
+guessed. `npm run measure` stages one controlled fight per enemy kind and
+reports facts — a bat closes at 189px/s, a swing commits for 0.34s, so a
+bat covers 64px while you are locked and the great-sword reaches 33.
+`tools/agent-play/learn/` trains a small network to play the arena by
+evolution strategies (no dependencies, ~15 min, seeds held out), which
+removes the hand-picked constant as a category. **If you find yourself
+choosing a threshold because it sounds right, one of those two is the
+tool you want** — a day was lost here A/B-ing invented numbers against
+five seeds and watching the verdict reverse on ten.
+
 **Before you drive the knight yourself, read
 `tools/agent-play/PLAYBOOK.md`** — a capped handover doc of what earlier
 agents measured about playing this game, including the approaches that
