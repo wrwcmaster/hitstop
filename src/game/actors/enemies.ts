@@ -412,6 +412,7 @@ const ARCHER_AIM = 0.45;
  */
 defineMonster('archer', {
   hp: 60, damage: 18, w: 12, h: 17, score: 350,
+  rangedAt: 300, // it looses at anything inside this
   colors: [CLOAK, CLOAK_DARK, WOOD],
   drops: [
     { id: 'coin', chance: 0.5 },
@@ -444,6 +445,7 @@ defineMonster('archer', {
           damage: 18, targets: 'player', attacker: m,
         });
         m.game.feel.sfx.play('bow');
+        m.state.mode = undefined;
         m.state.cd = rand(2, 2.6);
       }
       return;
@@ -453,7 +455,12 @@ defineMonster('archer', {
     else if (dist < 90) m.vx -= m.facing * 110 * dt;
     else m.vx *= 0.85;
     m.vx = Math.max(-40, Math.min(40, m.vx));
-    if ((m.state.cd as number) <= 0 && dist < 300) m.state.aim = ARCHER_AIM;
+    if ((m.state.cd as number) <= 0 && dist < 300) {
+      m.state.aim = ARCHER_AIM;
+      // Name the draw. It is already the visible telegraph — the bow
+      // comes up — so say so where an agent can read it too.
+      m.state.mode = 'aim';
+    }
   },
   draw(g, m) {
     const f = m.facing;
@@ -492,6 +499,7 @@ defineMonster('archer', {
  */
 defineMonster('gunner', {
   hp: 80, damage: 26, w: 13, h: 14, score: 450,
+  rangedAt: 320, // levels the musket at anything near-flat inside this
   colors: [COLORS.redDark, COLORS.steel, COLORS.gold],
   drops: [
     { id: 'coin', chance: 0.6 },
@@ -521,6 +529,7 @@ defineMonster('gunner', {
           damage: 26, targets: 'player', attacker: m,
         });
         muzzleFlash(m.game, m.cx + m.facing * 9, m.cy - 1, m.facing, 'bullet');
+        m.state.mode = undefined;
         m.vx -= m.facing * 60; // the kick
         m.state.cd = rand(2.6, 3.4);
       }
@@ -528,6 +537,7 @@ defineMonster('gunner', {
     }
     // Only levels the musket at a target it can plausibly hit: near-flat.
     if ((m.state.cd as number) <= 0 && Math.abs(dx) < 320 && Math.abs(dy) < 60) {
+      m.state.mode = 'aim';
       m.state.aim = 0.5;
     }
   },

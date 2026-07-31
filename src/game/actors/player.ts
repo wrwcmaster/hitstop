@@ -179,6 +179,11 @@ export class Player extends Actor {
   squash = 1;
   private wasGround = false;
   private dashCd = 0;
+
+  /** Whether a dash would fire right now (the cooldown has expired). */
+  get dashReady(): boolean {
+    return this.dashCd <= 0;
+  }
   private attackIndex = 0;
   /** Public for player-render, same reason. */
   attackDur = 0;
@@ -1003,27 +1008,48 @@ export class Player extends Actor {
     this.feel.text(this.cx, this.y - 6, t('PARRY!'), COLORS.gold, 1);
   }
 
-  beginAttack(): void {
+  /**
+   * The attack a press RIGHT NOW would perform, and its combo index.
+   *
+   * Split out of `beginAttack` so anything that needs to know her reach
+   * before she swings — the agent observation, chiefly — reads the same
+   * choice the swing will actually make. Reconstructing this elsewhere
+   * would be a copy that silently rots the first time the combo or
+   * contextual table changes.
+   */
+  plannedAttack(): { def: WeaponAttackDef | undefined; index: number } {
     const w = this.weapon;
     const type = weaponTypeOf(w);
     const ctx = this.attackContext;
     if (ctx === 'ground') {
       const continues = this.comboT > 0 && this.comboWeaponId === w.id;
-      this.attackIndex = continues ? (this.attackIndex + 1) % type.attacks.length : 0;
-      this.attackDef = type.attacks[this.attackIndex];
-    } else {
-      // Contextual moves sit outside the combo chain (and never advance it).
-      // A weapon's own plunge when it has one, the knight's body when it
-      // doesn't — Impact Drop belongs to her, not to the steel.
-      const table = {
-        aerial: type.aerial,
-        plunge: type.plunge ?? IMPACT_DROP_PLUNGE,
-        upper: type.upper,
-        dash: type.dashAttack,
-      };
-      this.attackDef = table[ctx] ?? type.attacks[0];
-      this.attackIndex = 0;
+      const index = continues ? (this.attackIndex + 1) % type.attacks.length : 0;
+      return { def: type.attacks[index], index };
     }
+    // Contextual moves sit outside the combo chain (and never advance it).
+    // A weapon's own plunge when it has one, the knight's body when it
+    // doesn't — Impact Drop belongs to her, not to the steel.
+    const table = {
+      aerial: type.aerial,
+      plunge: type.plunge ?? IMPACT_DROP_PLUNGE,
+      upper: type.upper,
+      dash: type.dashAttack,
+    };
+    return { def: table[ctx] ?? type.attacks[0], index: 0 };
+  }
+
+  beginAttack(): void {
+    const w = this.weapon;
+    const ctx = this.attackContext;
+    const planned = this.plannedAttack();
+    // A weapon with no swing in this context has nothing to begin. Only
+    // reachable for ranged arms, whose fire path never comes through
+    // here — but the observation now asks about the planned attack every
+    // frame, for every loadout, so "there isn't one" must be a real
+    // answer rather than a crash.
+    if (!planned.def) return;
+    this.attackIndex = planned.index;
+    this.attackDef = planned.def;
     this.comboT = 0;
     this.attackDur = this.attackDef.duration;
     // The lunge follows intent: full step when holding toward the target,
@@ -1298,13 +1324,19 @@ export class Player extends Actor {
 
   /* ---------------- combat ---------------- */
 
-  /** Active attack hitbox in world space (only valid during attack state). */
-  attackBox(): Rect {
-    const hitbox = this.attackDef?.hitbox;
-    if (!hitbox) return { x: this.x, y: this.y, w: 0, h: 0 };
+  /**
+   * Where ANY attack's hitbox would land, at a given facing.
+   *
+   * Generalized from `attackBox()` so the reach of a swing can be asked
+   * about before it is thrown. Forward hitboxes run from 14px unarmed to
+   * 36px on a great-sword combo finisher, so "reach" is not a constant
+   * anyone may hardcode — including the agent observation, which used to.
+   */
+  hitboxFor(def: WeaponAttackDef, facing: 1 | -1): Rect {
+    const hitbox = def.hitbox;
     // Vertical aims center on the body; `forward` becomes the gap from
     // the feet (down) or the head (up).
-    const aim = this.attackDef?.aim ?? 'forward';
+    const aim = def.aim ?? 'forward';
     if (aim === 'down') {
       return { x: this.cx - hitbox.w / 2, y: this.y + this.h + hitbox.forward, w: hitbox.w, h: hitbox.h };
     }
@@ -1312,13 +1344,19 @@ export class Player extends Actor {
       return { x: this.cx - hitbox.w / 2, y: this.y - hitbox.forward - hitbox.h, w: hitbox.w, h: hitbox.h };
     }
     return {
-      x: this.facing === 1
+      x: facing === 1
         ? this.x + this.w + hitbox.forward
         : this.x - hitbox.forward - hitbox.w,
       y: this.y + this.h / 2 - hitbox.h / 2 + hitbox.y,
       w: hitbox.w,
       h: hitbox.h,
     };
+  }
+
+  /** Active attack hitbox in world space (only valid during attack state). */
+  attackBox(): Rect {
+    if (!this.attackDef) return { x: this.x, y: this.y, w: 0, h: 0 };
+    return this.hitboxFor(this.attackDef, this.facing);
   }
 
   /** Contact damage routes through Combat like every other hit source. */
