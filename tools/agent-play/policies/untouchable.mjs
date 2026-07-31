@@ -121,6 +121,37 @@ export function reset() {
   recover = 0;
 }
 
+/*
+ * ON THE DASH, which this policy does not use — a result, not an
+ * omission.
+ *
+ * `player.dash` ships speed, length, cooldown and immunity because the
+ * dash is the strongest defensive verb the knight owns: contact damage
+ * skips the dash state outright and it leaves i-frames behind, so 0.36s
+ * of every 0.45s can be spent untouchable while covering ~48px. Against
+ * a game whose damage is almost entirely contact, that ought to end the
+ * problem. Three schedulings, each measured over ten seeds:
+ *
+ *   an ordinary travel option     6/10, and stalls past 25,000 frames
+ *   only under 10px of air        3/10, worse than never dashing
+ *   with a common score horizon   7/10, no stalls — but identical to
+ *                                 the same horizon WITHOUT the dash
+ *
+ * The first two failed for one reason, and it is a trap in any policy
+ * that scores options: a walk was judged over the next 0.35s while a
+ * dash was judged from 0.36s onward, because its immunity made the early
+ * moments free. Those are different futures. The walk carried the cost
+ * of the dangerous right-now and the dash never saw it, so the dash won
+ * comparisons it had not earned — hence dashing constantly, killing
+ * nothing, and stalling. Judged over one horizon the spam stops, and the
+ * dash then turns out to be worth nothing here: at 0.36s a bat's current
+ * velocity no longer predicts where it will be, so the landing spot is a
+ * guess. Doing better needs monster BEHAVIOUR modelled rather than
+ * velocity extrapolated. That is the honest next step, and worth taking:
+ * the unrestricted version produced the only untouched clear this policy
+ * has ever managed — seed 7, five waves, zero hits.
+ */
+
 /**
  * Clear air she insists on keeping, in px. Heavier hits earn more.
  *

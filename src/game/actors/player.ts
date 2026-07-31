@@ -179,6 +179,11 @@ export class Player extends Actor {
   squash = 1;
   private wasGround = false;
   private dashCd = 0;
+
+  /** Whether a dash would fire right now (the cooldown has expired). */
+  get dashReady(): boolean {
+    return this.dashCd <= 0;
+  }
   private attackIndex = 0;
   /** Public for player-render, same reason. */
   attackDur = 0;

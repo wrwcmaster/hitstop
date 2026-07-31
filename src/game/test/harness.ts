@@ -248,6 +248,24 @@ function attachObserver(game: ActionGame): void {
         // With a launch speed and a gravity it can price the arc: how
         // high, how long, and where the threats will be when it lands.
         jump: { speed: PLAYER_TUNING.jumpSpeed, gravity: GRAVITY },
+        // THE DASH, which is not a movement option — it is an immunity.
+        // Contact damage skips her entirely while the dash state runs
+        // (see Player: the contact loop excludes fsm 'dash'), and it
+        // hands over i-frames on landing, so a dash is ~0.36s during
+        // which nothing can touch her, covering ~48px, every 0.45s.
+        // Against a game whose damage is overwhelmingly contact, that is
+        // the strongest defensive verb she owns, and an agent told only
+        // that an action named 'dash' exists has no way to discover any
+        // of it. The numbers are what make it schedulable.
+        dash: {
+          ready: p.dashReady,
+          speed: PLAYER_TUNING.dashSpeed,
+          time: PLAYER_TUNING.dashTime,
+          cooldown: PLAYER_TUNING.dashCooldown,
+          // Seconds of total immunity: the pass-through plus the
+          // i-frames it leaves behind.
+          invuln: round(PLAYER_TUNING.dashTime + PLAYER_TUNING.dashInvuln),
+        },
         noise: round(p.noise),
       },
       // Deliberately terse, and deliberately RELATIVE.
