@@ -418,6 +418,25 @@ view **with** the state — so an agent sees the geometry ahead for ~150
 extra tokens and no extra round trip. Looking was never expensive;
 starting a process to ask was.
 
+**Before you drive the knight yourself, read
+`tools/agent-play/PLAYBOOK.md`** — a capped handover doc of what earlier
+agents measured about playing this game, including the approaches that
+sounded right and scored worse. `npm run playbook` enforces the cap; when
+you add a lesson, delete a weaker one. Score any change to how an agent
+plays with `npm run arena-trial`, which runs five seeded attempts at
+level 1 and reports clears and hits taken, so the numbers compare across
+sessions.
+
+Perception for a playing agent lives in `window.__observe()`, which is
+deliberately NOT `harness.state()`: state() is the replay divergence
+hash, compared bit-for-bit across every recording, so growing it to help
+an agent would invalidate the regression suite and conflate two jobs.
+`__observe()` is hashed by nobody and free to grow — add to it rather
+than teaching a policy to guess. It reports the SCREEN as well as the
+world (`ui.blocking`, plus whatever a scene's optional `describe()`
+returns): a menu on top of `PlayScene` freezes the sim and takes the
+keyboard, and an agent that cannot see one simply stops playing.
+
 The headless verbs run the game's own modules in Node through
 `tools/agent-play/headless.mjs` (vite `ssrLoadModule`; `offscreen()`
 returns a drawing sink when there is no document). All 22 recordings

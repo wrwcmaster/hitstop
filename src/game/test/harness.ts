@@ -8,12 +8,29 @@
  * main.ts — `bootReplay` seeds the gameplay RNG (and sandboxes storage
  * when watching a replay) before any other module can touch either.
  */
-import { Replay, bootReplay, DialogueScene, type Recording } from '@engine/index';
+import { Replay, bootReplay, DialogueScene, Projectile, skillDef, tiles, type Tilemap, type Recording } from '@engine/index';
 import { STORAGE_PREFIX, REPLAY_PENDING_KEY, type ActionGame, type Action, type RunStart, type GameEvents } from '../defs';
 import { Player } from '../actors/player';
 import { Monster } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
 import { PlayScene } from '../scenes/play';
+
+/**
+ * A scene that can explain itself to an agent. Optional and duck-typed on
+ * purpose: the harness must not grow a list of every menu in the game,
+ * and a scene that stays silent still reports its name and that it is
+ * blocking, which is the part that matters most.
+ */
+export interface AgentReadable {
+  describe(): Record<string, unknown>;
+}
+
+declare global {
+  interface Window {
+    /** Rich perception for agents — see attachObserver. Never hashed. */
+    __observe?: () => unknown;
+  }
+}
 
 export const BOOT = bootReplay({ storagePrefix: STORAGE_PREFIX, pendingKey: REPLAY_PENDING_KEY });
 
@@ -107,4 +124,166 @@ export function attachHarness(game: ActionGame): void {
 
   game.events.on('runStart', (start) => replay.runStarted(start));
   replay.install();
+  attachObserver(game);
+}
+
+/**
+ * What an agent needs to DECIDE, which is not what a replay needs to hash.
+ *
+ * `state()` above is the divergence hash: every field in it is compared
+ * bit-for-bit across 23 recordings, so adding to it invalidates all of
+ * them and couples "what a player can perceive" to "what determinism
+ * asserts". Those are different jobs, and this is the other one — free
+ * to grow, hashed by nobody.
+ *
+ * What it adds over `state()`, and why each was needed. An agent driving
+ * on positions alone died on wave 3 of the arena, hurt twelve times, TEN
+ * of them by bats:
+ *
+ *   - VELOCITY. A bat's x/y cannot distinguish one diving at you from one
+ *     leaving. Without it there is no such thing as dodging, only
+ *     flinching after the fact.
+ *   - REACH AND READINESS. `attackReady` and the weapon's range turn
+ *     "am I close" into "can I hit it from here, right now" — the
+ *     difference between trading blows and not being touched.
+ *   - INVULNERABILITY. i-frames are the one window where contact is free;
+ *     an agent that cannot see them either wastes them or fears nothing.
+ *   - SHOTS IN FLIGHT. Arrows and bullets were entirely invisible. Wave 4
+ *     brings archers and wave 5 gunners, so an agent could not have
+ *     avoided them even in principle.
+ */
+function attachObserver(game: ActionGame): void {
+  const round = (v: number): number => Math.round(v * 100) / 100;
+  window.__observe = () => {
+    const play = game.scenes.all().find((s): s is PlayScene => s instanceof PlayScene);
+    const p = game.world.all().find((e): e is Player => e instanceof Player && e.isLocal);
+    // THE SCREEN, before the world. A scene on top of play freezes the
+    // sim and takes the controls, and an observation that describes only
+    // monsters says nothing at all about the one thing in the way. An
+    // agent stalled 36,000 frames in front of an "Equip this?" panel it
+    // could not see, pressing nothing, a wave and a half from winning.
+    // Reported even when there is no player, because "the world is gone
+    // and a menu is up" is the case that most needs saying.
+    const top = game.scenes.top;
+    const ui = {
+      top: top?.constructor.name ?? null,
+      // Anything above PlayScene has the keyboard; movement is wasted.
+      blocking: !!top && !(top instanceof PlayScene),
+      ...((top as Partial<AgentReadable> | undefined)?.describe?.() ?? {}),
+    };
+    if (!play || !p) return { ui, player: null, monsters: [], shots: [] };
+    const reach = p.w / 2 + 26; // sword arc: what "in range" actually means
+    return {
+      ui,
+      player: {
+        x: round(p.x), y: round(p.y), w: p.w, h: p.h,
+        vx: round(p.vx), vy: round(p.vy),
+        hp: p.hp, maxHp: p.maxHp,
+        facing: p.facing,
+        onGround: p.onGround,
+        state: p.fsm.state,
+        // Free hits: contact costs nothing while these are burning.
+        invulnT: round(p.invulnT),
+        // Swinging is only possible outside a commit; this is the
+        // difference between "attack" doing something and being eaten.
+        attackReady: !p.fsm.is('attack', 'dead', 'dash', 'swallowed', 'shockwave'),
+        reach,
+        // How long a swing takes the controls away. Attacking is the only
+        // voluntary way to become unable to dodge, so an agent that cannot
+        // see the length of that window will keep swinging at things that
+        // arrive during it — safe at the instant it decided, hit a fifth
+        // of a second later. Weapons differ, so this is not a constant an
+        // agent could have hardcoded.
+        commitT: round(p.attackDur),
+        noise: round(p.noise),
+      },
+      monsters: game.world.all().filter((e): e is Monster => e instanceof Monster && !e.dead).map((m) => ({
+        type: m.type, x: round(m.x), y: round(m.y), w: m.w, h: m.h,
+        vx: round(m.vx), vy: round(m.vy),
+        hp: m.hp, maxHp: m.maxHp,
+        facing: m.facing,
+        flies: m.flies,
+        // What it is currently doing, in its own words. Behaviours name
+        // their phases ('creep', 'wind', 'lunge'…), and that name is the
+        // telegraph the artwork is already showing the human player. A
+        // string is enough: an agent can learn which ones hurt without
+        // this file having to decide for it.
+        ...(typeof m.state.mode === 'string' ? { mode: m.state.mode } : {}),
+        contactDamage: m.def.noContactDamage ? 0 : m.def.damage,
+        // Signed gaps: an agent should not have to redo this trigonometry
+        // every turn, and getting the sign wrong is a whole class of bug.
+        dx: round(m.cx - p.cx), dy: round(m.cy - p.cy),
+        dist: round(Math.hypot(m.cx - p.cx, m.cy - p.cy)),
+        inReach: Math.abs(m.cx - p.cx) <= reach && Math.abs(m.cy - p.cy) <= p.h,
+      })),
+      shots: game.world.all().filter((e): e is Projectile => e instanceof Projectile && !e.dead).map((s) => ({
+        x: round(s.x), y: round(s.y), vx: round(s.vx), vy: round(s.vy),
+        dx: round(s.x - p.cx), dy: round(s.y - p.cy),
+        dist: round(Math.hypot(s.x - p.cx, s.y - p.cy)),
+        // Only a shot that is CLOSING matters; the rest are scenery.
+        closing: (s.x - p.cx) * s.vx + (s.y - p.cy) * s.vy < 0,
+      })),
+      // Where there is room to GO. An agent that can see monsters but not
+      // the floor retreats into walls and off ledges — it backs away from
+      // the thing chasing it and finds the corner with its shoulders. The
+      // numbers are the two decisions actually being made: how far can I
+      // walk that way, and is there still ground under it.
+      space: room(p),
+      // WHAT SHE CAN DO. Perception without a move list is half a
+      // decision: an agent told only where things are will walk and swing
+      // forever, never dashing past a brute or spending a spell, because
+      // nothing ever told it those existed. Costs and readiness ride
+      // along, so "can I" is answerable without guessing.
+      abilities: {
+        actions: ACTIONS,
+        verbs: p.earned.list(),
+        mp: p.mp,
+        maxMp: p.maxMp,
+        skills: p.skills.known.map((id) => ({
+          id,
+          ready: p.skills.ready(id),
+          cost: skillDef(id).cost ?? 0,
+        })),
+        weapon: p.equipment.slots().find(([slot]) => slot === 'weapon')?.[1] ?? null,
+      },
+      wave: play.replayState().wave,
+    };
+  };
+}
+
+/**
+ * Walking room to each side, in pixels, and whether the floor continues.
+ *
+ * Deliberately two short rays rather than a tile dump: the policy needs
+ * "can I back up 40px to the left" answered, not a map to interpret. A
+ * view is already available via the bridge's `look` for the times the
+ * shape of the room genuinely matters.
+ */
+function room(p: Player): {
+  left: number; right: number; ledgeLeft: boolean; ledgeRight: boolean;
+} {
+  // The collision source the sim itself moves her against — no need to
+  // reach past PlayScene for a second opinion about the same room.
+  const map = p.collision as Tilemap;
+  const ts = map.tileSize;
+  const solidAt = (x: number, y: number): boolean => {
+    const id = map.tileAt(Math.floor(x / ts), Math.floor(y / ts));
+    if (!id) return false;
+    const d = tiles.get(id);
+    return !!d.solid && !d.oneWay;
+  };
+  const scan = (dir: -1 | 1): { room: number; ledge: boolean } => {
+    const edge = dir < 0 ? p.x : p.x + p.w;
+    for (let d = 2; d <= 96; d += 2) {
+      const x = edge + dir * d;
+      // A wall at head or knee height stops the retreat.
+      if (solidAt(x, p.y + 4) || solidAt(x, p.y + p.h - 4)) return { room: d - 2, ledge: false };
+      // So does a hole: walking off is a fall, not an escape.
+      if (!solidAt(x, p.y + p.h + 2)) return { room: d - 2, ledge: true };
+    }
+    return { room: 96, ledge: false };
+  };
+  const l = scan(-1);
+  const r = scan(1);
+  return { left: l.room, right: r.room, ledgeLeft: l.ledge, ledgeRight: r.ledge };
 }

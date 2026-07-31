@@ -38,6 +38,26 @@ export class PromptScene implements Scene {
     this.game.sfx.play('menuOpen');
   }
 
+  /**
+   * What an agent needs to answer this (see `AgentReadable`).
+   *
+   * A prompt freezes the world, so a driver that cannot read one simply
+   * stops playing: an agent stalled here for 36,000 frames after walking
+   * over a dropped weapon, holding no keys, while the wave runner sat
+   * frozen 0.5s from clearing. It could see every monster in the room and
+   * not the one panel actually blocking it.
+   */
+  describe(): { kind: string; title: string; options: string[]; index: number } {
+    return {
+      kind: 'prompt',
+      title: this.title,
+      // Labels may be lazy (a getter that reflects live state); resolve
+      // them, because the agent needs the words on the screen right now.
+      options: this.menu.entries.map((e) => (typeof e.label === 'function' ? e.label() : e.label)),
+      index: this.menu.index,
+    };
+  }
+
   private close(): void {
     this.game.scenes.pop();
   }
