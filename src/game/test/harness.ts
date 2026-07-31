@@ -8,9 +8,10 @@
  * main.ts — `bootReplay` seeds the gameplay RNG (and sandboxes storage
  * when watching a replay) before any other module can touch either.
  */
-import { Replay, bootReplay, DialogueScene, Projectile, skillDef, type Tilemap, type Recording } from '@engine/index';
+import { Replay, bootReplay, DialogueScene, GRAVITY, Projectile, skillDef, type Tilemap, type Recording } from '@engine/index';
 import { STORAGE_PREFIX, REPLAY_PENDING_KEY, type ActionGame, type Action, type RunStart, type GameEvents } from '../defs';
 import { Player } from '../actors/player';
+import { PLAYER_TUNING } from '../actors/player-tuning';
 import { Monster } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
 import { PlayScene } from '../scenes/play';
@@ -240,6 +241,13 @@ function attachObserver(game: ActionGame): void {
         // attack, not the last one: `attackDur` is 0 until she has swung
         // once, and every combo step has its own length.
         commitT: round(planned.def?.duration ?? 0),
+        // What a JUMP does, because an agent cannot choose a move whose
+        // outcome it cannot predict. Everything else here describes the
+        // horizontal world, so a hand-written policy considers only left,
+        // right and stand — and never leaves the floor except by reflex.
+        // With a launch speed and a gravity it can price the arc: how
+        // high, how long, and where the threats will be when it lands.
+        jump: { speed: PLAYER_TUNING.jumpSpeed, gravity: GRAVITY },
         noise: round(p.noise),
       },
       // Deliberately terse, and deliberately RELATIVE.
@@ -260,7 +268,22 @@ function attachObserver(game: ActionGame): void {
         const dx = Math.round(m.cx - p.cx);
         const dy = Math.round(m.cy - p.cy);
         const gap = Math.round(gapTo(m));
-        if (gap > NEAR) return { type: m.type, dx, distance: 'far' as const };
+        // Distance is not the same as safety. A far slime is a rumour; a
+        // far archer is a threat RIGHT NOW, and the trimmed payload made
+        // them look identical — a name and a bearing each. So the two
+        // things that make range dangerous always survive the cut: that
+        // it can reach you without touching you, and that it is winding
+        // up to. The archer's draw is a real telegraph the artwork
+        // already shows ("when the bow comes up, move").
+        const aiming = typeof m.state.mode === 'string' ? m.state.mode : undefined;
+        const shoots = m.def.rangedAt && gap < m.def.rangedAt ? true : undefined;
+        if (gap > NEAR) {
+          return {
+            type: m.type, dx, distance: 'far' as const,
+            ...(shoots ? { shoots: true } : {}),
+            ...(aiming ? { mode: aiming } : {}),
+          };
+        }
         return {
           type: m.type,
           dx, dy, gap,
@@ -271,16 +294,15 @@ function attachObserver(game: ActionGame): void {
           // started this frame connects, hitbox and timing included.
           distance: willLand(m) ? ('inReach' as const) : ('close' as const),
           dmg: m.def.noContactDamage ? 0 : m.def.damage,
+          ...(shoots ? { shoots: true } : {}),
           // Omitted unless true / unless hurt: absent is the common case
           // and costs nothing to send.
           ...(m.flies ? { flies: true } : {}),
           ...(m.hp < m.maxHp ? { hp: m.hp } : {}),
           // What it is currently doing, in its own words. Behaviours name
-          // their phases ('creep', 'wind', 'lunge'…), and that name is the
-          // telegraph the artwork is already showing the human player. A
-          // string is enough: an agent can learn which ones hurt without
-          // this file having to decide for it.
-          ...(typeof m.state.mode === 'string' ? { mode: m.state.mode } : {}),
+          // their phases ('aim', 'creep', 'lunge'…), and that name is the
+          // telegraph the artwork is already showing the human player.
+          ...(aiming ? { mode: aiming } : {}),
         };
       }),
       // HOSTILE shots only. Her own bow and flintlock rounds, and any
@@ -333,7 +355,7 @@ function attachObserver(game: ActionGame): void {
  * shape of the room genuinely matters.
  */
 function room(p: Player): {
-  left: number; right: number; ledgeLeft: boolean; ledgeRight: boolean;
+  left: number; right: number; ledgeLeft: boolean; ledgeRight: boolean; below: number;
 } {
   // The collision source the sim itself moves her against — no need to
   // reach past PlayScene for a second opinion about the same room.
@@ -372,5 +394,19 @@ function room(p: Player): {
   };
   const l = scan(-1);
   const r = scan(1);
-  return { left: l.room, right: r.room, ledgeLeft: l.ledge, ledgeRight: r.ledge };
+  // How far the floor is beneath her feet. Zero while standing on it.
+  //
+  // Needed to model her OWN arc, which is the thing a jump commits her
+  // to: an agent mid-air cannot decide how long it has left to fall
+  // without knowing how far there is to fall. Without this the only
+  // honest jump model is "grounded, launching from here", which says
+  // nothing about the half second afterwards.
+  let below = 0;
+  for (; below <= 160; below += 2) {
+    if (groundAt(p.x + p.w / 2, p.y + p.h + 2 + below)) break;
+  }
+  return {
+    left: l.room, right: r.room, ledgeLeft: l.ledge, ledgeRight: r.ledge,
+    below: Math.min(below, 160),
+  };
 }

@@ -66,6 +66,14 @@ export interface MonsterDef {
   /** Touching this monster doesn't hurt (it attacks some other way). */
   noContactDamage?: boolean;
   /**
+   * How far away this one can still hurt you, in px, when it hurts you
+   * without touching. Authored rather than inferred: nothing about a
+   * behaviour tells an observer that it shoots, and "far away" means
+   * something completely different for an archer than for a slime.
+   * Absent = it must reach you to matter.
+   */
+  rangedAt?: number;
+  /**
    * Killing this one is a change to the room, not an encounter: it stays
    * dead across room transitions and saves. For scenery that pays out
    * once (a chest, a barrel, a cracked pillar) — without it, walking out

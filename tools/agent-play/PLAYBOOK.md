@@ -5,114 +5,116 @@ working memory, not a log: when you add a line, delete a weaker one.
 Entries earn their place by having been *measured*. Delete anything you
 re-measure and find false, and say so in the PR.
 
-Score yourself the same way, so the numbers compare:
-
 ```bash
-node tools/agent-play/arena-trial.mjs --why
+node tools/agent-play/arena-trial.mjs --why --seeds 1,7,42,99,2024,5,13,77,300,808
 ```
 
-Five seeds of arena level 1. `cleared` = all five waves. `flawless` =
-cleared without taking a single hit.
+Arena level 1. `cleared` = all five waves; `flawless` = not hit once.
+Five seeds is noisy enough to reverse a verdict — a change measured
+4/5 vs 3/5 was 8/10 vs 7/10 on ten. Use ten before believing anything.
 
 ## Where the bar is
 
-| when | cleared | hits per run |
+| when | cleared | hits/run |
 | --- | --- | --- |
-| positions-only perception | 0/5 (died wave 3) | ~12 |
-| + velocity, reach, i-frames, shots | 0/5 (timeouts) | 2-6 |
-| + UI perception (`ui.blocking`) | 5/5 | 2-6 |
-| + honest hitbox geometry | 4/5, no deaths | 4-5 |
-| + trimmed observation | **3/5** | **2-10** |
+| positions only | 0/5, died wave 3 | ~12 |
+| + velocity, reach, i-frames, shots | 0/5, timeouts | 2-6 |
+| + UI (`ui.blocking`) | 5/5 | 2-6 |
+| + honest hitboxes, trimmed payload | 3/5 | 2-10 |
+| + ranged & jump, properly modelled | **8/10** | **3-5** |
 
-Nobody has gone flawless yet. The remaining damage is mostly bats, then
-ranged, then brutes; one seed still times out on wave 4.
+Nobody has gone flawless. Remaining damage: bats, then ranged, then
+brutes.
 
-The last row went DOWN and is still the better build. `inReach` used to
-be a radius, and it claimed she could hit a bat hovering above her that
-a horizontal chest-height hitbox never covered. Correcting it cost two
-clears, because the policy had been living off the lie. Never restore a
-generous falsehood to recover a number.
+Two rows went DOWN and are still the better build. `inReach` used to be
+a radius claiming she could hit a bat hovering above a chest-height
+hitbox; correcting it cost two clears because the policy had been living
+off the lie. Never restore a generous falsehood to recover a number.
 
 ## The rules that paid
 
-- **Read the screen before the world.** A scene on top of `PlayScene`
-  freezes the sim and takes the keyboard. Walking over a dropped weapon
-  opens "Equip this?"; ignoring it cost 36,000 frames of standing still,
-  a wave and a half from winning. `o.ui.blocking` -> press `confirm`.
-  This one change took clears from 0/5 to 5/5 and changed nothing else.
-- **Contact damage is a box overlap, so reason in box gaps.** Distance
-  between centres is a different game's geometry. A policy that demanded
-  34px of centre distance before swinging could never swing at all: her
-  reach is 33px, so "safe" and "in range" were mutually exclusive, and
-  she attacked 8 times in 3000 frames and lost by attrition.
+- **Read the screen before the world.** A scene above `PlayScene` freezes
+  the sim and takes the keyboard. Walking over a dropped weapon opens
+  "Equip this?"; ignoring it cost 36,000 frames of standing still, a wave
+  and a half from a win. `ui.blocking` -> `confirm`. 0/5 to 5/5, alone.
+- **Never hold no keys.** Two traces caught her pressing NOTHING for a
+  dozen frames while a bat closed from gap 17 to 0 — inside swing
+  distance but unable to swing, and a ledge flag vetoing both directions.
+  Repeated `-` in a trace IS the bug; no margin tuning touches it.
+- **Judge a move over the window it COMMITS you for.** A swing is judged
+  over `commitT` because she cannot dodge during it. A jump must be
+  judged over its airtime (0.53s) for the identical reason — no air
+  brakes. Priced over a footstep's 0.35s it looks safe because the
+  scoring stops before the landing; that cost one seed fourteen hits.
+  Modelled honestly, jump-as-an-option went 7/10 -> 8/10.
+- **Read the distance that comes with a flag.** `ledgeLeft` means there
+  is a drop *somewhere* to the left; `left: 94` says it is 94px away and
+  her step is 38. Vetoing the whole direction cornered her against a bat
+  with three quarters of the arena open behind her.
+- **Contact damage is a box overlap; reason in box gaps.** Demanding
+  34px of CENTRE distance with a 33px reach made "safe" and "in range"
+  mutually exclusive: 8 swings in 3000 frames, dead by attrition.
 - **Score the path, not the destination.** "Run through the slime" ends
-  up somewhere lovely. Sample the whole crossing, each threat led forward
-  by the time she will actually have taken to get there. Same mistake the
-  engine's mover made before it swept.
-- **A swing is a promise to stand still.** `player.commitT` is how long.
-  Judge the swing over that entire window with her pinned in place, or
-  she swings at things that were safe when she pressed and touching her
-  when the animation released.
+  up somewhere lovely. The mover made this mistake before it swept.
 - **Back off after swinging.** The frames just after a commit expires are
-  where the hits land: still shoulder-to-shoulder, and the tempting move
-  (swing again) is a trade she loses to brutes.
+  where the hits land, and the tempting move — swing again — is a trade
+  she loses to brutes.
 - **Fleeing is not a plan.** The arena is closed and the waves keep
   coming. Space has to be bought by killing things.
 
 ## Tried, measured, rejected
 
-Do not re-run these without a new reason — each cost a full trial.
+Each cost a full trial. Do not redo without a new reason.
 
-- **Meet the charge**: swing early at a closing bat, since she cannot
-  outrun 80px/s. Hits went 2-6 -> 3-10 and a run died. Against contact
-  damage the blade is not a shield.
-- **Speed-scaled safety margin**: demand more air in front of fast
-  things. Sounds right, measured worse — 24 hits across the seeds
-  against 20, and slower runs, because a wider no-go zone means more
-  time retreating and less time ending the wave.
-- **Jumping at an overhead bat**: meets the dive instead of avoiding it.
+- **Meet the charge**: swing early at a closing bat. 2-6 hits -> 3-10 and
+  a death. Against contact damage the blade is not a shield.
+- **Speed-scaled safety margin**: more air in front of fast things.
+  24 hits vs 20, and slower runs.
+- **Not jumping at incoming arrows**, reasoning that they arc rather than
+  fly flat so leaving the ground cannot help. True about the physics,
+  false about the outcome: 3/5 -> 1/5.
+- **Reacting to the archer's drawn bow**: moving off the spot while it
+  aims scored 3/5 -> 2/5; using it to pick a retreat direction changed
+  nothing. The signal is real — 339 frames of it in one run — and
+  unexploited. A genuinely open lead.
 
 ## What perception exists
 
-`window.__observe()` — separate from `harness.state()` on purpose, and
-hashed by nobody, so it is free to grow. Add to it rather than guessing.
+`window.__observe()`, separate from `harness.state()` (the replay
+divergence hash) and hashed by nobody. Add to it rather than guessing.
+The HTTP bridge forwards it on every reply; `see: false` opts out.
 
-- `ui` — `{ top, blocking, ...scene.describe() }`. A prompt reports its
-  title, options and highlighted index.
-- `player` — position, velocity, `facing`, `onGround`, `state`,
-  `invulnT`, `attackReady`, `noise`, and the swing: `reach`, `commitT`
-  and `swing.boxes`/`swing.active`, all read off the attack she would
-  actually throw next. Nothing here is a constant — reach runs 23px to
-  33px by weapon and combo step, and is 0 for a ranged arm.
-- `monsters[]` — RELATIVE and terse. Near ones (gap <= 200px) give
-  `dx`/`dy`/`gap`, box, velocity, `facing`, `dmg`, plus `flies`/`hp`/`mode`
-  only when they apply. Far ones give `{type, dx, distance:"far"}` —
-  a bearing, which is enough to walk towards and nothing more. Wave-1
-  enemies name no `mode`; their hits are spacing, not missed telegraphs.
+- `ui` — `{top, blocking, ...scene.describe()}`; prompts report title,
+  options, highlighted index.
+- `player` — relative and terse: `w`/`h`, velocity, `facing`, `onGround`,
+  `state`, `invulnT`, `attackReady`, `noise`, plus the swing (`reach`,
+  `commitT`) and `jump` (`speed`, `gravity`) so both commitments can be
+  priced. Reach is 23-33px by weapon and combo step, 0 for a ranged arm.
+- `monsters[]` — near (gap <= 200) gives `dx`/`dy`/`gap`, box, velocity,
+  `facing`, `dmg`, and `flies`/`hp`/`mode`/`shoots` when they apply. Far
+  gives `{type, dx, distance:"far"}` plus `shoots`/`mode` — because a far
+  slime is a rumour and a far archer is already drawing.
   `distance:"inReach"` is a VERDICT: a swing started now connects.
-- `shots[]` — HOSTILE arrows and bullets only, with `closing`. Her own
-  and parried rounds are filtered out; do not flee your own shot.
-- `space` — walking room each way and whether the floor continues.
-- `abilities` — every action, earned verbs, mp, skills with `ready` and
-  `cost`, the equipped weapon.
+- `shots[]` — hostile and closing only; the rest is scenery.
+- `space` — walking room each way, ledges, and `below` (drop beneath her,
+  needed to model her own arc).
+- `abilities` — verbs, mp, skills with `ready`/`cost`, weapon. The action
+  list ships once with the session, not every step.
 
 ## How to debug without burning a day
 
-- Everything runs headless: `bootGame({ fresh, seed })` from
-  `headless.mjs`. A browser is never needed to measure play.
-- **One seed per boot.** The harness reads its seed once, at boot, so
-  looping `beginRun` replays the same seed and the runs differ only by
-  leaked state. That looks exactly like seed variation. It is not.
-- **Death is an FSM state, not `Actor.dead`.** A killed knight sits in
-  fsm `dead` with negative hp; `dead` means "remove me" and is never set
-  on her. Check `hp <= 0`, or deaths get scored as timeouts.
+- **Read the replay before tuning.** Every real improvement this session
+  came from dumping the 25 frames before each hit — keys chosen, gaps,
+  space — and none came from adjusting a threshold. `arena-trial.mjs` is
+  the score; a frame trace is the diagnosis.
+- Everything runs headless via `bootGame({fresh, seed})`. No browser.
+- **One seed per boot.** The harness reads its seed once, so looping
+  `beginRun` replays the same one and the runs differ only by leaked
+  state. That looks exactly like seed variation.
 - **Clearing is an event, not a counter.** `WaveRunner` stops at the
-  goal — the counter never passes 5. Wait on `waveClear` with
-  `wave >= 5`. Polling for `wave > 5` waits forever and scored two real
-  clears as timeouts.
-- **Verify the probe before believing the verdict.** Four separate
-  conclusions here were probe bugs, not game behaviour. Before trusting
-  a passing check, break the thing it checks and watch it fail.
-- When a run stalls, dump what is *actually* blocking progress — the
-  scene stack and the wave runner's own fields — before theorising about
-  monsters. The stall was never in the fight.
+  goal; wait on `waveClear` with `wave >= 5`.
+- **Death is an FSM state, not `Actor.dead`.** She sits in fsm `dead`
+  with negative hp; check `hp <= 0` or deaths score as timeouts.
+- **Verify the probe before the verdict.** Five conclusions here were
+  probe bugs, not game behaviour — including one measured against a
+  stale server that `pkill` had silently failed to kill on Windows.
