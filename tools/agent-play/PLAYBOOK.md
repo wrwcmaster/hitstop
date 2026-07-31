@@ -20,10 +20,17 @@ cleared without taking a single hit.
 | --- | --- | --- |
 | positions-only perception | 0/5 (died wave 3) | ~12 |
 | + velocity, reach, i-frames, shots | 0/5 (timeouts) | 2-6 |
-| + UI perception (`ui.blocking`) | **5/5** | **2-6** |
+| + UI perception (`ui.blocking`) | 5/5 | 2-6 |
+| + honest hitbox geometry | **4/5**, no deaths | **4-5** |
 
 Nobody has gone flawless yet. The remaining damage is mostly bats, then
-archers and gunners at range, then brutes. That is the open problem.
+ranged, then brutes; one seed still times out on wave 4.
+
+The last row went DOWN and is still the better build. `inReach` used to
+be a radius, and it claimed she could hit a bat hovering above her that
+a horizontal chest-height hitbox never covered. Correcting it cost two
+clears, because the policy had been living off the lie. Never restore a
+generous falsehood to recover a number.
 
 ## The rules that paid
 
@@ -35,7 +42,7 @@ archers and gunners at range, then brutes. That is the open problem.
 - **Contact damage is a box overlap, so reason in box gaps.** Distance
   between centres is a different game's geometry. A policy that demanded
   34px of centre distance before swinging could never swing at all: her
-  reach is 31px, so "safe" and "in range" were mutually exclusive, and
+  reach is 33px, so "safe" and "in range" were mutually exclusive, and
   she attacked 8 times in 3000 frames and lost by attrition.
 - **Score the path, not the destination.** "Run through the slime" ends
   up somewhere lovely. Sample the whole crossing, each threat led forward
@@ -72,12 +79,16 @@ hashed by nobody, so it is free to grow. Add to it rather than guessing.
 - `ui` — `{ top, blocking, ...scene.describe() }`. A prompt reports its
   title, options and highlighted index.
 - `player` — position, velocity, `facing`, `onGround`, `state`,
-  `invulnT`, `attackReady`, `reach`, `commitT`, `noise`.
+  `invulnT`, `attackReady`, `noise`, and the swing: `reach`, `commitT`
+  and `swing.boxes`/`swing.active`, all read off the attack she would
+  actually throw next. Nothing here is a constant — reach runs 23px to
+  33px by weapon and combo step, and is 0 for a ranged arm.
 - `monsters[]` — box, velocity, hp, `flies`, `contactDamage`, signed
   `dx`/`dy`, `dist`, `inReach`, and `mode` when the behaviour names its
   phase. Wave-1 enemies (slime, bat, brute) name none — their hits are
   pure spacing, not missed telegraphs. Do not go looking for a tell.
-- `shots[]` — arrows and bullets, with `closing`.
+- `shots[]` — HOSTILE arrows and bullets only, with `closing`. Her own
+  and parried rounds are filtered out; do not flee your own shot.
 - `space` — walking room each way and whether the floor continues.
 - `abilities` — every action, earned verbs, mp, skills with `ready` and
   `cost`, the equipped weapon.
@@ -89,11 +100,14 @@ hashed by nobody, so it is free to grow. Add to it rather than guessing.
 - **One seed per boot.** The harness reads its seed once, at boot, so
   looping `beginRun` replays the same seed and the runs differ only by
   leaked state. That looks exactly like seed variation. It is not.
+- **Death is an FSM state, not `Actor.dead`.** A killed knight sits in
+  fsm `dead` with negative hp; `dead` means "remove me" and is never set
+  on her. Check `hp <= 0`, or deaths get scored as timeouts.
 - **Clearing is an event, not a counter.** `WaveRunner` stops at the
   goal — the counter never passes 5. Wait on `waveClear` with
   `wave >= 5`. Polling for `wave > 5` waits forever and scored two real
   clears as timeouts.
-- **Verify the probe before believing the verdict.** Three separate
+- **Verify the probe before believing the verdict.** Four separate
   conclusions here were probe bugs, not game behaviour. Before trusting
   a passing check, break the thing it checks and watch it fail.
 - When a run stalls, dump what is *actually* blocking progress — the

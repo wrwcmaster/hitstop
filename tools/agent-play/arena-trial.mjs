@@ -19,6 +19,13 @@
  * it fires `waveClear` for the last wave and drops the gate key, and the
  * counter never goes past 5. Waiting for `wave > 5` waits forever, which
  * scored two genuine clears as timeouts.
+ *
+ * DEATH IS AN FSM STATE, NOT `Actor.dead`. A killed knight goes to fsm
+ * state 'dead' and stays in the world with negative hp; `dead` marks an
+ * actor for REMOVAL and is never set on her. Checking it scored deaths
+ * as timeouts — runs sat at the 40,000-frame cap with hp of -20, and the
+ * distinction between "lost the fight" and "could not finish it" is the
+ * whole point of the report.
  */
 import { bootGame, close } from './headless.mjs';
 
@@ -52,7 +59,7 @@ async function trial(seed) {
   let hp = play()?.player?.hp ?? 0;
   for (; f < CAP && !cleared; f++) {
     const p = play()?.player;
-    if (!p || p.dead) break;
+    if (!p || p.hp <= 0) break;
     wave = Math.max(wave, harness.state().wave?.n ?? 0);
     if (p.hp < hp) {
       hurt++;
@@ -73,7 +80,7 @@ async function trial(seed) {
   return {
     seed, wave, hurt, frames: f, blame,
     hp: p?.hp ?? 0,
-    how: cleared ? 'CLEARED' : p?.dead ? 'DIED' : 'timeout',
+    how: cleared ? 'CLEARED' : !p || p.hp <= 0 ? 'DIED' : 'timeout',
   };
 }
 

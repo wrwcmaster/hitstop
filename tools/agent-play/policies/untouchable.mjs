@@ -98,6 +98,26 @@ export function reset() {
 const room = (m) => 6 + (m?.contactDamage ?? 0) / 4;
 
 /**
+ * Would a swing started NOW actually connect with `m`?
+ *
+ * Not `inReach`, which asks whether the blade would cover it at the
+ * instant of the press — but the blade does not exist yet at that
+ * instant. It appears partway through the commit (`swing.active`, a
+ * normalized window), by which time a bat doing 80px/s has moved most of
+ * a body length. Leading the target to the middle of the active window
+ * is the difference between swinging where something was and where it
+ * will be.
+ */
+function willLand(p, m) {
+  if (!p.swing) return false;                 // no melee attack in this loadout
+  const [a, b] = p.swing.active;
+  const when = ((a + b) / 2) * p.commitT;
+  const s = lead(m, when);
+  return p.swing.boxes.some((box) =>
+    s.x < box.x + box.w && s.x + m.w > box.x && s.y < box.y + box.h && s.y + m.h > box.y);
+}
+
+/**
  * One turn of play. `o` is the observation; returns the keys to hold.
  */
 export function decide(o) {
@@ -155,7 +175,7 @@ export function decide(o) {
   // theory that fleeing cannot beat 80px/s. Measured, it turned dodges
   // into trades — hits went from 2-6 per run to 3-10 and one run died.
   // Against contact damage the blade is not a shield; distance is.
-  if (target.inReach && p.attackReady && recover <= 0) {
+  if (willLand(p, target) && p.attackReady && recover <= 0) {
     // Zero margin is not a margin: "will not literally touch me" left her
     // trading blows with brutes, and she loses trades. Demand real air.
     if (tightest(here.x, here.x, p, o, p.commitT || 0.3) > need * 0.6) {
@@ -178,7 +198,7 @@ export function decide(o) {
   // Free hits: contact costs nothing while i-frames burn, so spend them
   // swinging rather than running. Fleeing through them wastes the one
   // advantage a hit hands back.
-  if (p.invulnT > 0.15 && p.attackReady && o.monsters.some((m) => m.inReach)) {
+  if (p.invulnT > 0.15 && p.attackReady && o.monsters.some((m) => willLand(p, m))) {
     keys.push('attack');
     return keys;
   }
@@ -189,8 +209,12 @@ export function decide(o) {
   if (standing.gap >= need) {
     const want = p.reach - 4;
     if (Math.abs(target.dx) > want) keys.push(target.dx > 0 ? 'right' : 'left');
-    // Bats hover out of a ground swing's arc; jump to bring them into it,
-    // but only when one is level enough that the swing will actually land.
+    // Bats hover out of a ground swing's arc — genuinely out, now that
+    // `inReach` is a real hitbox overlap instead of a radius that quietly
+    // claimed she could hit anything within 31px in any direction. A
+    // grounded swing is a horizontal box at chest height; the only way to
+    // put a bat inside it is to leave the floor, and the aerial attack
+    // that follows reports its own reach.
     if (target.flies && target.dy < -8 && target.dy > -26 && p.onGround
       && Math.abs(target.dx) < p.reach) keys.push('jump');
     return keys;

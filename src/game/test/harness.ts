@@ -8,7 +8,7 @@
  * main.ts — `bootReplay` seeds the gameplay RNG (and sandboxes storage
  * when watching a replay) before any other module can touch either.
  */
-import { Replay, bootReplay, DialogueScene, Projectile, skillDef, tiles, type Tilemap, type Recording } from '@engine/index';
+import { Replay, bootReplay, DialogueScene, Projectile, skillDef, type Tilemap, type Recording } from '@engine/index';
 import { STORAGE_PREFIX, REPLAY_PENDING_KEY, type ActionGame, type Action, type RunStart, type GameEvents } from '../defs';
 import { Player } from '../actors/player';
 import { Monster } from '../actors/monster';
@@ -172,7 +172,27 @@ function attachObserver(game: ActionGame): void {
       ...((top as Partial<AgentReadable> | undefined)?.describe?.() ?? {}),
     };
     if (!play || !p) return { ui, player: null, monsters: [], shots: [] };
-    const reach = p.w / 2 + 26; // sword arc: what "in range" actually means
+    // What "in range" means for THIS loadout and THIS point in the combo.
+    // Asking the planned attack rather than assuming: forward hitboxes
+    // run 14px unarmed to 36px on a great-sword finisher, so a constant
+    // tuned around one weapon makes an agent swing at air with a short
+    // one and close to contact range with a long one.
+    // A ranged arm has no melee swing at all, and reporting a borrowed
+    // number for it would be worse than reporting none: the agent would
+    // walk into contact range to use a reach it does not have.
+    const planned = p.plannedAttack();
+    const boxes = planned.def
+      ? [p.hitboxFor(planned.def, 1), p.hitboxFor(planned.def, -1)]
+      : [];
+    // Reach from her centre to the far edge — she may turn to face a
+    // target, so take whichever side reaches further.
+    const reach = boxes.length
+      ? Math.max(...boxes.flatMap((b) => [Math.abs(b.x + b.w - p.cx), Math.abs(p.cx - b.x)]))
+      : 0;
+    /** Would the planned swing actually cover this body, facing either way? */
+    const covers = (m: Monster): boolean =>
+      boxes.some((b) =>
+        m.x < b.x + b.w && m.x + m.w > b.x && m.y < b.y + b.h && m.y + m.h > b.y);
     return {
       ui,
       player: {
@@ -188,13 +208,29 @@ function attachObserver(game: ActionGame): void {
         // difference between "attack" doing something and being eaten.
         attackReady: !p.fsm.is('attack', 'dead', 'dash', 'swallowed', 'shockwave'),
         reach,
-        // How long a swing takes the controls away. Attacking is the only
-        // voluntary way to become unable to dodge, so an agent that cannot
-        // see the length of that window will keep swinging at things that
-        // arrive during it — safe at the instant it decided, hit a fifth
-        // of a second later. Weapons differ, so this is not a constant an
-        // agent could have hardcoded.
-        commitT: round(p.attackDur),
+        // How long the NEXT swing will take the controls away. Attacking
+        // is the only voluntary way to become unable to dodge, so an
+        // agent that cannot see the length of that window keeps swinging
+        // at things that arrive during it — safe at the instant it
+        // decided, hit a fifth of a second later. Read from the planned
+        // attack, not the last one: `attackDur` is 0 until she has swung
+        // once, and every combo step has its own length.
+        commitT: round(planned.def?.duration ?? 0),
+        // The swing itself: where the blade will be, and WHEN it is live.
+        //
+        // `inReach` answers "could I hit it this instant", which is the
+        // wrong question for a moving target — the hitbox does not exist
+        // at the moment of the press. It appears for `active` (normalized
+        // start/end of the commit) and the target has moved by then. An
+        // agent given only the instantaneous answer either swings at a
+        // bat that has flown off, or refuses one that is about to arrive.
+        // Both boxes ride along because she can turn to face either way.
+        swing: planned.def
+          ? {
+            boxes: boxes.map((b) => ({ x: round(b.x), y: round(b.y), w: b.w, h: b.h })),
+            active: planned.def.active,
+          }
+          : null,
         noise: round(p.noise),
       },
       monsters: game.world.all().filter((e): e is Monster => e instanceof Monster && !e.dead).map((m) => ({
@@ -214,9 +250,16 @@ function attachObserver(game: ActionGame): void {
         // every turn, and getting the sign wrong is a whole class of bug.
         dx: round(m.cx - p.cx), dy: round(m.cy - p.cy),
         dist: round(Math.hypot(m.cx - p.cx, m.cy - p.cy)),
-        inReach: Math.abs(m.cx - p.cx) <= reach && Math.abs(m.cy - p.cy) <= p.h,
+        // The real hitbox overlap, not a radius: a plunge covers the
+        // ground and an anti-air covers her head, and neither is a circle.
+        inReach: covers(m),
       })),
-      shots: game.world.all().filter((e): e is Projectile => e instanceof Projectile && !e.dead).map((s) => ({
+      // HOSTILE shots only. Her own bow and flintlock rounds, and any
+      // projectile she has parried back, are live Projectiles heading
+      // away from her — an observation that lumps them in makes an agent
+      // dive away from its own arrows.
+      shots: game.world.all().filter((e): e is Projectile =>
+        e instanceof Projectile && !e.dead && e.targetTeam === 'player').map((s) => ({
         x: round(s.x), y: round(s.y), vx: round(s.vx), vy: round(s.vy),
         dx: round(s.x - p.cx), dy: round(s.y - p.cy),
         dist: round(Math.hypot(s.x - p.cx, s.y - p.cy)),
@@ -264,14 +307,28 @@ function room(p: Player): {
 } {
   // The collision source the sim itself moves her against — no need to
   // reach past PlayScene for a second opinion about the same room.
+  //
+  // Ask the tilemap for its SOLIDS rather than reading raw tile ids. Two
+  // things are invisible to a `tileAt` lookup and both produce confident
+  // nonsense: moving platforms and closed barriers live in `extraSolids`
+  // and are not tiles at all, and one-way geometry is not "not solid" —
+  // it is floor. Treating it as a hole reported a ledge on both sides of
+  // a knight standing on a platform, and a policy that will not step off
+  // a ledge then refuses to move at all.
   const map = p.collision as Tilemap;
-  const ts = map.tileSize;
-  const solidAt = (x: number, y: number): boolean => {
-    const id = map.tileAt(Math.floor(x / ts), Math.floor(y / ts));
-    if (!id) return false;
-    const d = tiles.get(id);
-    return !!d.solid && !d.oneWay;
+  const hits = (x: number, y: number, floor: boolean): boolean => {
+    const probe = { x: x - 0.5, y: y - 0.5, w: 1, h: 1 };
+    for (const s of map.solidsNear(probe)) {
+      // One-way tiles block a fall but not a walk: they count as ground
+      // underfoot and as open air at body height.
+      if (s.oneWay && !floor) continue;
+      if (probe.x < s.x + s.w && probe.x + probe.w > s.x
+        && probe.y < s.y + s.h && probe.y + probe.h > s.y) return true;
+    }
+    return false;
   };
+  const solidAt = (x: number, y: number): boolean => hits(x, y, false);
+  const groundAt = (x: number, y: number): boolean => hits(x, y, true);
   const scan = (dir: -1 | 1): { room: number; ledge: boolean } => {
     const edge = dir < 0 ? p.x : p.x + p.w;
     for (let d = 2; d <= 96; d += 2) {
@@ -279,7 +336,7 @@ function room(p: Player): {
       // A wall at head or knee height stops the retreat.
       if (solidAt(x, p.y + 4) || solidAt(x, p.y + p.h - 4)) return { room: d - 2, ledge: false };
       // So does a hole: walking off is a fall, not an escape.
-      if (!solidAt(x, p.y + p.h + 2)) return { room: d - 2, ledge: true };
+      if (!groundAt(x, p.y + p.h + 2)) return { room: d - 2, ledge: true };
     }
     return { room: 96, ledge: false };
   };

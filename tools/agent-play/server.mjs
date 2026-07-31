@@ -71,14 +71,42 @@ function need() {
 
 /** Attach the local view when the caller asked for one. */
 function withLook(st, body, q) {
+  const out = { ...st, ...perception(body, q) };
   const want = body?.look ?? (q && q.get('look') === '1');
-  if (!want) return st;
+  if (!want) return out;
   const view = lookAround(sess.game, {
     r: Number(body?.r ?? q?.get('r') ?? 10),
     rows: Number(body?.rows ?? q?.get('rows') ?? 7),
     tiles: sess.tiles,
   });
-  return { ...st, view };
+  return { ...out, view };
+}
+
+/**
+ * The rich observation, on every reply the bridge sends.
+ *
+ * `harness.state()` is the replay divergence hash — positions and hit
+ * points, because that is what determinism needs to compare. An agent
+ * needs velocities, reach, projectiles and, above all, THE SCREEN, and
+ * for a while it could only get those in-process: an agent driving the
+ * documented HTTP bridge received exactly the old positions-only state
+ * and would still freeze in front of an "Equip this?" panel it had no
+ * way to know was there.
+ *
+ * On by default rather than behind a flag, because "you had to know to
+ * ask" is the same bug in a new place. `see: false` opts out for a
+ * caller that wants the smaller payload.
+ */
+function perception(body, q) {
+  const off = body?.see === false || q?.get('see') === '0';
+  const observe = globalThis.window?.__observe;
+  if (off || typeof observe !== 'function') return {};
+  const o = observe();
+  if (!o) return {};
+  // `ui` is hoisted out of `see` and always sent: it is two fields, and
+  // it is the one that decides whether any of the others matter.
+  const { ui, ...rest } = o;
+  return { ui, see: rest };
 }
 
 /** A room's whole tilemap as ASCII — the structural question, not the local one. */
