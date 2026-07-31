@@ -21,10 +21,10 @@ Five seeds is noisy enough to reverse a verdict — a change measured
 | + velocity, reach, i-frames, shots | 0/5, timeouts | 2-6 |
 | + UI (`ui.blocking`) | 5/5 | 2-6 |
 | + honest hitboxes, trimmed payload | 3/5 | 2-10 |
-| + ranged & jump, properly modelled | **8/10** | **3-5** |
+| + ranged & jump, properly modelled | 8/10 | 3-5 |
+| + fixes found by PLAYING it | **6/10** | **3-8** |
 
-Nobody has gone flawless. Remaining damage: bats, then ranged, then
-brutes.
+Nobody has gone flawless. Damage: bats, then ranged, then brutes.
 
 Two rows went DOWN and are still the better build. `inReach` used to be
 a radius claiming she could hit a bat hovering above a chest-height
@@ -47,15 +47,12 @@ off the lie. Never restore a generous falsehood to recover a number.
   brakes. Priced over a footstep's 0.35s it looks safe because the
   scoring stops before the landing; that cost one seed fourteen hits.
   Modelled honestly, jump-as-an-option went 7/10 -> 8/10.
-- **Read the distance that comes with a flag.** `ledgeLeft` means there
-  is a drop *somewhere* to the left; `left: 94` says it is 94px away and
-  her step is 38. Vetoing the whole direction cornered her against a bat
-  with three quarters of the arena open behind her.
-- **Contact damage is a box overlap; reason in box gaps.** Demanding
-  34px of CENTRE distance with a 33px reach made "safe" and "in range"
-  mutually exclusive: 8 swings in 3000 frames, dead by attrition.
-- **Score the path, not the destination.** "Run through the slime" ends
-  up somewhere lovely. The mover made this mistake before it swept.
+- **Read the distance that comes with a flag.** `ledgeLeft` means a drop
+  *somewhere* left; `left: 94` says it is 94px off and her step is 38.
+  Vetoing the direction cornered her with the arena open behind her.
+- **Contact damage is a box overlap; reason in box gaps.** Demanding 34px
+  of CENTRE distance with a 33px reach made "safe" and "in range"
+  exclusive: 8 swings in 3000 frames, dead by attrition.
 - **Back off after swinging.** The frames just after a commit expires are
   where the hits land, and the tempting move — swing again — is a trade
   she loses to brutes.
@@ -68,8 +65,6 @@ Each cost a full trial. Do not redo without a new reason.
 
 - **Meet the charge**: swing early at a closing bat. 2-6 hits -> 3-10 and
   a death. Against contact damage the blade is not a shield.
-- **Speed-scaled safety margin**: more air in front of fast things.
-  24 hits vs 20, and slower runs.
 - **Not jumping at incoming arrows**, reasoning that they arc rather than
   fly flat so leaving the ground cannot help. True about the physics,
   false about the outcome: 3/5 -> 1/5.
@@ -88,13 +83,14 @@ The HTTP bridge forwards it on every reply; `see: false` opts out.
   options, highlighted index.
 - `player` — relative and terse: `w`/`h`, velocity, `facing`, `onGround`,
   `state`, `invulnT`, `attackReady`, `noise`, plus the swing (`reach`,
-  `commitT`) and `jump` (`speed`, `gravity`) so both commitments can be
-  priced. Reach is 23-33px by weapon and combo step, 0 for a ranged arm.
-- `monsters[]` — near (gap <= 200) gives `dx`/`dy`/`gap`, box, velocity,
-  `facing`, `dmg`, and `flies`/`hp`/`mode`/`shoots` when they apply. Far
-  gives `{type, dx, distance:"far"}` plus `shoots`/`mode` — because a far
-  slime is a rumour and a far archer is already drawing.
-  `distance:"inReach"` is a VERDICT: a swing started now connects.
+  `commitT`, `busyT` = seconds until the controls return), `jump` and
+  `dash`. Reach is 23-33px by weapon and combo step, 0 for a ranged arm.
+- `monsters[]` — stable `id`, then near (gap <= 200) gives `dx`/`dy`/
+  `gap`, box, velocity, `facing`, `dmg`, and `flies`/`hp`/`mode`/`shoots`
+  when they apply; far gives `{id, type, dx, distance:"far"}` plus
+  `shoots`/`mode`, because a far slime is a rumour and a far archer is
+  already drawing. `distance:"inReach"` is a VERDICT: a swing started now
+  connects.
 - `shots[]` — hostile and closing only; the rest is scenery.
 - `space` — walking room each way, ledges, and `below` (drop beneath her,
   needed to model her own arc).
@@ -103,10 +99,14 @@ The HTTP bridge forwards it on every reply; `see: false` opts out.
 
 ## How to debug without burning a day
 
-- **Read the replay before tuning.** Every real improvement this session
-  came from dumping the 25 frames before each hit — keys chosen, gaps,
-  space — and none came from adjusting a threshold. `arena-trial.mjs` is
-  the score; a frame trace is the diagnosis.
+- **Play it yourself before tuning.** Drive the bridge by hand for ten
+  turns and read what comes back as if you had to act on it. Twenty
+  minutes of that found more than a day of policy work: `space` lying
+  while airborne, no monster ids, no countdown on a commitment, and a
+  label saying "close" about something 194px away.
+- **Read the replay before tuning.** Dump the 25 frames before each hit —
+  keys, gaps, space. Every real gain came from that; none from moving a
+  threshold. `arena-trial.mjs` scores, a frame trace diagnoses.
 - Everything runs headless via `bootGame({fresh, seed})`. No browser.
 - **One seed per boot.** The harness reads its seed once, so looping
   `beginRun` replays the same one and the runs differ only by leaked
@@ -116,5 +116,5 @@ The HTTP bridge forwards it on every reply; `see: false` opts out.
 - **Death is an FSM state, not `Actor.dead`.** She sits in fsm `dead`
   with negative hp; check `hp <= 0` or deaths score as timeouts.
 - **Verify the probe before the verdict.** Five conclusions here were
-  probe bugs, not game behaviour — including one measured against a
-  stale server that `pkill` had silently failed to kill on Windows.
+  probe bugs, not the game — one measured against a stale server that
+  `pkill` had silently failed to kill on Windows.

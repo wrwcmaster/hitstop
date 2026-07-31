@@ -22,7 +22,17 @@
 /** Where a body will be in `t` seconds if it keeps doing what it is doing. */
 const lead = (e, t) => ({ x: e.x + e.vx * t, y: e.y + e.vy * t });
 
-/** Run speed, px/s — how far a step of intent actually carries her. */
+/**
+ * How far a step of INTENT is planned to carry her, px/s.
+ *
+ * Not her measured speed, and deliberately so. She actually covers
+ * 35.1px in 0.35s — 100px/s, ground and air alike, since air control
+ * here is full — but planning with that number measured worse (4/10
+ * against 6/10). A slightly long step makes the policy commit to
+ * clearing a threat rather than shaving past it, and shaving past is
+ * how it gets touched. Kept at the value that plays better, with the
+ * real one written down so the next reader is not misled.
+ */
 const RUN = 110;
 
 /** How far ahead a footstep is judged. A jump is judged over its own

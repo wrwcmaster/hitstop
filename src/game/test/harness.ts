@@ -155,6 +155,17 @@ export function attachHarness(game: ActionGame): void {
  */
 function attachObserver(game: ActionGame): void {
   const round = (v: number): number => Math.round(v * 100) / 100;
+  // Stable per-body ids. Two slimes at the same distance are the same
+  // JSON, so without this an agent taking turns cannot tell whether the
+  // thing in front of it is the one it just hit or its twin, and cannot
+  // hold any belief about a monster across a turn boundary.
+  const ids = new WeakMap<object, number>();
+  let nextId = 1;
+  const idOf = (o: object): number => {
+    let n = ids.get(o);
+    if (n === undefined) { n = nextId++; ids.set(o, n); }
+    return n;
+  };
   window.__observe = () => {
     const play = game.scenes.all().find((s): s is PlayScene => s instanceof PlayScene);
     const p = game.world.all().find((e): e is Player => e instanceof Player && e.isLocal);
@@ -232,6 +243,14 @@ function attachObserver(game: ActionGame): void {
         // Swinging is only possible outside a commit; this is the
         // difference between "attack" doing something and being eaten.
         attackReady: !p.fsm.is('attack', 'dead', 'dash', 'swallowed', 'shockwave'),
+        // Seconds until the controls come back.  says
+        // she is committed but not for how much longer, and that is the
+        // whole question mid-commit — the sample policy had to keep its
+        // OWN frame counter to answer it, which is the tell that a field
+        // is missing: the game already knows this number.
+        busyT: round(p.fsm.is('attack') ? Math.max(0, p.attackDur - p.fsm.t)
+          : p.fsm.is('dash') ? Math.max(0, PLAYER_TUNING.dashTime - p.fsm.t)
+          : 0),
         reach,
         // How long the NEXT swing will take the controls away. Attacking
         // is the only voluntary way to become unable to dodge, so an
@@ -297,12 +316,13 @@ function attachObserver(game: ActionGame): void {
         const shoots = m.def.rangedAt && gap < m.def.rangedAt ? true : undefined;
         if (gap > NEAR) {
           return {
-            type: m.type, dx, distance: 'far' as const,
+            id: idOf(m), type: m.type, dx, distance: 'far' as const,
             ...(shoots ? { shoots: true } : {}),
             ...(aiming ? { mode: aiming } : {}),
           };
         }
         return {
+          id: idOf(m),
           type: m.type,
           dx, dy, gap,
           w: m.w, h: m.h,
@@ -310,7 +330,7 @@ function attachObserver(game: ActionGame): void {
           facing: m.facing,
           // The verdict, not the trigonometry: 'inReach' means a swing
           // started this frame connects, hitbox and timing included.
-          distance: willLand(m) ? ('inReach' as const) : ('close' as const),
+          distance: willLand(m) ? ('inReach' as const) : ('near' as const),
           dmg: m.def.noContactDamage ? 0 : m.def.damage,
           ...(shoots ? { shoots: true } : {}),
           // Omitted unless true / unless hurt: absent is the common case
@@ -399,6 +419,22 @@ function room(p: Player): {
   };
   const solidAt = (x: number, y: number): boolean => hits(x, y, false);
   const groundAt = (x: number, y: number): boolean => hits(x, y, true);
+  // Find the FLOOR before describing it, because her feet are not always
+  // on it. The lateral rays used to probe just under her feet, which is
+  // right while standing and nonsense while falling: at spawn, 20px above
+  // open arena floor, this reported left 0, right 0, ledge both ways —
+  // read plainly, "you are on a pillar with drops either side", when the
+  // room was clear in every direction. An agent that believes it cannot
+  // move is worse off than one that cannot see.
+  let below = 0;
+  for (; below <= 160; below += 2) {
+    if (groundAt(p.x + p.w / 2, p.y + p.h + 2 + below)) break;
+  }
+  below = Math.min(below, 160);
+  // The height the floor sits at: hers when grounded, the landing floor
+  // when not. Everything below is measured against this.
+  const floorY = p.y + p.h + below;
+
   const scan = (dir: -1 | 1): { room: number; ledge: boolean } => {
     const edge = dir < 0 ? p.x : p.x + p.w;
     for (let d = 2; d <= 96; d += 2) {
@@ -406,25 +442,11 @@ function room(p: Player): {
       // A wall at head or knee height stops the retreat.
       if (solidAt(x, p.y + 4) || solidAt(x, p.y + p.h - 4)) return { room: d - 2, ledge: false };
       // So does a hole: walking off is a fall, not an escape.
-      if (!groundAt(x, p.y + p.h + 2)) return { room: d - 2, ledge: true };
+      if (!groundAt(x, floorY + 2)) return { room: d - 2, ledge: true };
     }
     return { room: 96, ledge: false };
   };
   const l = scan(-1);
   const r = scan(1);
-  // How far the floor is beneath her feet. Zero while standing on it.
-  //
-  // Needed to model her OWN arc, which is the thing a jump commits her
-  // to: an agent mid-air cannot decide how long it has left to fall
-  // without knowing how far there is to fall. Without this the only
-  // honest jump model is "grounded, launching from here", which says
-  // nothing about the half second afterwards.
-  let below = 0;
-  for (; below <= 160; below += 2) {
-    if (groundAt(p.x + p.w / 2, p.y + p.h + 2 + below)) break;
-  }
-  return {
-    left: l.room, right: r.room, ledgeLeft: l.ledge, ledgeRight: r.ledge,
-    below: Math.min(below, 160),
-  };
+  return { left: l.room, right: r.room, ledgeLeft: l.ledge, ledgeRight: r.ledge, below };
 }
