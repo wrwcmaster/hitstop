@@ -70,8 +70,8 @@ function need() {
 }
 
 /** Attach the local view when the caller asked for one. */
-function withLook(st, body, q) {
-  const out = { ...st, ...perception(body, q) };
+function withLook(st, body, q, first = false) {
+  const out = { ...st, ...perception(body, q, first) };
   const want = body?.look ?? (q && q.get('look') === '1');
   if (!want) return out;
   const view = lookAround(sess.game, {
@@ -97,7 +97,7 @@ function withLook(st, body, q) {
  * ask" is the same bug in a new place. `see: false` opts out for a
  * caller that wants the smaller payload.
  */
-function perception(body, q) {
+function perception(body, q, first = false) {
   const off = body?.see === false || q?.get('see') === '0';
   const observe = globalThis.window?.__observe;
   if (off || typeof observe !== 'function') return {};
@@ -106,6 +106,14 @@ function perception(body, q) {
   // `ui` is hoisted out of `see` and always sent: it is two fields, and
   // it is the one that decides whether any of the others matter.
   const { ui, ...rest } = o;
+  // The action list never changes for the length of a session, so it
+  // goes out once with the session and never again. Sixteen fixed
+  // strings repeated on every step is the kind of waste that is
+  // invisible per-frame and enormous over a run.
+  if (!first && rest.abilities) {
+    const { actions, ...live } = rest.abilities;
+    rest.abilities = live;
+  }
   return { ui, see: rest };
 }
 
@@ -202,7 +210,7 @@ async function handle(req, res, body) {
       const st = body.scenario
         ? s.harness.beginRun({ kind: 'scenario', scenario: body.scenario })
         : s.harness.state();
-      return { seed, state: withLook(st, body, q) };
+      return { seed, state: withLook(st, body, q, true) };
     }
     case 'POST /scenario': {
       const s = need();

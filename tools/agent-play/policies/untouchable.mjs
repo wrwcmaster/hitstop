@@ -35,12 +35,13 @@ const RUN = 110;
  * simply never attacked. Contact damage is an overlap test in the sim;
  * anything else is a different game's geometry.
  */
-function boxGap(px, py, pw, ph, e, t) {
-  const s = lead(e, t);
-  const dx = Math.abs(px - (s.x + e.w / 2)) - (pw + e.w) / 2;
-  const dy = Math.abs(py - (s.y + e.h / 2)) - (ph + e.h) / 2;
+function boxGap(shiftX, p, e, t) {
+  const ex = e.dx + e.vx * t - shiftX;
+  const ey = e.dy + e.vy * t;
+  const gx = Math.abs(ex) - (p.w + (e.w ?? 6)) / 2;
+  const gy = Math.abs(ey) - (p.h + (e.h ?? 6)) / 2;
   // Both axes must overlap to touch, so the wider separation is the gap.
-  return Math.max(dx, dy);
+  return Math.max(gx, gy);
 }
 
 /**
@@ -54,18 +55,17 @@ function boxGap(px, py, pw, ph, e, t) {
  * not where you WENT. So sample the crossing, each threat led forward by
  * the time the step will actually have taken when she is there.
  */
-function tightest(fromX, toX, p, o, t) {
+function tightest(shift, p, o, t) {
   const STEPS = 5;
-  const cy = p.y + p.h / 2;
   let worst = Infinity;
   for (let i = 1; i <= STEPS; i++) {
     const f = i / STEPS;
-    const x = fromX + (toX - fromX) * f;
     const when = t * f;
-    for (const m of o.monsters) worst = Math.min(worst, boxGap(x, cy, p.w, p.h, m, when));
-    for (const s of o.shots) {
-      worst = Math.min(worst, boxGap(x, cy, p.w, p.h, { ...s, w: 6, h: 6 }, when));
+    for (const m of o.monsters) {
+      if (m.distance === 'far') continue;   // cannot reach her within the horizon
+      worst = Math.min(worst, boxGap(shift * f, p, m, when));
     }
+    for (const s of o.shots) worst = Math.min(worst, boxGap(shift * f, p, s, when));
   }
   return worst;
 }
@@ -95,27 +95,7 @@ export function reset() {
  * ending the wave. Both experiments point the same way: the margin is not
  * where the remaining damage lives.
  */
-const room = (m) => 6 + (m?.contactDamage ?? 0) / 4;
-
-/**
- * Would a swing started NOW actually connect with `m`?
- *
- * Not `inReach`, which asks whether the blade would cover it at the
- * instant of the press — but the blade does not exist yet at that
- * instant. It appears partway through the commit (`swing.active`, a
- * normalized window), by which time a bat doing 80px/s has moved most of
- * a body length. Leading the target to the middle of the active window
- * is the difference between swinging where something was and where it
- * will be.
- */
-function willLand(p, m) {
-  if (!p.swing) return false;                 // no melee attack in this loadout
-  const [a, b] = p.swing.active;
-  const when = ((a + b) / 2) * p.commitT;
-  const s = lead(m, when);
-  return p.swing.boxes.some((box) =>
-    s.x < box.x + box.w && s.x + m.w > box.x && s.y < box.y + box.h && s.y + m.h > box.y);
-}
+const room = (m) => 6 + (m?.dmg ?? 0) / 4;
 
 /**
  * One turn of play. `o` is the observation; returns the keys to hold.
@@ -137,17 +117,16 @@ export function decide(o) {
   const p = o.player;
   if (!p || p.hp <= 0) return keys;
   const t = 0.35;
-  const here = { x: p.x + p.w / 2, y: p.y + p.h / 2 };
 
   // Where could she be a third of a second from now? Only somewhere the
   // room actually allows — `space` is what stops a retreat becoming a
   // corner or a fall, which is how an earlier version kept getting caught
   // with its shoulders against a wall.
   const step = RUN * t;
-  const options = [{ dir: 0, x: here.x }];
-  if (o.space.left > step * 0.6 && !o.space.ledgeLeft) options.push({ dir: -1, x: here.x - step });
-  if (o.space.right > step * 0.6 && !o.space.ledgeRight) options.push({ dir: 1, x: here.x + step });
-  for (const opt of options) opt.gap = tightest(here.x, opt.x, p, o, t);
+  const options = [{ dir: 0, shift: 0 }];
+  if (o.space.left > step * 0.6 && !o.space.ledgeLeft) options.push({ dir: -1, shift: -step });
+  if (o.space.right > step * 0.6 && !o.space.ledgeRight) options.push({ dir: 1, shift: step });
+  for (const opt of options) opt.gap = tightest(opt.shift, p, o, t);
   options.sort((a, b) => b.gap - a.gap);
   const best = options[0];
   const standing = options.find((opt) => opt.dir === 0);
@@ -155,15 +134,26 @@ export function decide(o) {
   // A shot already in the air outranks everything: it is the one threat
   // that does not care how far away its owner is. Arrows fly flat, so
   // leaving the floor is the reliable answer to them.
-  const incoming = o.shots.filter((s) => s.closing && s.dist < 110);
+  const incoming = o.shots.filter((s) => Math.hypot(s.dx, s.dy) < 110);
   if (incoming.length) {
     if (p.onGround) keys.push('jump');
     if (best.dir) keys.push(best.dir > 0 ? 'right' : 'left');
     return keys;
   }
 
-  const target = o.monsters.slice().sort((a, b) => a.dist - b.dist)[0];
-  if (!target) return keys;
+  const target = o.monsters.filter((m) => m.distance !== 'far')
+    .sort((a, b) => a.gap - b.gap)[0];
+
+  // Nothing within arm's length: go and find something. A far monster is
+  // reported as a name and a bearing and nothing else, which is all this
+  // needs — but ignoring them entirely is not an option. Standing still
+  // because no threat is CLOSE is how she died on wave 4 of every seed,
+  // shot to pieces by archers she was never going to walk towards.
+  if (!target) {
+    const away = o.monsters.slice().sort((a, b) => Math.abs(a.dx) - Math.abs(b.dx))[0];
+    if (away) keys.push(away.dx > 0 ? 'right' : 'left');
+    return keys;
+  }
   const need = room(target);
 
   // A swing is a promise to stand still for `commitT`. Judge it over that
@@ -175,10 +165,10 @@ export function decide(o) {
   // theory that fleeing cannot beat 80px/s. Measured, it turned dodges
   // into trades — hits went from 2-6 per run to 3-10 and one run died.
   // Against contact damage the blade is not a shield; distance is.
-  if (willLand(p, target) && p.attackReady && recover <= 0) {
+  if (target.distance === 'inReach' && p.attackReady && recover <= 0) {
     // Zero margin is not a margin: "will not literally touch me" left her
     // trading blows with brutes, and she loses trades. Demand real air.
-    if (tightest(here.x, here.x, p, o, p.commitT || 0.3) > need * 0.6) {
+    if (tightest(0, p, o, p.commitT || 0.3) > need * 0.6) {
       recover = Math.round((p.commitT || 0.3) * 60) + 10;
       keys.push('attack');
       return keys;
@@ -198,7 +188,7 @@ export function decide(o) {
   // Free hits: contact costs nothing while i-frames burn, so spend them
   // swinging rather than running. Fleeing through them wastes the one
   // advantage a hit hands back.
-  if (p.invulnT > 0.15 && p.attackReady && o.monsters.some((m) => willLand(p, m))) {
+  if (p.invulnT > 0.15 && p.attackReady && o.monsters.some((m) => m.distance === 'inReach')) {
     keys.push('attack');
     return keys;
   }

@@ -189,14 +189,38 @@ function attachObserver(game: ActionGame): void {
     const reach = boxes.length
       ? Math.max(...boxes.flatMap((b) => [Math.abs(b.x + b.w - p.cx), Math.abs(p.cx - b.x)]))
       : 0;
-    /** Would the planned swing actually cover this body, facing either way? */
-    const covers = (m: Monster): boolean =>
-      boxes.some((b) =>
-        m.x < b.x + b.w && m.x + m.w > b.x && m.y < b.y + b.h && m.y + m.h > b.y);
+    /**
+     * Would a swing STARTED NOW land on this body?
+     *
+     * The harness answers it rather than shipping the geometry for an
+     * agent to redo, because the honest version is not a distance test.
+     * The blade does not exist at the moment of the press: it appears
+     * during `active`, a normalized slice of the commit, by which time a
+     * bat doing 80px/s has moved most of a body length. So lead the
+     * target to the middle of that window and test the real hitbox.
+     */
+    const willLand = (m: Monster): boolean => {
+      if (!planned.def) return false;
+      const [a, b] = planned.def.active;
+      const t = ((a + b) / 2) * planned.def.duration;
+      const mx = m.x + m.vx * t;
+      const my = m.y + m.vy * t;
+      return boxes.some((box) =>
+        mx < box.x + box.w && mx + m.w > box.x && my < box.y + box.h && my + m.h > box.y);
+    };
+    /** Clear air between her box and its, in px. <= 0 means touching. */
+    const gapTo = (m: Monster): number => Math.max(
+      Math.abs(m.cx - p.cx) - (p.w + m.w) / 2,
+      Math.abs(m.cy - p.cy) - (p.h + m.h) / 2,
+    );
+    // How much detail a thing has earned. Beyond the screen she cannot
+    // see it and cannot be hurt by it this second; all that matters is
+    // that it exists and which way it lies.
+    const NEAR = 200;
     return {
       ui,
       player: {
-        x: round(p.x), y: round(p.y), w: p.w, h: p.h,
+        w: p.w, h: p.h,
         vx: round(p.vx), vy: round(p.vy),
         hp: p.hp, maxHp: p.maxHp,
         facing: p.facing,
@@ -216,55 +240,61 @@ function attachObserver(game: ActionGame): void {
         // attack, not the last one: `attackDur` is 0 until she has swung
         // once, and every combo step has its own length.
         commitT: round(planned.def?.duration ?? 0),
-        // The swing itself: where the blade will be, and WHEN it is live.
-        //
-        // `inReach` answers "could I hit it this instant", which is the
-        // wrong question for a moving target — the hitbox does not exist
-        // at the moment of the press. It appears for `active` (normalized
-        // start/end of the commit) and the target has moved by then. An
-        // agent given only the instantaneous answer either swings at a
-        // bat that has flown off, or refuses one that is about to arrive.
-        // Both boxes ride along because she can turn to face either way.
-        swing: planned.def
-          ? {
-            boxes: boxes.map((b) => ({ x: round(b.x), y: round(b.y), w: b.w, h: b.h })),
-            active: planned.def.active,
-          }
-          : null,
         noise: round(p.noise),
       },
-      monsters: game.world.all().filter((e): e is Monster => e instanceof Monster && !e.dead).map((m) => ({
-        type: m.type, x: round(m.x), y: round(m.y), w: m.w, h: m.h,
-        vx: round(m.vx), vy: round(m.vy),
-        hp: m.hp, maxHp: m.maxHp,
-        facing: m.facing,
-        flies: m.flies,
-        // What it is currently doing, in its own words. Behaviours name
-        // their phases ('creep', 'wind', 'lunge'…), and that name is the
-        // telegraph the artwork is already showing the human player. A
-        // string is enough: an agent can learn which ones hurt without
-        // this file having to decide for it.
-        ...(typeof m.state.mode === 'string' ? { mode: m.state.mode } : {}),
-        contactDamage: m.def.noContactDamage ? 0 : m.def.damage,
-        // Signed gaps: an agent should not have to redo this trigonometry
-        // every turn, and getting the sign wrong is a whole class of bug.
-        dx: round(m.cx - p.cx), dy: round(m.cy - p.cy),
-        dist: round(Math.hypot(m.cx - p.cx, m.cy - p.cy)),
-        // The real hitbox overlap, not a radius: a plunge covers the
-        // ground and an anti-air covers her head, and neither is a circle.
-        inReach: covers(m),
-      })),
+      // Deliberately terse, and deliberately RELATIVE.
+      //
+      // The first version of this shipped sixteen fields per monster
+      // including absolute world coordinates, `dist` next to `inReach`
+      // next to `dx`/`dy`, and `maxHp` — most of it either redundant or
+      // something no decision reads. Absolute position is the clearest
+      // example: nothing an agent decides depends on where the room's
+      // origin is, only on where things are relative to HER.
+      //
+      // Detail is also earned by proximity. Something off screen cannot
+      // touch her this second, so it gets a name and a bearing; the
+      // things that can hurt her get everything. `w`/`h` survive the cut
+      // for those, because contact is a box overlap and predicting one
+      // needs the box.
+      monsters: game.world.all().filter((e): e is Monster => e instanceof Monster && !e.dead).map((m) => {
+        const dx = Math.round(m.cx - p.cx);
+        const dy = Math.round(m.cy - p.cy);
+        const gap = Math.round(gapTo(m));
+        if (gap > NEAR) return { type: m.type, dx, distance: 'far' as const };
+        return {
+          type: m.type,
+          dx, dy, gap,
+          w: m.w, h: m.h,
+          vx: Math.round(m.vx), vy: Math.round(m.vy),
+          facing: m.facing,
+          // The verdict, not the trigonometry: 'inReach' means a swing
+          // started this frame connects, hitbox and timing included.
+          distance: willLand(m) ? ('inReach' as const) : ('close' as const),
+          dmg: m.def.noContactDamage ? 0 : m.def.damage,
+          // Omitted unless true / unless hurt: absent is the common case
+          // and costs nothing to send.
+          ...(m.flies ? { flies: true } : {}),
+          ...(m.hp < m.maxHp ? { hp: m.hp } : {}),
+          // What it is currently doing, in its own words. Behaviours name
+          // their phases ('creep', 'wind', 'lunge'…), and that name is the
+          // telegraph the artwork is already showing the human player. A
+          // string is enough: an agent can learn which ones hurt without
+          // this file having to decide for it.
+          ...(typeof m.state.mode === 'string' ? { mode: m.state.mode } : {}),
+        };
+      }),
       // HOSTILE shots only. Her own bow and flintlock rounds, and any
       // projectile she has parried back, are live Projectiles heading
       // away from her — an observation that lumps them in makes an agent
       // dive away from its own arrows.
+      // And only the ones actually coming at her: a shot that is not
+      // closing is scenery, and reporting scenery every frame is how a
+      // payload doubles for nothing.
       shots: game.world.all().filter((e): e is Projectile =>
-        e instanceof Projectile && !e.dead && e.targetTeam === 'player').map((s) => ({
-        x: round(s.x), y: round(s.y), vx: round(s.vx), vy: round(s.vy),
-        dx: round(s.x - p.cx), dy: round(s.y - p.cy),
-        dist: round(Math.hypot(s.x - p.cx, s.y - p.cy)),
-        // Only a shot that is CLOSING matters; the rest are scenery.
-        closing: (s.x - p.cx) * s.vx + (s.y - p.cy) * s.vy < 0,
+        e instanceof Projectile && !e.dead && e.targetTeam === 'player'
+        && (e.x - p.cx) * e.vx + (e.y - p.cy) * e.vy < 0).map((s) => ({
+        dx: Math.round(s.x - p.cx), dy: Math.round(s.y - p.cy),
+        vx: Math.round(s.vx), vy: Math.round(s.vy),
       })),
       // Where there is room to GO. An agent that can see monsters but not
       // the floor retreats into walls and off ledges — it backs away from

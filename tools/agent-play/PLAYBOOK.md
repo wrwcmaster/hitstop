@@ -21,7 +21,8 @@ cleared without taking a single hit.
 | positions-only perception | 0/5 (died wave 3) | ~12 |
 | + velocity, reach, i-frames, shots | 0/5 (timeouts) | 2-6 |
 | + UI perception (`ui.blocking`) | 5/5 | 2-6 |
-| + honest hitbox geometry | **4/5**, no deaths | **4-5** |
+| + honest hitbox geometry | 4/5, no deaths | 4-5 |
+| + trimmed observation | **3/5** | **2-10** |
 
 Nobody has gone flawless yet. The remaining damage is mostly bats, then
 ranged, then brutes; one seed still times out on wave 4.
@@ -83,10 +84,12 @@ hashed by nobody, so it is free to grow. Add to it rather than guessing.
   and `swing.boxes`/`swing.active`, all read off the attack she would
   actually throw next. Nothing here is a constant — reach runs 23px to
   33px by weapon and combo step, and is 0 for a ranged arm.
-- `monsters[]` — box, velocity, hp, `flies`, `contactDamage`, signed
-  `dx`/`dy`, `dist`, `inReach`, and `mode` when the behaviour names its
-  phase. Wave-1 enemies (slime, bat, brute) name none — their hits are
-  pure spacing, not missed telegraphs. Do not go looking for a tell.
+- `monsters[]` — RELATIVE and terse. Near ones (gap <= 200px) give
+  `dx`/`dy`/`gap`, box, velocity, `facing`, `dmg`, plus `flies`/`hp`/`mode`
+  only when they apply. Far ones give `{type, dx, distance:"far"}` —
+  a bearing, which is enough to walk towards and nothing more. Wave-1
+  enemies name no `mode`; their hits are spacing, not missed telegraphs.
+  `distance:"inReach"` is a VERDICT: a swing started now connects.
 - `shots[]` — HOSTILE arrows and bullets only, with `closing`. Her own
   and parried rounds are filtered out; do not flee your own shot.
 - `space` — walking room each way and whether the floor continues.
