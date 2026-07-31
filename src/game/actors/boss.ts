@@ -1,10 +1,11 @@
 import { FSM, rand, pick, frameAt, ballisticVelocity, carryBody, placeBody, t } from '@engine/index';
 import { defineMonster, Monster } from './monster';
 import { SLIME1, SLIME2, TEXEL, DUELIST_ANIMS, duelistSprite } from '../content/sprites';
-import { tintOf, whiteOf } from '@engine/index';
+import { tintOf, whiteOf, type Tilemap } from '@engine/index';
 import { COLORS } from '../content/palette';
 import { shootBullet, muzzleFlash, BULLET_GRAVITY } from '../content/ballistics';
 import { drawDebris } from './gizmos';
+import { Shockwave } from './shockwave';
 import type { Player } from './player';
 
 /** Lob a sticky slime ball: no damage, applies the slow on hit. */
@@ -1098,5 +1099,385 @@ defineMonster('vise-nest', {
       const p = Math.sin(m.animT * (ready ? 9 : 3) + i) * 0.5 + 0.5;
       g.fillRect(x + 3 + i * 5, y + 4 + Math.round(p * 9), 2, 2);
     }
+  },
+});
+
+/* ==================== MOURN, THE BELL BELOW ==================== */
+
+/**
+ * The Keeper of the voice, and the fight that argues for Shockwave.
+ *
+ * Mourn is blind. It hunts by what the stone tells it, which turns the
+ * arena into an instrument the player plays: **you author your own
+ * openings by choosing where sound happens, then strike from the
+ * silence.** Every other Keeper hands you a window — Maul staggers,
+ * Bellwether's beat comes round, Vise crawls past. Mourn hands you
+ * nothing and lets you make one.
+ *
+ * The damage model IS the fiction. Its attention pins to the last loud
+ * thing it felt, and the flank facing away from that noise hangs open.
+ * Hit the braced side and you may as well be hitting the floor.
+ *
+ * Its health is its grief made solid — four deadstone knots along the
+ * spine (Vise's component-health pattern). The fourth ends it: Mourn is
+ * *beaten, not butchered*, which is what the Keepers' story needs the
+ * fight to say.
+ */
+const MOURN_KNOT_HP = 120;
+/** Four knots of grief; shattering the last rings it clean. */
+const MOURN_KNOTS = 4;
+const MOURN_BODY = '#3b3350';
+const MOURN_KNOT = '#cfc4e8';
+const MOURN_EAR = '#e8d98f';
+
+/** How many spine-knots are gone, from damage taken. */
+function shattered(m: Monster): number {
+  return Math.min(MOURN_KNOTS, Math.floor((m.maxHp - m.hp) / MOURN_KNOT_HP));
+}
+
+/**
+ * Where Mourn BELIEVES the knight is, and how sure it is.
+ *
+ * It only ever knows the last place the floor rang. Go quiet and the
+ * belief goes stale exactly where you left it — that staleness is the
+ * opening, which is why the ear is drawn dimmer as it decays.
+ */
+function attention(m: Monster): { x: number; sure: number } {
+  const at = m.state.earAt as { x: number; y: number } | undefined;
+  return { x: at?.x ?? m.cx, sure: (m.state.earSure as number) ?? 0 };
+}
+
+/** Which side its attention is pinned to: -1 left, +1 right. */
+function earSide(m: Monster): -1 | 1 {
+  return attention(m).x < m.cx ? -1 : 1;
+}
+
+/**
+ * Listen. The only sense it has.
+ *
+ * It hears the LOUDEST knight, not the nearest — `m.player` answers
+ * "who is closest", which is the wrong question for a blind thing. In
+ * co-op that difference is the whole mechanic: a partner sprinting on
+ * the far side of the arena must be able to pull its attention away
+ * while you creep in from the quiet, and picking by distance would let a
+ * silent knight standing nearer swallow the decoy entirely.
+ */
+function mournListen(m: Monster, dt: number): void {
+  let loudest: Player | null = null;
+  for (const a of m.world.actors('player')) {
+    const p = a as Player;
+    if (p.dead || p.noise <= 0.45 || !p.lastNoiseAt) continue;
+    if (!loudest || p.noise > loudest.noise) loudest = p;
+  }
+  // While the chamber hums, footfalls are lost inside it (see `humming`):
+  // the free approach the last knot is supposed to buy.
+  if (loudest && !humming(m) && loudest.lastNoiseAt) {
+    m.state.earAt = { x: loudest.lastNoiseAt.x, y: loudest.lastNoiseAt.y };
+    m.state.earSure = 1;
+  } else {
+    // A knight who is still, airborne, or on deadstone tells it nothing,
+    // and the old belief simply decays where it stands.
+    m.state.earSure = Math.max(0, ((m.state.earSure as number) ?? 0) - dt * 0.5);
+  }
+  m.facing = earSide(m);
+}
+
+/**
+ * Is the chamber ringing right now?
+ *
+ * On the last knot Mourn hums on a rhythm, and a hum loud enough to
+ * shake the room is loud enough to hide a footstep in. The masked window
+ * is the gap BETWEEN beats resolving — deliberately most of the cycle,
+ * because the promise is "the brave get free approaches", and a promise
+ * the code does not keep is worse than no promise.
+ */
+function humming(m: Monster): boolean {
+  return (m.state.humMask as number ?? 0) > 0;
+}
+
+/** A toll: the knight's own verb, aimed the other way. */
+function tollWave(m: Monster, dir: 1 | -1): void {
+  m.game.world.spawn(new Shockwave(m.game, m.collision as Tilemap, m, dir, {
+    targets: 'player',
+    damage: 18 + shattered(m) * 4,
+    range: 220,
+    speed: 210,
+    colors: [MOURN_KNOT, COLORS.white],
+  }));
+  m.game.feel.shake(0.35);
+}
+
+function makeMournFsm(m: Monster): FSM<Monster> {
+  const fsm: FSM<Monster> = new FSM<Monster>(m, {
+    /**
+     * The resting state, and what the fight is about. It listens, turns
+     * its head toward the last noise, and decides what to do about it.
+     * Patience shortens as the knots go.
+     */
+    listen: {
+      enter(b) {
+        b.state.patience = rand(1.3, 2.2) * (1 - shattered(b) * 0.13);
+        b.state.loudFor = 0;
+      },
+      update(b, dt) {
+        mournListen(b, dt);
+        b.vx = 0;
+        const p = b.player as Player | undefined;
+        // Sustained loudness on one span presses its ear to that surface —
+        // the biggest opening in the fight, and one the player BUILT.
+        if (p && p.noise > 0.8 && (b.state.earSure as number) >= 1) {
+          b.state.loudFor = ((b.state.loudFor as number) ?? 0) + dt;
+          if ((b.state.loudFor as number) > 0.9) return 'fixate';
+        } else {
+          b.state.loudFor = 0;
+        }
+        if (fsm.t < (b.state.patience as number)) return;
+        const heavy = shattered(b) >= 2;
+        return pick(heavy ? ['toll', 'pounce', 'toll', 'keen'] : ['toll', 'pounce', 'toll']);
+      },
+    },
+
+    /**
+     * Waves along the floor, both ways from its feet. The counter is the
+     * room itself: leave the ground, or stand on deadstone, which carries
+     * nothing — the same rule the knight's own Shockwave obeys.
+     */
+    toll: {
+      enter(b) { b.state.tolled = false; },
+      update(b, dt) {
+        mournListen(b, dt);
+        b.vx = 0;
+        // Telegraph: it draws breath and the knots shiver.
+        if (fsm.t < 0.55) {
+          b.tremorY = Math.sin(fsm.t * 60) * 0.7;
+          return;
+        }
+        if (!(b.state.tolled as boolean)) {
+          b.state.tolled = true;
+          tollWave(b, 1);
+          tollWave(b, -1);
+        }
+        if (fsm.t > 1.25) return 'listen';
+      },
+    },
+
+    /**
+     * It leaps at the last place it heard and comes down hard. Bait it
+     * and its own landing becomes your cover — and its next noise.
+     */
+    pounce: {
+      enter(b) {
+        b.state.launched = false;
+        b.vx = 0;
+      },
+      update(b, dt) {
+        if (fsm.t < 0.45) {
+          mournListen(b, dt);
+          b.tremorX = Math.sin(fsm.t * 70) * 0.6;
+          return;
+        }
+        if (!(b.state.launched as boolean)) {
+          b.state.launched = true;
+          const dx = attention(b).x - b.cx;
+          b.vx = Math.max(-260, Math.min(260, dx * 1.6));
+          b.vy = -300;
+          b.game.feel.sfx.play('jump');
+        }
+        // The landing IS the attack, and it rings the floor.
+        if (b.onGround && fsm.t > 0.6) {
+          b.game.feel.impact(b.cx, b.cy, {
+            strength: 0.7, colors: [MOURN_KNOT, COLORS.white], sfx: 'land',
+          });
+          b.game.feel.shake(0.5);
+          const strike = b.game.combat.strike({
+            damage: 22, targets: 'player', attacker: b,
+            strength: 0.6, knockback: 150, popY: -120,
+            colors: [MOURN_KNOT, COLORS.white],
+          });
+          strike.apply({ x: b.x - 20, y: b.y, w: b.w + 40, h: b.h + 8 });
+          return 'listen';
+        }
+        if (fsm.t > 2.4) return 'listen';
+      },
+    },
+
+    /**
+     * Ear pressed to a loud surface: deaf to everything else and WIDE
+     * open, long enough to shatter a knot outright — provided you are no
+     * longer standing on the thing that made the noise.
+     */
+    fixate: {
+      enter(b) {
+        b.state.loudFor = 0;
+        b.vx = 0;
+        b.game.feel.sfx.play('menuOpen');
+      },
+      update(b) {
+        b.tremorY = Math.sin(b.animT * 8) * 0.4;
+        if (fsm.t > 1.8) return 'listen';
+      },
+    },
+
+    /** A standing cry brings the bats in — more noise, yours to steer. */
+    keen: {
+      enter(b) {
+        b.state.called = false;
+        b.vx = 0;
+      },
+      update(b, dt) {
+        mournListen(b, dt);
+        if (fsm.t < 0.5) {
+          b.tremorX = Math.sin(fsm.t * 50) * 0.5;
+          return;
+        }
+        if (!(b.state.called as boolean)) {
+          b.state.called = true;
+          b.game.feel.sfx.play('kill');
+          // Call them into open air ABOVE it, not blindly out to the
+          // sides: a ±26px offset is inside the wall whenever Mourn is
+          // fighting near one. Placement still has the final say (a bat
+          // with nowhere to go is stillborn rather than embedded), but
+          // asking for a sane spot means it rarely has to exercise it.
+          for (const dx of [-18, 18]) {
+            const bat = new Monster('bat', b.game, b.collision, b.cx + dx, b.y - 26);
+            if (!bat.dead) b.world.spawn(bat);
+          }
+        }
+        if (fsm.t > 1.1) return 'listen';
+      },
+    },
+  }, 'listen');
+  return fsm;
+}
+
+defineMonster('mourn', {
+  hp: MOURN_KNOT_HP * MOURN_KNOTS,
+  damage: 20,
+  w: 34,
+  h: 28,
+  score: 11000,
+  boss: true,
+  displayName: 'MOURN, THE BELL BELOW',
+  epilogue: 'mourn-fallen',
+  grants: 'shockwave',
+  colors: [MOURN_BODY, MOURN_KNOT, COLORS.white],
+  drops: [
+    { id: 'coin', chance: 1 },
+    { id: 'coin', chance: 1 },
+    { id: 'potion', chance: 1 },
+    { id: 'mana-orb', chance: 1 },
+  ],
+  xp: 300,
+  /**
+   * The damage model, in one rule: it is BRACED on the side its ear is
+   * pinned to and open on the other. Strike from the noise and you are
+   * hitting something that already knows where you are; strike from the
+   * quiet and the blow lands whole.
+   *
+   * `fixate` is the payoff for authoring a loud decoy — ear to the stone,
+   * open from every side.
+   */
+  mitigate(m, damage, opts) {
+    const fsm = m.state.fsm as FSM<Monster> | undefined;
+    if (fsm?.is('fixate')) return damage;
+    const from = opts.attacker;
+    if (!from) return damage;
+    const side = from.cx < m.cx ? -1 : 1;
+    return side === earSide(m) ? damage * 0.15 : damage;
+  },
+  /**
+   * What a co-op guest needs to READ this fight: how sure the ear is, and
+   * whether it is fixated. Both live in internal state a puppet never
+   * simulates, and both are the safe-opening signal — without them the
+   * second knight sees a dim ear forever and is playing blind against a
+   * blind thing.
+   */
+  tell(m) {
+    const fsm = m.state.fsm as FSM<Monster> | undefined;
+    return [attention(m).sure, fsm?.is('fixate') ? 1 : 0];
+  },
+  readTell(m, [sure, fixated]) {
+    m.state.earSure = sure;
+    // The puppet has no FSM of its own worth trusting; the flag drives
+    // the draw directly.
+    m.state.remoteFixate = fixated === 1;
+  },
+  init(m) {
+    m.state.earAt = { x: m.cx, y: m.cy };
+    m.state.earSure = 0;
+    m.state.shown = 0;
+    m.state.fsm = makeMournFsm(m);
+  },
+  update(m, dt) {
+    // A knot goes: the fight's progress display, and the moment it grows
+    // more dangerous rather than less.
+    const gone = shattered(m);
+    if (gone > (m.state.shown as number)) {
+      m.state.shown = gone;
+      m.game.feel.slowmo(0.45, 0.3);
+      m.game.feel.shake(0.7);
+      m.game.feel.sfx.play('kill');
+      m.game.feel.text(m.cx, m.y - 10, t('KNOT SHATTERED'), MOURN_KNOT, 2);
+      m.game.feel.burst(m.cx, m.cy, 20, {
+        color: [MOURN_KNOT, MOURN_BODY], speed: 140, life: 0.5, drag: 2.5,
+      });
+    }
+    // Last knot: the chamber hums on a rhythm, and the hum genuinely
+    // MASKS footsteps (see `humming`) — the free approach the phase is
+    // supposed to buy. It is not a kindness: the same beat throws a toll
+    // wave, so the cover you walk under is also what is hunting you. The
+    // window shuts for a breath around each beat, which is when it can
+    // hear you again.
+    //
+    // This runs BEFORE the FSM, because the FSM is what listens. Setting
+    // the mask afterwards left `listen` reading the previous frame's
+    // value, and one footstep per cycle leaked through on the boundary —
+    // measured at exactly 1 refresh in 129 masked frames, which is the
+    // kind of "almost" that turns into a bug report later.
+    m.state.humMask = 0;
+    if (gone >= MOURN_KNOTS - 1) {
+      const hum = ((m.state.hum as number) ?? 0) + dt;
+      m.state.hum = hum;
+      // Deaf except for a short breath on either side of the beat.
+      m.state.humMask = hum > 0.35 && hum < 1.35 ? 1 : 0;
+      if (hum > 1.6) {
+        m.state.hum = 0;
+        tollWave(m, m.facing as 1 | -1);
+      }
+    }
+    (m.state.fsm as FSM<Monster>).update(dt);
+  },
+  draw(g, m) {
+    const fsm = m.state.fsm as FSM<Monster>;
+    const gone = shattered(m);
+    // A hunched bell-shape.
+    g.fillStyle = m.flashT > 0 ? COLORS.white : MOURN_BODY;
+    g.fillRect(m.x + 2, m.y + 6, m.w - 4, m.h - 6);
+    g.fillRect(m.x + 6, m.y + 2, m.w - 12, 6);
+    // The four spine-knots: the health bar, worn on the body.
+    for (let i = 0; i < MOURN_KNOTS; i++) {
+      const kx = m.x + 6 + i * ((m.w - 12) / MOURN_KNOTS);
+      if (i < MOURN_KNOTS - gone) {
+        g.fillStyle = m.flashT > 0 ? COLORS.white : MOURN_KNOT;
+        g.fillRect(kx, m.y + 9, 4, 5);
+      } else {
+        g.fillStyle = COLORS.bgDark; // a shattered knot leaves a socket
+        g.fillRect(kx, m.y + 10, 4, 3);
+      }
+    }
+    // The ear faces what it is listening to and glows with how sure it
+    // is. A DIM ear is a stale belief — the tell that you have gone quiet
+    // enough to move, and the one thing the player must learn to read.
+    const ex = m.facing < 0 ? m.x + 1 : m.x + m.w - 4;
+    g.globalAlpha = 0.35 + 0.65 * attention(m).sure;
+    // A guest's puppet DOES have an FSM — `init` ran there too — it is
+    // simply never stepped, so asking it would report `listen` forever.
+    // The wire value is therefore the authority whenever one has arrived.
+    const fixated = m.state.remoteFixate !== undefined
+      ? m.state.remoteFixate === true
+      : fsm.is('fixate');
+    g.fillStyle = fixated ? COLORS.white : MOURN_EAR;
+    g.fillRect(ex, m.y + 8, 3, 7);
+    g.globalAlpha = 1;
   },
 });

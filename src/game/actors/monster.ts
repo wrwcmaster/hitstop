@@ -8,6 +8,7 @@ import {
   whiteOf,
   rand,
   type CollisionSource,
+  type StrikeOptions,
 } from '@engine/index';
 import type { ActorHost } from '../defs';
 import { nearestPlayer, type Player } from './player';
@@ -80,10 +81,27 @@ export interface MonsterDef {
   contactInset?: number;
   /** Definition-owned unusual contact. Return true to suppress normal damage. */
   onPlayerContact?(m: Monster, player: Player): boolean | void;
+  /**
+   * Transform an incoming blow before it lands (see Entity.mitigate).
+   * A def-level hook because "how much this creature feels a hit" is
+   * content: Mourn is braced on the side its ear is pinned to and open
+   * on the other, which is its entire damage model.
+   */
+  mitigate?(m: Monster, damage: number, opts: StrikeOptions): number;
   /** Strategy for holding and presenting a swallowed player. */
   swallow?: SwallowDef;
   /** XP granted on kill (default: score / 20). */
   xp?: number;
+  /**
+   * Presentation state a co-op guest needs in order to READ this monster,
+   * as a few plain numbers (rides `MobSnap.tell`). Only for tells that
+   * live in internal state rather than in position and facing — a boss
+   * whose safe-opening signal is an internal value is unreadable on a
+   * guest's screen without this. Omit it and nothing is sent.
+   */
+  tell?(m: Monster): number[];
+  /** Apply a `tell` on the guest's puppet, which is never simulated. */
+  readTell?(m: Monster, tell: number[]): void;
   /** One-time setup; stash per-instance state on the monster. */
   init?(m: Monster): void;
   /** Behavior. Physics (gravity + collide) runs after this. */
@@ -150,7 +168,14 @@ export class Monster extends Actor {
     // resolved the way the mover would have left it, never born buried
     // where collision cannot see it. (Size must be known first, which is
     // why placement follows the def lookup.)
-    placeBody(this, x, y, collision);
+    //
+    // And when there is genuinely nowhere to stand, it does not exist.
+    // Ignoring this verdict is how Mourn's keen put an echo bat inside
+    // the arena's east wall: a blind ±26px offset landed in three
+    // columns of stone, placement said "no" and the caller spawned it
+    // anyway. A monster in a wall is worse than a monster that never
+    // arrived — it cannot be fought, and collision cannot see it.
+    if (!placeBody(this, x, y, collision)) this.dead = true;
     this.hp = this.maxHp = this.def.hp;
     this.mass = this.def.mass ?? 1;
     this.flies = this.def.flies ?? false;
@@ -168,6 +193,11 @@ export class Monster extends Actor {
   /** The nearest living player (AI targeting helper — co-op aware). */
   get player(): Actor | undefined {
     return nearestPlayer(this.world, this.cx, this.cy) ?? undefined;
+  }
+
+  /** Defs decide how a blow lands on them; by default it lands whole. */
+  mitigate(damage: number, opts: StrikeOptions): number {
+    return this.def.mitigate ? this.def.mitigate(this, damage, opts) : damage;
   }
 
   update(dt: number): void {

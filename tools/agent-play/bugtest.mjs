@@ -12,6 +12,7 @@
  *
  *   - journey: the exact sequence of rooms the tape visits
  *   - bounds:  the player stays inside the room's extent every frame
+ *   - buried:  no body — knight or monster — is ever inside solid rock
  *   - warps:   no same-room position jump bigger than physics allows
  *   - end:     where the tape must come to rest
  *
@@ -48,9 +49,16 @@ async function traceTape(browser, recording) {
     storage: recording.storage ?? {},
   });
   await page.evaluate((rec) => window.__harness.replayRun(rec), recording);
-  const trace = await page.evaluate((end) => {
+  const trace = await page.evaluate(async (end) => {
+    const eng = await import('/src/engine/index.ts');
     const rooms = [];
     const frames = [];
+    // Nothing may be inside stone — not the knight, and not anything the
+    // fight spawned. Mourn's keen put an echo bat in a wall precisely
+    // because the tape watched only the player, so this is sampled for
+    // every body: an embedded monster cannot be fought and collision
+    // cannot see it, whoever it is.
+    let buried = null;
     for (let f = 1; f <= end; f++) {
       const st = window.__harness.runTo(f);
       const sc = window.hitstop.scenes.all().find((s) => s.constructor.name === 'PlayScene');
@@ -58,9 +66,24 @@ async function traceTape(browser, recording) {
       if (!p) continue;
       if (!rooms.length || rooms[rooms.length - 1] !== st.roomId) rooms.push(st.roomId);
       frames.push([st.roomId, p.x, p.y, sc?.tilemap?.worldW ?? 0, sc?.tilemap?.worldH ?? 0]);
+      if (!buried && sc?.tilemap) {
+        for (const a of window.hitstop.world.all()) {
+          if (a.dead || a.constructor.name !== 'Monster') continue;
+          for (let dx = 1; dx < a.w && !buried; dx += 3) {
+            for (let dy = 1; dy < a.h && !buried; dy += 3) {
+              const id = sc.tilemap.tileAt(Math.floor((a.x + dx) / 8), Math.floor((a.y + dy) / 8));
+              if (!id) continue;
+              const def = eng.tiles.get(id);
+              if (def.solid && !def.oneWay) {
+                buried = `${a.type} at (${Math.round(a.x)},${Math.round(a.y)}) on step ${f}`;
+              }
+            }
+          }
+        }
+      }
     }
     const last = frames[frames.length - 1];
-    return { rooms, frames, end: { room: last[0], x: last[1], y: last[2] } };
+    return { rooms, frames, buried, end: { room: last[0], x: last[1], y: last[2] } };
   }, recording.end);
   await page.context().close();
   return { trace, errors };
@@ -85,7 +108,7 @@ function measure(trace) {
     }
     prev = [room, x, y];
   }
-  return { outOfBounds, maxWarp };
+  return { outOfBounds, maxWarp, buried: trace.buried };
 }
 
 function check(bug, trace, stats) {
@@ -95,6 +118,7 @@ function check(bug, trace, stats) {
     fails.push(`journey ${trace.rooms.join(' > ')} != expected ${e.rooms.join(' > ')}`);
   }
   if (e.inBounds && stats.outOfBounds) fails.push(`left the world at ${stats.outOfBounds}`);
+  if (e.nothingBuried && stats.buried) fails.push(`spawned inside rock: ${stats.buried}`);
   if (e.maxWarp != null && stats.maxWarp > e.maxWarp) {
     fails.push(`same-room warp of ${stats.maxWarp.toFixed(1)}px (allowed ${e.maxWarp})`);
   }
@@ -136,6 +160,7 @@ if (args[0] === '--new') {
   console.log('  end    :', trace.end.room, 'y=' + Math.round(trace.end.y));
   console.log('  maxWarp:', stats.maxWarp.toFixed(1), '-> allowed', bug.expect.maxWarp);
   console.log('  bounds :', stats.outOfBounds ?? 'stayed inside');
+  console.log('  buried :', stats.buried ?? 'nothing inside rock');
   if (errors.length) console.log('  page errors:', errors);
   console.log('Edit the `issue` field, tighten `expect` if you like, then commit.');
 } else {

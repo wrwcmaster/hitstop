@@ -139,15 +139,58 @@ export function placeBody(
       outDown = Math.max(outDown, s.y + s.h - b.y);
       outUp = Math.max(outUp, b.y + b.h - s.y);
     }
-    if (!hit) return true;
+    // Clear of stone — but "clear" is not the same as "legal". A push can
+    // shove a body straight out through the ceiling of a sealed space,
+    // where there are no tiles to complain; the bounds check below is
+    // what calls that what it is, and sends it to the search instead.
+    if (!hit) break;
     const shortest = Math.min(outLeft, outRight, outUp, outDown);
     if (shortest === outUp) b.y -= outUp;
     else if (shortest === outDown) b.y += outDown;
     else if (shortest === outLeft) b.x -= outLeft;
     else b.x += outRight;
   }
-  // Still buried after several passes: the spot is solid rock, not a
-  // near miss. Say so.
+  if (fitsHere(b, world)) return true;
+
+  // Still buried. The shortest-axis walk can dead-end inside thick
+  // geometry — a body in the middle of a three-column wall gets shoved
+  // along it rather than out of it — so fall back to looking for the
+  // nearest open space outright. Rings outward from the asked-for spot,
+  // so it lands as close to the caller's intent as the room allows.
+  const step = 4;
+  const origin = { x, y };
+  for (let r = step; r <= 96; r += step) {
+    for (const [dx, dy] of [
+      [-r, 0], [r, 0], [0, -r], [0, r],
+      [-r, -r], [r, -r], [-r, r], [r, r],
+    ]) {
+      b.x = origin.x + dx;
+      b.y = origin.y + dy;
+      if (fitsHere(b, world)) return true;
+    }
+  }
+  // Nowhere within reach is open. Leave the body where it was asked for
+  // and say so plainly: a caller that cannot handle this should not be
+  // spawning here at all.
+  b.x = origin.x;
+  b.y = origin.y;
+  return false;
+}
+
+/**
+ * Is this a place a body may actually be — clear of solids AND inside
+ * the level?
+ *
+ * Bounds matter as much as stone here. Space beyond the room's extent
+ * looks gloriously empty (there are no tiles out there to report), so a
+ * search that only asked about solids would happily park a body just
+ * outside the wall it was trying to escape — and the mover's backstop
+ * would shove it straight back into that wall on the next step.
+ */
+function fitsHere(b: Body, world: CollisionSource): boolean {
+  const lvl = world.bounds;
+  if (lvl && (b.x < lvl.x || b.y < lvl.y
+    || b.x + b.w > lvl.x + lvl.w || b.y + b.h > lvl.y + lvl.h)) return false;
   for (const s of world.solidsNear(b)) {
     if (s.oneWay) continue;
     if (b.x < s.x + s.w && b.x + b.w > s.x && b.y < s.y + s.h && b.y + b.h > s.y) return false;

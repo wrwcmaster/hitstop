@@ -165,8 +165,13 @@ function requireReachable(room: RoomDef, doors: TriggerDef[], path: string): voi
       }
     }
     if (!reached) {
+      // Name it usefully: a portal pad has no destination room to quote,
+      // and "doorway to undefined" is how you waste ten minutes.
+      const what = door.event === 'portal'
+        ? `portal pad at (${door.x},${door.y})`
+        : `doorway to "${String(door.props?.room)}"`;
       throw new Error(
-        `${path}: doorway to "${String(door.props?.room)}" cannot be reached from the spawn — `
+        `${path}: ${what} cannot be reached from the spawn — `
         + 'its tiles may be clear, but no path of open space leads to them',
       );
     }
@@ -351,8 +356,11 @@ export function validateRoomContent(room: RoomDef, id = room.name): RoomDef {
     }
   });
 
-  // One flood fill answers for every door at once, rather than per door.
-  const doors = (room.triggers ?? []).filter((t) => t.event === 'door');
-  if (doors.length) requireReachable(room, doors, root);
+  // One flood fill answers for every way OUT at once, rather than per
+  // trigger — and a portal pad is a way out. Checking only doors let
+  // riven-flue ship a fast-travel pad sealed behind a gripstone column:
+  // reachable by the validator's standards because it never looked.
+  const exits = (room.triggers ?? []).filter((t) => t.event === 'door' || t.event === 'portal');
+  if (exits.length) requireReachable(room, exits, root);
   return room;
 }

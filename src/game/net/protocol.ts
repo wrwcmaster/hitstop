@@ -60,6 +60,19 @@ export interface MobSnap {
   animT: number;
   hp: number;
   maxHp: number;
+  /**
+   * Presentation state only this monster knows it needs — a few numbers,
+   * shaped by its own def (`MonsterDef.tell` / `readTell`).
+   *
+   * A guest's monsters are puppets: never simulated, only positioned. For
+   * most that is enough, because their whole tell is where they are and
+   * which way they face. It is NOT enough for a fight whose tell lives in
+   * internal state — Mourn's ear brightness IS the safe-opening signal,
+   * and without this a guest sees a dim ear forever and cannot read the
+   * mechanic at all. The protocol stays ignorant of what the numbers
+   * mean; the def owns that.
+   */
+  tell?: number[];
 }
 
 export interface PickSnap {

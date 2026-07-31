@@ -194,5 +194,13 @@ defineConversation('vise-fallen', {
   ],
 });
 
+defineConversation('mourn-fallen', {
+  lines: [
+    { speaker: 'VOICE', text: 'It stops listening. The stone stops answering.' },
+    { speaker: 'VOICE', text: 'Something that had been grief this whole time settles, and is only weight.' },
+    { speaker: 'VOICE', text: 'Strike the ground now and the ground will carry it. Ask the Undertoll what it is holding.' },
+  ],
+});
+
 /** Importing this module registers the conversations. */
 export function registerConversations(): void {}
