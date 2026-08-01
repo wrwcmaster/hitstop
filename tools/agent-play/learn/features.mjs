@@ -39,7 +39,17 @@ const SELF_F = 16;
  */
 const GOAL_F = 5;
 
-export const FEATURES = SELF_F + MOBS * MOB_F + SHOTS * SHOT_F + 2 + GOAL_F;
+/**
+ * NEW FEATURES APPEND AT THE END — this is a contract, not a style.
+ * grow.mjs widens a trained net by zero-padding each weight row at the
+ * END, so an insertion anywhere else silently shifts the meaning of
+ * every later slot. Learned the expensive way: sinceSwing spent one
+ * training run in the middle of the self block, and the good gen-9
+ * boss weights read scrambled inputs — 4/5 at 120hp became 0/5 with
+ * the knight 97% idle, while validation rejected everything and
+ * faithfully kept the corrupted baseline.
+ */
+export const FEATURES = SELF_F + MOBS * MOB_F + SHOTS * SHOT_F + 2 + GOAL_F + 1;
 
 const clamp = (v) => (v < -1 ? -1 : v > 1 ? 1 : v);
 
@@ -122,6 +132,9 @@ export function encode(o, out = new Float64Array(FEATURES), goal = null) {
     out[i++] = clamp(Math.hypot(gx, gy) / 400);
     out[i++] = goal.kind ?? 1;
   }
+  // sinceSwing: the hit-and-run phase variable, appended last (see the
+  // contract above). Always written, goal or no goal.
+  out[FEATURES - 1] = clamp((o.player?.sinceSwing ?? 2) / 2);
   return out;
 }
 

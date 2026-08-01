@@ -161,6 +161,10 @@ function attachObserver(game: ActionGame): void {
   // thing in front of it is the one it just hit or its twin, and cannot
   // hold any belief about a monster across a turn boundary.
   const ids = new WeakMap<object, number>();
+  // When each knight last finished a swing, in sim steps. Observer-side
+  // memory of an observable event — anyone WATCHING knows she just
+  // swung; the game keeps no such field, so the observation does.
+  const lastSwing = new WeakMap<object, number>();
   let nextId = 1;
   const idOf = (o: object): number => {
     let n = ids.get(o);
@@ -270,6 +274,20 @@ function attachObserver(game: ActionGame): void {
         // attack, not the last one: `attackDur` is 0 until she has swung
         // once, and every combo step has its own length.
         commitT: round(planned.def?.duration ?? 0),
+        // Seconds since her last swing ENDED, capped at 2. Hit-and-run
+        // is a cycle — strike, step out, come back — and a memoryless
+        // policy cannot close a cycle unless something in its input
+        // varies around it. After a swing, busyT is already 0 and every
+        // other field looks like "fresh": same input, same output, so
+        // the best a net could express near a wall was to stand in the
+        // corner and trade. This is the phase variable the cycle needs,
+        // and it is physics — the rule bot keeps the identical fact in
+        // a private counter it calls recover.
+        sinceSwing: (() => {
+          if (p.fsm.is('attack')) { lastSwing.set(p, game.steps); return 0; }
+          const at = lastSwing.get(p);
+          return at === undefined ? 2 : Math.min(2, round((game.steps - at) / 60));
+        })(),
         // What a JUMP does, because an agent cannot choose a move whose
         // outcome it cannot predict. Everything else here describes the
         // horizontal world, so a hand-written policy considers only left,
