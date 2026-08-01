@@ -52,32 +52,66 @@ export function loadWorld() {
 }
 
 /**
- * Fewest doors from `from` to `to`. Returns the room sequence, or null.
+ * The cheapest way from `from` to `to`, given what she can do and what
+ * we have learned about the doors. Returns the room sequence, or null.
  *
- * Breadth-first is right for now because every edge costs the same. It
- * will stop being right the moment we measure that some crossings fail —
- * a door the policy muffs two times in three is not one door away, and
- * routing through it forever is how a planner strands a runner. When
- * rollouts can report per-edge success, swap this for Dijkstra weighted
- * by -log(success). The shape of the call does not change.
+ * Not plain breadth-first, because "fewest doors" is the wrong cost the
+ * moment a crossing can fail. Two things make an edge expensive:
+ *
+ *   IT NEEDS A VERB SHE DOES NOT HAVE. The world is a Metroidvania —
+ *   four bosses, each granting a traversal verb, each opening more map.
+ *   Routing through a door that wants impact-drop before the Slime King
+ *   is dead is not a long route, it is no route.
+ *
+ *   SHE KEEPS FAILING IT. A door muffed two times in three is not one
+ *   door away, and a planner that keeps sending her at it will strand
+ *   her forever. An edge costs its EXPECTED ATTEMPTS, 1/p — a door that
+ *   works one time in twenty costs eleven, which correctly loses to an
+ *   eight-room detour. (I first wrote -log(p), which charges that same
+ *   door 3.4 and kept routing through it; log-cost is the right shape
+ *   when failure is fatal, and here it is merely a retry.) Nothing is
+ *   ever hard-banned, so evidence can change its mind.
+ *
+ * Gating is NOT readable from the room JSON, which is why it arrives as
+ * an argument. The one declared gate in the repo (underground to
+ * riven-lip) is physical: a cracked cap you break with impact-drop. So
+ * feasibility has to be measured or told, never inferred.
  */
-export function route(rooms, from, to) {
+export function route(rooms, from, to, { verbs = null, edgeStats = null } = {}) {
   const start = norm(from);
   const goal = norm(to);
   if (!rooms[start] || !rooms[goal]) return null;
-  const seen = new Set([start]);
-  const queue = [[start]];
-  while (queue.length) {
-    const path_ = queue.shift();
-    const at = path_[path_.length - 1];
-    if (at === goal) return path_;
+
+  const cost = (a, d) => {
+    if (d.needs && verbs && !verbs.has(d.needs)) return Infinity;
+    const s = edgeStats?.[`${a}>${d.to}`];
+    if (!s || !s.tries) return 1;
+    // Laplace: one success and one failure of imaginary evidence, so a
+    // single unlucky attempt does not condemn a door outright.
+    const p = (s.wins + 1) / (s.tries + 2);
+    return 1 / p;
+  };
+
+  // Dijkstra. The graph is 22 nodes; a heap would be ceremony.
+  const dist = { [start]: 0 };
+  const prev = {};
+  const done = new Set();
+  for (;;) {
+    let at = null;
+    for (const k of Object.keys(dist)) if (!done.has(k) && (at === null || dist[k] < dist[at])) at = k;
+    if (at === null || dist[at] === Infinity) return null;
+    if (at === goal) break;
+    done.add(at);
     for (const d of rooms[at]?.doors ?? []) {
-      if (seen.has(d.to)) continue;
-      seen.add(d.to);
-      queue.push([...path_, d.to]);
+      const c = cost(at, d);
+      if (c === Infinity) continue;
+      const alt = dist[at] + c;
+      if (dist[d.to] === undefined || alt < dist[d.to]) { dist[d.to] = alt; prev[d.to] = at; }
     }
   }
-  return null;
+  const path = [goal];
+  while (path[0] !== start) path.unshift(prev[path[0]]);
+  return path;
 }
 
 /** The door in `room` that leads to `next`, if there is one. */
