@@ -28,6 +28,23 @@ const blob = JSON.parse(fs.readFileSync(path.join(here, 'weights.json'), 'utf8')
 /** Anything closer than this and the fight matters more than the trip. */
 const DANGER = 70;
 
+/**
+ * How much room to keep between a fight and the door she came in by.
+ *
+ * Traced from a real run: she pressed RIGHT for 180 frames straight and
+ * travelled LEFT, from x=112 back to x=8, and out through the door at
+ * x=4. Nothing was steering her — contact KNOCKBACK was, one hit at a
+ * time, because she was fighting with her back to an exit. The planner
+ * then recomputed from the wrong room and walked her forward again,
+ * which is the oscillation: cavern > arena > cavern > arena.
+ *
+ * So the leash is on WHERE she fights, not on how she steers. Inside
+ * this margin of the way back, put distance between herself and the door
+ * before engaging; a knockback that lands her in the previous room costs
+ * two crossings and a re-plan, which is far more than the hit did.
+ */
+const DOOR_BACK = 70;
+
 export function make(goalOf) {
   const net = actor(Float64Array.from(blob.weights), blob.shape, goalOf);
   return (o) => {
@@ -38,6 +55,16 @@ export function make(goalOf) {
     // Something near, or the job is to kill: a fighter has the controls.
     const near = o.monsters.some((m) => m.distance !== 'far' && m.gap < DANGER)
       || o.shots.length > 0;
+    // Backed against the way in, with something on her: step off the
+    // door first.  is the door to the room she came from, set by
+    // the planner, which is the only part of the system that knows where
+    // she has been.
+    if (near && goal?.avoid) {
+      const cx = o.player.x + o.player.w / 2;
+      const off = cx - goal.avoid.x;
+      if (Math.abs(off) < DOOR_BACK) return [off >= 0 ? 'right' : 'left'];
+    }
+
     if (!goal || goal.kind === 2 || near) {
       // Which fighter is measured, not preferred. Over ten held-out
       // seeds the rule-based policy clears the arena 6/10 against the

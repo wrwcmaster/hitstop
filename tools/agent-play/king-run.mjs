@@ -85,7 +85,11 @@ async function run(seed, policy) {
       // The arena gate wants a key that only drops when the waves are
       // done, so until then the job is to fight, not to travel.
       const needsKey = here === 'arena' && !p.inventory?.has?.('gate-key');
-      goal = needsKey || !door ? { x: p.cx, y: p.cy, kind: 2 } : { x: door.x, y: door.y, kind: 1 };
+      // The way back, so the driver can avoid being knocked through it.
+      const back = at > 0 ? doorTo(rooms, here, PATH[at - 1]) : null;
+      goal = needsKey || !door
+        ? { x: p.cx, y: p.cy, kind: 2, avoid: back }
+        : { x: door.x, y: door.y, kind: 1, avoid: back };
     }
     harness.step(act(globalThis.window.__observe()), 1);
   }
