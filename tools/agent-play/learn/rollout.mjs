@@ -63,7 +63,14 @@ export const REWARD = {
  *
  * Returns the fitness plus the numbers worth watching while it trains.
  */
-export function episode(harness, game, act, { frames = EPISODE, runSeed = null } = {}) {
+/**
+ * One episode. `room` picks the task: the arena teaches wave-fighting;
+ * the throne teaches the Slime King, who the net can now SEE telegraph
+ * (mode + kinematics) but has never once trained against — every
+ * previous run only ever met slimes and bats, so "do not stand under
+ * the falling king" had no episodes to be learned in.
+ */
+export function episode(harness, game, act, { frames = EPISODE, runSeed = null, room = 'arena' } = {}) {
   const play = () => game.scenes.all().find((s) => s.constructor.name === 'PlayScene');
   let waves = 0;
   // `on` hands back an unsubscribe — there is no `off`. A training run is
@@ -85,8 +92,9 @@ export function episode(harness, game, act, { frames = EPISODE, runSeed = null }
   // score -188, -188, -188.
   if (runSeed !== null) globalThis.window.__harness.pinSeed(runSeed);
   harness.beginRun({ kind: 'scenario', scenario: {
-    room: 'arena', quiet: true,
-    player: { x: 230, y: 192, give: ['great-sword'], equip: ['great-sword'] },
+    room, quiet: true,
+    player: { ...(room === 'throne' ? { x: 120, y: 100 } : { x: 230, y: 192 }),
+      give: ['great-sword'], equip: ['great-sword'] },
   } });
   // Pin BEFORE beginRun, not after. Every candidate must face the same
   // arena, or an antithetic pair compares two different problems and the
@@ -98,6 +106,9 @@ export function episode(harness, game, act, { frames = EPISODE, runSeed = null }
   // its wave queue are already built by then.
   harness.step([], 30);
 
+  // A boss episode is scored on the boss. Grab him now; his absence at
+  // the end IS the win condition.
+  const boss0 = game.world.all().find((e) => e.def?.boss && !e.dead);
   let hp = play()?.player?.hp ?? 0;
   let hits = 0;
   let score = 0;
@@ -119,14 +130,15 @@ export function episode(harness, game, act, { frames = EPISODE, runSeed = null }
   }
   stopListening();
 
-  const cleared = waves >= 5;
+  const bossDead = !!boss0 && (boss0.dead || boss0.hp <= 0);
+  const cleared = room === 'throne' ? bossDead : waves >= 5;
   const fitness = REWARD.wave * waves
     + (cleared ? REWARD.clear : 0)
     + REWARD.kill * score
     + REWARD.hit * hits
     + REWARD.frame * f
     + (died ? REWARD.death : 0);
-  return { fitness, waves, hits, score, frames: f, died, cleared };
+  return { fitness, waves, hits, score, frames: f, died, cleared, bossDead };
 }
 
 /**
