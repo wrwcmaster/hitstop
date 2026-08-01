@@ -30,7 +30,7 @@
  * Adding torch to produce 1,700 numbers would be a poor trade.
  *
  * SEEDS ARE HELD OUT. Training rotates through a POOL of seeds; the
- * that matters comes from `arena-trial.mjs` on seeds this never saw.
+ * score that matters comes from `arena-trial.mjs` on seeds this never saw.
  * Fitting five seeds and believing the number is exactly the mistake the
  * hand-written policy made all day, and a learner overfits far harder.
  */
