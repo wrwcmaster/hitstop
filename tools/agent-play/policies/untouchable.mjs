@@ -271,7 +271,21 @@ export function decide(o) {
   const incoming = o.shots.filter((s) =>
     Math.hypot(s.dx, s.dy) < Math.hypot(s.vx, s.vy) * WALK_HORIZON);
   if (incoming.length) {
-    if (p.onGround && !best.jump) keys.push('jump');
+    if (p.onGround) {
+      if (!best.jump) keys.push('jump');
+      return go(best, keys);
+    }
+    // Airborne, which is where the bullets actually land. Traced on the
+    // rule bot's wave-5 deaths: the bullet was in the observation for
+    // its whole approach — 84px, 75, 65 ... 12 — closing at 620px/s,
+    // and she was off the ground on every frame of it, because dodging
+    // bats keeps her hopping. Mid-air there is no jump, and lateral
+    // drift cannot leave a flat bullet's line. The one tool that works
+    // is the dash: 0.36s of immunity, available airborne. This is the
+    // same verb that measured WORSE as a general movement option —
+    // rejected there, correct here, because "escape this bullet" is the
+    // narrow job an immunity is actually for.
+    if (p.dash?.ready) keys.push('dash');
     return go(best, keys);
   }
 
