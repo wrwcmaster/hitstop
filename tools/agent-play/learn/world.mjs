@@ -21,6 +21,25 @@ const roomsDir = path.join(
   'src', 'game', 'content', 'rooms',
 );
 
+/**
+ * Doors that need a traversal verb, which the room JSON does not say.
+ *
+ * These gates are PHYSICAL, not declared: underground to riven-lip is a
+ * cracked cap you break with impact-drop, so there is no property to
+ * read and no way to infer it. The list is therefore hand-maintained,
+ * and it is the same knowledge `sweep.mjs` keeps in its VERB_GATED table
+ * for the same reason — when a new gate is authored, both want updating.
+ *
+ * Without this the verb-aware routing is INERT: `loadWorld()` sets no
+ * `needs`, so every gate check passes and a planner cheerfully routes a
+ * verbless knight through a wall she cannot break. Passing `verbs: null`
+ * (the default) still ignores gating, which is what the CLI map view
+ * wants; a real planner must pass the set she actually owns.
+ */
+export const VERB_GATES = {
+  'underground>riven_lip': 'impact-drop',
+};
+
 /** Door ids in room JSON use hyphens; file names use underscores. */
 const norm = (id) => id.replace(/-/g, '_');
 
@@ -31,7 +50,7 @@ const norm = (id) => id.replace(/-/g, '_');
  * the same records the game itself acts on, so this cannot drift from
  * what a knight can actually walk through.
  */
-export function loadWorld() {
+export function loadWorld({ gates = VERB_GATES } = {}) {
   const rooms = {};
   for (const file of fs.readdirSync(roomsDir).filter((f) => f.endsWith('.json'))) {
     const def = JSON.parse(fs.readFileSync(path.join(roomsDir, file), 'utf8'));
@@ -40,6 +59,7 @@ export function loadWorld() {
       .filter((t) => t.event === 'door' && t.props?.room)
       .map((t) => ({
         to: norm(t.props.room),
+        needs: gates[`${id}>${norm(t.props.room)}`] ?? null,
         // Where the trigger sits, so a policy can be told which way to go.
         x: t.x + (t.w ?? 8) / 2,
         y: t.y + (t.h ?? 8) / 2,

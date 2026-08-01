@@ -71,9 +71,25 @@ const N = paramCount();
 const rand = rng(Number(arg('--rng', 12345)));
 
 let mu = new Float64Array(N);
+let bestValid = -Infinity;
+let savedAt = 0;
 if (resume && fs.existsSync(OUT)) {
-  mu = Float64Array.from(JSON.parse(fs.readFileSync(OUT, 'utf8')).weights);
-  console.log('resumed from', OUT);
+  const prev = JSON.parse(fs.readFileSync(OUT, 'utf8'));
+  mu = Float64Array.from(prev.weights);
+  // Carry the checkpoint's validation score forward, or the first
+  // validation of the resumed run beats -Infinity by definition and
+  // overwrites a better policy with a worse one. Only reusable when the
+  // validation seeds match; otherwise the two numbers are not comparable
+  // and the honest thing is to re-score what we just loaded.
+  const sameSeeds = JSON.stringify(prev.validSeeds ?? []) === JSON.stringify(VALID_SEEDS);
+  if (sameSeeds && typeof prev.validFitness === 'number') {
+    bestValid = prev.validFitness;
+    savedAt = prev.generation ?? 0;
+    console.log(`resumed from ${OUT} (validation ${bestValid}, generation ${savedAt})`);
+  } else {
+    bestValid = await validate(mu);
+    console.log(`resumed from ${OUT}; re-scored the loaded mean: ${Math.round(bestValid)}`);
+  }
 } else {
   // Small random init. Zeros would make every output identical and every
   // perturbation equally meaningless for the first few generations.
@@ -86,6 +102,17 @@ console.log(`ES: ${GENS} generations x ${POP} candidates x ${PER_GEN} seeds`
 console.log(`seed pool ${POOL.join(',')}, ${PER_GEN} per generation — others are the score
 `);
 
+/** Score a policy on the fixed validation seeds. */
+async function validate(weights) {
+  let v = 0;
+  for (const seed of VALID_SEEDS) {
+    const { harness: vh, game: vg } = await bootGame({ fresh: true, seed });
+    v += episode(vh, vg, actor(weights), { runSeed: seed }).fitness / VALID_SEEDS.length;
+    await close();
+  }
+  return v;
+}
+
 /** Rank-normalise to [-0.5, 0.5]: robust to reward outliers. */
 function ranked(vals) {
   const order = vals.map((v, i) => [v, i]).sort((a, b) => a[0] - b[0]);
@@ -93,9 +120,6 @@ function ranked(vals) {
   order.forEach(([, i], r) => { out[i] = r / (vals.length - 1) - 0.5; });
   return out;
 }
-
-let bestValid = -Infinity;
-let savedAt = 0;
 
 const t0 = Date.now();
 
@@ -165,12 +189,7 @@ for (let g = 1; g <= GENS; g++) {
   // never move, and keep the best of those. Comparable by construction,
   // and it measures the policy rather than a perturbation of it.
   if (g % VALIDATE_EVERY === 0 || g === GENS) {
-    let v = 0;
-    for (const seed of VALID_SEEDS) {
-      const { harness: vh, game: vg } = await bootGame({ fresh: true, seed });
-      v += episode(vh, vg, actor(mu), { runSeed: seed }).fitness / VALID_SEEDS.length;
-      await close();
-    }
+    const v = await validate(mu);
     const better = v > bestValid;
     if (better) {
       bestValid = v;
