@@ -121,6 +121,32 @@ export class PauseScene implements Scene {
     this.game.scenes.pop();
   }
 
+  /**
+   * What an agent needs to work this menu (see `AgentReadable`).
+   *
+   * A potion restores 40 health and is used from HERE, and the Slime
+   * King is only beatable at full health — so "open the pause menu and
+   * drink" sits directly on the critical path of a whole run. Without
+   * this an agent sees `{top: 'PauseScene', blocking: true}` and has no
+   * way to know what is on the screen, let alone which row to press.
+   * Which page is showing matters too: the same up/down/confirm means
+   * different things on the main list and the inventory.
+   */
+  describe(): { kind: string; page: string; options: string[]; hints: string[]; index: number } {
+    const menu = this.page === 'inventory' ? this.invMenu : this.mainMenu;
+    return {
+      kind: 'pause',
+      page: this.page,
+      options: menu.entries.map((e) => (typeof e.label === 'function' ? e.label() : e.label)),
+      // 'USE' / 'EQUIP' — what confirming this row would actually do.
+      hints: menu.entries.map((e) => {
+        const h = (e as { hint?: () => string }).hint;
+        return typeof h === 'function' ? h() : '';
+      }),
+      index: menu.index,
+    };
+  }
+
   private openInventory(): void {
     this.page = 'inventory';
     this.rebuildInventory();
