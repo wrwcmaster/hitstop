@@ -61,6 +61,11 @@ const LR = Number(arg('--lr', 0.06));
 const POOL = arg('--seeds', '3,11,29,47,58,64,91,102').split(',').map(Number);
 const PER_GEN = Number(arg('--seeds-per-gen', 2));
 const resume = process.argv.includes('--resume');
+// Seeds that NEVER change, used only to compare one saved policy against
+// another. Disjoint from the training pool and from the held-out set the
+// final score is reported on, so validation cannot flatter either.
+const VALID_SEEDS = arg('--valid', '201,202').split(',').map(Number);
+const VALIDATE_EVERY = Number(arg('--validate-every', 4));
 
 const N = paramCount();
 const rand = rng(Number(arg('--rng', 12345)));
@@ -88,6 +93,9 @@ function ranked(vals) {
   order.forEach(([, i], r) => { out[i] = r / (vals.length - 1) - 0.5; });
   return out;
 }
+
+let bestValid = -Infinity;
+let savedAt = 0;
 
 const t0 = Date.now();
 
@@ -140,21 +148,42 @@ for (let g = 1; g <= GENS; g++) {
   for (let i = 0; i < N; i++) mu[i] += (LR / (POP * SIGMA)) * step[i];
 
   const top = fitness.indexOf(Math.max(...fitness));
-  // Save the CURRENT MEAN, every generation.
+
+  // MODEL SELECTION, on a fixed validation set.
   //
-  // The old rule kept a historical maximum and only wrote when a
-  // generation beat it — but the seeds rotate, so those maxima are not
-  // comparable, and a lucky early generation locks the file forever
-  // while training carries on improving into the void. It happened: a
-  // 22-generation run shipped its generation-7 weights. The saved
-  // fitness was wrong too, belonging to a perturbed candidate while the
-  // stored weights were the post-update mean — two different policies
-  // in one file.
-  fs.writeFileSync(OUT, JSON.stringify({
-    shape: SHAPE, note: 'ES-trained arena policy', trainSeeds: POOL,
-    generation: g, meanFitness: Math.round(fitness.reduce((a, b) => a + b, 0) / POP),
-    weights: Array.from(mu),
-  }));
+  // Two wrong versions preceded this. The first kept a historical
+  // maximum of the best perturbed CANDIDATE — but seeds rotate, so those
+  // maxima are incomparable, and one lucky early generation locked the
+  // file while training carried on (a 22-generation run shipped its
+  // generation-7 weights). The second wrote the mean every generation,
+  // which is honest about WHAT it saves and does no selection at all, so
+  // training ends on whatever the last generation happened to be —
+  // generation 13 scored +108 here and generation 21 scored -173, and
+  // the file kept the latter.
+  //
+  // So: score the MEAN — the thing actually being saved — on seeds that
+  // never move, and keep the best of those. Comparable by construction,
+  // and it measures the policy rather than a perturbation of it.
+  if (g % VALIDATE_EVERY === 0 || g === GENS) {
+    let v = 0;
+    for (const seed of VALID_SEEDS) {
+      const { harness: vh, game: vg } = await bootGame({ fresh: true, seed });
+      v += episode(vh, vg, actor(mu), { runSeed: seed }).fitness / VALID_SEEDS.length;
+      await close();
+    }
+    const better = v > bestValid;
+    if (better) {
+      bestValid = v;
+      fs.writeFileSync(OUT, JSON.stringify({
+        shape: SHAPE, note: 'ES-trained arena policy', trainSeeds: POOL,
+        generation: g, validFitness: Math.round(v), validSeeds: VALID_SEEDS,
+        weights: Array.from(mu),
+      }));
+    }
+    console.log(`  gen ${String(g).padStart(3)}  VALIDATION ${String(Math.round(v)).padStart(6)}`
+      + (better ? '  <- saved' : `  (kept generation ${savedAt})`));
+    if (better) savedAt = g;
+  }
   const s = stats[top];
   const mean = fitness.reduce((a, b) => a + b, 0) / POP;
   console.log(`gen ${String(g).padStart(3)}  best ${String(Math.round(fitness[top])).padStart(6)}`
