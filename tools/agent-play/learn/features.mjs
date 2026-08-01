@@ -25,7 +25,21 @@ const SHOT_F = 5;
 /** Player + space block. */
 const SELF_F = 16;
 
-export const FEATURES = SELF_F + MOBS * MOB_F + SHOTS * SHOT_F + 2;
+/**
+ * Goal slots: where am I trying to GET to, and what kind of job is it.
+ *
+ * Without these the policy is a fighter and nothing else — two spots in
+ * a room that look identical need opposite actions depending on whether
+ * the exit is left or right, and the net cannot tell them apart, so no
+ * amount of training makes it navigate. The goal comes from the DRIVER
+ * (which knows the route) rather than from the game: the observation
+ * describes the world, not the plan.
+ *   dx, dy  — direction and distance to the target, scaled
+ * kinds: 0 none / 1 reach a door / 2 clear the room
+ */
+const GOAL_F = 5;
+
+export const FEATURES = SELF_F + MOBS * MOB_F + SHOTS * SHOT_F + 2 + GOAL_F;
 
 const clamp = (v) => (v < -1 ? -1 : v > 1 ? 1 : v);
 
@@ -35,7 +49,7 @@ const clamp = (v) => (v < -1 ? -1 : v > 1 ? 1 : v);
  * A null player (she is dead, or a menu owns the screen) encodes as all
  * zeros — the caller handles those cases before it ever gets here.
  */
-export function encode(o, out = new Float64Array(FEATURES)) {
+export function encode(o, out = new Float64Array(FEATURES), goal = null) {
   out.fill(0);
   const p = o?.player;
   if (!p) return out;
@@ -95,6 +109,19 @@ export function encode(o, out = new Float64Array(FEATURES)) {
   out[i++] = far.length
     ? Math.sign(far.slice().sort((a, b) => Math.abs(a.dx) - Math.abs(b.dx))[0].dx)
     : 0;
+
+  // The goal, if the driver set one. Absent = all zeros, which is what
+  // the arena-only policy trained against, so old weights still mean the
+  // same thing in the slots they do use.
+  if (goal && p.x !== undefined) {
+    const gx = goal.x - (p.x + p.w / 2);
+    const gy = goal.y - (p.y + p.h / 2);
+    out[i++] = clamp(gx / 300);
+    out[i++] = clamp(gy / 200);
+    out[i++] = Math.sign(gx);
+    out[i++] = clamp(Math.hypot(gx, gy) / 400);
+    out[i++] = goal.kind ?? 1;
+  }
   return out;
 }
 

@@ -65,10 +65,15 @@ Every step of that table came from a diagnosis, not a knob:
 | `train.mjs` | evolution strategies, antithetic pairs, rank-normalised |
 | `learned.mjs` | loads `weights.json`, plugs into `arena-trial.mjs` |
 
-**Evolution strategies, not gradients.** The sim is a black box full of
-hit-stop, state machines and discrete events; there is nothing to
-differentiate through short of rewriting the game. ES only needs to be
-able to *play*, and this sim plays at 7,500 frames/s in-process — an HTTP
+**Evolution strategies, and not for the reason first written here.** The
+original justification was "the sim is not differentiable" — that is
+wrong. PPO and friends never differentiate through the environment, only
+through the policy, which is a plain MLP. The real case for ES at 2,106
+parameters is that it needs no autodiff, no dependency, and yields a
+deterministic argmax policy. Its cost is credit assignment: one scalar
+per episode, which is why an eight-minute corner camp scoring 3434
+against a brisk clear's 3454 was invisible to the optimiser. Above
+~5k parameters, prefer PPO. ES only needs to be able to *play*, and this sim plays at 7,500 frames/s in-process — an HTTP
 gym wrapper would cap at ~70 turns/s and throw away two orders of
 magnitude, which is why training lives in Node beside the sim.
 

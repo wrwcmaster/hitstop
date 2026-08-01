@@ -45,8 +45,17 @@ export const REWARD = {
   // and "still standing" scored the same, so nothing ever taught it the
   // difference.
   clear: 2000,
-  frame: -0.02,
-  death: -500,
+  // Time, charged properly. At -0.02 an eight-minute corner camp scored
+  // 3434 against a brisk clear's 3454 — a 20-point gap on 3400, which is
+  // noise, so the learner took the easy one: it ran to the left wall,
+  // held left and attack, and let five waves path into the sword. Mean x
+  // was 3 in an arena 960 wide, motionless for 90% of the run, and it
+  // finished on 120/120 HP looking like skill. At -0.1 the same camp
+  // scores 1194 against 3094.
+  frame: -0.1,
+  // Raised with it. A big time charge makes a long honest attempt cost
+  // more than a quick death, and a policy will notice that before you do.
+  death: -2000,
 };
 
 /**
@@ -96,8 +105,16 @@ export function episode(harness, game, act, { frames = EPISODE } = {}) {
   return { fitness, waves, hits, score, frames: f, died, cleared };
 }
 
-/** Wrap raw weights as an `act` function, reusing scratch buffers. */
-export function actor(weights, shape = SHAPE) {
+/**
+ * Wrap raw weights as an `act` function, reusing scratch buffers.
+ *
+ * `goalOf` is optional and supplied by the DRIVER, not the game: it
+ * returns {x, y, kind} for whatever the policy is currently trying to
+ * do. The observation describes the world; the plan is not part of the
+ * world, and putting it in `__observe()` would make the game responsible
+ * for knowing where an agent wants to go.
+ */
+export function actor(weights, shape = SHAPE, goalOf = null) {
   const scratch = {};
   const x = encode({ player: null, monsters: [], shots: [] });
   return (o) => {
@@ -106,7 +123,7 @@ export function actor(weights, shape = SHAPE) {
     // would burn episodes on something the game never varies.
     if (o?.ui?.blocking) return ['confirm'];
     if (!o?.player) return [];
-    encode(o, x);
+    encode(o, x, goalOf ? goalOf() : null);
     return MOVES[forward(weights, x, shape, scratch)];
   };
 }

@@ -5,11 +5,25 @@
  *   node tools/agent-play/learn/train.mjs --gens 60 --pop 24
  *   node tools/agent-play/learn/train.mjs --resume        # continue from weights.json
  *
- * WHY ES AND NOT GRADIENTS. The sim is a black box with hit-stop, state
- * machines and discrete events in it; there is nothing to differentiate
- * through without rewriting the game. ES only needs to be able to PLAY,
- * which this sim does at 7,500 frames/s in-process — an HTTP gym wrapper
- * would cap at ~70 turns/s and throw away two orders of magnitude.
+ * WHY ES, HONESTLY. Not because the sim is undifferentiable — that was
+ * my reasoning and it is wrong. Policy-gradient methods never
+ * differentiate through the environment; they differentiate the POLICY,
+ * which is a plain MLP here. PPO was always available.
+ *
+ * The real case for ES at this size: 2,106 parameters, no dependency, no
+ * autodiff, embarrassingly parallel, and a deterministic argmax policy
+ * that can be dropped straight into the game. Its real cost is credit
+ * assignment — one scalar per episode. That is not academic: an
+ * eight-minute corner camp scored 3434 against a brisk clear's 3454, a
+ * 0.6% difference that rank-normalisation cannot see through seed noise,
+ * so the exploit was invisible to the optimiser by construction. A
+ * per-timestep method with a value baseline separates those trivially.
+ *
+ * The switch point is capacity. ES sample cost grows with parameter
+ * count; PPO's does not, meaningfully. Keep ES under ~5k parameters and
+ * short per-room tasks. The whole-game version — goal-conditioned, with
+ * a tile window in the observation — lands at 20k-100k, and should be
+ * PPO from the start rather than after ES stalls.
  *
  * WHY NOT A LIBRARY. The repo ships zero runtime dependencies, and the
  * artifact here is a JSON blob of weights plus two matrix multiplies.
