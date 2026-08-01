@@ -65,9 +65,11 @@ async function trial(seed) {
     const p = play()?.player;
     if (!p || p.hp <= 0) break;
     wave = Math.max(wave, harness.state().wave?.n ?? 0);
+    // Previous frame, not a low-water mark: level-ups and potions heal
+    // her mid-run, and a low-water mark then ignores every later hit
+    // that lands above it. Measured: 8 real damage events, 2 counted.
     if (p.hp < hp) {
       hurt++;
-      hp = p.hp;
       // Blame whatever is close enough to have done it. Contact damage is
       // the overwhelming majority; 'ranged' means nothing was in touching
       // distance, so it came in through the air.
@@ -77,6 +79,7 @@ async function trial(seed) {
       const k = near.length ? near.sort().join('+') : 'ranged';
       blame[k] = (blame[k] ?? 0) + 1;
     }
+    hp = p.hp;
     const keys = policy.decide(globalThis.window.__observe());
     harness.step(keys, every);
     f += every - 1;

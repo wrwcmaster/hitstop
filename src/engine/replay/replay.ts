@@ -148,6 +148,17 @@ interface Run<Start> {
 export class Replay<A extends string, Start = unknown, E extends Record<string, unknown> = Record<string, unknown>> {
   private run: Run<Start> | null = null;
   private runCount = 0;
+  /**
+   * Force every run to start from this seed instead of a fresh one.
+   *
+   * Harness runs normally derive a NEW seed per run (see below), which
+   * is right for an agent session — each run should be its own world.
+   * It is wrong for training: comparing two candidate policies means
+   * putting them in the SAME world, and a derived-per-run seed silently
+   * gives them different ones. Reseeding after  does not fix
+   * that, because the room and its wave queue are already built by then.
+   */
+  pinnedSeed: number | null = null;
   private tainted: string | undefined;
   private created = new Date().toISOString();
 
@@ -197,9 +208,11 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
       // tapes never span that boundary, so the playback is over.
       this.viewerEnded = true;
     }
-    const seed = this.boot.harness
-      ? (((this.boot.seed + 0x9e3779b9 * ++this.runCount) >>> 0) || 1)
-      : newSeed();
+    const seed = this.pinnedSeed !== null
+      ? this.pinnedSeed
+      : this.boot.harness
+        ? (((this.boot.seed + 0x9e3779b9 * ++this.runCount) >>> 0) || 1)
+        : newSeed();
     seedRandom(seed);
     this.run = {
       seed, start, storage: snapshotStorage(this.boot.storagePrefix),
@@ -326,6 +339,10 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
 
     window.__harness = {
       seed: this.boot.seed,
+      /** Pin (or with null, release) the seed every run starts from.
+       * Training uses it so candidates share one world; normal agent
+       * play leaves it alone and keeps a fresh world per run. */
+      pinSeed: (n: number | null) => { this.pinnedSeed = n; },
       actions: this.config.actions,
       step: step as (down?: string[], frames?: number) => unknown,
       state: () => this.config.state(),
@@ -481,6 +498,8 @@ declare global {
     };
     __harness?: {
       seed: number;
+      /** Pin every run to this seed (null releases). Training only. */
+      pinSeed(n: number | null): void;
       actions: readonly string[];
       step(down?: string[], frames?: number): unknown;
       state(): unknown;

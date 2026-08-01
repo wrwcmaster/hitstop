@@ -63,7 +63,7 @@ export const REWARD = {
  *
  * Returns the fitness plus the numbers worth watching while it trains.
  */
-export function episode(harness, game, act, { frames = EPISODE } = {}) {
+export function episode(harness, game, act, { frames = EPISODE, runSeed = null } = {}) {
   const play = () => game.scenes.all().find((s) => s.constructor.name === 'PlayScene');
   let waves = 0;
   // `on` hands back an unsubscribe — there is no `off`. A training run is
@@ -74,10 +74,28 @@ export function episode(harness, game, act, { frames = EPISODE } = {}) {
     waves = Math.max(waves, e.wave);
   });
 
+  // Pin BEFORE beginRun, not after. Every candidate must face the same
+  // arena, or an antithetic pair compares two different problems and the
+  // difference measures noise rather than the perturbation. Harness runs
+  // normally derive a fresh seed each time (boot.seed + 0x9e3779b9 *
+  // ++runCount), so booting once per seed is NOT enough — I believed it
+  // was, and the same weights run four times scored -176, -200, -176,
+  // -323. Reseeding AFTER beginRun does not work either: the room and
+  // its wave queue are already built by then. Pinned, the same weights
+  // score -188, -188, -188.
+  if (runSeed !== null) globalThis.window.__harness.pinSeed(runSeed);
   harness.beginRun({ kind: 'scenario', scenario: {
     room: 'arena', quiet: true,
     player: { x: 230, y: 192, give: ['great-sword'], equip: ['great-sword'] },
   } });
+  // Pin BEFORE beginRun, not after. Every candidate must face the same
+  // arena, or an antithetic pair compares two different problems and the
+  // difference measures noise rather than the perturbation. Harness runs
+  // normally derive a fresh seed each time (boot.seed + 0x9e3779b9 *
+  // ++runCount), so booting once per seed is NOT enough — I believed it
+  // was, and the same weights run four times scored -176, -200, -176,
+  // -323. Reseeding AFTER beginRun does not work either: the room and
+  // its wave queue are already built by then.
   harness.step([], 30);
 
   let hp = play()?.player?.hp ?? 0;
@@ -88,7 +106,13 @@ export function episode(harness, game, act, { frames = EPISODE } = {}) {
   for (; f < frames; f++) {
     const p = play()?.player;
     if (!p || p.hp <= 0) { died = true; break; }
-    if (p.hp < hp) { hits++; hp = p.hp; }
+    // Compare with the PREVIOUS FRAME, not the lowest hp so far. Kills
+    // level her up and potions drop, so hp goes back up mid-run; a
+    // low-water mark then silently ignores every later hit that lands
+    // above it. Measured on one arena run: 8 real damage events, 2
+    // counted. The hit penalty was a quarter of what I thought it was.
+    if (p.hp < hp) hits++;
+    hp = p.hp;
     const st = harness.state();
     score = st.score ?? 0;
     harness.step(act(globalThis.window.__observe()), 1);

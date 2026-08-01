@@ -65,7 +65,8 @@ async function run(seed, policy) {
   for (; f < CAP; f++) {
     const p = play()?.player;
     if (!p || p.hp <= 0) break;
-    if (p.hp < hp) { hits++; hp = p.hp; }
+    if (p.hp < hp) hits++;
+    hp = p.hp;
 
     const st = harness.state();
     const here = (st.roomId ?? 'arena').replace(/-/g, '_');

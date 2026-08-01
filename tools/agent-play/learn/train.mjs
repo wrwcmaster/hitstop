@@ -90,7 +90,6 @@ function ranked(vals) {
 }
 
 const t0 = Date.now();
-let best = { fitness: -Infinity, weights: null };
 
 for (let g = 1; g <= GENS; g++) {
   // Antithetic pairs: every perturbation is tried in both directions, so
@@ -121,7 +120,7 @@ for (let g = 1; g <= GENS; g++) {
       const e = eps[pair * 2];
       const w = new Float64Array(N);
       for (let i = 0; i < N; i++) w[i] = mu[i] + sign * SIGMA * e[i];
-      const r = episode(harness, game, actor(w));
+      const r = episode(harness, game, actor(w), { runSeed: seed });
       fitness[c] += r.fitness / TRAIN_SEEDS.length;
       const acc = stats[c];
       acc.waves += r.waves; acc.hits += r.hits; acc.score += r.score; acc.died += r.died ? 1 : 0;
@@ -141,13 +140,21 @@ for (let g = 1; g <= GENS; g++) {
   for (let i = 0; i < N; i++) mu[i] += (LR / (POP * SIGMA)) * step[i];
 
   const top = fitness.indexOf(Math.max(...fitness));
-  if (fitness[top] > best.fitness) {
-    best = { fitness: fitness[top], weights: Array.from(mu) };
-    fs.writeFileSync(OUT, JSON.stringify({
-      shape: SHAPE, note: 'ES-trained arena policy', trainSeeds: POOL,
-      generation: g, fitness: Math.round(fitness[top]), weights: best.weights,
-    }));
-  }
+  // Save the CURRENT MEAN, every generation.
+  //
+  // The old rule kept a historical maximum and only wrote when a
+  // generation beat it — but the seeds rotate, so those maxima are not
+  // comparable, and a lucky early generation locks the file forever
+  // while training carries on improving into the void. It happened: a
+  // 22-generation run shipped its generation-7 weights. The saved
+  // fitness was wrong too, belonging to a perturbed candidate while the
+  // stored weights were the post-update mean — two different policies
+  // in one file.
+  fs.writeFileSync(OUT, JSON.stringify({
+    shape: SHAPE, note: 'ES-trained arena policy', trainSeeds: POOL,
+    generation: g, meanFitness: Math.round(fitness.reduce((a, b) => a + b, 0) / POP),
+    weights: Array.from(mu),
+  }));
   const s = stats[top];
   const mean = fitness.reduce((a, b) => a + b, 0) / POP;
   console.log(`gen ${String(g).padStart(3)}  best ${String(Math.round(fitness[top])).padStart(6)}`
