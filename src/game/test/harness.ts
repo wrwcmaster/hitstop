@@ -232,6 +232,15 @@ function attachObserver(game: ActionGame): void {
     return {
       ui,
       player: {
+        // Absolute position, restored. I cut this when trimming the
+        // payload, on the reasoning that "nothing an agent decides
+        // depends on where the room's origin is, only on where things
+        // are relative to HER". That is true of FIGHTING and false of
+        // going somewhere: a door is at a fixed spot in the room, and
+        // without her own coordinates there is no way to work out which
+        // way it lies. Two numbers, and navigation is impossible without
+        // them.
+        x: round(p.x), y: round(p.y),
         w: p.w, h: p.h,
         vx: round(p.vx), vy: round(p.vy),
         hp: p.hp, maxHp: p.maxHp,

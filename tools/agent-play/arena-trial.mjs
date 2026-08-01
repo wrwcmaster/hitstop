@@ -36,6 +36,10 @@ const arg = (name, fallback) => {
 const seeds = arg('--seeds', '1,7,42,99,2024').split(',').map(Number);
 const policyPath = arg('--policy', './policies/untouchable.mjs');
 const why = process.argv.includes('--why');
+// How many frames pass per decision. A code policy decides every frame;
+// an LLM over the bridge decides perhaps once a second. Same game, very
+// different problem, and this is the knob that tells them apart.
+const every = Number(arg('--every', '1'));
 const CAP = 40000; // ~11 minutes of game time: a stall, not a slow win
 
 const policy = await import(policyPath);
@@ -61,9 +65,11 @@ async function trial(seed) {
     const p = play()?.player;
     if (!p || p.hp <= 0) break;
     wave = Math.max(wave, harness.state().wave?.n ?? 0);
+    // Previous frame, not a low-water mark: level-ups and potions heal
+    // her mid-run, and a low-water mark then ignores every later hit
+    // that lands above it. Measured: 8 real damage events, 2 counted.
     if (p.hp < hp) {
       hurt++;
-      hp = p.hp;
       // Blame whatever is close enough to have done it. Contact damage is
       // the overwhelming majority; 'ranged' means nothing was in touching
       // distance, so it came in through the air.
@@ -73,7 +79,10 @@ async function trial(seed) {
       const k = near.length ? near.sort().join('+') : 'ranged';
       blame[k] = (blame[k] ?? 0) + 1;
     }
-    harness.step(policy.decide(globalThis.window.__observe()), 1);
+    hp = p.hp;
+    const keys = policy.decide(globalThis.window.__observe());
+    harness.step(keys, every);
+    f += every - 1;
   }
   const p = play()?.player;
   await close();

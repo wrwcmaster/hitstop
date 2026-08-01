@@ -163,17 +163,23 @@ export function reset() {
  */
 
 /**
- * Clear air she insists on keeping, in px. Heavier hits earn more.
+ * How fast each kind eats the gap, px/s, with the knight standing still.
+ * Measured by staging one fight per kind: tools/agent-play/measure.mjs.
  *
- * Also tried and rejected: scaling this with the thing's SPEED, on the
- * reasoning that ~8px is a tenth of a second in front of a bat doing
- * 80px/s, so she reacts too late. It sounds right and it measures worse —
- * 24 hits across the five seeds against 20, and slower runs, because a
- * bigger no-go zone means more time spent backing up and less spent
- * ending the wave. Both experiments point the same way: the margin is not
- * where the remaining damage lives.
+ * This table replaces a guess, and the guess was not close. The margin
+ * used to be `6 + damage/4` — about 8px in front of a bat — chosen
+ * because it sounded like enough. A bat closes at 189px/s. Over a 0.34s
+ * swing that is 64px of ground, so she was demanding an eighth of the
+ * room she needed, which is why bats have led the damage table all day.
  */
-const room = (m) => 6 + (m?.dmg ?? 0) / 4;
+const CLOSE_RATE = { slime: 82, bat: 189, brute: 55, archer: 0, gunner: 0 };
+
+/**
+ * Clear air a swing must respect: what this thing can cover while the
+ * swing has the controls. Derived, so it stays right if a weapon gets
+ * slower or a monster gets faster.
+ */
+const room = (m, p) => (CLOSE_RATE[m?.type] ?? 100) * (p.commitT || 0.3);
 
 /** Worst gap while she is locked in a swing: pinned, for commitT. */
 function swingSafety(p, o) {
@@ -230,7 +236,7 @@ export function decide(o) {
   // bat with both directions refused and nothing pressed, holding still
   // for ten frames while it closed, with three quarters of the arena
   // open behind her.
-  const canGo = (room, ledge) => room > step * 0.6 && (!ledge || room > step);
+  const canGo = (space, ledge) => space >= step && (!ledge || space > step);
   const options = [{ dir: 0, shift: 0 }];
   if (canGo(o.space.left, o.space.ledgeLeft)) options.push({ dir: -1, shift: -step });
   if (canGo(o.space.right, o.space.ledgeRight)) options.push({ dir: 1, shift: step });
@@ -258,7 +264,12 @@ export function decide(o) {
   // clears, 3/5 -> 1/5, with everything else held identical. Leaving the
   // ground dodges these shots whatever the arc is; the physics was right
   // and the conclusion drawn from it was not.
-  const incoming = o.shots.filter((s) => Math.hypot(s.dx, s.dy) < 110);
+  // How near a shot has to be to matter is its SPEED times the time she
+  // needs to leave the line — not a round number. Arrows fly at 318px/s
+  // and bullets at 620, so one figure cannot serve both: 110px was 0.35s
+  // of arrow and 0.18s of bullet, which is no warning at all.
+  const incoming = o.shots.filter((s) =>
+    Math.hypot(s.dx, s.dy) < Math.hypot(s.vx, s.vy) * WALK_HORIZON);
   if (incoming.length) {
     if (p.onGround && !best.jump) keys.push('jump');
     return go(best, keys);
@@ -291,7 +302,7 @@ export function decide(o) {
     if (away) keys.push(away.dx > 0 ? 'right' : 'left');
     return keys;
   }
-  const need = room(target);
+  const need = room(target, p);
 
   // A swing is a promise to stand still for `commitT`. Judge it over that
   // whole window with her PINNED where she is — because during it, she
@@ -305,8 +316,24 @@ export function decide(o) {
   if (target.distance === 'inReach' && p.attackReady && recover <= 0) {
     // Zero margin is not a margin: "will not literally touch me" left her
     // trading blows with brutes, and she loses trades. Demand real air.
-    if (swingSafety(p, o) > need * 0.6) {
-      recover = Math.round((p.commitT || 0.3) * 60) + 10;
+    // A bat needs 64px of margin and her reach is 33: those cannot both
+    // be satisfied, and that is not a bug in the arithmetic — it is the
+    // game telling the truth. You cannot trade with something closing at
+    // 189px/s using a swing that takes the controls for a third of a
+    // second. So the other half of the rule: swing when it is NOT coming
+    // at you. Bats weave, overshoot and turn; the moment after the pass
+    // is free, and it is the only free one.
+    const receding = (target.dx * target.vx + target.dy * target.vy) >= 0;
+    if (swingSafety(p, o) > need * 0.6 || receding) {
+      // Back off only from something that actually punishes the recovery.
+      // Staged and measured (measure.mjs): after a swing beside it, a bat
+      // lands a hit 0.38s later — just past the 0.34s commit — while a
+      // slime and a brute never punish a stationary knight at all, out to
+      // four seconds. Retreating from those two buys nothing and costs
+      // the tempo that ends the wave.
+      recover = (CLOSE_RATE[target.type] ?? 100) > 100
+        ? Math.round((p.commitT || 0.3) * 60) + 10
+        : 0;
       keys.push('attack');
       return keys;
     }
@@ -324,7 +351,7 @@ export function decide(o) {
   // Free hits: contact costs nothing while i-frames burn, so spend them
   // swinging rather than running. Fleeing through them wastes the one
   // advantage a hit hands back.
-  if (p.invulnT > 0.15 && p.attackReady && o.monsters.some((m) => m.distance === 'inReach')) {
+  if (p.invulnT > (p.commitT || 0.3) && p.attackReady && o.monsters.some((m) => m.distance === 'inReach')) {
     keys.push('attack');
     return keys;
   }

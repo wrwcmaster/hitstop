@@ -14,7 +14,9 @@
     "bugtest": "node tools/agent-play/bugtest.mjs",
     "replay:headless": "node tools/agent-play/replay-headless.mjs",
     "playbook": "node tools/agent-play/playbook-check.mjs",
-    "arena-trial": "node tools/agent-play/arena-trial.mjs"
+    "arena-trial": "node tools/agent-play/arena-trial.mjs",
+    "measure": "node tools/agent-play/measure.mjs",
+    "learn": "node tools/agent-play/learn/train.mjs"
   },
   "devDependencies": {
     "playwright": "^1.61.1",
