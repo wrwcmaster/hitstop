@@ -15,6 +15,7 @@ import { PLAYER_TUNING } from '../actors/player-tuning';
 import { Monster } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
 import { PlayScene } from '../scenes/play';
+import { Shockwave } from '../actors/shockwave';
 
 /**
  * A scene that can explain itself to an agent. Optional and duck-typed on
@@ -368,12 +369,34 @@ function attachObserver(game: ActionGame): void {
       // And only the ones actually coming at her: a shot that is not
       // closing is scenery, and reporting scenery every frame is how a
       // payload doubles for nothing.
-      shots: game.world.all().filter((e): e is Projectile =>
+      // Everything incoming rides in ONE list, as physics: a position,
+      // a velocity, a size. An arrow, a bullet and a ground shockwave
+      // are all "a hazard that will be here soon", and a policy that
+      // dodges one dodges the others without knowing any of their
+      // names. The Slime King's slam was the gap that forced this: its
+      // radius damage arrives as a Shockwave, which is not a Projectile,
+      // so the slam's actual damage dealer was invisible — an agent
+      // could watch him leap and still never see what hit her.
+      shots: (([] as { dx: number; dy: number; vx: number; vy: number; w?: number; h?: number }[])
+        .concat(game.world.all().filter((e): e is Shockwave =>
+          e instanceof Shockwave && !e.dead && e.targetTeam === 'player')
+          .flatMap((wv) => {
+            const cells = wv.crestCells();
+            if (!cells.length) return [];
+            const [cx, cy] = cells[0];        // the front cell, world px
+            const dx = cx + 4 - p.cx;
+            const dy = cy + 4 - p.cy;
+            const vx = wv.runDir * wv.speed;
+            // Same closing test as any shot: receding waves are scenery.
+            if (dx * vx >= 0 && Math.sign(dx) !== 0) return [];
+            return [{ dx: Math.round(dx), dy: Math.round(dy), vx: Math.round(vx), vy: 0, w: 8, h: 8 }];
+          })))
+        .concat(game.world.all().filter((e): e is Projectile =>
         e instanceof Projectile && !e.dead && e.targetTeam === 'player'
         && (e.x - p.cx) * e.vx + (e.y - p.cy) * e.vy < 0).map((s) => ({
         dx: Math.round(s.x - p.cx), dy: Math.round(s.y - p.cy),
         vx: Math.round(s.vx), vy: Math.round(s.vy),
-      })),
+      }))),
       // Where there is room to GO. An agent that can see monsters but not
       // the floor retreats into walls and off ledges — it backs away from
       // the thing chasing it and finds the corner with its shoulders. The
