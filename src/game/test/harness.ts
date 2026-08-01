@@ -321,7 +321,16 @@ function attachObserver(game: ActionGame): void {
         // it can reach you without touching you, and that it is winding
         // up to. The archer's draw is a real telegraph the artwork
         // already shows ("when the bow comes up, move").
-        const aiming = typeof m.state.mode === 'string' ? m.state.mode : undefined;
+        // A behaviour's named phase, from either place behaviours keep
+        // one. Simple monsters write `state.mode` ('aim'); FSM-driven
+        // ones — every boss, the brute — keep it in `state.fsm.state`
+        // ('slam', 'hop', 'pounce'). The Slime King's slam has a whole
+        // authored telegraph phase, and without this line the
+        // observation showed position and velocity only, so an agent's
+        // first hint of the attack was being under it.
+        const fsmState = (m.state.fsm as { state?: string } | undefined)?.state;
+        const aiming = typeof m.state.mode === 'string' ? m.state.mode
+          : typeof fsmState === 'string' ? fsmState : undefined;
         const shoots = m.def.rangedAt && gap < m.def.rangedAt ? true : undefined;
         if (gap > NEAR) {
           return {
