@@ -189,7 +189,7 @@ def main():
 
     saved_any = best_valid > baseline
     print(f"best validation {best_valid:.0f}"
-          + (f"; saved policy at {args.out}" if saved_any else "; nothing beat the baseline — output untouched"))
+          + (f"; saved policy at {args.out}" if saved_any else "; nothing beat the baseline, output untouched"))
 
 
 if __name__ == "__main__":
