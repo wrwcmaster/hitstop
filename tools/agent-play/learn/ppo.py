@@ -104,6 +104,8 @@ def collect(weights_path, room, episodes, det=False, seeds=None):
     traj = HERE / "traj.jsonl"
     cmd = ["node", str(HERE / "collect.mjs"), "--weights", str(weights_path),
            "--out", str(traj), "--episodes", str(episodes), "--room", room]
+    if not det:
+        cmd.append("--rand-spawn")
     if det:
         cmd.append("--det")
     if seeds:

@@ -35,6 +35,13 @@ const EPISODES = Number(arg('--episodes', 8));
 const ROOM = arg('--room', 'throne');
 const TEMP = Number(arg('--temp', 1));
 const DET = process.argv.includes('--det');
+// Random spawn for training episodes. Every fixed-spawn episode starts
+// her at the same wall-adjacent spot, so all experience begins where
+// cornering is the natural policy and the corner basin deepens with
+// every iteration — the policy literally never collects data on what
+// mid-room play earns. Validation keeps the fixed spawn (--det), so
+// scores stay comparable across every run ever made.
+const RAND_SPAWN = process.argv.includes('--rand-spawn');
 const SEEDS = arg('--seeds', '3,11,29,47,58,64,91,102').split(',').map(Number);
 
 const blob = JSON.parse(fs.readFileSync(weightsPath, 'utf8'));
@@ -75,7 +82,9 @@ for (let e = 0; e < EPISODES; e++) {
   globalThis.window.__harness.pinSeed(seed);
   harness.beginRun({ kind: 'scenario', scenario: {
     room: ROOM, quiet: true,
-    player: { ...(ROOM === 'throne' ? { x: 120, y: 100 } : { x: 230, y: 192 }),
+    player: { ...(ROOM === 'throne'
+      ? { x: RAND_SPAWN && !DET ? 80 + Math.floor(Math.random() * 480) : 120, y: 100 }
+      : { x: RAND_SPAWN && !DET ? 120 + Math.floor(Math.random() * 700) : 230, y: 192 }),
       give: ['great-sword'], equip: ['great-sword'] },
   } });
   harness.step([], 30);
