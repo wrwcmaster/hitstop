@@ -44,6 +44,13 @@ def parse():
     ap.add_argument("--lam", type=float, default=0.95)
     ap.add_argument("--entropy", type=float, default=0.01)
     ap.add_argument("--valid-every", type=int, default=3)
+    # Iterations where ONLY the critic trains. The policy arrives
+    # pretrained (ES gen-9) and the value head arrives random, so the
+    # first advantages are noise from an untrained critic — the 3-iter
+    # shakedown lost 3,250 validation points to exactly that. Freezing
+    # the policy until the critic can price states protects what ES
+    # already earned.
+    ap.add_argument("--warmup", type=int, default=3)
     return ap.parse_args()
 
 
@@ -139,6 +146,7 @@ def main():
     best_valid = float("-inf")
     save_blob(model, blob, tmp, "ppo working copy", None)
     _, best_valid = collect(tmp, args.room, 2, det=True, seeds="205,206")
+    baseline = best_valid
     print(f"baseline validation {best_valid:.0f}")
 
     for it in range(1, args.iters + 1):
@@ -151,6 +159,7 @@ def main():
             _, v = model(obs)
         adv, ret = gae(steps, v.numpy().astype(np.float64), args.gamma, args.lam)
 
+        warm = it <= args.warmup
         for _ in range(args.epochs):
             logits, value = model(obs)
             dist = torch.distributions.Categorical(logits=logits)
@@ -158,15 +167,15 @@ def main():
             ratio = torch.exp(lp - old_lp)
             surr = torch.min(ratio * adv,
                              torch.clamp(ratio, 1 - args.clip, 1 + args.clip) * adv)
-            loss = (-surr.mean()
-                    + 0.5 * torch.nn.functional.mse_loss(value, ret)
+            vloss = torch.nn.functional.mse_loss(value, ret)
+            loss = vloss if warm else (-surr.mean() + 0.5 * vloss
                     - args.entropy * dist.entropy().mean())
             opt.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 0.5)
             opt.step()
 
-        print(f"iter {it:3d}  steps {len(steps):6d}  meanReturn {mean_ret:7.0f}")
+        print(f"iter {it:3d}  steps {len(steps):6d}  meanReturn {mean_ret:7.0f}{'  [critic warmup]' if warm else ''}")
         if it % args.valid_every == 0 or it == args.iters:
             save_blob(model, blob, tmp, "ppo working copy", None)
             _, valid = collect(tmp, args.room, 2, det=True, seeds="205,206")
@@ -178,7 +187,9 @@ def main():
                 mark = "  <- saved"
             print(f"          validation {valid:7.0f}{mark}")
 
-    print(f"best validation {best_valid:.0f}; saved policy at {args.out}")
+    saved_any = best_valid > baseline
+    print(f"best validation {best_valid:.0f}"
+          + (f"; saved policy at {args.out}" if saved_any else "; nothing beat the baseline — output untouched"))
 
 
 if __name__ == "__main__":

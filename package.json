@@ -16,7 +16,8 @@
     "playbook": "node tools/agent-play/playbook-check.mjs",
     "arena-trial": "node tools/agent-play/arena-trial.mjs",
     "measure": "node tools/agent-play/measure.mjs",
-    "learn": "node tools/agent-play/learn/train.mjs"
+    "learn": "node tools/agent-play/learn/train.mjs",
+    "learn:collect": "node tools/agent-play/learn/collect.mjs"
   },
   "devDependencies": {
     "playwright": "^1.61.1",
