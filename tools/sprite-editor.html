@@ -40,6 +40,10 @@
     #frames button { margin-right: 4px; }
     #preview { border: 1px solid #33447f; background: #0a0c1c; max-width: 100%; height: auto; }
     #status { color: #38b764; margin-left: auto; }
+    #bridgeStatus { color: #566c86; }
+    #bridgeStatus.connected { color: #38b764; }
+    #bridgeStatus.dirty { color: #ffcd75; }
+    #bridgeStatus.conflict { color: #ef7d57; }
   </style>
 </head>
 <body>
@@ -49,12 +53,14 @@
       <option value="">-- load existing sprite --</option>
     </select>
     <button id="btnLoad" title="Open a .json sprite file">load local file...</button>
-    <button id="btnSave" title="Download the current sprite as .json">save</button>
+    <button id="btnSaveRepo" title="Write the shared document to src/game/content/sprites" disabled>save to repo</button>
+    <button id="btnSave" title="Download the current sprite as .json">download</button>
     <button id="btnUndo" title="Undo (Ctrl+Z)" disabled>undo</button>
     <button id="btnRedo" title="Redo (Ctrl+Y)" disabled>redo</button>
     <button id="btnExport" title="Copy JSON to clipboard">export</button>
     <button id="btnImport" title="Import JSON from the textarea">import</button>
     <input type="file" id="fileInput" accept=".json,application/json" style="display:none">
+    <span id="bridgeStatus" title="Live local agent bridge">bridge: connecting</span>
     <span id="status"></span>
   </header>
   <main>
@@ -70,6 +76,20 @@
       <div style="display:flex; gap:6px; margin-bottom:6px">
         <button id="btnToolDraw" class="active">pencil</button>
         <button id="btnToolFill">fill</button>
+      </div>
+      <div style="display:flex; gap:6px; align-items:center">
+        <label style="margin:0">grid zoom
+          <select id="gridZoom">
+            <option value="4">4×</option>
+            <option value="6">6×</option>
+            <option value="8">8×</option>
+            <option value="12">12×</option>
+            <option value="16">16×</option>
+            <option value="24" selected>24×</option>
+            <option value="32">32×</option>
+          </select>
+        </label>
+        <button id="btnFitGrid">fit</button>
       </div>
       <h2>reference</h2>
       <div style="display:flex; flex-direction:column; gap:4px">
@@ -138,8 +158,8 @@
 
       <h2>size</h2>
       <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px">
-        <label style="margin:0">w <input id="w" type="number" min="1" max="64" value="12" style="width:50px"></label>
-        <label style="margin:0">h <input id="h" type="number" min="1" max="64" value="14" style="width:50px"></label>
+        <label style="margin:0">w <input id="w" type="number" min="1" max="160" value="12" style="width:50px"></label>
+        <label style="margin:0">h <input id="h" type="number" min="1" max="160" value="14" style="width:50px"></label>
         <button id="btnResize">resize</button>
       </div>
 
@@ -160,6 +180,18 @@
           <label style="margin:0">h <input id="boxH" type="number" min="0.25" step="0.25" style="width:50px"></label>
         </div>
       </div>
+
+      <h2 style="display:inline">anchors</h2> <label style="font-size:12px"><input id="showAnchors" type="checkbox" checked> show</label>
+      <div style="display:flex; gap:4px; margin:5px 0">
+        <select id="anchorName" style="min-width:100px; flex:1"><option value="">-- none --</option></select>
+        <button id="btnAddAnchor" title="Add a named frame-aligned attachment point">+</button>
+        <button id="btnDelAnchor" title="Delete the selected attachment point">del</button>
+      </div>
+      <div style="display:flex; gap:6px; align-items:center; margin-bottom:4px">
+        <label style="margin:0">x <input id="anchorX" type="number" step="0.25" style="width:58px"></label>
+        <label style="margin:0">y <input id="anchorY" type="number" step="0.25" style="width:58px"></label>
+      </div>
+      <p class="hint" style="margin:0 0 8px">Alt-click the grid to place the selected anchor. For a right-facing knight, frontHand is the knight's right/weapon hand, on the left side of the image.</p>
 
       <h2>transform</h2>
       <div style="display:flex; gap:4px; margin-bottom:10px">

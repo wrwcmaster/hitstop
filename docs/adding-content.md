@@ -79,8 +79,8 @@ Conventions:
 
 Two options:
 
-1. **Sprite editor** (`/tools/sprite-editor.html`): paint, animate, export — then paste rows into a `sprite([...], PAL)` call in `src/game/content/sprites.ts`. Full walkthrough in [design-tools.md](design-tools.md).
-2. **By hand**: sprites are text; the palette chars are defined in `src/game/content/palette.ts`.
+1. **Sprite editor** (`/tools/sprite-editor.html`): open or create a JSON sheet, paint and animate it, then use **save to repo** while the development server is running (or download it for a hosted editor). Character and equipment sheets live under `src/game/content/sprites/`. The editor also shares unsaved revisions and its real preview with agents. Full walkthrough in [design-tools.md](design-tools.md).
+2. **By hand**: sprite sheets are JSON text grids; small one-off effects can still use `sprite([...], PAL)` directly. Shared palette chars are defined in `src/game/content/palette.ts`.
 
 ```ts
 const ORB = sprite([

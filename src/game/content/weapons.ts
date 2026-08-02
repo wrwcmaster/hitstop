@@ -102,6 +102,8 @@ export interface RangedDef {
   cooldown: number;
   /** Backward kick on the shooter, px/s. */
   recoil: number;
+  /** Forward distance from the player's center to the visible muzzle. */
+  muzzleX?: number;
   /** Small vertical trim from the shared ranged hand line (see
    * RANGED_HAND_Y in weapon-visuals.ts) — shots spawn ON the drawn
    * weapon, this only nudges within it (a barrel above the grip, say). */
@@ -170,6 +172,8 @@ export function defineWeaponType(id: string, def: WeaponTypeDef): void {
     for (const [field, value] of Object.entries({
       speed: r.speed, gravity: r.gravity, cooldown: r.cooldown, recoil: r.recoil,
     })) finite(value, `weapon type "${id}".ranged.${field}`);
+    if (r.muzzleX !== undefined) finite(r.muzzleX, `weapon type "${id}".ranged.muzzleX`);
+    if (r.muzzleY !== undefined) finite(r.muzzleY, `weapon type "${id}".ranged.muzzleY`);
     if (r.speed <= 0 || r.cooldown <= 0 || r.gravity < 0 || r.recoil < 0) {
       throw new Error(`weapon type "${id}".ranged: speed/cooldown must be positive, gravity/recoil non-negative`);
     }
@@ -473,7 +477,7 @@ defineWeaponType('bow', {
   comboWindow: 0,
   attacks: [],
   ranged: {
-    projectile: 'arrow', speed: 330, gravity: 420, cooldown: 0.55, recoil: 30,
+    projectile: 'arrow', speed: 330, gravity: 420, cooldown: 0.55, recoil: 30, muzzleX: 9,
     charge: { time: 0.8, floor: 0.4, curve: 1.4 },
   },
 });
@@ -483,7 +487,7 @@ defineWeaponType('bow', {
 defineWeaponType('gun', {
   comboWindow: 0,
   attacks: [],
-  ranged: { projectile: 'bullet', speed: 640, gravity: 30, cooldown: 0.85, recoil: 90, muzzleY: -0.25 },
+  ranged: { projectile: 'bullet', speed: 640, gravity: 30, cooldown: 0.85, recoil: 90, muzzleX: 10, muzzleY: -0.25 },
 });
 
 defineWeapon('unarmed', {

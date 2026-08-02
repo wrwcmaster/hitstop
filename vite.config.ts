@@ -1,11 +1,13 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
 import { readFileSync } from 'fs';
+import { spriteEditorBridge } from './tools/sprite-editor-bridge';
 
 const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8'));
 
 // Multi-page app: the game plus each design tool is its own entry point.
 export default defineConfig({
+  plugins: [spriteEditorBridge(__dirname)],
   // Relative asset URLs so the build runs from any path — a double-click,
   // a project GitHub Pages subpath (wrwcmaster.github.io/hitstop/), or a
   // custom domain — without hardcoding the repo name.

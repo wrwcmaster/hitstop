@@ -39,6 +39,8 @@ export {
   type SpriteFile,
   type SpriteGeometry,
   type SpriteAnimData,
+  type SpriteAnchor,
+  type SpriteAnchors,
   type LoadedSprite,
 } from './gfx/spritefile';
 export {

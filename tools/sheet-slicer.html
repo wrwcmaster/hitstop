@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <link rel="icon" href="data:," />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>hitstop — sprite-sheet slicer</title>
+  <title>hitstop - sprite animation workbench</title>
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
@@ -31,20 +31,33 @@
     .anim { border: 1px solid #33447f; border-radius: 4px; padding: 6px; margin: 6px 0; }
     .anim .row { display: flex; gap: 6px; align-items: center; margin: 2px 0; }
     .anim .row span { width: 46px; color: #ffcd75; }
-    #preview { border: 1px solid #33447f; background: #0a0c1c; }
+    #previewViewport { width: 100%; max-height: 300px; overflow: auto; border: 1px solid #33447f; background: #0a0c1c; }
+    #preview { image-rendering: pixelated; display: block; background: #0a0c1c; }
     #status { color: #38b764; margin-left: auto; }
+    .gate { border: 1px solid #33447f; border-radius: 4px; padding: 6px; margin: 5px 0; }
+    .gate.ready { border-color: #38b764; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
   </style>
 </head>
 <body>
   <header>
-    <h1>hitstop sheet slicer</h1>
+    <h1>hitstop sprite animation workbench</h1>
     <button id="btnLoad">load png</button>
+    <input id="imageUrl" type="text" placeholder="workspace image URL" style="width:260px">
+    <button id="btnLoadUrl">load URL</button>
+    <button id="btnDetect">detect frames</button>
+    <label style="display:inline">padding <input id="detectPadding" type="number" min="0" value="8"></label>
     <button id="btnExport">export descriptor</button>
-    <button id="btnExportSprite" title="convert the sliced frames to a text-grid sprite JSON (loadSprite / sprite editor)">to sprite json</button>
+    <button id="btnExportPng" title="export aligned, keyed frames as the approved source sheet">export normalized png</button>
+    <button id="btnExportSprite" disabled title="approve identity, motion, and alignment before converting">to sprite json</button>
     <span style="margin-left:8px">zoom</span>
     <button id="btnZoomOut" title="zoom out">&minus;</button>
     <span id="zoomLbl">3×</span>
     <button id="btnZoomIn" title="zoom in">+</button>
+    <button id="btnFit" title="fit the source sheet in the viewport">fit</button>
+    <span style="margin-left:8px">view</span>
+    <button id="btnViewSource">generated source</button>
+    <button id="btnViewNormalized">normalized pixels</button>
     <input type="file" id="fileInput" accept=".png,image/png,image/*" style="display:none">
     <span id="status"></span>
   </header>
@@ -69,20 +82,58 @@
       </div>
       <label>texel <input id="texel" type="number" min="1" value="4">
         <span class="hint">src px per logical px</span></label>
-      <label>max colors <input id="maxColors" type="number" min="2" max="70" value="24">
+      <label>max colors <input id="maxColors" type="number" min="2" max="70" value="32">
         <span class="hint">palette size for “to sprite json”</span></label>
+      <h2>source preparation</h2>
+      <label><input id="keyEnabled" type="checkbox"> remove chroma key</label>
+      <label>key <input id="keyColor" type="color" value="#00ff00">
+        tolerance <input id="keyTolerance" type="number" min="0" max="255" value="64"></label>
+      <button id="btnProtectKey" type="button">protect subject color</button>
+      <button id="btnAddProtection" type="button">+ protection</button>
+      <button id="btnClearProtection" type="button">clear protection</button>
+      <label>click mask size <input id="protectSize" type="number" min="1" value="24"></label>
+      <label><input id="lockProtectedPixels" type="checkbox" checked> lock one protected feature per frame to frame 0</label>
+      <p class="hint">In generated-source view, enable protection and click a detail or drag a custom region over subject colors that resemble the key. Right-click a region to remove it.</p>
+      <div id="protectionList"></div>
+      <label>target frame w <input id="targetW" type="number" min="0" value="0">
+        h <input id="targetH" type="number" min="0" value="0"></label>
+      <label>reduction <select id="resampleMode">
+        <option value="coverage" selected>coverage-aware pixel reduction</option>
+        <option value="nearest">nearest-neighbor sampling</option>
+      </select></label>
+      <p class="hint">0 keeps the detected size. Coverage-aware reduction keeps thin clusters that single-point nearest-neighbor sampling can skip.</p>
+      <p class="hint">Detection, reduction, palette selection, preview, normalized PNG, and JSON all honor the same protected subject colors.</p>
+      <h2>frame alignment</h2>
+      <p class="hint">Every crop is bottom-centered in one shared frame. Use offsets for the final origin and baseline.</p>
+      <div id="alignmentList"></div>
       <h2>animations</h2>
       <div id="anims"></div>
       <button id="btnAddAnim">+ anim</button>
-      <h2>preview <label style="display:inline"><input type="checkbox" id="playing" checked> play</label></h2>
-      <canvas id="preview" width="240" height="90"></canvas>
+      <h2>preview <span id="previewStage" class="hint">generated source</span></h2>
+      <div style="display:flex;gap:4px;align-items:center;margin-bottom:5px">
+        <label style="display:inline"><input type="checkbox" id="playing" checked> play</label>
+        <label style="display:inline"><input type="checkbox" id="onion"> previous</label>
+        <button id="btnPreviewZoomOut" title="preview zoom out">&minus;</button>
+        <span id="previewZoomLbl">0.75&times;</span>
+        <button id="btnPreviewZoomIn" title="preview zoom in">+</button>
+        <button id="btnPreviewFit" title="fit preview frames">fit</button>
+      </div>
+      <div id="previewViewport"><canvas id="preview" width="240" height="90"></canvas></div>
+      <h2>approval gate</h2>
+      <div id="approvalGate" class="gate">
+        <label><input id="approveSource" type="checkbox"> generated source approved</label>
+        <label><input id="approveIdentity" type="checkbox"> normalized identity and silhouette approved</label>
+        <label><input id="approveMotion" type="checkbox"> motion and cadence approved</label>
+        <label><input id="approveAlignment" type="checkbox"> origin and baseline approved</label>
+        <p id="approvalStatus" class="hint" style="margin:4px 0 0">JSON conversion is locked.</p>
+      </div>
       <h2>descriptor</h2>
       <textarea id="io" spellcheck="false" readonly></textarea>
       <p class="hint">
-        load a sheet, set the grid, list each animation's frame numbers
-        (shown on the sheet), then export the descriptor. Save it next to
-        the PNG and load both with <code>loadSheet</code> — see
-        docs/design-tools.md.
+        approve the generated source, then inspect and approve the normalized
+        pixels. Export that normalized PNG as the review artifact; only then
+        unlock JSON conversion.
+        See docs/design-tools.md.
       </p>
     </div>
     <div id="view"><canvas id="sheet"></canvas></div>

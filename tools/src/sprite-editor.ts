@@ -1,6 +1,9 @@
 /// <reference types="vite/client" />
 
-import { resolveSpriteGeometry, resolveAnim, sprite, epx, type Palette, type SpriteFile, type SpriteAnimData } from '@engine/index';
+import {
+  resolveSpriteGeometry, resolveAnim, sprite, epx,
+  type Palette, type SpriteFile, type SpriteAnimData, type SpriteAnchor,
+} from '@engine/index';
 import { PAL } from '@game/content/palette';
 // Composite preview: the editor borrows the GAME's renderers rather than
 // imitating them, so what you see here — held weapon anchored to the
@@ -14,7 +17,8 @@ import {
   rebuildSpriteWeapon,
 } from '@game/content/weapon-visuals';
 import { weapons, weaponTypeOf, allAttacks } from '@game/content/weapons';
-import { KNIGHT_ANIMS, baseKnight } from '@game/content/sprites';
+import { KNIGHT_ANIMS, baseKnight, rebuildKnightSprite } from '@game/content/sprites';
+import { rebuildGearVisual } from '@game/content/gear-visuals';
 // The "player (full)" body drives a REAL Player — body-english, gear
 // layers, held weapon and trail all come from Player.render, posed via
 // its poseAttack seam. Content self-registers on import (the game's
@@ -35,7 +39,8 @@ import '@game/content/skilltree';
  * "hd" density), then export/import the exact file the game loads.
  */
 
-const CELL = 24;
+const MAX_GRID_SIZE = 160;
+let cellSize = 24;
 
 /* ---------------- state ---------------- */
 
@@ -52,9 +57,30 @@ let erasing = false;
 let currentTool: 'draw' | 'fill' = 'draw';
 let refFile: SpriteFile | null = null;
 let currentFileName = 'new sprite.json';
+let currentRepoPath: string | null = null;
+let selectedAnchorName = '';
 const undoStack: string[] = [];
 const redoStack: string[] = [];
 const MAX_HISTORY = 100;
+
+interface BridgeState {
+  path: string | null;
+  file: SpriteFile;
+  revision: number;
+  source: string;
+  updatedAt: number;
+  dirty: boolean;
+}
+
+const BRIDGE = '/__sprite-editor';
+const bridgeClientId = `editor-${crypto.randomUUID()}`;
+let bridgeRevision = 0;
+let bridgeDirty = false;
+let bridgeConnected = false;
+let bridgeConflict = false;
+let bridgePublishing = false;
+let lastSharedFile = '';
+let previewTimer = 0;
 
 function emptyFrame(w: number, h: number): string[] {
   return Array.from({ length: h }, () => '.'.repeat(w));
@@ -80,6 +106,35 @@ const concreteAnims = (): [string, SpriteAnimData][] =>
 const cur = () => anim().frames[frameIdx];
 const W = () => cur()[0].length;
 const H = () => cur().length;
+const density = () => file.hd === false ? 4 : 1;
+
+function concreteAnimName(name = animName): string {
+  const seen = new Set<string>();
+  let current = name;
+  while (typeof file.anims[current] === 'string' && !seen.has(current)) {
+    seen.add(current);
+    current = file.anims[current] as string;
+  }
+  return current;
+}
+
+function currentAnchor(): SpriteAnchor | undefined {
+  if (!selectedAnchorName) return undefined;
+  return file.anchors?.[selectedAnchorName]?.[concreteAnimName()]?.[frameIdx];
+}
+
+function ensureCurrentAnchor(): SpriteAnchor {
+  if (!selectedAnchorName) throw new Error('select an anchor first');
+  const name = concreteAnimName();
+  const target = resolveAnim(file, name)!;
+  const group = (file.anchors ??= {})[selectedAnchorName] ??= {};
+  const points = group[name] ??= Array.from(
+    { length: target.frames.length },
+    () => ({ x: W() / density() / 2, y: H() / density() / 2 }),
+  );
+  while (points.length < target.frames.length) points.push({ ...points.at(-1)! });
+  return points[frameIdx];
+}
 
 function gridSize(rows: string[]): { w: number; h: number } {
   return {
@@ -133,6 +188,20 @@ function existingSprite(path: string): SpriteFile {
   return normalize(structuredClone(spriteFile));
 }
 
+function configureCompositeForPath(path: string): void {
+  if (!path.includes('equipment/')) return;
+  const stem = path.split('/').at(-1)!.replace(/\.json$/, '');
+  ($('compBody') as HTMLSelectElement).value = 'player';
+  if (weapons.has(stem)) {
+    ($('compWeapon') as HTMLSelectElement).value = stem;
+    rebuildMoveSelect(stem);
+  } else {
+    ($('compWeapon') as HTMLSelectElement).value = '';
+    ($('compGear') as HTMLInputElement).checked = true;
+    rebuildMoveSelect('');
+  }
+}
+
 populateSpriteSelect('selectSprite');
 populateSpriteSelect('selectRefSprite');
 
@@ -143,6 +212,228 @@ function flash(msg: string): void {
     if (s.textContent === msg) s.textContent = '';
   }, 2000);
 }
+
+/* ---------------- live agent bridge ---------------- */
+
+let pendingBridgeState: BridgeState | null = null;
+
+function updateBridgeStatus(): void {
+  const status = $('bridgeStatus');
+  status.className = '';
+  if (bridgeConflict) {
+    status.classList.add('conflict');
+    status.textContent = 'bridge: conflict (click to accept remote)';
+    status.title = 'Your unsent edits and a remote edit overlap. Click to keep the remote revision; undo restores your local version.';
+  } else if (!bridgeConnected) {
+    status.textContent = 'bridge: offline';
+    status.title = 'Start the Vite development server to share this document with an agent.';
+  } else {
+    status.classList.add(bridgeDirty ? 'dirty' : 'connected');
+    const name = currentRepoPath ?? 'unsaved sprite';
+    status.textContent = `bridge: ${name} r${bridgeRevision}${bridgeDirty ? ' *' : ''}`;
+    status.title = bridgeDirty ? 'Shared changes have not been written to the repository.' : 'Browser and agent share this revision.';
+  }
+  const save = $('btnSaveRepo') as HTMLButtonElement;
+  save.disabled = !bridgeConnected || bridgeConflict || !currentRepoPath || !bridgeDirty;
+}
+
+function rememberForUndo(): void {
+  const snapshot = JSON.stringify(file);
+  if (undoStack[undoStack.length - 1] !== snapshot) undoStack.push(snapshot);
+  if (undoStack.length > MAX_HISTORY) undoStack.shift();
+  redoStack.length = 0;
+}
+
+function updateBridgeMeta(state: BridgeState): void {
+  bridgeConnected = true;
+  bridgeRevision = state.revision;
+  bridgeDirty = state.dirty;
+  currentRepoPath = state.path;
+  if (state.path) currentFileName = state.path.split('/').at(-1)!;
+  lastSharedFile = JSON.stringify(state.file);
+  bridgeConflict = false;
+  pendingBridgeState = null;
+  updateBridgeStatus();
+  schedulePreviewUpload();
+}
+
+function applyBridgeState(state: BridgeState, force = false): void {
+  if (!force && state.revision <= bridgeRevision) return;
+  const switchedSprite = state.path !== currentRepoPath;
+  const local = JSON.stringify(file);
+  const unsentLocalEdit = Boolean(lastSharedFile) && local !== lastSharedFile;
+  if (!force && state.source !== bridgeClientId && unsentLocalEdit) {
+    pendingBridgeState = state;
+    bridgeConflict = true;
+    updateBridgeStatus();
+    return;
+  }
+
+  const incoming = JSON.stringify(state.file);
+  if (incoming !== local) {
+    rememberForUndo();
+    file = normalize(structuredClone(state.file));
+    if (!file.anims[animName]) animName = Object.keys(file.anims)[0];
+    frameIdx = Math.min(frameIdx, anim().frames.length - 1);
+    currentChar = firstPaintChar();
+    editVersion++;
+    refreshUI();
+    updateUndoRedoButtons();
+    if (switchedSprite) fitGrid();
+    if (state.source !== bridgeClientId) flash(`updated by ${state.source}`);
+  }
+  updateBridgeMeta(state);
+  const select = $('selectSprite') as HTMLSelectElement;
+  select.value = state.path ?? '';
+  if (switchedSprite && state.path) configureCompositeForPath(state.path);
+}
+
+async function bridgeJson(path: string, init?: RequestInit): Promise<{ response: Response; body: Record<string, unknown> }> {
+  const response = await fetch(`${BRIDGE}${path}`, init);
+  const body = await response.json() as Record<string, unknown>;
+  return { response, body };
+}
+
+async function openSharedSprite(path: string): Promise<boolean> {
+  try {
+    // A stroke can be waiting for the 160 ms publish tick when the user
+    // changes the selector. Flush it first so `/open` sees a dirty shared
+    // document and cannot replace work that existed only in this tab.
+    if (lastSharedFile && JSON.stringify(file) !== lastSharedFile) {
+      await publishSharedSprite();
+      if (JSON.stringify(file) !== lastSharedFile || bridgeConflict) {
+        flash('finish resolving the current shared edit before opening another');
+        return false;
+      }
+    }
+    const { response, body } = await bridgeJson('/open', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, source: bridgeClientId }),
+    });
+    if (response.status === 409) {
+      const shared = (body.state as BridgeState | null) ?? null;
+      if (shared) applyBridgeState(shared, true);
+      flash('save the current shared sprite before opening another');
+      return false;
+    }
+    if (!response.ok) throw new Error(String(body.error ?? response.statusText));
+    applyBridgeState(body as unknown as BridgeState, true);
+    flash(`opened shared ${path}`);
+    return true;
+  } catch {
+    bridgeConnected = false;
+    updateBridgeStatus();
+    return false;
+  }
+}
+
+async function publishSharedSprite(): Promise<void> {
+  if (bridgePublishing || bridgeConflict) return;
+  const serialized = JSON.stringify(file);
+  if (serialized === lastSharedFile) return;
+  bridgePublishing = true;
+  try {
+    const { response, body } = await bridgeJson('/state', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        path: currentRepoPath,
+        file,
+        baseRevision: bridgeRevision,
+        source: bridgeClientId,
+      }),
+    });
+    if (response.status === 409) {
+      pendingBridgeState = (body.state as BridgeState | null) ?? null;
+      bridgeConflict = true;
+      bridgeConnected = true;
+      updateBridgeStatus();
+      return;
+    }
+    if (!response.ok) throw new Error(String(body.error ?? response.statusText));
+    updateBridgeMeta(body as unknown as BridgeState);
+  } catch {
+    bridgeConnected = false;
+    updateBridgeStatus();
+  } finally {
+    bridgePublishing = false;
+    // A paint stroke may have continued while its previous version was sent.
+    if (!bridgeConflict && JSON.stringify(file) !== lastSharedFile) void publishSharedSprite();
+  }
+}
+
+async function saveSharedSprite(): Promise<void> {
+  if (!currentRepoPath || bridgeConflict) return;
+  try {
+    const { response, body } = await bridgeJson('/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: currentRepoPath, baseRevision: bridgeRevision, source: bridgeClientId }),
+    });
+    if (response.status === 409) {
+      pendingBridgeState = (body.state as BridgeState | null) ?? null;
+      bridgeConflict = true;
+      updateBridgeStatus();
+      return;
+    }
+    if (!response.ok) throw new Error(String(body.error ?? response.statusText));
+    updateBridgeMeta(body as unknown as BridgeState);
+    flash(`saved ${currentRepoPath}`);
+  } catch (error) {
+    flash(`repo save failed: ${(error as Error).message}`);
+  }
+}
+
+function schedulePreviewUpload(): void {
+  window.clearTimeout(previewTimer);
+  if (!bridgeConnected || !bridgeRevision) return;
+  previewTimer = window.setTimeout(() => {
+    preview.toBlob((blob) => {
+      if (!blob) return;
+      void fetch(`${BRIDGE}/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'image/png', 'X-Sprite-Revision': String(bridgeRevision) },
+        body: blob,
+      }).catch(() => {});
+    }, 'image/png');
+  }, 180);
+}
+
+function connectBridgeEvents(): void {
+  const events = new EventSource(`${BRIDGE}/events`);
+  events.onopen = () => {
+    bridgeConnected = true;
+    updateBridgeStatus();
+  };
+  events.onerror = () => {
+    bridgeConnected = false;
+    updateBridgeStatus();
+  };
+  events.addEventListener('state', (event) => {
+    const state = JSON.parse((event as MessageEvent<string>).data) as BridgeState;
+    applyBridgeState(state);
+  });
+}
+
+async function initializeBridge(): Promise<void> {
+  connectBridgeEvents();
+  const requested = new URLSearchParams(location.search).get('sprite');
+  if (requested && await openSharedSprite(requested)) return;
+  try {
+    const { response, body } = await bridgeJson('/state');
+    if (response.ok) applyBridgeState(body as unknown as BridgeState, true);
+    else void publishSharedSprite();
+  } catch {
+    bridgeConnected = false;
+    updateBridgeStatus();
+  }
+}
+
+$('bridgeStatus').onclick = () => {
+  if (bridgeConflict && pendingBridgeState) applyBridgeState(pendingBridgeState, true);
+};
+$('btnSaveRepo').onclick = () => void saveSharedSprite();
 
 /* ---------------- palette ui ---------------- */
 
@@ -180,6 +471,87 @@ $('btnAddColor').onclick = () => {
   redraw();
 };
 
+/* ---------------- attachment anchors ---------------- */
+
+function buildAnchors(): void {
+  const names = Object.keys(file.anchors ?? {});
+  if (selectedAnchorName && !names.includes(selectedAnchorName)) selectedAnchorName = '';
+  // For player sheets, open on the primary weapon grip instead of whichever
+  // anchor happens to be serialized first.  After handedness is corrected,
+  // rearHand is often first and its screen-right marker looks like a broken
+  // weapon anchor even though it is the knight's left/off hand.
+  if (!selectedAnchorName && names.length) {
+    selectedAnchorName = names.includes('frontHand') ? 'frontHand' : names[0];
+  }
+
+  const select = $('anchorName') as HTMLSelectElement;
+  select.innerHTML = '<option value="">-- none --</option>';
+  for (const name of names) {
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = name;
+    select.appendChild(option);
+  }
+  select.value = selectedAnchorName;
+
+  const point = currentAnchor();
+  const x = $('anchorX') as HTMLInputElement;
+  const y = $('anchorY') as HTMLInputElement;
+  x.disabled = y.disabled = !selectedAnchorName;
+  x.value = point ? String(point.x) : '';
+  y.value = point ? String(point.y) : '';
+  ($('btnDelAnchor') as HTMLButtonElement).disabled = !selectedAnchorName;
+}
+
+($('anchorName') as HTMLSelectElement).onchange = (event) => {
+  selectedAnchorName = (event.target as HTMLSelectElement).value;
+  buildAnchors();
+  redraw();
+};
+
+$('btnAddAnchor').onclick = () => {
+  const name = prompt('anchor name (e.g. frontHand, rearHand, head):', '')?.trim();
+  if (!name) return;
+  if (file.anchors?.[name]) {
+    flash('anchor already exists');
+    return;
+  }
+  saveHistory();
+  const groups: Record<string, SpriteAnchor[]> = {};
+  for (const [animId, entry] of concreteAnims()) {
+    groups[animId] = entry.frames.map(() => ({
+      x: entry.frames[0][0].length / density() / 2,
+      y: entry.frames[0].length / density() / 2,
+    }));
+  }
+  (file.anchors ??= {})[name] = groups;
+  selectedAnchorName = name;
+  refreshUI();
+};
+
+$('btnDelAnchor').onclick = () => {
+  if (!selectedAnchorName || !file.anchors) return;
+  saveHistory();
+  delete file.anchors[selectedAnchorName];
+  selectedAnchorName = '';
+  refreshUI();
+};
+
+function onAnchorChange(): void {
+  if (!selectedAnchorName) return;
+  const x = ($('anchorX') as HTMLInputElement).valueAsNumber;
+  const y = ($('anchorY') as HTMLInputElement).valueAsNumber;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+  saveHistory();
+  Object.assign(ensureCurrentAnchor(), { x, y });
+  redraw();
+  syncIO();
+}
+
+($('anchorX') as HTMLInputElement).onchange = onAnchorChange;
+($('anchorY') as HTMLInputElement).onchange = onAnchorChange;
+($('showAnchors') as HTMLInputElement).onchange = () => redraw();
+
 /* ---------------- animations ui ---------------- */
 
 function buildAnims(): void {
@@ -215,6 +587,9 @@ $('btnAddAnim').onclick = () => {
   }
   saveHistory();
   file.anims[name] = { fps: 8, frames: [emptyFrame(W(), H())] };
+  for (const anchors of Object.values(file.anchors ?? {})) {
+    anchors[name] = [{ x: W() / density() / 2, y: H() / density() / 2 }];
+  }
   animName = name;
   frameIdx = 0;
   refreshUI();
@@ -231,6 +606,12 @@ $('btnRenameAnim').onclick = () => {
   const next: SpriteFile['anims'] = {};
   for (const [k, v] of Object.entries(file.anims)) next[k === animName ? name : k] = v;
   file.anims = next;
+  for (const anchors of Object.values(file.anchors ?? {})) {
+    if (anchors[animName]) {
+      anchors[name] = anchors[animName];
+      delete anchors[animName];
+    }
+  }
   animName = name;
   refreshUI();
 };
@@ -242,6 +623,7 @@ $('btnDelAnim').onclick = () => {
   }
   saveHistory();
   delete file.anims[animName];
+  for (const anchors of Object.values(file.anchors ?? {})) delete anchors[animName];
   animName = Object.keys(file.anims)[0];
   frameIdx = 0;
   refreshUI();
@@ -256,7 +638,9 @@ $('btnDelAnim').onclick = () => {
 function setPixel(x: number, y: number, ch: string): void {
   if (x < 0 || y < 0 || x >= W() || y >= H()) return;
   const f = cur();
+  if (f[y][x] === ch) return;
   f[y] = f[y].slice(0, x) + ch + f[y].slice(x + 1);
+  editVersion++;
 }
 
 function floodFill(startX: number, startY: number, fillChar: string): void {
@@ -288,6 +672,18 @@ function floodFill(startX: number, startY: number, fillChar: string): void {
 
 grid.addEventListener('contextmenu', (e) => e.preventDefault());
 grid.addEventListener('mousedown', (e) => {
+  if (e.altKey && selectedAnchorName) {
+    e.preventDefault();
+    const bounds = grid.getBoundingClientRect();
+    const sourceX = Math.floor((e.clientX - bounds.left) / cellSize);
+    const sourceY = Math.floor((e.clientY - bounds.top) / cellSize);
+    saveHistory();
+    Object.assign(ensureCurrentAnchor(), { x: sourceX / density(), y: sourceY / density() });
+    buildAnchors();
+    redraw();
+    syncIO();
+    return;
+  }
   saveHistory();
   erasing = e.button === 2;
   painting = true;
@@ -305,8 +701,8 @@ window.addEventListener('mouseup', () => {
 
 function paint(e: MouseEvent): void {
   const r = grid.getBoundingClientRect();
-  const x = Math.floor((e.clientX - r.left) / CELL);
-  const y = Math.floor((e.clientY - r.top) / CELL);
+  const x = Math.floor((e.clientX - r.left) / cellSize);
+  const y = Math.floor((e.clientY - r.top) / cellSize);
   if (currentTool === 'fill') {
     floodFill(x, y, erasing ? '.' : currentChar);
   } else {
@@ -327,6 +723,7 @@ function buildFrames(): void {
     b.onclick = () => {
       frameIdx = i;
       buildFrames();
+      buildAnchors();
       redraw();
     };
     host.appendChild(b);
@@ -337,16 +734,26 @@ function buildFrames(): void {
 $('btnAddFrame').onclick = () => {
   saveHistory();
   anim().frames.push(emptyFrame(W(), H()));
+  for (const anchors of Object.values(file.anchors ?? {})) {
+    const points = anchors[concreteAnimName()];
+    if (points) points.push({ ...(points.at(-1) ?? { x: W() / density() / 2, y: H() / density() / 2 }) });
+  }
   frameIdx = anim().frames.length - 1;
   buildFrames();
+  buildAnchors();
   redraw();
   syncIO();
 };
 $('btnDupFrame').onclick = () => {
   saveHistory();
   anim().frames.splice(frameIdx + 1, 0, [...cur()]);
+  for (const anchors of Object.values(file.anchors ?? {})) {
+    const points = anchors[concreteAnimName()];
+    if (points) points.splice(frameIdx + 1, 0, { ...(points[frameIdx] ?? { x: W() / density() / 2, y: H() / density() / 2 }) });
+  }
   frameIdx++;
   buildFrames();
+  buildAnchors();
   redraw();
   syncIO();
 };
@@ -354,8 +761,10 @@ $('btnDelFrame').onclick = () => {
   if (anim().frames.length <= 1) return;
   saveHistory();
   anim().frames.splice(frameIdx, 1);
+  for (const anchors of Object.values(file.anchors ?? {})) anchors[concreteAnimName()]?.splice(frameIdx, 1);
   frameIdx = Math.min(frameIdx, anim().frames.length - 1);
   buildFrames();
+  buildAnchors();
   redraw();
   syncIO();
 };
@@ -363,7 +772,7 @@ $('btnDelFrame').onclick = () => {
 $('btnResize').onclick = () => {
   const w = Number(($('w') as HTMLInputElement).value);
   const h = Number(($('h') as HTMLInputElement).value);
-  if (!(w >= 1 && h >= 1 && w <= 64 && h <= 64)) return;
+  if (!(w >= 1 && h >= 1 && w <= MAX_GRID_SIZE && h <= MAX_GRID_SIZE)) return;
   saveHistory();
   // Resize every frame of every animation so the sprite stays uniform.
   for (const [, a] of concreteAnims()) {
@@ -378,8 +787,8 @@ $('btnResize').onclick = () => {
 };
 
 function redraw(): void {
-  grid.width = W() * CELL;
-  grid.height = H() * CELL;
+  grid.width = W() * cellSize;
+  grid.height = H() * cellSize;
   gctx.imageSmoothingEnabled = false;
 
   // 1. Draw base background (gaps/borders)
@@ -387,14 +796,14 @@ function redraw(): void {
   gctx.fillRect(0, 0, grid.width, grid.height);
 
   // 2. Draw inset checkerboard for all cells
-  const inset = 3;
+  const inset = Math.max(1, Math.min(3, Math.floor(cellSize / 8)));
   for (let y = 0; y < H(); y++) {
     for (let x = 0; x < W(); x++) {
       gctx.fillStyle = (x + y) % 2 ? '#141830' : '#0f1226';
-      gctx.fillRect(x * CELL + inset, y * CELL + inset, CELL - inset * 2, CELL - inset * 2);
+      gctx.fillRect(x * cellSize + inset, y * cellSize + inset, cellSize - inset * 2, cellSize - inset * 2);
       
       gctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
-      gctx.strokeRect(x * CELL + inset + 0.5, y * CELL + inset + 0.5, CELL - inset * 2 - 1, CELL - inset * 2 - 1);
+      gctx.strokeRect(x * cellSize + inset + 0.5, y * cellSize + inset + 0.5, cellSize - inset * 2 - 1, cellSize - inset * 2 - 1);
     }
   }
 
@@ -414,7 +823,7 @@ function redraw(): void {
               const color = (refFile.palette ?? {})[char] ?? PAL[char];
               if (color) {
                 gctx.fillStyle = color;
-                gctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+                gctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
               }
             }
           }
@@ -436,7 +845,7 @@ function redraw(): void {
           const color = pal()[prevFrame[y]?.[x]];
           if (color) {
             gctx.fillStyle = color;
-            gctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+            gctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
           }
         }
       }
@@ -450,7 +859,7 @@ function redraw(): void {
       const color = pal()[cur()[y][x]];
       if (color) {
         gctx.fillStyle = color;
-        gctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+        gctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
       }
     }
   }
@@ -459,15 +868,38 @@ function redraw(): void {
   gctx.strokeStyle = 'rgba(148,176,194,0.1)';
   for (let x = 0; x <= W(); x++) {
     gctx.beginPath();
-    gctx.moveTo(x * CELL + 0.5, 0);
-    gctx.lineTo(x * CELL + 0.5, H() * CELL);
+    gctx.moveTo(x * cellSize + 0.5, 0);
+    gctx.lineTo(x * cellSize + 0.5, H() * cellSize);
     gctx.stroke();
   }
   for (let y = 0; y <= H(); y++) {
     gctx.beginPath();
-    gctx.moveTo(0, y * CELL + 0.5);
-    gctx.lineTo(W() * CELL, y * CELL + 0.5);
+    gctx.moveTo(0, y * cellSize + 0.5);
+    gctx.lineTo(W() * cellSize, y * cellSize);
     gctx.stroke();
+  }
+
+  if (($('showAnchors') as HTMLInputElement)?.checked) {
+    const point = currentAnchor();
+    if (point) {
+      const x = point.x * density() * cellSize;
+      const y = point.y * density() * cellSize;
+      const radius = Math.max(4, Math.min(10, cellSize * 0.7));
+      gctx.save();
+      gctx.strokeStyle = '#ffcd75';
+      gctx.lineWidth = 2;
+      gctx.beginPath();
+      gctx.moveTo(x - radius, y); gctx.lineTo(x + radius, y);
+      gctx.moveTo(x, y - radius); gctx.lineTo(x, y + radius);
+      gctx.stroke();
+      gctx.fillStyle = '#07070d';
+      gctx.fillRect(x - 2, y - 2, 4, 4);
+      gctx.font = `${Math.max(10, Math.min(14, cellSize))}px monospace`;
+      gctx.textBaseline = 'bottom';
+      gctx.fillStyle = '#ffcd75';
+      gctx.fillText(selectedAnchorName, x + radius + 3, y - 3);
+      gctx.restore();
+    }
   }
 }
 
@@ -481,12 +913,21 @@ function redraw(): void {
 let editVersion = 0;
 let rebuiltVersion = -1;
 
-function maybeRebakeEditedWeapon(): void {
+function maybeRebakeEditedEquipment(): void {
   if (rebuiltVersion === editVersion) return;
   rebuiltVersion = editVersion;
+  if (currentRepoPath === 'knight.json' || currentFileName === 'knight.json') {
+    rebuildKnightSprite(file);
+    // Player copied the old anim set during construction; rebuild the
+    // render-only mannequin so the shared draft appears immediately.
+    posePlayer = null;
+    posePlayerError = '';
+  }
   // "rusty-sword.json" -> visual id "rusty-sword"; a no-op for sheets
   // that aren't a registered sprite weapon.
-  rebuildSpriteWeapon(currentFileName.replace(/\.json$/, ''), file);
+  const id = currentFileName.replace(/\.json$/, '');
+  rebuildSpriteWeapon(id, file);
+  rebuildGearVisual(id, file);
 }
 
 /**
@@ -629,19 +1070,22 @@ function ensureEquipped(p: Player, slot: string, id: string | null): void {
  */
 function renderComposite(t: number): boolean {
   const weaponId = ($('compWeapon') as HTMLSelectElement).value;
-  if (!weaponId || !weapons.has(weaponId)) return false;
+  const hasWeapon = Boolean(weaponId && weapons.has(weaponId));
+  const bodySel = ($('compBody') as HTMLSelectElement).value;
+  // A full player is useful without a weapon when editing armor. Raw
+  // edited/knight sheets only become a composite when a weapon is chosen.
+  if (!hasWeapon && bodySel !== 'player') return false;
   const a = anim();
   if (!a || !a.frames.length) return false;
-  maybeRebakeEditedWeapon();
 
-  const wdef = weapons.get(weaponId);
-  const moves = movesOf(weaponId);
+  const wdef = hasWeapon ? weapons.get(weaponId) : null;
+  const moves = hasWeapon ? movesOf(weaponId) : [];
   // A move is a candidate when its animation is the one on screen — or
   // when its animation is MISSING from the sheet and the screen shows
   // 'attack', the pattern it falls back to in game. So the base swing
   // still previews every un-arted move via the selector, and a move
   // gains its own art the moment its animation exists.
-  const sheetHas = (name: string) => !!weaponVisuals.get(wdef.visual).animations?.includes(name);
+  const sheetHas = (name: string) => !!wdef && !!weaponVisuals.get(wdef.visual).animations?.includes(name);
   const candidates = moves.filter((m) =>
     m.def.animation === animName || (animName === 'attack' && !sheetHas(m.def.animation)));
   const wantKey = ($('compMove') as HTMLSelectElement).value;
@@ -659,7 +1103,7 @@ function renderComposite(t: number): boolean {
   const moveTag = move ? ` [${move.label}${speedup > 1 ? ` x${speedup.toFixed(1)}` : ''}]` : '';
   // When the previewed anim isn't one this weapon attacks WITH, say
   // where the attack lives instead of only that it's absent.
-  const noAttackHint = atkDef
+  const noAttackHint = !hasWeapon || atkDef
     ? ''
     : `  (attacks play on: ${[...new Set(moves.map((m) => m.def.animation))].join(', ') || 'none'})`;
 
@@ -671,8 +1115,6 @@ function renderComposite(t: number): boolean {
   const pose = atkDef && tIn <= dur
     ? { progress: Math.min(1, tIn / dur), def: atkDef }
     : undefined;
-
-  const bodySel = ($('compBody') as HTMLSelectElement).value;
 
   // Game parity: the game draws a world pixel at 8 screen px (ZOOM 4 x
   // WORLD_ZOOM 2), and judging attack art at any other size is judging
@@ -698,7 +1140,7 @@ function renderComposite(t: number): boolean {
   if (bodySel === 'player') {
     const p = getPosePlayer();
     if (p) {
-      ensureEquipped(p, 'weapon', weaponId);
+      ensureEquipped(p, 'weapon', hasWeapon ? weaponId : null);
       const gearOn = ($('compGear') as HTMLInputElement).checked;
       ensureEquipped(p, 'helmet', gearOn ? 'iron-helmet' : null);
       ensureEquipped(p, 'armor', gearOn ? 'steel-armor' : null);
@@ -723,7 +1165,7 @@ function renderComposite(t: number): boolean {
       pctx.fillText(
         posePlayerError
           ? 'player render failed: ' + posePlayerError.slice(0, 40)
-          : `${animName}${moveTag} + ${weaponId} (full player)${noAttackHint}`,
+          : `${animName}${moveTag}${hasWeapon ? ` + ${weaponId}` : ''} (full player)${noAttackHint}`,
         6, preview.height - 6,
       );
       return true;
@@ -767,23 +1209,37 @@ function renderComposite(t: number): boolean {
   pctx.save();
   pctx.translate(fx, fy);
   pctx.drawImage(bodyImg, -dw / 2, -dh, dw, dh);
+  // Attachment points are authored from the sheet's top-left, while
+  // held-weapon renderers work from the player's feet-centred origin.
+  // Feed the raw-sheet composite the same converted hand anchors that
+  // Player.render uses; otherwise it silently falls back to a generic
+  // hand position and cannot reveal handedness mistakes in draft art.
+  const sheetAnchor = (name: string): { x: number; y: number } | undefined => {
+    const point = bodySel === 'knight'
+      ? baseKnight.anchor?.(name, animName, frame)
+      : file.anchors?.[name]?.[concreteAnimName()]?.[frame];
+    return point ? { x: point.x - dw / 2, y: point.y - dh } : undefined;
+  };
   // The weapon draw needs an animation its sheet actually has; outside
   // an attack pose, fall back to idle rather than throwing mid-paint.
-  const known = weaponVisuals.get(wdef.visual).animations;
+  const known = weaponVisuals.get(wdef!.visual).animations;
   const weaponAnim = !known || known.includes(animName) ? animName : 'idle';
   try {
-    drawHeldWeapon(pctx, wdef.visual, {
+    drawHeldWeapon(pctx, wdef!.visual, {
       facing: 1, anim: weaponAnim, frame, animT: tIn,
-      bodyW: dw, bodyH: dh, attack: pose,
+      bodyW: dw, bodyH: dh,
+      frontHand: sheetAnchor('frontHand'),
+      rearHand: sheetAnchor('rearHand'),
+      attack: pose,
     });
   } catch { /* a half-painted sheet mid-edit; next frame will catch up */ }
   pctx.restore();
 
   if (pose && ($('compTrail') as HTMLInputElement).checked) {
     try {
-      drawWeaponTrail(pctx, wdef.visual, {
+      drawWeaponTrail(pctx, wdef!.visual, {
         x: fx, y: fy - dh * 0.45, facing: 1,
-        colors: [...wdef.colors], attack: pose,
+        colors: [...wdef!.colors], attack: pose,
       });
     } catch { /* ditto */ }
   }
@@ -804,6 +1260,7 @@ function renderComposite(t: number): boolean {
 }
 
 function renderPreview(): void {
+  maybeRebakeEditedEquipment();
   const hd = ($('hd') as HTMLInputElement).checked;
   const p = pal();
   const t = performance.now() / 1000;
@@ -924,11 +1381,13 @@ $('btnLoad').onclick = () => ($('fileInput') as HTMLInputElement).click();
       frameIdx = 0;
       currentChar = firstPaintChar();
       currentFileName = f.name;
+      currentRepoPath = null;
       editVersion++;
       undoStack.length = 0;
       redoStack.length = 0;
       updateUndoRedoButtons();
       refreshUI();
+      fitGrid();
       flash(`loaded ${f.name}`);
       ($('selectSprite') as HTMLSelectElement).value = ''; // clear dropdown
     } catch (err) {
@@ -939,9 +1398,10 @@ $('btnLoad').onclick = () => ($('fileInput') as HTMLInputElement).click();
   input.value = ''; // allow re-loading the same file
 };
 
-$('selectSprite').onchange = (e) => {
+$('selectSprite').onchange = async (e) => {
   const val = (e.target as HTMLSelectElement).value;
   if (!val) return;
+  if (await openSharedSprite(val)) return;
   try {
     file = existingSprite(val);
     animName = Object.keys(file.anims)[0];
@@ -951,23 +1411,15 @@ $('selectSprite').onchange = (e) => {
 
     const parts = val.split('/');
     currentFileName = parts[parts.length - 1];
+    currentRepoPath = val;
 
-    // Loading a weapon sheet sets the composite up for it: the knight
-    // underneath, this weapon in hand — the view you actually want when
-    // touching up a sword's attack frames.
-    const stem = currentFileName.replace(/\.json$/, '');
-    if (val.includes('equipment/') && weapons.has(stem)) {
-      ($('compWeapon') as HTMLSelectElement).value = stem;
-      ($('compBody') as HTMLSelectElement).value = 'player';
-      // Setting .value programmatically fires no change event, so the
-      // move list must be rebuilt by hand or it stays empty.
-      rebuildMoveSelect(stem);
-    }
+    configureCompositeForPath(val);
 
     undoStack.length = 0;
     redoStack.length = 0;
     updateUndoRedoButtons();
     refreshUI();
+    fitGrid();
     flash(`loaded ${val}`);
   } catch (err) {
     flash(`load failed: ${(err as Error).message}`);
@@ -1034,6 +1486,27 @@ $('btnToolFill').onclick = () => {
   $('btnToolDraw').classList.remove('active');
 };
 
+const GRID_ZOOMS = [4, 6, 8, 12, 16, 24, 32];
+
+function setGridZoom(value: number): void {
+  cellSize = GRID_ZOOMS.includes(value) ? value : 8;
+  ($('gridZoom') as HTMLSelectElement).value = String(cellSize);
+  redraw();
+}
+
+function fitGrid(): void {
+  const center = $('center');
+  const availableW = Math.max(1, center.clientWidth - 40);
+  const availableH = Math.max(1, center.clientHeight - 40);
+  const ideal = Math.floor(Math.min(availableW / W(), availableH / H()));
+  setGridZoom([...GRID_ZOOMS].reverse().find((size) => size <= ideal) ?? GRID_ZOOMS[0]);
+}
+
+($('gridZoom') as HTMLSelectElement).onchange = (event) => {
+  setGridZoom(Number((event.target as HTMLSelectElement).value));
+};
+$('btnFitGrid').onclick = () => fitGrid();
+
 $('btnLoadRef').onclick = () => ($('refFileInput') as HTMLInputElement).click();
 ($('refFileInput') as HTMLInputElement).onchange = (e) => {
   const input = e.target as HTMLInputElement;
@@ -1096,6 +1569,18 @@ function nudge(dx: number, dy: number): void {
   }
   
   anim().frames[frameIdx] = next;
+  const logicalW = w / density();
+  const logicalH = h / density();
+  const concrete = concreteAnimName();
+  let movedAnchor = false;
+  for (const groups of Object.values(file.anchors ?? {})) {
+    const point = groups[concrete]?.[frameIdx];
+    if (!point) continue;
+    point.x = (point.x + dx / density() + logicalW) % logicalW;
+    point.y = (point.y + dy / density() + logicalH) % logicalH;
+    movedAnchor = true;
+  }
+  if (movedAnchor) buildAnchors();
   redraw();
   syncIO();
 }
@@ -1236,11 +1721,13 @@ function refreshUI(): void {
   buildPalette();
   buildAnims();
   buildFrames();
+  buildAnchors();
   redraw();
   syncIO();
 
   const hdCheckbox = $('hd') as HTMLInputElement;
   if (hdCheckbox) hdCheckbox.checked = file.hd ?? true;
+  updateBridgeStatus();
 }
 
 refreshUI();
@@ -1250,8 +1737,53 @@ Object.defineProperty(window, '__editor', {
   value: {
     get file() { return file; },
     get currentFileName() { return currentFileName; },
+    get currentRepoPath() { return currentRepoPath; },
+    get animName() { return animName; },
+    get frameIdx() { return frameIdx; },
     get editVersion() { return editVersion; },
     get rebuiltVersion() { return rebuiltVersion; },
+    get bridge() {
+      return {
+        connected: bridgeConnected,
+        revision: bridgeRevision,
+        dirty: bridgeDirty,
+        conflict: bridgeConflict,
+        clientId: bridgeClientId,
+      };
+    },
+    open(path: string) { return openSharedSprite(path); },
+    replace(next: SpriteFile, path: string | null = currentRepoPath) {
+      rememberForUndo();
+      file = normalize(structuredClone(next));
+      currentRepoPath = path;
+      currentFileName = path?.split('/').at(-1) ?? currentFileName;
+      animName = Object.keys(file.anims)[0];
+      frameIdx = 0;
+      currentChar = firstPaintChar();
+      editVersion++;
+      refreshUI();
+      updateUndoRedoButtons();
+      void publishSharedSprite();
+    },
+    setPixels(changes: { anim?: string; frame?: number; pixels: { x: number; y: number; char: string }[] }) {
+      const targetName = changes.anim ?? animName;
+      const targetAnim = resolveAnim(file, targetName);
+      if (!targetAnim) throw new Error(`unknown animation "${targetName}"`);
+      const targetFrame = changes.frame ?? frameIdx;
+      const rows = targetAnim.frames[targetFrame];
+      if (!rows) throw new Error(`unknown frame ${targetFrame} in "${targetName}"`);
+      rememberForUndo();
+      for (const pixel of changes.pixels) {
+        if (pixel.char.length !== 1) throw new Error('pixel char must be one character');
+        if (pixel.y < 0 || pixel.y >= rows.length || pixel.x < 0 || pixel.x >= rows[pixel.y].length) continue;
+        rows[pixel.y] = rows[pixel.y].slice(0, pixel.x) + pixel.char + rows[pixel.y].slice(pixel.x + 1);
+      }
+      editVersion++;
+      refreshUI();
+      updateUndoRedoButtons();
+      void publishSharedSprite();
+    },
+    save() { return saveSharedSprite(); },
   },
 });
 
@@ -1270,3 +1802,6 @@ Object.defineProperty(window, '__editor', {
 
 rebuildMoveSelect(($('compWeapon') as HTMLSelectElement).value);
 renderPreview();
+updateBridgeStatus();
+void initializeBridge();
+window.setInterval(() => void publishSharedSprite(), 160);

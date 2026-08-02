@@ -33,11 +33,23 @@ export interface SpriteGeometry {
   };
 }
 
+/** A named attachment point in logical pixels from the sprite's top-left. */
+export interface SpriteAnchor {
+  x: number;
+  y: number;
+  angle?: number;
+}
+
+/** Anchor name → animation name → one point per animation frame. */
+export type SpriteAnchors = Record<string, Record<string, SpriteAnchor[]>>;
+
 export interface SpriteFile extends SpriteGeometry {
   /** Char → color overrides layered on the base palette. */
   palette?: Palette;
   /** EPX-upscale twice (4x) at load. Default true. */
   hd?: boolean;
+  /** Frame-aligned attachment points (hands, head, muzzle, etc.). */
+  anchors?: SpriteAnchors;
   /**
    * An animation is authored frames — or a STRING naming another
    * animation in this file to borrow wholesale. Aliases are what let a
@@ -75,6 +87,8 @@ export interface LoadedSprite {
   h: number;
   /** Collision hitbox relative to drawing origin. */
   hitbox: Rect;
+  /** Resolve a named point, following animation aliases like frame art. */
+  anchor?(name: string, anim: string, frame?: number): SpriteAnchor | undefined;
   /** One baked frame canvas of an animation (default frame 0). */
   frame(anim: string, i?: number): HTMLCanvasElement;
   /** All baked frames of an animation. */
@@ -125,6 +139,21 @@ export function resolveSpriteGeometry(
  */
 export function loadSprite(file: SpriteFile, base: Palette = {}): LoadedSprite {
   const pal: Palette = { ...base, ...(file.palette ?? {}) };
+  for (const [pointName, animations] of Object.entries(file.anchors ?? {})) {
+    for (const [animName, points] of Object.entries(animations)) {
+      const frames = resolveAnim(file, animName)?.frames;
+      if (!frames) throw new Error(`sprite anchor "${pointName}": unknown animation "${animName}"`);
+      if (points.length !== frames.length) {
+        throw new Error(`sprite anchor "${pointName}.${animName}": expected ${frames.length} frame points, got ${points.length}`);
+      }
+      for (const point of points) {
+        if (!Number.isFinite(point.x) || !Number.isFinite(point.y)
+          || (point.angle !== undefined && !Number.isFinite(point.angle))) {
+          throw new Error(`sprite anchor "${pointName}.${animName}": coordinates must be finite`);
+        }
+      }
+    }
+  }
   const bake = (rows: string[]): HTMLCanvasElement =>
     file.hd === false ? sprite(rows, pal) : sprite(epx(epx(rows)), pal);
 
@@ -155,8 +184,23 @@ export function loadSprite(file: SpriteFile, base: Palette = {}): LoadedSprite {
     return baked;
   };
 
+  const anchorOf = (name: string, anim: string, frame = 0): SpriteAnchor | undefined => {
+    let target = anim;
+    let entry = file.anims[target];
+    const seen = new Set<string>();
+    while (typeof entry === 'string' && !seen.has(target)) {
+      seen.add(target);
+      target = entry;
+      entry = file.anims[target];
+    }
+    const points = file.anchors?.[name]?.[anim] ?? file.anchors?.[name]?.[target];
+    if (!points?.length) return undefined;
+    return points[Math.min(Math.max(0, frame), points.length - 1)];
+  };
+
   return {
     ...geometry,
+    anchor: anchorOf,
     frame: (name, i = 0) => framesOf(name)[i],
     frames: framesOf,
     names: () => Object.keys(file.anims),

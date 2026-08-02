@@ -11,6 +11,7 @@ import {
 import { COLORS, PAL } from './palette';
 import { TEXEL } from './sprites';
 import { drawArrowSprite } from './ballistics';
+import { normalizedItemIcon } from './item-icon';
 import greatSwordJson from './sprites/equipment/great-sword.json';
 import rustySwordJson from './sprites/equipment/rusty-sword.json';
 import slashCrescentJson from './sprites/slash-crescent.json';
@@ -29,6 +30,9 @@ export interface HeldWeaponCtx {
   animT: number;
   bodyW: number;
   bodyH: number;
+  /** Frame-authored hand points, in body-local pixels from the feet origin. */
+  frontHand?: { x: number; y: number };
+  rearHand?: { x: number; y: number };
   attack?: WeaponAttackPose;
   /** Hold-to-charge progress 0..1 while the wielder is drawing (the
    * player's `draw` state) — charged visuals pull their string/wind-up
@@ -59,6 +63,8 @@ export interface WeaponVisual {
   icon?: HTMLCanvasElement;
   /** Authored animation names, exposed for weapon-definition validation. */
   animations?: readonly string[];
+  /** Which authored hands must render in front of the weapon. */
+  gripHands?: 'none' | 'front' | 'bothWhenCharging';
   drawHeld(g: CanvasRenderingContext2D, ctx: HeldWeaponCtx): void;
   drawTrail?(g: CanvasRenderingContext2D, ctx: WeaponTrailCtx): void;
 }
@@ -100,7 +106,7 @@ export function defineSlashVisual(id: string, visual: SlashVisual): void {
  * arrows/bullets at exactly this line (± the weapon's small `muzzleY`
  * trim), so if you move the hand, the shots move with it.
  */
-export const RANGED_HAND_Y = -9.5;
+export const RANGED_HAND_Y = -7.5;
 
 export function defineWeaponVisual(id: string, visual: WeaponVisual): void {
   weaponVisuals.register(id, visual);
@@ -108,6 +114,13 @@ export function defineWeaponVisual(id: string, visual: WeaponVisual): void {
 
 export function drawHeldWeapon(g: CanvasRenderingContext2D, id: string | null, ctx: HeldWeaponCtx): void {
   if (id) weaponVisuals.get(id).drawHeld(g, ctx);
+}
+
+export function heldWeaponHands(id: string | null, charging: boolean): ('front' | 'rear')[] {
+  if (!id) return [];
+  const usage = weaponVisuals.get(id).gripHands ?? 'front';
+  if (usage === 'none') return [];
+  return usage === 'bothWhenCharging' && charging ? ['front', 'rear'] : ['front'];
 }
 
 export function drawWeaponTrail(g: CanvasRenderingContext2D, id: string | null, ctx: WeaponTrailCtx): void {
@@ -190,8 +203,9 @@ export function spriteWeapon(config: SpriteWeaponConfig): WeaponVisual {
     ?? Object.values(config.anims.right)[0]?.frames[0];
   if (!iconFrame) throw new Error('sprite weapon needs at least one frame');
   return {
-    icon: normalizedIcon(iconFrame),
+    icon: normalizedItemIcon(iconFrame),
     animations: Object.keys(config.anims.right),
+    gripHands: 'front',
     drawHeld(g, ctx) {
       const set = ctx.facing === 1 ? config.anims.right : config.anims.left;
       // A move whose named animation isn't in the sheet falls back to
@@ -223,47 +237,6 @@ export function spriteWeapon(config: SpriteWeaponConfig): WeaponVisual {
   };
 }
 
-/** Trim a world sprite and fit it into the established 8x8 icon footprint. */
-function normalizedIcon(image: HTMLCanvasElement): HTMLCanvasElement {
-  const size = 8 * TEXEL;
-  const padding = 1 * TEXEL;
-  const source = image.getContext('2d')!.getImageData(0, 0, image.width, image.height);
-  let minX = image.width;
-  let minY = image.height;
-  let maxX = -1;
-  let maxY = -1;
-  for (let y = 0; y < image.height; y++) {
-    for (let x = 0; x < image.width; x++) {
-      if (source.data[(y * image.width + x) * 4 + 3] === 0) continue;
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
-    }
-  }
-
-  const [icon, g] = offscreen(size, size);
-  if (maxX < minX || maxY < minY) return icon;
-  const sourceW = maxX - minX + 1;
-  const sourceH = maxY - minY + 1;
-  const scale = Math.min((size - padding * 2) / sourceW, (size - padding * 2) / sourceH);
-  const drawW = Math.max(1, Math.round(sourceW * scale));
-  const drawH = Math.max(1, Math.round(sourceH * scale));
-  g.imageSmoothingEnabled = false;
-  g.drawImage(
-    image,
-    minX,
-    minY,
-    sourceW,
-    sourceH,
-    Math.floor((size - drawW) / 2),
-    Math.floor((size - drawH) / 2),
-    drawW,
-    drawH,
-  );
-  return icon;
-}
-
 export interface ProceduralBladeConfig {
   bladeLen: number;
   bladeW: number;
@@ -274,22 +247,17 @@ export interface ProceduralBladeConfig {
 /** Build compact pixel art when a weapon does not need an authored sheet. */
 export function proceduralBlade(config: ProceduralBladeConfig): WeaponVisual {
   return {
+    gripHands: 'front',
     drawHeld(g, ctx) {
       const f = ctx.facing;
-      let hx = 1.75;
-      let hy = -4.5;
-      if (ctx.anim === 'run') {
-        if (ctx.frame === 0) {
-          hx = 2.25;
-          hy = -5.25;
-        } else if (ctx.frame === 2) {
-          hx = 1.25;
-          hy = -5.25;
-        }
-      } else if (ctx.anim === 'air') {
-        hx = 1.5;
-        hy = -5;
-      } else {
+      let hx = ctx.frontHand?.x ?? 1.75;
+      let hy = ctx.frontHand?.y ?? -4.5;
+      if (!ctx.frontHand && ctx.anim === 'run') {
+        if (ctx.frame === 0) { hx = 2.25; hy = -5.25; }
+        else if (ctx.frame === 2) { hx = 1.25; hy = -5.25; }
+      } else if (!ctx.frontHand && ctx.anim === 'air') {
+        hx = 1.5; hy = -5;
+      } else if (!ctx.frontHand) {
         hy += Math.sin(ctx.animT * 4.5) * 0.2;
       }
 
@@ -516,6 +484,7 @@ function attackFrame(attack: WeaponAttackPose, frameCount: number): number {
 }
 
 defineWeaponVisual('unarmed', {
+  gripHands: 'none',
   drawHeld() {},
   drawTrail: drawSlashTrail,
 });
@@ -593,30 +562,33 @@ const WOOD_DARK = '#5d4728';
  * rows. Only the STRING (and the nocked arrow) is dynamic — pixels
  * can't bend, but a line can.
  */
-const STAVE_W = 4;
-const STAVE_H = 8;
+const STAVE_W = 7;
+const STAVE_H = 12;
 const STAVE = (() => {
   const [c, g] = offscreen(STAVE_W * TEXEL, STAVE_H * TEXEL);
   const px = (x: number, y: number, color: string) => {
     g.fillStyle = color;
     g.fillRect(x * TEXEL, y * TEXEL, TEXEL, TEXEL);
   };
-  px(1, 0, WOOD); // top tip — the string anchors here
-  px(2, 1, WOOD);
-  for (let y = 2; y <= 5; y++) {
-    px(3, y, WOOD); // belly
-    px(2, y, WOOD_DARK); // shaded spine, and the grip wrap
+  px(1, 0, COLORS.outline); px(2, 0, WOOD); // tapered upper horn
+  px(2, 1, COLORS.outline); px(3, 1, WOOD);
+  px(3, 2, COLORS.outline); px(4, 2, WOOD);
+  for (let y = 3; y <= 8; y++) {
+    px(4, y, COLORS.outline); px(5, y, WOOD);
+    if (y >= 5 && y <= 7) px(4, y, WOOD_DARK); // wrapped grip
+    else px(5, y, COLORS.gold);
   }
-  px(2, 6, WOOD);
-  px(1, 7, WOOD); // bottom tip
+  px(3, 9, COLORS.outline); px(4, 9, WOOD);
+  px(2, 10, COLORS.outline); px(3, 10, WOOD);
+  px(1, 11, COLORS.outline); px(2, 11, WOOD); // lower horn
   return c;
 })();
 const STAVE_FLASH = whiteOf(STAVE);
 
 /** Where the string ties on, in grip-origin coords (art tip centers). */
-const STAVE_TIP = { x: 0.5, y: 3.5 };
+const STAVE_TIP = { x: 0.5, y: 5.5 };
 /** How far behind the tips a full draw anchors the nock. */
-const PULL_DEPTH = 4.5;
+const PULL_DEPTH = 5.5;
 
 /** How a bow should look right now — shared by every bow in the game. */
 export interface BowPose {
@@ -663,22 +635,27 @@ export function drawBow(g: CanvasRenderingContext2D, pose: BowPose): void {
 // The hunting bow: a strung arc held at the knight's leading hand. The
 // arc leans with the run cycle like the blades do.
 defineWeaponVisual('hunting-bow', {
+  gripHands: 'bothWhenCharging',
   // The icon IS the held bow: the same pixel stave + slack string at
   // 1:1 (the stave is authored 8 tall, exactly the icon frame) —
   // inventory, pickups, and the knight's hand can never drift apart.
   icon: (() => {
     const [icon, g] = offscreen(8 * TEXEL, 8 * TEXEL);
     g.scale(TEXEL, TEXEL);
-    g.translate(3, 4);
+    g.translate(3.1, 4);
+    g.scale(0.62, 0.62);
     drawBow(g, { pull: 0 });
     return icon;
   })(),
   drawHeld(g, ctx) {
     const f = ctx.facing;
     const pull = ctx.charge ?? 0;
-    let hx = 2.25;
-    let hy = RANGED_HAND_Y; // grip on the shared hand line — arrows nock here
-    if (pull === 0) {
+    // The authored anchor is signed around the body origin. In the
+    // right-facing three-quarter sprite, the knight's right/weapon hand
+    // is on the image's left, so forcing this positive swaps hands.
+    let hx = ctx.frontHand?.x ?? 4;
+    let hy = ctx.frontHand?.y ?? RANGED_HAND_Y; // authored grip; shots use the same baseline
+    if (pull === 0 && !ctx.frontHand) {
       if (ctx.anim === 'run') hy += ctx.frame === 1 ? 0.5 : -0.25;
       else if (ctx.anim !== 'air') hy += Math.sin(ctx.animT * 4.5) * 0.2;
     }
@@ -694,6 +671,7 @@ defineWeaponVisual('hunting-bow', {
 
 // The flintlock: a stubby barrel + drooping grip at the hand.
 defineWeaponVisual('flintlock', {
+  gripHands: 'front',
   icon: bakedIcon((px) => {
     px(1, 3, 6, 1, COLORS.steel); px(6, 2, 1, 1, COLORS.white); // barrel + muzzle
     px(1, 4, 2, 1, WOOD); px(1, 5, 1, 2, WOOD_DARK); // stock + grip
@@ -701,10 +679,10 @@ defineWeaponVisual('flintlock', {
   }),
   drawHeld(g, ctx) {
     const f = ctx.facing;
-    let hx = 2;
-    let hy = RANGED_HAND_Y; // barrel rides the shared hand line
-    if (ctx.anim === 'run') hy += ctx.frame === 1 ? 0.4 : -0.2;
-    else if (ctx.anim !== 'air') hy += Math.sin(ctx.animT * 4.5) * 0.2;
+    let hx = ctx.frontHand?.x ?? 4;
+    let hy = ctx.frontHand?.y ?? RANGED_HAND_Y; // barrel rides the authored hand
+    if (!ctx.frontHand && ctx.anim === 'run') hy += ctx.frame === 1 ? 0.4 : -0.2;
+    else if (!ctx.frontHand && ctx.anim !== 'air') hy += Math.sin(ctx.animT * 4.5) * 0.2;
     g.save();
     g.translate(hx * f, hy);
     if (f === -1) g.scale(-1, 1);

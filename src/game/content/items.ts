@@ -3,7 +3,6 @@ import { COLORS } from './palette';
 import {
   ICON_POTION,
   ICON_ORB,
-  ICON_CHARM,
   ICON_COIN,
   ICON_HASTE,
   ICON_KEY,
@@ -11,6 +10,7 @@ import {
 import type { ActorHost } from '../defs';
 import type { Player } from '../actors/player';
 import { weaponIcon } from './weapon-visuals';
+import { gearIcon } from './gear-visuals';
 
 /** Context handed to item use/onPickup hooks. */
 export interface ItemCtx {
@@ -54,7 +54,7 @@ defineItem<ItemCtx>('flintlock', {
 defineItem<ItemCtx>('iron-helmet', {
   name: 'IRON HELMET',
   desc: 'Soaks 4 damage a blow. Dents until it splits.',
-  icon: ICON_CHARM,
+  icon: gearIcon('iron-helmet'),
   kind: 'equipment',
   slot: 'helmet',
   // Armor SOAKS damage rather than padding the health pool (see
@@ -127,7 +127,7 @@ defineItem<ItemCtx>('gate-key', {
 defineItem<ItemCtx>('steel-armor', {
   name: 'STEEL ARMOR',
   desc: 'Heavy plate. Soaks 8 damage a blow, until it gives.',
-  icon: ICON_CHARM,
+  icon: gearIcon('steel-armor'),
   kind: 'equipment',
   slot: 'armor',
   mods: { add: { armor: 8 } },
