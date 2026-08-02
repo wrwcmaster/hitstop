@@ -29,7 +29,9 @@ export function paramCount(shape = SHAPE) {
  * `scratch` lets a training loop run millions of these without handing
  * the garbage collector a new pair of arrays every frame.
  */
-export function forward(w, x, shape = SHAPE, scratch = {}) {
+/** Raw output scores — the PPO collector samples from these; forward()
+ * below argmaxes them, so the two cannot disagree about the network. */
+export function forwardLogits(w, x, shape = SHAPE, scratch = {}) {
   let cur = x;
   let at = 0;
   for (let l = 0; l + 1 < shape.length; l++) {
@@ -48,8 +50,13 @@ export function forward(w, x, shape = SHAPE, scratch = {}) {
     at += inN * outN + outN;
     cur = next;
   }
+  return cur;
+}
+
+export function forward(w, x, shape = SHAPE, scratch = {}) {
+  const out = forwardLogits(w, x, shape, scratch);
   let best = 0;
-  for (let j = 1; j < cur.length; j++) if (cur[j] > cur[best]) best = j;
+  for (let j = 1; j < out.length; j++) if (out[j] > out[best]) best = j;
   return best;
 }
 
