@@ -8,7 +8,7 @@
  * main.ts — `bootReplay` seeds the gameplay RNG (and sandboxes storage
  * when watching a replay) before any other module can touch either.
  */
-import { Replay, bootReplay, DialogueScene, GRAVITY, Projectile, skillDef, type Tilemap, type Recording } from '@engine/index';
+import { Replay, bootReplay, DialogueScene, GRAVITY, Projectile, skillDef, tiles, type Tilemap, type Recording } from '@engine/index';
 import { STORAGE_PREFIX, REPLAY_PENDING_KEY, type ActionGame, type Action, type RunStart, type GameEvents } from '../defs';
 import { Player } from '../actors/player';
 import { PLAYER_TUNING } from '../actors/player-tuning';
@@ -438,9 +438,63 @@ function attachObserver(game: ActionGame): void {
         })),
         weapon: p.equipment.slots().find(([slot]) => slot === 'weapon')?.[1] ?? null,
       },
+      // LOCAL GEOMETRY: an 11x7 window of tile cells around her, one
+      // number per cell. This is the field whose absence three results
+      // agree on: the rule bot corners itself, ES flatlined at 0/10 and
+      // PPO round one could not cross its own baseline, all in the one
+      // room where "cornered", "platform above" and "hazard floor"
+      // decide fights — and none of those is expressible in two rays
+      // and a drop. Values: 1 solid, 0.5 stand-through platform, -1
+      // hazard, 0 air. Moving solids (platforms, closed barriers) are
+      // stamped from the tilemap's own solids so a closed gate reads as
+      // the wall it is.
+      tiles: tileWindow(p),
       wave: play.replayState().wave,
     };
   };
+}
+
+/** Tile-window shape, exported for the feature encoder. */
+export const TILE_WIN = { w: 11, h: 7 } as const;
+
+/** The 11x7 cell window centred on the knight (see the caller). */
+function tileWindow(p: Player): number[] {
+  const map = p.collision as Tilemap;
+  const ts = map.tileSize;
+  const cx = Math.floor((p.x + p.w / 2) / ts);
+  const cy = Math.floor((p.y + p.h / 2) / ts);
+  const out: number[] = [];
+  for (let dy = -(TILE_WIN.h >> 1); dy <= (TILE_WIN.h >> 1); dy++) {
+    for (let dx = -(TILE_WIN.w >> 1); dx <= (TILE_WIN.w >> 1); dx++) {
+      const tx = cx + dx;
+      const ty = cy + dy;
+      // Beyond the room is a wall in every way that matters — the mover
+      // will not let her leave, so "cornered against the world edge"
+      // must LOOK like a corner. Encoding it as air made the one thing
+      // this window exists for invisible exactly at the boundary.
+      if (tx < 0 || ty < 0 || tx >= map.cols || ty >= map.rows) { out.push(1); continue; }
+      const id = map.tileAt(tx, ty);
+      const d = id ? tiles.get(id) : null;
+      out.push(d?.hazard ? -1 : d?.solid && !d.oneWay ? 1 : d?.oneWay ? 0.5 : 0);
+    }
+  }
+  // Moving solids and closed barriers are not tiles; stamp them in.
+  const x0 = (cx - (TILE_WIN.w >> 1)) * ts;
+  const y0 = (cy - (TILE_WIN.h >> 1)) * ts;
+  const win = { x: x0, y: y0, w: TILE_WIN.w * ts, h: TILE_WIN.h * ts };
+  for (const sld of map.solidsNear(win)) {
+    const gx0 = Math.max(0, Math.floor((sld.x - x0) / ts));
+    const gy0 = Math.max(0, Math.floor((sld.y - y0) / ts));
+    const gx1 = Math.min(TILE_WIN.w - 1, Math.floor((sld.x + sld.w - 1 - x0) / ts));
+    const gy1 = Math.min(TILE_WIN.h - 1, Math.floor((sld.y + sld.h - 1 - y0) / ts));
+    for (let gy = gy0; gy <= gy1; gy++) {
+      for (let gx = gx0; gx <= gx1; gx++) {
+        const i = gy * TILE_WIN.w + gx;
+        if (out[i] === 0) out[i] = sld.oneWay ? 0.5 : 1;
+      }
+    }
+  }
+  return out;
 }
 
 /**

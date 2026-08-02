@@ -49,7 +49,12 @@ const GOAL_F = 5;
  * the knight 97% idle, while validation rejected everything and
  * faithfully kept the corrupted baseline.
  */
-export const FEATURES = SELF_F + MOBS * MOB_F + SHOTS * SHOT_F + 2 + GOAL_F + 1;
+/** The 11x7 local tile window (harness TILE_WIN): 77 cells, one value
+ * each, already in [-1,1] by construction. Appended after sinceSwing,
+ * per the contract above. */
+const TILES_F = 77;
+
+export const FEATURES = SELF_F + MOBS * MOB_F + SHOTS * SHOT_F + 2 + GOAL_F + 1 + TILES_F;
 
 const clamp = (v) => (v < -1 ? -1 : v > 1 ? 1 : v);
 
@@ -134,7 +139,14 @@ export function encode(o, out = new Float64Array(FEATURES), goal = null) {
   }
   // sinceSwing: the hit-and-run phase variable, appended last (see the
   // contract above). Always written, goal or no goal.
-  out[FEATURES - 1] = clamp((o.player?.sinceSwing ?? 2) / 2);
+  out[FEATURES - 1 - TILES_F] = clamp((o.player?.sinceSwing ?? 2) / 2);
+  // The tile window, last. Cells are already -1..1; missing (an old
+  // observation without the field) stays zero, which reads as open air.
+  const tw = o.tiles;
+  if (tw) {
+    const base = FEATURES - TILES_F;
+    for (let k = 0; k < TILES_F && k < tw.length; k++) out[base + k] = tw[k];
+  }
   return out;
 }
 
