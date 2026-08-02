@@ -16,6 +16,19 @@ interface ActiveSprite {
   dirty: boolean;
 }
 
+interface ActiveSelection {
+  path: string | null;
+  anim: string;
+  frame: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rows: string[];
+  source: string;
+  updatedAt: number;
+}
+
 /**
  * Development-only bridge between the browser sprite editor and local agents.
  * The browser and the agent exchange one revisioned document; repository writes
@@ -24,6 +37,7 @@ interface ActiveSprite {
 export function spriteEditorBridge(root: string): Plugin {
   const spriteRoot = path.resolve(root, 'src/game/content/sprites');
   let active: ActiveSprite | null = null;
+  let selection: ActiveSelection | null = null;
   let preview: Buffer | null = null;
   let previewRevision = 0;
   const listeners = new Set<ServerResponse>();
@@ -178,6 +192,40 @@ export function spriteEditorBridge(root: string): Plugin {
             return active ? send(res, 200, active) : send(res, 404, { error: 'no sprite is open' });
           }
 
+          if (req.method === 'GET' && url.pathname === `${API}/selection`) {
+            return send(res, 200, { selection });
+          }
+
+          if (req.method === 'PUT' && url.pathname === `${API}/selection`) {
+            const body = await jsonBody(req);
+            if (body.selection == null) {
+              selection = null;
+              return send(res, 200, { selection });
+            }
+            const value = body.selection as Record<string, unknown>;
+            const rows = value.rows;
+            const numbers = ['frame', 'x', 'y', 'w', 'h'] as const;
+            if (numbers.some((key) => !Number.isInteger(value[key]))
+              || Number(value.x) < 0 || Number(value.y) < 0 || Number(value.w) < 1 || Number(value.h) < 1
+              || typeof value.anim !== 'string' || !Array.isArray(rows) || !rows.every((row) => typeof row === 'string')
+              || rows.length !== Number(value.h) || rows.some((row) => row.length !== Number(value.w))) {
+              return send(res, 400, { error: 'selection needs integer bounds and matching pixel rows' });
+            }
+            selection = {
+              path: value.path == null ? null : String(value.path),
+              anim: value.anim,
+              frame: Number(value.frame),
+              x: Number(value.x),
+              y: Number(value.y),
+              w: Number(value.w),
+              h: Number(value.h),
+              rows: rows as string[],
+              source: String(value.source ?? 'browser'),
+              updatedAt: Number(value.updatedAt) || Date.now(),
+            };
+            return send(res, 200, { selection });
+          }
+
           if (req.method === 'POST' && url.pathname === `${API}/open`) {
             const body = await jsonBody(req);
             const target = spritePath(body.path);
@@ -196,6 +244,7 @@ export function spriteEditorBridge(root: string): Plugin {
             };
             preview = null;
             previewRevision = 0;
+            selection = null;
             publish();
             return send(res, 200, active);
           }

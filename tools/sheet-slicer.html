@@ -97,11 +97,19 @@
       <div id="protectionList"></div>
       <label>target frame w <input id="targetW" type="number" min="0" value="0">
         h <input id="targetH" type="number" min="0" value="0"></label>
+      <label><input id="trimTransparent" type="checkbox"> fit shared content bounds</label>
+      <label>shared trim
+        t <input id="sharedTrimTop" type="number" min="0" value="0">
+        r <input id="sharedTrimRight" type="number" min="0" value="0"></label>
+      <label>
+        b <input id="sharedTrimBottom" type="number" min="0" value="0">
+        l <input id="sharedTrimLeft" type="number" min="0" value="0">
+        <span class="hint">logical output px</span></label>
       <label>reduction <select id="resampleMode">
         <option value="coverage" selected>coverage-aware pixel reduction</option>
         <option value="nearest">nearest-neighbor sampling</option>
       </select></label>
-      <p class="hint">0 keeps the detected size. Coverage-aware reduction keeps thin clusters that single-point nearest-neighbor sampling can skip.</p>
+      <p class="hint">0 keeps the detected size. Coverage-aware reduction integrates each source footprint; local edge contrast protects bounded details during palette selection.</p>
       <p class="hint">Detection, reduction, palette selection, preview, normalized PNG, and JSON all honor the same protected subject colors.</p>
       <h2>frame alignment</h2>
       <p class="hint">Every crop is bottom-centered in one shared frame. Use offsets for the final origin and baseline.</p>

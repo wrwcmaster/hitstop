@@ -54,7 +54,23 @@ let frameIdx = 0;
 let currentChar = firstPaintChar();
 let painting = false;
 let erasing = false;
-let currentTool: 'draw' | 'fill' = 'draw';
+type EditorTool = 'draw' | 'fill' | 'picker' | 'select';
+let currentTool: EditorTool = 'draw';
+let altPickerActive = false;
+let picking = false;
+interface PixelRect { x: number; y: number; w: number; h: number }
+interface PixelClipboard { w: number; h: number; rows: string[] }
+interface SharedSelection extends PixelRect {
+  path: string | null;
+  anim: string;
+  frame: number;
+  rows: string[];
+  source: string;
+  updatedAt: number;
+}
+let selection: PixelRect | null = null;
+let selectionStart: { x: number; y: number } | null = null;
+let pixelClipboard: PixelClipboard | null = null;
 let refFile: SpriteFile | null = null;
 let currentFileName = 'new sprite.json';
 let currentRepoPath: string | null = null;
@@ -272,6 +288,7 @@ function applyBridgeState(state: BridgeState, force = false): void {
   const incoming = JSON.stringify(state.file);
   if (incoming !== local) {
     rememberForUndo();
+    clearSelection(false);
     file = normalize(structuredClone(state.file));
     if (!file.anims[animName]) animName = Object.keys(file.anims)[0];
     frameIdx = Math.min(frameIdx, anim().frames.length - 1);
@@ -292,6 +309,33 @@ async function bridgeJson(path: string, init?: RequestInit): Promise<{ response:
   const response = await fetch(`${BRIDGE}${path}`, init);
   const body = await response.json() as Record<string, unknown>;
   return { response, body };
+}
+
+function selectionSnapshot(): SharedSelection | null {
+  if (!selection) return null;
+  return {
+    ...selection,
+    path: currentRepoPath,
+    anim: concreteAnimName(),
+    frame: frameIdx,
+    rows: cur().slice(selection.y, selection.y + selection.h)
+      .map((row) => row.slice(selection!.x, selection!.x + selection!.w)),
+    source: bridgeClientId,
+    updatedAt: Date.now(),
+  };
+}
+
+async function publishSelection(): Promise<void> {
+  if (!bridgeConnected) return;
+  try {
+    await bridgeJson('/selection', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selection: selectionSnapshot() }),
+    });
+  } catch {
+    // Selection is collaboration metadata, never worth taking the editor offline.
+  }
 }
 
 async function openSharedSprite(path: string): Promise<boolean> {
@@ -437,27 +481,76 @@ $('btnSaveRepo').onclick = () => void saveSharedSprite();
 
 /* ---------------- palette ui ---------------- */
 
+interface PaletteSortColor {
+  hue: number;
+  saturation: number;
+  lightness: number;
+  neutral: boolean;
+}
+
+function paletteSortColor(hex: string): PaletteSortColor | null {
+  const match = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!match) return null;
+  const value = Number.parseInt(match[1], 16);
+  const r = ((value >> 16) & 0xff) / 255;
+  const g = ((value >> 8) & 0xff) / 255;
+  const b = (value & 0xff) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const chroma = max - min;
+  const lightness = (max + min) / 2;
+  const saturation = chroma === 0 ? 0 : chroma / (1 - Math.abs(2 * lightness - 1));
+  let hue = 0;
+  if (chroma !== 0) {
+    if (max === r) hue = ((g - b) / chroma) % 6;
+    else if (max === g) hue = (b - r) / chroma + 2;
+    else hue = (r - g) / chroma + 4;
+    hue = (hue * 60 + 360) % 360;
+  }
+  // Hue becomes visually meaningless for near-grey ramps. Keep those ramps
+  // together and order them by value instead of scattering them around the
+  // chromatic palette.
+  return { hue, saturation, lightness, neutral: chroma < 0.08 || saturation < 0.12 };
+}
+
+function sortedPaletteEntries(): [string, string][] {
+  return Object.entries(pal())
+    .filter((entry): entry is [string, string] => entry[0] !== '.' && typeof entry[1] === 'string')
+    .map(([ch, color], index) => ({ ch, color, index, sort: paletteSortColor(color) }))
+    .sort((a, b) => {
+      if (!a.sort || !b.sort) return a.sort ? -1 : b.sort ? 1 : a.index - b.index;
+      if (a.sort.neutral !== b.sort.neutral) return a.sort.neutral ? -1 : 1;
+      if (a.sort.neutral) {
+        return a.sort.lightness - b.sort.lightness
+          || a.sort.saturation - b.sort.saturation
+          || a.index - b.index;
+      }
+      return a.sort.hue - b.sort.hue
+        || a.sort.lightness - b.sort.lightness
+        || a.sort.saturation - b.sort.saturation
+        || a.index - b.index;
+    })
+    .map(({ ch, color }) => [ch, color]);
+}
+
 function buildPalette(): void {
   const host = $('palette');
   host.innerHTML = '';
-  // Always ensure transparent/erase is at the top of the palette list
-  const entries: [string, string | null][] = [['.', null], ...Object.entries(pal()).filter(([ch]) => ch !== '.')];
+  // Sorting is display-only: palette characters and every authored frame stay
+  // byte-for-byte unchanged.
+  const entries: [string, string | null][] = [['.', null], ...sortedPaletteEntries()];
   for (const [ch, color] of entries) {
-    const row = document.createElement('div');
-    row.className = 'swatch';
-    const chip = document.createElement('span');
-    chip.className = 'chip' + (color ? '' : ' none');
-    if (color) chip.style.background = color;
     const b = document.createElement('button');
-    b.textContent = `${ch} ${color ?? '(erase)'}`;
-    b.className = ch === currentChar ? 'active' : '';
+    b.type = 'button';
+    b.className = `palette-cell${color ? '' : ' none'}${ch === currentChar ? ' active' : ''}`;
+    b.title = color ? `${ch}  ${color}` : '.  erase';
+    b.setAttribute('aria-label', color ? `palette ${ch}, ${color}` : 'erase transparent pixels');
+    if (color) b.style.background = color;
     b.onclick = () => {
       currentChar = ch;
       buildPalette();
     };
-    row.appendChild(chip);
-    row.appendChild(b);
-    host.appendChild(row);
+    host.appendChild(b);
   }
 }
 
@@ -569,9 +662,11 @@ function buildAnims(): void {
     b.className = name === animName ? 'active' : '';
     b.style.marginRight = '4px';
     b.onclick = () => {
+      clearSelection(false);
       animName = name;
       frameIdx = 0;
       refreshUI();
+      void publishSelection();
     };
     host.appendChild(b);
   }
@@ -672,7 +767,7 @@ function floodFill(startX: number, startY: number, fillChar: string): void {
 
 grid.addEventListener('contextmenu', (e) => e.preventDefault());
 grid.addEventListener('mousedown', (e) => {
-  if (e.altKey && selectedAnchorName) {
+  if (e.altKey && e.shiftKey && selectedAnchorName) {
     e.preventDefault();
     const bounds = grid.getBoundingClientRect();
     const sourceX = Math.floor((e.clientX - bounds.left) / cellSize);
@@ -684,20 +779,90 @@ grid.addEventListener('mousedown', (e) => {
     syncIO();
     return;
   }
+  if (e.altKey || currentTool === 'picker') {
+    e.preventDefault();
+    if (e.button !== 0) return;
+    picking = true;
+    pickColor(e);
+    return;
+  }
+  if (currentTool === 'select') {
+    e.preventDefault();
+    if (e.button === 2) {
+      setSelection(null);
+      void publishSelection();
+      return;
+    }
+    if (e.button !== 0) return;
+    const point = gridCell(e);
+    selectionStart = point;
+    setSelection({ x: point.x, y: point.y, w: 1, h: 1 });
+    return;
+  }
   saveHistory();
   erasing = e.button === 2;
   painting = true;
   paint(e);
 });
 grid.addEventListener('mousemove', (e) => {
+  if (picking) {
+    pickColor(e, false);
+    return;
+  }
+  if (selectionStart) {
+    const point = gridCell(e);
+    const x = Math.min(selectionStart.x, point.x);
+    const y = Math.min(selectionStart.y, point.y);
+    setSelection({ x, y, w: Math.abs(point.x - selectionStart.x) + 1, h: Math.abs(point.y - selectionStart.y) + 1 });
+    return;
+  }
   if (painting && currentTool !== 'fill') paint(e); // Don't drag-fill for bucket
 });
 window.addEventListener('mouseup', () => {
+  picking = false;
+  if (selectionStart) {
+    selectionStart = null;
+    void publishSelection();
+  }
   if (painting) {
     painting = false;
     syncIO();
   }
 });
+
+function gridCell(e: MouseEvent): { x: number; y: number } {
+  const r = grid.getBoundingClientRect();
+  return {
+    x: Math.max(0, Math.min(W() - 1, Math.floor((e.clientX - r.left) / cellSize))),
+    y: Math.max(0, Math.min(H() - 1, Math.floor((e.clientY - r.top) / cellSize))),
+  };
+}
+
+function pickColor(e: MouseEvent, announce = true): void {
+  const { x, y } = gridCell(e);
+  currentChar = cur()[y][x];
+  buildPalette();
+  if (announce) {
+    const color = pal()[currentChar];
+    flash(currentChar === '.' ? `picked transparency at ${x},${y}` : `picked ${currentChar} ${color} at ${x},${y}`);
+  }
+}
+
+function setSelection(next: PixelRect | null): void {
+  selection = next;
+  ($('btnCut') as HTMLButtonElement).disabled = !selection;
+  ($('btnCopy') as HTMLButtonElement).disabled = !selection;
+  $('selectionStatus').textContent = selection
+    ? `selection: ${selection.w}x${selection.h} at ${selection.x},${selection.y} · shared with agent`
+    : 'selection: none';
+  redraw();
+}
+
+function clearSelection(publish = true): void {
+  selectionStart = null;
+  setSelection(null);
+  if (publish) void publishSelection();
+}
 
 function paint(e: MouseEvent): void {
   const r = grid.getBoundingClientRect();
@@ -721,10 +886,12 @@ function buildFrames(): void {
     b.textContent = String(i + 1);
     b.className = i === frameIdx ? 'active' : '';
     b.onclick = () => {
+      clearSelection(false);
       frameIdx = i;
       buildFrames();
       buildAnchors();
       redraw();
+      void publishSelection();
     };
     host.appendChild(b);
   });
@@ -877,6 +1044,21 @@ function redraw(): void {
     gctx.moveTo(0, y * cellSize + 0.5);
     gctx.lineTo(W() * cellSize, y * cellSize);
     gctx.stroke();
+  }
+
+  if (selection) {
+    const x = selection.x * cellSize;
+    const y = selection.y * cellSize;
+    const w = selection.w * cellSize;
+    const h = selection.h * cellSize;
+    gctx.save();
+    gctx.fillStyle = 'rgba(255,205,117,0.12)';
+    gctx.fillRect(x, y, w, h);
+    gctx.strokeStyle = '#ffcd75';
+    gctx.lineWidth = 2;
+    gctx.setLineDash([Math.max(3, cellSize / 3), Math.max(2, cellSize / 5)]);
+    gctx.strokeRect(x + 1, y + 1, Math.max(0, w - 2), Math.max(0, h - 2));
+    gctx.restore();
   }
 
   if (($('showAnchors') as HTMLInputElement)?.checked) {
@@ -1475,22 +1657,97 @@ function normalize(raw: unknown): SpriteFile {
 
 /* ---------------- tools & reference & nudge ---------------- */
 
-$('btnToolDraw').onclick = () => {
-  currentTool = 'draw';
-  $('btnToolDraw').classList.add('active');
-  $('btnToolFill').classList.remove('active');
-};
-$('btnToolFill').onclick = () => {
-  currentTool = 'fill';
-  $('btnToolFill').classList.add('active');
-  $('btnToolDraw').classList.remove('active');
-};
+function updateToolUI(): void {
+  const visibleTool: EditorTool = altPickerActive ? 'picker' : currentTool;
+  $('btnToolDraw').classList.toggle('active', visibleTool === 'draw');
+  $('btnToolFill').classList.toggle('active', visibleTool === 'fill');
+  $('btnToolPicker').classList.toggle('active', visibleTool === 'picker');
+  $('btnToolSelect').classList.toggle('active', visibleTool === 'select');
+  grid.classList.toggle('selecting', visibleTool === 'select');
+  grid.classList.toggle('picking', visibleTool === 'picker');
+}
 
-const GRID_ZOOMS = [4, 6, 8, 12, 16, 24, 32];
+function setTool(tool: EditorTool): void {
+  currentTool = tool;
+  updateToolUI();
+}
+
+$('btnToolDraw').onclick = () => setTool('draw');
+$('btnToolFill').onclick = () => setTool('fill');
+$('btnToolPicker').onclick = () => setTool('picker');
+$('btnToolSelect').onclick = () => setTool('select');
+
+function copySelection(): PixelClipboard | null {
+  const snapshot = selectionSnapshot();
+  if (!snapshot) return null;
+  pixelClipboard = { w: snapshot.w, h: snapshot.h, rows: snapshot.rows };
+  const envelope = JSON.stringify({ kind: 'hitstop-sprite-selection', v: 1, ...snapshot });
+  void navigator.clipboard?.writeText(envelope).catch(() => {});
+  flash(`copied ${snapshot.w}x${snapshot.h} pixels`);
+  return pixelClipboard;
+}
+
+function cutSelection(): void {
+  if (!selection || !copySelection()) return;
+  saveHistory();
+  for (let y = selection.y; y < selection.y + selection.h; y++) {
+    const row = cur()[y];
+    cur()[y] = row.slice(0, selection.x) + '.'.repeat(selection.w) + row.slice(selection.x + selection.w);
+  }
+  redraw();
+  syncIO();
+  void publishSelection();
+  flash(`cut ${selection.w}x${selection.h} pixels`);
+}
+
+function parsePixelClipboard(text: string): PixelClipboard | null {
+  try {
+    const value = JSON.parse(text) as { kind?: unknown; w?: unknown; h?: unknown; rows?: unknown };
+    if (value.kind !== 'hitstop-sprite-selection' || !Number.isInteger(value.w) || !Number.isInteger(value.h)
+      || !Array.isArray(value.rows) || !value.rows.every((row) => typeof row === 'string')) return null;
+    const w = Number(value.w);
+    const h = Number(value.h);
+    if (w < 1 || h < 1 || value.rows.length !== h || value.rows.some((row) => row.length !== w)) return null;
+    return { w, h, rows: value.rows as string[] };
+  } catch {
+    return null;
+  }
+}
+
+async function pasteSelection(): Promise<void> {
+  let clip = pixelClipboard;
+  if (!clip) {
+    try { clip = parsePixelClipboard(await navigator.clipboard.readText()); } catch { /* permission denied */ }
+  }
+  if (!clip) {
+    flash('copy a sprite selection first');
+    return;
+  }
+  const x = selection?.x ?? 0;
+  const y = selection?.y ?? 0;
+  const pastedW = Math.min(clip.w, W() - x);
+  const pastedH = Math.min(clip.h, H() - y);
+  if (pastedW <= 0 || pastedH <= 0) return;
+  saveHistory();
+  for (let dy = 0; dy < pastedH; dy++) {
+    const row = cur()[y + dy];
+    cur()[y + dy] = row.slice(0, x) + clip.rows[dy].slice(0, pastedW) + row.slice(x + pastedW);
+  }
+  setSelection({ x, y, w: pastedW, h: pastedH });
+  syncIO();
+  void publishSelection();
+  flash(`pasted ${pastedW}x${pastedH} pixels`);
+}
+
+$('btnCopy').onclick = () => { copySelection(); };
+$('btnCut').onclick = () => cutSelection();
+$('btnPaste').onclick = () => void pasteSelection();
+
+const GRID_ZOOMS = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64];
 
 function setGridZoom(value: number): void {
-  cellSize = GRID_ZOOMS.includes(value) ? value : 8;
-  ($('gridZoom') as HTMLSelectElement).value = String(cellSize);
+  cellSize = Math.max(GRID_ZOOMS[0], Math.min(GRID_ZOOMS.at(-1)!, Math.round(value)));
+  ($('gridZoomPercent') as HTMLInputElement).value = String(cellSize * 100);
   redraw();
 }
 
@@ -1502,8 +1759,14 @@ function fitGrid(): void {
   setGridZoom([...GRID_ZOOMS].reverse().find((size) => size <= ideal) ?? GRID_ZOOMS[0]);
 }
 
-($('gridZoom') as HTMLSelectElement).onchange = (event) => {
-  setGridZoom(Number((event.target as HTMLSelectElement).value));
+($('gridZoomPercent') as HTMLInputElement).onchange = (event) => {
+  setGridZoom(Number((event.target as HTMLInputElement).value) / 100);
+};
+$('btnGridZoomOut').onclick = () => {
+  setGridZoom([...GRID_ZOOMS].reverse().find((size) => size < cellSize) ?? GRID_ZOOMS[0]);
+};
+$('btnGridZoomIn').onclick = () => {
+  setGridZoom(GRID_ZOOMS.find((size) => size > cellSize) ?? GRID_ZOOMS.at(-1)!);
 };
 $('btnFitGrid').onclick = () => fitGrid();
 
@@ -1652,7 +1915,35 @@ $('btnUndo').onclick = () => undo();
 $('btnRedo').onclick = () => redo();
 
 window.addEventListener('keydown', (e) => {
+  if (e.key === 'Alt') {
+    e.preventDefault();
+    altPickerActive = true;
+    updateToolUI();
+    return;
+  }
+  const target = e.target as HTMLElement | null;
+  const typing = target?.matches('input, textarea, select, [contenteditable="true"]') ?? false;
   const key = e.key.toLowerCase();
+  if (!typing && (e.ctrlKey || e.metaKey) && key === 'c' && selection) {
+    e.preventDefault();
+    copySelection();
+  }
+  if (!typing && (e.ctrlKey || e.metaKey) && key === 'x' && selection) {
+    e.preventDefault();
+    cutSelection();
+  }
+  if (!typing && (e.ctrlKey || e.metaKey) && key === 'v') {
+    e.preventDefault();
+    void pasteSelection();
+  }
+  if (!typing && key === 'escape' && selection) {
+    e.preventDefault();
+    clearSelection();
+  }
+  if (!typing && key === 'm' && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault();
+    setTool('select');
+  }
   if ((e.ctrlKey || e.metaKey) && key === 'z') {
     e.preventDefault();
     if (e.shiftKey) {
@@ -1665,6 +1956,19 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     redo();
   }
+});
+
+window.addEventListener('keyup', (e) => {
+  if (e.key !== 'Alt') return;
+  e.preventDefault();
+  altPickerActive = false;
+  updateToolUI();
+});
+
+window.addEventListener('blur', () => {
+  altPickerActive = false;
+  picking = false;
+  updateToolUI();
 });
 
 ($('hd') as HTMLInputElement).onchange = (e) => {
@@ -1742,6 +2046,7 @@ Object.defineProperty(window, '__editor', {
     get frameIdx() { return frameIdx; },
     get editVersion() { return editVersion; },
     get rebuiltVersion() { return rebuiltVersion; },
+    get selection() { return selectionSnapshot(); },
     get bridge() {
       return {
         connected: bridgeConnected,

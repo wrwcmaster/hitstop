@@ -64,6 +64,10 @@ switch (command) {
     print(await state());
     break;
 
+  case 'selection':
+    print(await request('/selection'));
+    break;
+
   case 'preview': {
     const destination = path.resolve(args[0] ?? 'sprite-preview.png');
     const bytes = await request('/preview.png');
@@ -104,6 +108,7 @@ usage:
   npm run agent-sprite -- list
   npm run agent-sprite -- open knight.json [--force]
   npm run agent-sprite -- state
+  npm run agent-sprite -- selection
   npm run agent-sprite -- preview sprite-preview.png
   npm run agent-sprite -- apply edited.json [repo-path]
   npm run agent-sprite -- save [repo-path]

@@ -223,8 +223,12 @@ function sourceImage(): CanvasImageSource | null {
   const data = ctx.getImageData(0, 0, prepared.width, prepared.height);
   const color = ($('keyColor') as HTMLInputElement).value;
   const key = [1, 3, 5].map((i) => Number.parseInt(color.slice(i, i + 2), 16));
-  const dominant = key.indexOf(Math.max(...key));
-  const otherChannels = [0, 1, 2].filter((i) => i !== dominant);
+  const peak = Math.max(...key);
+  // Spill suppression must follow the key's chroma signature, not merely its
+  // first strongest channel. Magenta has two peaks (red + blue); treating it
+  // as red alone erases perfectly valid skin, hair, and leather colors.
+  const dominantChannels = [0, 1, 2].filter((i) => peak - key[i] <= 8);
+  const otherChannels = [0, 1, 2].filter((i) => !dominantChannels.includes(i));
   const tolerance = Math.max(0, num('keyTolerance'));
   const isProtected = (x: number, y: number) => protectedRects.some((r) =>
     x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
@@ -242,20 +246,28 @@ function sourceImage(): CanvasImageSource | null {
       // Soft matte the antialiased fringe instead of leaving a neon halo.
       const opacity = (distance - tolerance) / 48;
       data.data[p + 3] = Math.round(data.data[p + 3] * opacity);
-      const neutralKey = Math.max(...otherChannels.map((i) => data.data[p + i]));
-      const channel = p + dominant;
-      data.data[channel] = Math.round(neutralKey + (data.data[channel] - neutralKey) * opacity);
+      if (otherChannels.length) {
+        const neutralKey = Math.max(...otherChannels.map((i) => data.data[p + i]));
+        for (const dominant of dominantChannels) {
+          const channel = p + dominant;
+          data.data[channel] = Math.round(neutralKey + (data.data[channel] - neutralKey) * opacity);
+        }
+      }
     }
-    const channel = p + dominant;
+    if (!otherChannels.length) continue;
     const neutral = Math.max(...otherChannels.map((i) => data.data[p + i]));
-    const dominance = data.data[channel] - neutral;
+    const keyedLevel = Math.min(...dominantChannels.map((i) => data.data[p + i]));
+    const dominance = keyedLevel - neutral;
     if (dominance > 4) {
       // Remove key-colored spill that is too dark to match the distance
       // threshold. A true subject color close to the key is already forbidden
       // by the generation brief; near-neutral teal cloth is unaffected.
       const spill = Math.min(1, (dominance - 4) / 72);
       data.data[p + 3] = Math.round(data.data[p + 3] * (1 - spill));
-      data.data[channel] = neutral;
+      for (const dominant of dominantChannels) {
+        const channel = p + dominant;
+        data.data[channel] = Math.round(neutral + (data.data[channel] - neutral) * (1 - spill));
+      }
     }
   }
   ctx.putImageData(data, 0, 0);
@@ -343,7 +355,8 @@ $('btnAddProtection').onclick = () => {
 
 for (const id of [
   'keyEnabled', 'keyColor', 'keyTolerance', 'targetW', 'targetH',
-  'resampleMode', 'maxColors', 'lockProtectedPixels',
+  'resampleMode', 'maxColors', 'lockProtectedPixels', 'trimTransparent',
+  'sharedTrimTop', 'sharedTrimRight', 'sharedTrimBottom', 'sharedTrimLeft',
 ]) {
   ($(id) as HTMLInputElement).onchange = sourcePreparationChanged;
 }
@@ -395,15 +408,28 @@ function detectFrames(): void {
   // edge. Keep figure-scale components, not every surviving pixel island.
   const tallest = Math.max(...figures.map((f) => f.y2 - f.y1 + 1));
   const densest = Math.max(...figures.map((f) => f.pixels));
-  rects = figures
+  const detected = figures
     .filter((f) => f.y2 - f.y1 + 1 >= tallest * 0.35 && f.pixels >= densest * 0.05)
     .map(({ x1, x2, y1, y2 }) => {
-    const left = Math.max(0, x1 - pad);
-    const top = Math.max(0, y1 - pad);
-    const right = Math.min(cv.width - 1, x2 + pad);
-    const bottom = Math.min(cv.height - 1, y2 + pad);
-    return { x: left, y: top, w: right - left + 1, h: bottom - top + 1 };
+      const left = Math.max(0, x1 - pad);
+      const top = Math.max(0, y1 - pad);
+      const right = Math.min(cv.width - 1, x2 + pad);
+      const bottom = Math.min(cv.height - 1, y2 + pad);
+      return { x: left, y: top, w: right - left + 1, h: bottom - top + 1 };
     });
+  // Animation frames share one camera cell. Tight crops with independent sizes
+  // make normalization rescale each pose, turning a small breath into a zoom.
+  // Expand every detection to the largest frame, centered on the figure and
+  // anchored to its baseline, so motion stays motion and scale stays constant.
+  const sharedW = Math.max(...detected.map((r) => r.w));
+  const sharedH = Math.max(...detected.map((r) => r.h));
+  rects = detected.map((r) => {
+    const center = r.x + r.w / 2;
+    const baseline = r.y + r.h;
+    const x = Math.max(0, Math.min(cv.width - sharedW, Math.round(center - sharedW / 2)));
+    const y = Math.max(0, Math.min(cv.height - sharedH, baseline - sharedH));
+    return { x, y, w: sharedW, h: sharedH };
+  });
   mode = 'rects';
   viewMode = 'normalized';
   offsets = rects.map(() => ({ x: 0, y: 0 }));
@@ -736,6 +762,16 @@ function buildAlignmentList(): void {
  * default origin; offsets are the deliberate per-frame correction. This is
  * the palette-limited image-stage artifact that gets approved and exported.
  */
+const sourceColorDistance = (
+  data: Uint8ClampedArray,
+  a: number,
+  b: number,
+): number => Math.max(
+  Math.abs(data[a] - data[b]),
+  Math.abs(data[a + 1] - data[b + 1]),
+  Math.abs(data[a + 2] - data[b + 2]),
+);
+
 function drawCoverageFrame(
   source: ImageData,
   crop: SheetRect,
@@ -785,6 +821,81 @@ function drawCoverageFrame(
       out[targetOffset + 3] = 255;
     }
   }
+}
+
+/**
+ * Reduction can discard a sparse edge row even when the source crop itself is
+ * bottom-aligned. Move the completed sheet as one unit so the lowest surviving
+ * subject pixel becomes the shared ground line without introducing per-frame
+ * animation jitter.
+ */
+function anchorNormalizedSheetToBottom(canvas: HTMLCanvasElement, frameH: number): void {
+  const ctx = canvas.getContext('2d')!;
+  const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  let lowestOpaqueY = -1;
+  for (let y = frameH - 1; y >= 0 && lowestOpaqueY < 0; y -= 1) {
+    for (let x = 0; x < canvas.width; x += 1) {
+      if (image.data[(y * canvas.width + x) * 4 + 3] !== 0) {
+        lowestOpaqueY = y;
+        break;
+      }
+    }
+  }
+  const shiftY = frameH - 1 - lowestOpaqueY;
+  if (lowestOpaqueY < 0 || shiftY <= 0) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.putImageData(image, 0, shiftY);
+}
+
+/**
+ * Fit one union content box across every frame, then apply an explicit shared
+ * crop. The frames keep identical cells and relative motion; unlike changing
+ * target dimensions this never rescales the approved pixels.
+ */
+function fitSharedContentBounds(
+  canvas: HTMLCanvasElement,
+  frameW: number,
+  frameH: number,
+): { canvas: HTMLCanvasElement; frameW: number; frameH: number } {
+  const ctx = canvas.getContext('2d')!;
+  const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const frameCount = Math.max(1, Math.round(canvas.width / frameW));
+  let left = frameW;
+  let right = -1;
+  let top = frameH;
+  let bottom = -1;
+  for (let frame = 0; frame < frameCount; frame += 1) {
+    const frameX = frame * frameW;
+    for (let y = 0; y < frameH; y += 1) {
+      for (let x = 0; x < frameW; x += 1) {
+        if (image.data[(y * canvas.width + frameX + x) * 4 + 3] === 0) continue;
+        left = Math.min(left, x);
+        right = Math.max(right, x);
+        top = Math.min(top, y);
+        bottom = Math.max(bottom, y);
+      }
+    }
+  }
+  if (right < left || bottom < top) return { canvas, frameW, frameH };
+  const trimTop = Math.max(0, Math.round(num('sharedTrimTop')));
+  const trimRight = Math.max(0, Math.round(num('sharedTrimRight')));
+  const trimBottom = Math.max(0, Math.round(num('sharedTrimBottom')));
+  const trimLeft = Math.max(0, Math.round(num('sharedTrimLeft')));
+  left = Math.min(right, left + trimLeft);
+  right = Math.max(left, right - trimRight);
+  top = Math.min(bottom, top + trimTop);
+  bottom = Math.max(top, bottom - trimBottom);
+  const fittedFrameW = right - left + 1;
+  const fittedFrameH = bottom - top + 1;
+  const fitted = document.createElement('canvas');
+  fitted.width = fittedFrameW * frameCount;
+  fitted.height = fittedFrameH;
+  const fittedCtx = fitted.getContext('2d')!;
+  for (let frame = 0; frame < frameCount; frame += 1) {
+    const pixels = ctx.getImageData(frame * frameW + left, top, fittedFrameW, fittedFrameH);
+    fittedCtx.putImageData(pixels, frame * fittedFrameW, 0);
+  }
+  return { canvas: fitted, frameW: fittedFrameW, frameH: fittedFrameH };
 }
 
 interface NormalizedPlacement {
@@ -907,9 +1018,24 @@ function quantizeNormalizedPixels(canvas: HTMLCanvasElement, semanticRects: Shee
   const ctx = canvas.getContext('2d')!;
   const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const samples: number[][] = [];
-  for (let p = 0; p < image.data.length; p += 4) {
-    if (image.data[p + 3] >= 128) {
-      samples.push([image.data[p], image.data[p + 1], image.data[p + 2]]);
+  for (let y = 0; y < image.height; y += 1) {
+    for (let x = 0; x < image.width; x += 1) {
+      const p = (y * image.width + x) * 4;
+      if (image.data[p + 3] < 128) continue;
+      let contrast = 0;
+      for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= image.width || ny >= image.height) continue;
+        const neighbor = (ny * image.width + nx) * 4;
+        if (image.data[neighbor + 3] < 128) continue;
+        contrast = Math.max(contrast, sourceColorDistance(image.data, p, neighbor));
+      }
+      // Palette selection still accounts for area, but bounded internal
+      // features receive enough votes to compete with broad flat clothing.
+      const weight = 1 + Math.min(7, Math.floor(contrast / 32));
+      for (let i = 0; i < weight; i += 1) {
+        samples.push([image.data[p], image.data[p + 1], image.data[p + 2]]);
+      }
     }
   }
   if (!samples.length) return;
@@ -985,7 +1111,8 @@ function normalizedSheet(): { canvas: HTMLCanvasElement; frameW: number; frameH:
   const sourceCtx = sourceCanvas.getContext('2d')!;
   sourceCtx.drawImage(src, 0, 0);
   const sourceData = sourceCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
-  if (($('resampleMode') as HTMLSelectElement).value === 'coverage') {
+  const resampleMode = ($('resampleMode') as HTMLSelectElement).value;
+  if (resampleMode === 'coverage') {
     const destination = ctx.createImageData(canvas.width, canvas.height);
     for (const placement of placements) {
       drawCoverageFrame(
@@ -1019,7 +1146,10 @@ function normalizedSheet(): { canvas: HTMLCanvasElement; frameW: number; frameH:
   preserveProtectedKeyColors(sourceData, placements, canvas);
   lockProtectedPixelsAcrossFrames(canvas, semanticRects, placements.length);
   quantizeNormalizedPixels(canvas, semanticRects);
-  normalizedCache = { canvas, frameW, frameH };
+  anchorNormalizedSheetToBottom(canvas, frameH);
+  normalizedCache = ($('trimTransparent') as HTMLInputElement).checked
+    ? fitSharedContentBounds(canvas, frameW, frameH)
+    : { canvas, frameW, frameH };
   return normalizedCache;
 }
 
@@ -1049,7 +1179,15 @@ function drawSheet(): void {
     if (!r || r.w <= 0 || r.h <= 0) continue;
     const x = r.x * zoom, y = r.y * zoom;
     sctx.strokeStyle = 'rgba(255,205,117,0.8)';
-    sctx.strokeRect(x + 0.5, y + 0.5, r.w * zoom, r.h * zoom);
+    // Keep the one-pixel border inside the bitmap. Using the full dimensions
+    // after the half-pixel alignment placed the bottom and final right edge
+    // outside the canvas, where they were clipped.
+    sctx.strokeRect(
+      x + 0.5,
+      y + 0.5,
+      Math.max(0, r.w * zoom - 1),
+      Math.max(0, r.h * zoom - 1),
+    );
     // Index badge sized to the label so multi-digit numbers aren't clipped.
     const label = String(i);
     const pad = 3;
@@ -1426,6 +1564,7 @@ interface WorkbenchUrlState {
   inputs: Record<string, string>;
   keyEnabled: boolean;
   lockProtectedPixels?: boolean;
+  trimTransparent?: boolean;
   playing: boolean;
   onion: boolean;
 }
@@ -1433,7 +1572,7 @@ interface WorkbenchUrlState {
 const persistedInputIds = [
   'fw', 'fh', 'margin', 'spacing', 'rw', 'rh', 'texel', 'maxColors',
   'detectPadding', 'keyColor', 'keyTolerance', 'protectSize', 'targetW', 'targetH',
-  'resampleMode',
+  'resampleMode', 'sharedTrimTop', 'sharedTrimRight', 'sharedTrimBottom', 'sharedTrimLeft',
 ] as const;
 
 function captureUrlState(): WorkbenchUrlState {
@@ -1454,6 +1593,7 @@ function captureUrlState(): WorkbenchUrlState {
     inputs: Object.fromEntries(persistedInputIds.map((id) => [id, ($(id) as HTMLInputElement).value])),
     keyEnabled: ($('keyEnabled') as HTMLInputElement).checked,
     lockProtectedPixels: ($('lockProtectedPixels') as HTMLInputElement).checked,
+    trimTransparent: ($('trimTransparent') as HTMLInputElement).checked,
     playing: ($('playing') as HTMLInputElement).checked,
     onion: ($('onion') as HTMLInputElement).checked,
   };
@@ -1487,6 +1627,7 @@ function restoreUrlState(state: WorkbenchUrlState): void {
   }
   ($('keyEnabled') as HTMLInputElement).checked = !!state.keyEnabled;
   ($('lockProtectedPixels') as HTMLInputElement).checked = state.lockProtectedPixels !== false;
+  ($('trimTransparent') as HTMLInputElement).checked = !!state.trimTransparent;
   ($('playing') as HTMLInputElement).checked = state.playing !== false;
   ($('onion') as HTMLInputElement).checked = !!state.onion;
   mode = state.mode;

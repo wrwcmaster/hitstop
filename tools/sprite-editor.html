@@ -12,6 +12,15 @@
     body { display: flex; flex-direction: column; }
     header { padding: 8px 12px; background: #07070d; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
     header h1 { font-size: 14px; margin: 0 12px 0 0; color: #f4f4f4; }
+    #toolbar {
+      min-height: 42px; padding: 6px 12px; background: #0b0e20;
+      border-top: 1px solid #171d3c; border-bottom: 1px solid #33447f;
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    }
+    #toolbar .group { display: flex; align-items: center; gap: 4px; }
+    #toolbar .separator { width: 1px; height: 24px; margin: 0 5px; background: #33447f; }
+    #toolbar label { display: flex; align-items: center; gap: 3px; margin: 0; }
+    #gridZoomPercent { width: 72px; text-align: right; }
     main { flex: 1; display: flex; min-height: 0; }
     #side-left, #side-right { width: 260px; padding: 10px; background: #101430; overflow-y: auto; flex-shrink: 0; }
     /* The composite preview renders at the game's on-screen scale (8px
@@ -20,6 +29,8 @@
     #center { flex: 1; overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 20px; background: #07070d; }
     canvas { image-rendering: pixelated; }
     #grid { cursor: crosshair; border: 1px solid #33447f; }
+    #grid.selecting { cursor: cell; }
+    #grid.picking { cursor: copy; }
     h2 { font-size: 12px; color: #ffcd75; margin: 14px 0 6px; text-transform: uppercase; }
     h2:first-child { margin-top: 0; }
     button, select, input {
@@ -28,6 +39,30 @@
     }
     button:hover { background: #33447f; }
     button.active { background: #38b764; color: #07070d; border-color: #38b764; }
+    #palette {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(26px, 1fr));
+      gap: 5px;
+      padding: 3px;
+      margin-bottom: 8px;
+    }
+    .palette-cell {
+      min-width: 0;
+      width: 100%;
+      aspect-ratio: 1;
+      padding: 0;
+      border-radius: 2px;
+      border-color: #566c86;
+      transition: transform 80ms ease, box-shadow 80ms ease;
+    }
+    .palette-cell:hover { transform: scale(1.08); position: relative; z-index: 1; }
+    .palette-cell.none {
+      background: repeating-conic-gradient(#39405a 0 25%, #11162b 0 50%) 0 0 / 10px 10px;
+    }
+    #palette .palette-cell.active {
+      border-color: #f4f4f4;
+      box-shadow: 0 0 0 2px #07070d, 0 0 0 4px #ffcd75;
+    }
     .swatch { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
     .swatch button { flex: 1; text-align: left; }
     .chip { width: 14px; height: 14px; border: 1px solid #566c86; display: inline-block; flex-shrink: 0; }
@@ -63,6 +98,28 @@
     <span id="bridgeStatus" title="Live local agent bridge">bridge: connecting</span>
     <span id="status"></span>
   </header>
+  <div id="toolbar" role="toolbar" aria-label="sprite editing tools">
+    <div class="group" aria-label="paint tools">
+      <button id="btnToolDraw" class="active" title="Pencil">pencil</button>
+      <button id="btnToolFill" title="Fill">fill</button>
+      <button id="btnToolPicker" title="Pick a color from the canvas (hold Alt)">picker</button>
+      <button id="btnToolSelect" title="Select a rectangular pixel region (M)">select</button>
+    </div>
+    <span class="separator" aria-hidden="true"></span>
+    <div class="group" aria-label="selection clipboard">
+      <button id="btnCut" title="Cut selected pixels (Ctrl+X)" disabled>cut</button>
+      <button id="btnCopy" title="Copy selected pixels (Ctrl+C)" disabled>copy</button>
+      <button id="btnPaste" title="Paste pixels at the selection (Ctrl+V)">paste</button>
+    </div>
+    <span id="selectionStatus" class="hint">selection: none</span>
+    <span class="separator" aria-hidden="true"></span>
+    <div class="group" aria-label="canvas zoom">
+      <button id="btnGridZoomOut" title="Zoom out" aria-label="Zoom out">&minus;</button>
+      <label>zoom <input id="gridZoomPercent" type="number" min="100" max="6400" step="100" value="2400">%</label>
+      <button id="btnGridZoomIn" title="Zoom in" aria-label="Zoom in">+</button>
+      <button id="btnFitGrid" title="Fit canvas to workspace">fit</button>
+    </div>
+  </div>
   <main>
     <div id="side-left">
       <h2>palette</h2>
@@ -71,25 +128,6 @@
         <input type="color" id="newColor" value="#38b764">
         <input type="text" id="newChar" maxlength="1" placeholder="ch" style="width:34px">
         <button id="btnAddColor">add</button>
-      </div>
-      <h2>tools</h2>
-      <div style="display:flex; gap:6px; margin-bottom:6px">
-        <button id="btnToolDraw" class="active">pencil</button>
-        <button id="btnToolFill">fill</button>
-      </div>
-      <div style="display:flex; gap:6px; align-items:center">
-        <label style="margin:0">grid zoom
-          <select id="gridZoom">
-            <option value="4">4×</option>
-            <option value="6">6×</option>
-            <option value="8">8×</option>
-            <option value="12">12×</option>
-            <option value="16">16×</option>
-            <option value="24" selected>24×</option>
-            <option value="32">32×</option>
-          </select>
-        </label>
-        <button id="btnFitGrid">fit</button>
       </div>
       <h2>reference</h2>
       <div style="display:flex; flex-direction:column; gap:4px">
@@ -191,7 +229,7 @@
         <label style="margin:0">x <input id="anchorX" type="number" step="0.25" style="width:58px"></label>
         <label style="margin:0">y <input id="anchorY" type="number" step="0.25" style="width:58px"></label>
       </div>
-      <p class="hint" style="margin:0 0 8px">Alt-click the grid to place the selected anchor. For a right-facing knight, frontHand is the knight's right/weapon hand, on the left side of the image.</p>
+      <p class="hint" style="margin:0 0 8px">Shift+Alt-click the grid to place the selected anchor. For a right-facing knight, frontHand is the knight's right/weapon hand, on the left side of the image.</p>
 
       <h2>transform</h2>
       <div style="display:flex; gap:4px; margin-bottom:10px">

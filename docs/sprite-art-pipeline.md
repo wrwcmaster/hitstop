@@ -102,12 +102,17 @@ Remove the background, isolate the character, and find the image's actual pixel-
 
 1. When reducing by a non-integer ratio, use coverage-aware pixel reduction:
    integrate the whole source footprint of each destination pixel instead of
-   sampling one arbitrary point. Keep nearest-neighbor for integer pixel-grid
-   scaling or as a diagnostic comparison.
+   sampling one arbitrary point. A generated pseudo-pixel image does not
+   necessarily contain one recoverable lattice—block size and phase can vary
+   by feature—so do not infer cell boundaries unless the source was authored on
+   a guaranteed grid. Keep nearest-neighbor as a diagnostic comparison.
 2. Give the sprite a hard 0/255 alpha mask.
 3. Place it on a fixed transparent canvas with a deliberate baseline and padding.
 4. Quantize to a controlled palette.
-5. Preserve semantic colors manually: eyes, emissive cores, team colors, hazard colors, skin highlights, metal highlights, and outlines should not be allowed to collapse into their nearest common color.
+5. Weight palette samples by local edge contrast, so small bounded features can
+   compete with broad clothing colors without rules for particular hues or
+   brightness ranges. Use manual protection only when a real subject color is
+   close enough to the chroma key to be removed before segmentation.
 
 Never judge this step only from an enlarged image. Inspect the native 1× pixels too.
 
