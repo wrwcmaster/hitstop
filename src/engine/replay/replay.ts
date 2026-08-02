@@ -22,7 +22,7 @@
  */
 import type { Game } from '../core/game';
 import { STEP } from '../core/loop';
-import { seedRandom } from '../math/util';
+import { seedRandom, randomDraws } from '../math/util';
 import { sandboxStorage, snapshotStorage } from '../core/storage';
 import { drawText } from '../gfx/font';
 import type { RawInputEvent } from '../input/input';
@@ -47,6 +47,15 @@ export interface Recording<A extends string = string, Start = unknown> {
   tape: TapeEvent<A>[];
   /** [relative step, state hash] once per second (+ final at save time). */
   checks: [number, number][];
+  /**
+   * [relative step, gameplay-RNG draws] beside each check.
+   *
+   * The hash says the worlds parted; this says the STREAM parted, which
+   * happens FIRST and silently — a cosmetic that draws from the gameplay
+   * stream moves it without moving a single hashed field. Optional: tapes
+   * recorded before this existed simply have none, and verify the same.
+   */
+  draws?: [number, number][];
   /** Total steps the recording covers, relative to run start. */
   end: number;
   /** Something non-replayable touched the session (e.g. network play). */
@@ -142,6 +151,7 @@ interface Run<Start> {
   storage: Record<string, string>;
   tape: TapeEvent<string>[];
   checks: [number, number][];
+  draws: [number, number][];
   offset: number;
 }
 
@@ -199,7 +209,7 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
       p.armed = true;
       this.run = {
         seed: p.rec.seed, start, storage: snapshotStorage(this.boot.storagePrefix),
-        tape: [], checks: [], offset: this.game.steps,
+        tape: [], checks: [], draws: [], offset: this.game.steps,
       };
       return;
     }
@@ -216,7 +226,7 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
     seedRandom(seed);
     this.run = {
       seed, start, storage: snapshotStorage(this.boot.storagePrefix),
-      tape: [], checks: [], offset: this.game.steps,
+      tape: [], checks: [], draws: [], offset: this.game.steps,
     };
   }
 
@@ -224,11 +234,15 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
     const run = this.run;
     if (!run) return null;
     const checks = [...run.checks];
+    const draws = [...run.draws];
     const end = this.relStep();
-    if (!checks.length || checks[checks.length - 1][0] !== end) checks.push([end, this.hashNow()]);
+    if (!checks.length || checks[checks.length - 1][0] !== end) {
+      checks.push([end, this.hashNow()]);
+      draws.push([end, randomDraws()]);
+    }
     return {
       v: 3, seed: run.seed, mode: this.boot.harness ? 'harness' : 'live', created: this.created,
-      start: run.start, storage: run.storage, tape: [...run.tape] as TapeEvent<A>[], checks, end,
+      start: run.start, storage: run.storage, tape: [...run.tape] as TapeEvent<A>[], checks, draws, end,
       ...(this.tainted && { tainted: this.tainted }),
     };
   }
@@ -264,6 +278,7 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
       const s = this.relStep();
       if (s > 0 && s % 60 === 0) {
         run.checks.push([s, this.hashNow()]);
+        run.draws.push([s, randomDraws()]);
         if (!this.tainted) this.tainted = this.config.taint?.();
       }
     });
@@ -347,6 +362,7 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
       step: step as (down?: string[], frames?: number) => unknown,
       state: () => this.config.state(),
       hashNow: () => this.hashNow(),
+      draws: () => randomDraws(),
       // Begin a run of the game's choosing (e.g. a test scenario). The
       // start is opaque to the engine and rides the recording, so a
       // scenario replays like any other run. Deferred to the next step,
@@ -504,6 +520,8 @@ declare global {
       step(down?: string[], frames?: number): unknown;
       state(): unknown;
       hashNow(): number;
+      /** Gameplay-RNG draws so far — the stream's position. */
+      draws(): number;
       beginRun(start: unknown): unknown;
       replayRun(rec: Recording): unknown;
       runTo(target: number): unknown;
