@@ -170,6 +170,14 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
    */
   pinnedSeed: number | null = null;
   private tainted: string | undefined;
+  /**
+   * The run that just ENDED, kept across the reset. Dying starts a new
+   * run (respawn loads the autosave), and per-run tapes cut at run
+   * start — so SAVE REPLAY after a death used to save an 8-second stub
+   * of menus while the fight that killed you was discarded at the exact
+   * moment it became worth keeping. Losses are the tapes that teach.
+   */
+  private lastRec: Recording<A, Start> | null = null;
   private created = new Date().toISOString();
 
   private playback: { rec: Recording<A, Start>; offset: number; cursor: number; armed: boolean } | null = null;
@@ -218,6 +226,19 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
       // tapes never span that boundary, so the playback is over.
       this.viewerEnded = true;
     }
+    if (this.run && !p) {
+      // Snapshot WITHOUT a fresh final check: the world has already been
+      // reset for the run that is starting, so hashing it now would pin
+      // the OLD tape to the NEW world. The last periodic check stands as
+      // the final assertion; the tape end simply reaches a little past it.
+      const r = this.run;
+      this.lastRec = {
+        v: 3, seed: r.seed, mode: this.boot.harness ? 'harness' : 'live', created: this.created,
+        start: r.start, storage: r.storage, tape: [...r.tape] as TapeEvent<A>[],
+        checks: [...r.checks], draws: [...r.draws], end: this.relStep(),
+        ...(this.tainted && { tainted: this.tainted }),
+      };
+    }
     const seed = this.pinnedSeed !== null
       ? this.pinnedSeed
       : this.boot.harness
@@ -249,7 +270,11 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
 
   /** Download the current run's recording (how a player keeps a replay). */
   saveFile(name?: string): string | null {
-    const rec = this.recording();
+    return this.saveFileOf(this.recording(), name);
+  }
+
+  /** Download any recording (the current one, or the stashed last run). */
+  saveFileOf(rec: Recording<A, Start> | null, name?: string): string | null {
     if (!rec) return null;
     const file = `${name ?? `${this.boot.storagePrefix}-run-${rec.seed}-${Date.now()}`}.json`;
     const blob = new Blob([JSON.stringify(rec)], { type: 'application/json' });
@@ -286,6 +311,8 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
     window.__replay = {
       recording: () => this.recording(),
       save: (name?: string) => this.saveFile(name),
+      last: () => this.lastRec,
+      saveLast: (name?: string) => this.saveFileOf(this.lastRec, name),
     };
 
     if (this.boot.harness) this.installStepped();
@@ -511,6 +538,9 @@ declare global {
     __replay?: {
       recording(): Recording | null;
       save(name?: string): string | null;
+      /** The run that just ended (a death, usually). Null until one has. */
+      last(): Recording | null;
+      saveLast(name?: string): string | null;
     };
     __harness?: {
       seed: number;
