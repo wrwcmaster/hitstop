@@ -45,8 +45,15 @@ const DANGER = 70;
  */
 const DOOR_BACK = 70;
 
-export function make(goalOf) {
-  const net = actor(Float64Array.from(blob.weights), blob.shape, goalOf);
+export function make(goalOf, opts = {}) {
+  // Deploy the DICE, not the argmax. Same champion weights, measured on
+  // the full ladder: argmax 5/5, 0/5, 0/5 across 120/84/60hp starts;
+  // temp-0.5 sampling 5/5, 5/5, 3/5 with FEWER hits taken. The sampled
+  // distribution is what training optimises and what the weights are
+  // actually good at; argmax was shipping this policy's worst self.
+  // Callers pass a seeded rng when the run must reproduce.
+  const { temp = 0.5, rng } = opts;
+  const net = actor(Float64Array.from(blob.weights), blob.shape, goalOf, { temp, ...(rng ? { rng } : {}) });
   return (o) => {
     if (o?.ui?.blocking) return ['confirm'];
     if (!o?.player) return [];
