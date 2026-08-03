@@ -51,6 +51,17 @@ def parse():
     # the policy until the critic can price states protects what ES
     # already earned.
     ap.add_argument("--warmup", type=int, default=3)
+    # Keep a human demonstration IN the loss instead of only in the
+    # initialisation. Cloning Scott's fight and then handing it to PPO
+    # failed in both directions: the clone alone moves like him and loses
+    # 0/5 (motion without timing), and PPO starting from that clone slid
+    # further down (-4461 -> -3862, still 0/5) because the corner is the
+    # nearest optimum to anywhere. Pulling toward the demonstration on
+    # every update is the standard answer — reward keeps her alive, the
+    # demo term keeps her from parking at the wall, and neither gets to
+    # win outright.
+    ap.add_argument("--demo", default=None, help="demo.jsonl of (o, a) pairs")
+    ap.add_argument("--bc-coef", type=float, default=0.0)
     return ap.parse_args()
 
 
@@ -141,6 +152,13 @@ def main():
     value_ckpt = HERE / "value.pt"
     if value_ckpt.exists():
         model.value.load_state_dict(torch.load(value_ckpt))
+    demo_x = demo_y = None
+    if args.demo and args.bc_coef > 0:
+        rows = [json.loads(l) for l in Path(args.demo).read_text().splitlines() if l.strip()]
+        demo_x = torch.tensor(np.array([r["o"] for r in rows], dtype=np.float32))
+        demo_y = torch.tensor(np.array([r["a"] for r in rows], dtype=np.int64))
+        print(f"demo term on: {len(rows)} human pairs, coef {args.bc_coef}")
+
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     # The gate, same discipline as train.mjs: deterministic score on fixed
@@ -172,6 +190,9 @@ def main():
             vloss = torch.nn.functional.mse_loss(value, ret)
             loss = vloss if warm else (-surr.mean() + 0.5 * vloss
                     - args.entropy * dist.entropy().mean())
+            if demo_x is not None and not warm:
+                dl, _ = model(demo_x)
+                loss = loss + args.bc_coef * torch.nn.functional.cross_entropy(dl, demo_y)
             opt.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 0.5)
