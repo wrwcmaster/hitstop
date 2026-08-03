@@ -378,6 +378,23 @@ function attachObserver(game: ActionGame): void {
           // their phases ('aim', 'creep', 'lunge'…), and that name is the
           // telegraph the artwork is already showing the human player.
           ...(aiming ? { mode: aiming } : {}),
+          // The telegraph as a VERDICT, not a name. `mode` is a string an
+          // LLM can read but a net cannot: the encoder never carried it,
+          // so "winding up to slam" and "standing idle" encoded to the
+          // same vector — the knight's first learnable evidence of a slam
+          // was the king already airborne. The def declares which of its
+          // own states are attack telegraphs (the same way it declares
+          // dmg), and this stays a plain 0/1 any policy can eat without
+          // the encoder ever learning a boss's name.
+          ...(aiming && m.def.telegraphs?.includes(aiming) ? { winding: true } : {}),
+          // Seconds in the current behaviour state. Telegraphs and
+          // recoveries have DURATIONS — "he has shivered for 0.4s of a
+          // 0.55s windup" is the dodge timing itself, and "he landed
+          // 0.1s ago" is the safe window to punish. One number, every
+          // FSM has it, no per-boss anything.
+          ...(typeof (m.state.fsm as { t?: number } | undefined)?.t === 'number'
+            ? { stateAge: Math.round((m.state.fsm as { t: number }).t * 100) / 100 }
+            : {}),
         };
       }),
       // HOSTILE shots only. Her own bow and flintlock rounds, and any

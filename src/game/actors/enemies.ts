@@ -411,6 +411,7 @@ const ARCHER_AIM = 0.45;
  * telegraph: when the bow comes up, move.
  */
 defineMonster('archer', {
+  telegraphs: ['aim'], // the drawn bow / raised gun IS the warning
   hp: 60, damage: 18, w: 12, h: 17, score: 350,
   rangedAt: 300, // it looses at anything inside this
   colors: [CLOAK, CLOAK_DARK, WOOD],
@@ -498,6 +499,7 @@ defineMonster('archer', {
  * fast, nearly-flat bullet. Long reload — punish it.
  */
 defineMonster('gunner', {
+  telegraphs: ['aim'], // the drawn bow / raised gun IS the warning
   hp: 80, damage: 26, w: 13, h: 14, score: 450,
   rangedAt: 320, // levels the musket at anything near-flat inside this
   colors: [COLORS.redDark, COLORS.steel, COLORS.gold],

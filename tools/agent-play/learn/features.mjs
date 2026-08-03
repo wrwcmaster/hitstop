@@ -54,7 +54,22 @@ const GOAL_F = 5;
  * per the contract above. */
 const TILES_F = 77;
 
-export const FEATURES = SELF_F + MOBS * MOB_F + SHOTS * SHOT_F + 2 + GOAL_F + 1 + TILES_F;
+/**
+ * Telegraph block, appended after the tiles (contract above): per near
+ * monster [winding, stateAge, facing]. Scott's question exposed the gap:
+ * the FSM phase ('slam' windup) rode __observe as a STRING and never
+ * reached this vector, so 'winding up' and 'standing idle' encoded
+ * identically — the net's first learnable evidence of a slam was the
+ * king already airborne. He dodges on the shiver; now she can too.
+ *   winding  — def-declared attack phase, 0/1
+ *   stateAge — seconds in the current behaviour state (timing lives here:
+ *              how far into the windup, how long since the landing)
+ *   facing   — which way it points; 'behind him' finally differs from
+ *              'in front of him'
+ */
+const TELE_F = 3;
+
+export const FEATURES = SELF_F + MOBS * MOB_F + SHOTS * SHOT_F + 2 + GOAL_F + 1 + TILES_F + MOBS * TELE_F;
 
 const clamp = (v) => (v < -1 ? -1 : v > 1 ? 1 : v);
 
@@ -139,13 +154,28 @@ export function encode(o, out = new Float64Array(FEATURES), goal = null) {
   }
   // sinceSwing: the hit-and-run phase variable, appended last (see the
   // contract above). Always written, goal or no goal.
-  out[FEATURES - 1 - TILES_F] = clamp((o.player?.sinceSwing ?? 2) / 2);
+  // (Indexed from the end THROUGH every later block — anchoring to
+  // FEATURES alone silently moved this slot when the telegraphs landed,
+  // which is the exact scramble the append-only contract exists to stop.)
+  out[FEATURES - 1 - TILES_F - MOBS * TELE_F] = clamp((o.player?.sinceSwing ?? 2) / 2);
   // The tile window, last. Cells are already -1..1; missing (an old
   // observation without the field) stays zero, which reads as open air.
   const tw = o.tiles;
   if (tw) {
-    const base = FEATURES - TILES_F;
+    const base = FEATURES - TILES_F - MOBS * TELE_F;
     for (let k = 0; k < TILES_F && k < tw.length; k++) out[base + k] = tw[k];
+  }
+  // Telegraphs, same monsters in the same slot order as the MOB block,
+  // so slot k's winding is about the same creature as slot k's gap.
+  {
+    const base = FEATURES - MOBS * TELE_F;
+    for (let k = 0; k < MOBS; k++) {
+      const m = near[k];
+      if (!m) continue;
+      out[base + k * TELE_F] = m.winding ? 1 : 0;
+      out[base + k * TELE_F + 1] = clamp((m.stateAge ?? 0) / 2);
+      out[base + k * TELE_F + 2] = m.facing ?? 0;
+    }
   }
   return out;
 }
