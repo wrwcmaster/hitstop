@@ -46,7 +46,6 @@ const ACTIONS = [
 export interface HarnessState {
   /** Sim steps since the current run started. */
   step: number;
-  timeScale: number;
   scenes: string[];
   dialogue: boolean;
   phase?: string;
@@ -79,9 +78,15 @@ export function attachHarness(game: ActionGame): void {
     actions: ACTIONS,
 
     state: (): HarnessState => {
+      // timeScale is deliberately NOT here. freezeT/slowT decay by wall-
+      // clock realDt, so "is slow-mo active at step N" depends on the
+      // recorder's frame rate — a live tape at 59.94Hz caught the boss-
+      // kill slow (0.45) still active at a checkpoint where a stepped
+      // replay at exactly 60 had it expired, and the tape failed with
+      // every WORLD field identical and the RNG in lockstep. A
+      // determinism hash may only assert what the sim determines.
       const out: HarnessState = {
         step: replay.relStep(),
-        timeScale: game.loop.timeScale,
         scenes: game.scenes.all().map((s) => s.constructor.name),
         dialogue: game.scenes.top instanceof DialogueScene,
         monsters: [],
