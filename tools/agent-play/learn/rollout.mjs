@@ -6,7 +6,7 @@
  * cheerfully optimise the gap.
  */
 import { encode, MOVES } from './features.mjs';
-import { forward, SHAPE } from './net.mjs';
+import { forward, forwardLogits, SHAPE } from './net.mjs';
 
 /**
  * Frames a training episode is allowed.
@@ -150,7 +150,18 @@ export function episode(harness, game, act, { frames = EPISODE, runSeed = null, 
  * world, and putting it in `__observe()` would make the game responsible
  * for knowing where an agent wants to go.
  */
-export function actor(weights, shape = SHAPE, goalOf = null) {
+/**
+ * Make a policy function from weights.
+ *
+ * temp 0 (default) is argmax — every deployment so far. temp > 0 samples
+ * from softmax(logits/temp): the DICE the trainer actually optimises.
+ * The gap between those two is this week's recurring failure — updates
+ * that improve the sampled policy while argmax falls off its ridge — so
+ * the dice are now deployable, with an optional seeded rng so a sampled
+ * evaluation can still be reproduced exactly.
+ */
+export function actor(weights, shape = SHAPE, goalOf = null, opts = {}) {
+  const { temp = 0, rng = Math.random } = opts;
   const scratch = {};
   const x = encode({ player: null, monsters: [], shots: [] });
   return (o) => {
@@ -160,6 +171,14 @@ export function actor(weights, shape = SHAPE, goalOf = null) {
     if (o?.ui?.blocking) return ['confirm'];
     if (!o?.player) return [];
     encode(o, x, goalOf ? goalOf() : null);
-    return MOVES[forward(weights, x, shape, scratch)];
+    if (temp <= 0) return MOVES[forward(weights, x, shape, scratch)];
+    const lg = forwardLogits(weights, x, shape, scratch);
+    let mx = -Infinity;
+    for (const v of lg) if (v > mx) mx = v;
+    const ex = lg.map((v) => Math.exp((v - mx) / temp));
+    const Z = ex.reduce((a, c) => a + c, 0);
+    let r = rng() * Z;
+    for (let j = 0; j < ex.length; j++) { r -= ex[j]; if (r <= 0) return MOVES[j]; }
+    return MOVES[ex.length - 1];
   };
 }

@@ -60,6 +60,11 @@ def parse():
     # every update is the standard answer — reward keeps her alive, the
     # demo term keeps her from parking at the wall, and neither gets to
     # win outright.
+    # Judge validation by the DICE at this temperature instead of argmax.
+    # 0 keeps the historical argmax gate. The trainer optimises the
+    # sampled policy; judging a different one is the mismatch behind a
+    # week of "training healthy, validation cratered".
+    ap.add_argument("--valid-temp", type=float, default=0.0)
     ap.add_argument("--demo", default=None, help="demo.jsonl of (o, a) pairs")
     ap.add_argument("--bc-coef", type=float, default=0.0)
     return ap.parse_args()
@@ -110,7 +115,7 @@ def save_blob(model, blob, path, note, valid):
     Path(path).write_text(json.dumps(out))
 
 
-def collect(weights_path, room, episodes, det=False, seeds=None):
+def collect(weights_path, room, episodes, det=False, seeds=None, temp=None):
     """One call into the Node collector; returns (steps, meanReturn)."""
     traj = HERE / "traj.jsonl"
     cmd = ["node", str(HERE / "collect.mjs"), "--weights", str(weights_path),
@@ -121,6 +126,8 @@ def collect(weights_path, room, episodes, det=False, seeds=None):
         cmd.append("--det")
     if seeds:
         cmd += ["--seeds", seeds]
+    if temp is not None:
+        cmd += ["--temp", str(temp)]
     r = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True)
     if r.returncode != 0:
         sys.exit(f"collector failed:\n{r.stdout}\n{r.stderr}")
@@ -165,7 +172,7 @@ def main():
     # seeds decides what gets saved; training never overwrites the best.
     best_valid = float("-inf")
     save_blob(model, blob, tmp, "ppo working copy", None)
-    _, best_valid = collect(tmp, args.room, 2, det=True, seeds="205,206")
+    _, best_valid = collect(tmp, args.room, 2, det=True, seeds="205,206", temp=args.valid_temp)
     baseline = best_valid
     print(f"baseline validation {best_valid:.0f}")
 
@@ -201,7 +208,7 @@ def main():
         print(f"iter {it:3d}  steps {len(steps):6d}  meanReturn {mean_ret:7.0f}{'  [critic warmup]' if warm else ''}")
         if it % args.valid_every == 0 or it == args.iters:
             save_blob(model, blob, tmp, "ppo working copy", None)
-            _, valid = collect(tmp, args.room, 2, det=True, seeds="205,206")
+            _, valid = collect(tmp, args.room, 2, det=True, seeds="205,206", temp=args.valid_temp)
             mark = ""
             if valid > best_valid:
                 best_valid = valid

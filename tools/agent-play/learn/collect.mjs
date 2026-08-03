@@ -33,8 +33,11 @@ const weightsPath = arg('--weights', 'tools/agent-play/learn/weights.json');
 const outPath = arg('--out', 'tools/agent-play/learn/traj.jsonl');
 const EPISODES = Number(arg('--episodes', 8));
 const ROOM = arg('--room', 'throne');
-const TEMP = Number(arg('--temp', 1));
 const DET = process.argv.includes('--det');
+// temp 0 means argmax. Validation historically argmaxed (--det implied
+// it); now --det --temp 0.5 judges the DICE instead — reproducibly,
+// because det seeds the sampler from the episode seed.
+const TEMP = Number(arg('--temp', DET ? 0 : 1));
 // Random spawn for training episodes. Every fixed-spawn episode starts
 // her at the same wall-adjacent spot, so all experience begins where
 // cornering is the natural policy and the corner basin deepens with
@@ -51,18 +54,30 @@ if (shape[0] !== FEATURES) {
   throw new Error(`weights expect ${shape[0]} features, encoder makes ${FEATURES}`);
 }
 
+/** mulberry32 — so a det+temp validation rolls the same dice every time. */
+function mulberry32(a) {
+  a = a >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+let rng = Math.random;
+
 /** Sample from softmax(logits/T); returns [index, logProb]. */
 function sample(logits) {
   let mx = -Infinity;
   for (const v of logits) if (v > mx) mx = v;
-  const ex = logits.map((v) => Math.exp((v - mx) / TEMP));
+  const ex = logits.map((v) => Math.exp((v - mx) / (TEMP || 1)));
   const Z = ex.reduce((a, b) => a + b, 0);
-  if (DET) {
+  if (TEMP === 0) {
     let best = 0;
     for (let j = 1; j < logits.length; j++) if (logits[j] > logits[best]) best = j;
     return [best, Math.log(ex[best] / Z)];
   }
-  let r = Math.random() * Z;
+  let r = rng() * Z;
   for (let j = 0; j < ex.length; j++) {
     r -= ex[j];
     if (r <= 0) return [j, Math.log(ex[j] / Z)];
@@ -79,6 +94,7 @@ for (let e = 0; e < EPISODES; e++) {
   let waveHits = 0;
   const stopListening = game.events.on('waveClear', () => { waveHits++; });
 
+  rng = DET ? mulberry32(seed ^ 0x9e3779b9) : Math.random;
   globalThis.window.__harness.pinSeed(seed);
   harness.beginRun({ kind: 'scenario', scenario: {
     room: ROOM, quiet: true,
