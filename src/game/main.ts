@@ -2,7 +2,7 @@
 // before any other module can draw from it — key to deterministic replays.
 import { attachHarness } from './test/harness';
 import { Game, GamepadInput, validateRoom } from '@engine/index';
-import { KEYMAP, GAMEPAD, VIEW_W, VIEW_H, ZOOM, WORLD_ZOOM, type Action, type GameEvents, type ActionGame } from './defs';
+import { KEYMAP, GAMEPAD, VIEW_W, VIEW_H, ZOOM, WORLD_ZOOM, type Action, type GameEvents, type ActionGame, type TestScenario } from './defs';
 import { registerSounds } from './content/sfx';
 import { registerSongs } from './content/music';
 import { registerEnemies } from './actors/enemies';
@@ -168,10 +168,34 @@ const play = new PlayScene(game, testRoom());
 game.scenes.switch(play);
 game.start();
 
-// Test scenario without the bridge: write a TestScenario to
-// localStorage['hitstop.scenario'] and open ?scenario=local (the level
-// editor and hand-testing use this, as ?room=local does for rooms).
-if (new URLSearchParams(location.search).get('scenario') === 'local') {
+/**
+ * Named fight setups, openable straight from the address bar
+ * (`?scenario=throne`) — no editor, no console, no localStorage.
+ *
+ * These exist because a DEMONSTRATION tape has to be cheap to make. The
+ * net cannot learn hit-and-run from exploration alone (every route out
+ * of its corner passes through worse play), so the way through is a
+ * human fight to imitate — and nobody records a dozen of those if each
+ * one costs five minutes of arena first. Same funnel as every other
+ * run: the scenario rides the recording, so these replay like anything
+ * else.
+ */
+const NAMED_SCENARIOS: Record<string, TestScenario> = {
+  throne: {
+    room: 'throne', quiet: true,
+    player: { x: 120, y: 100, give: ['great-sword'], equip: ['great-sword'] },
+  },
+  arena: {
+    room: 'arena', quiet: true,
+    player: { x: 230, y: 192, give: ['great-sword'], equip: ['great-sword'] },
+  },
+};
+
+// Test scenario without the bridge: a NAMED_SCENARIOS key, or 'local' to
+// read a TestScenario from localStorage['hitstop.scenario'] (the level
+// editor and hand-testing use that, as ?room=local does for rooms).
+const wanted = new URLSearchParams(location.search).get('scenario');
+if (wanted === 'local') {
   const raw = localStorage.getItem('hitstop.scenario');
   if (raw) {
     try {
@@ -180,6 +204,10 @@ if (new URLSearchParams(location.search).get('scenario') === 'local') {
       console.error('bad scenario in localStorage, ignoring', err);
     }
   }
+} else if (wanted && NAMED_SCENARIOS[wanted]) {
+  play.beginRun({ kind: 'scenario', scenario: NAMED_SCENARIOS[wanted] });
+} else if (wanted) {
+  console.error(`unknown scenario '${wanted}' — have: ${Object.keys(NAMED_SCENARIOS).join(', ')}, local`);
 }
 
 // Handy for poking at the game from the console / bug reports.
