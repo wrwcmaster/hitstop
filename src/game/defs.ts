@@ -149,7 +149,7 @@ export function promptText(game: ActionGame, text: string): string {
 }
 
 /** The actions a prompt may name. Anything else is left alone. */
-const PROMPTABLE = new Set<Action>(['left', 'right', 'up', 'down', 'jump', 'attack', 'dash', 'parry', 'interact']);
+const PROMPTABLE = new Set<Action>(['left', 'right', 'up', 'down', 'jump', 'attack', 'dash', 'parry', 'interact', 'menu', 'map', 'skill', 'skill3']);
 
 /** localStorage prefix for saves/settings — also scopes what the replay
  * recorder snapshots at run start. */

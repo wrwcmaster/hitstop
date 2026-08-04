@@ -418,6 +418,15 @@ defineMonster('chest', chestDef([
     { id: 'mana-orb', chance: 0.5 },
 ]));
 
+// The training yard's cache: guaranteed gear, so the menu lesson has
+// something real to equip and drink. A random-roll chest can teach
+// 'this is a chest'; only a guaranteed one can teach 'open the menu
+// and USE what you found'.
+defineMonster('supply-chest', {
+  ...chestDef([{ id: 'potion', chance: 1 }, { id: 'iron-helmet', chance: 1 }]),
+  displayName: 'SUPPLY CACHE',
+});
+
 defineMonster('healing-chest', {
   ...chestDef([{ id: 'potion', chance: 1 }], true),
   displayName: 'HEALING CACHE',
