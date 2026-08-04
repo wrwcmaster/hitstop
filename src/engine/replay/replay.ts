@@ -22,7 +22,7 @@
  */
 import type { Game } from '../core/game';
 import { STEP } from '../core/loop';
-import { seedRandom } from '../math/util';
+import { seedRandom, randomDraws } from '../math/util';
 import { sandboxStorage, snapshotStorage } from '../core/storage';
 import { drawText } from '../gfx/font';
 import type { RawInputEvent } from '../input/input';
@@ -47,6 +47,15 @@ export interface Recording<A extends string = string, Start = unknown> {
   tape: TapeEvent<A>[];
   /** [relative step, state hash] once per second (+ final at save time). */
   checks: [number, number][];
+  /**
+   * [relative step, gameplay-RNG draws] beside each check.
+   *
+   * The hash says the worlds parted; this says the STREAM parted, which
+   * happens FIRST and silently — a cosmetic that draws from the gameplay
+   * stream moves it without moving a single hashed field. Optional: tapes
+   * recorded before this existed simply have none, and verify the same.
+   */
+  draws?: [number, number][];
   /** Total steps the recording covers, relative to run start. */
   end: number;
   /** Something non-replayable touched the session (e.g. network play). */
@@ -142,6 +151,7 @@ interface Run<Start> {
   storage: Record<string, string>;
   tape: TapeEvent<string>[];
   checks: [number, number][];
+  draws: [number, number][];
   offset: number;
 }
 
@@ -160,6 +170,14 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
    */
   pinnedSeed: number | null = null;
   private tainted: string | undefined;
+  /**
+   * The run that just ENDED, kept across the reset. Dying starts a new
+   * run (respawn loads the autosave), and per-run tapes cut at run
+   * start — so SAVE REPLAY after a death used to save an 8-second stub
+   * of menus while the fight that killed you was discarded at the exact
+   * moment it became worth keeping. Losses are the tapes that teach.
+   */
+  private lastRec: Recording<A, Start> | null = null;
   private created = new Date().toISOString();
 
   private playback: { rec: Recording<A, Start>; offset: number; cursor: number; armed: boolean } | null = null;
@@ -199,7 +217,7 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
       p.armed = true;
       this.run = {
         seed: p.rec.seed, start, storage: snapshotStorage(this.boot.storagePrefix),
-        tape: [], checks: [], offset: this.game.steps,
+        tape: [], checks: [], draws: [], offset: this.game.steps,
       };
       return;
     }
@@ -207,6 +225,19 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
       // A replayed run started ANOTHER run (loaded a save mid-run):
       // tapes never span that boundary, so the playback is over.
       this.viewerEnded = true;
+    }
+    if (this.run && !p) {
+      // Snapshot WITHOUT a fresh final check: the world has already been
+      // reset for the run that is starting, so hashing it now would pin
+      // the OLD tape to the NEW world. The last periodic check stands as
+      // the final assertion; the tape end simply reaches a little past it.
+      const r = this.run;
+      this.lastRec = {
+        v: 3, seed: r.seed, mode: this.boot.harness ? 'harness' : 'live', created: this.created,
+        start: r.start, storage: r.storage, tape: [...r.tape] as TapeEvent<A>[],
+        checks: [...r.checks], draws: [...r.draws], end: this.relStep(),
+        ...(this.tainted && { tainted: this.tainted }),
+      };
     }
     const seed = this.pinnedSeed !== null
       ? this.pinnedSeed
@@ -216,7 +247,7 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
     seedRandom(seed);
     this.run = {
       seed, start, storage: snapshotStorage(this.boot.storagePrefix),
-      tape: [], checks: [], offset: this.game.steps,
+      tape: [], checks: [], draws: [], offset: this.game.steps,
     };
   }
 
@@ -224,18 +255,26 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
     const run = this.run;
     if (!run) return null;
     const checks = [...run.checks];
+    const draws = [...run.draws];
     const end = this.relStep();
-    if (!checks.length || checks[checks.length - 1][0] !== end) checks.push([end, this.hashNow()]);
+    if (!checks.length || checks[checks.length - 1][0] !== end) {
+      checks.push([end, this.hashNow()]);
+      draws.push([end, randomDraws()]);
+    }
     return {
       v: 3, seed: run.seed, mode: this.boot.harness ? 'harness' : 'live', created: this.created,
-      start: run.start, storage: run.storage, tape: [...run.tape] as TapeEvent<A>[], checks, end,
+      start: run.start, storage: run.storage, tape: [...run.tape] as TapeEvent<A>[], checks, draws, end,
       ...(this.tainted && { tainted: this.tainted }),
     };
   }
 
   /** Download the current run's recording (how a player keeps a replay). */
   saveFile(name?: string): string | null {
-    const rec = this.recording();
+    return this.saveFileOf(this.recording(), name);
+  }
+
+  /** Download any recording (the current one, or the stashed last run). */
+  saveFileOf(rec: Recording<A, Start> | null, name?: string): string | null {
     if (!rec) return null;
     const file = `${name ?? `${this.boot.storagePrefix}-run-${rec.seed}-${Date.now()}`}.json`;
     const blob = new Blob([JSON.stringify(rec)], { type: 'application/json' });
@@ -264,6 +303,7 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
       const s = this.relStep();
       if (s > 0 && s % 60 === 0) {
         run.checks.push([s, this.hashNow()]);
+        run.draws.push([s, randomDraws()]);
         if (!this.tainted) this.tainted = this.config.taint?.();
       }
     });
@@ -271,6 +311,8 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
     window.__replay = {
       recording: () => this.recording(),
       save: (name?: string) => this.saveFile(name),
+      last: () => this.lastRec,
+      saveLast: (name?: string) => this.saveFileOf(this.lastRec, name),
     };
 
     if (this.boot.harness) this.installStepped();
@@ -347,6 +389,7 @@ export class Replay<A extends string, Start = unknown, E extends Record<string, 
       step: step as (down?: string[], frames?: number) => unknown,
       state: () => this.config.state(),
       hashNow: () => this.hashNow(),
+      draws: () => randomDraws(),
       // Begin a run of the game's choosing (e.g. a test scenario). The
       // start is opaque to the engine and rides the recording, so a
       // scenario replays like any other run. Deferred to the next step,
@@ -495,6 +538,9 @@ declare global {
     __replay?: {
       recording(): Recording | null;
       save(name?: string): string | null;
+      /** The run that just ended (a death, usually). Null until one has. */
+      last(): Recording | null;
+      saveLast(name?: string): string | null;
     };
     __harness?: {
       seed: number;
@@ -504,6 +550,8 @@ declare global {
       step(down?: string[], frames?: number): unknown;
       state(): unknown;
       hashNow(): number;
+      /** Gameplay-RNG draws so far — the stream's position. */
+      draws(): number;
       beginRun(start: unknown): unknown;
       replayRun(rec: Recording): unknown;
       runTo(target: number): unknown;

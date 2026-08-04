@@ -44,14 +44,42 @@ for (const f of files) {
   const t = Date.now();
   harness.replayRun(rec);
   let bad = null;
+  // The stream parts BEFORE the worlds do: a cosmetic that draws from the
+  // gameplay stream moves it without moving a hashed field, and the tape
+  // stays clean until something rolls. Walk the draw counts to the end
+  // even after a hash fails, so the report names the earlier cause rather
+  // than the later symptom.
+  const drawLog = new Map((rec.draws ?? []).map(([s, n]) => [s, n]));
+  let firstDrift = null;
   for (const [step, want] of rec.checks) {
     harness.runTo(step);
     const got = harness.hashNow();
-    if (got !== want) { bad = { step, want, got }; break; }
+    if (firstDrift === null && drawLog.has(step)) {
+      const drew = harness.draws();
+      if (drew !== drawLog.get(step)) firstDrift = { step, want: drawLog.get(step), got: drew };
+    }
+    if (got !== want && !bad) { bad = { step, want, got }; if (!drawLog.size || firstDrift) break; }
   }
   if (bad) {
     failed++;
     console.log(`FAIL ${f}: DIVERGED at step ${bad.step} (recorded ${bad.want}, replayed ${bad.got})`);
+    if (firstDrift) {
+      const d = firstDrift.got - firstDrift.want;
+      console.log(`     RNG stream drifted first at step ${firstDrift.step}: recorded ${firstDrift.want} draws, replayed ${firstDrift.got} (${d > 0 ? '+' : ''}${d})`
+        + `${firstDrift.step < bad.step ? ` — ${bad.step - firstDrift.step} steps before the worlds parted` : ''}`);
+    } else if (drawLog.size) {
+      console.log('     RNG stream stayed in lockstep — the difference is in the world, not the dice.');
+    }
+  } else if (firstDrift) {
+    // Every hash matched and the dice still differ. This is the shape the
+    // bug takes before it is a bug: the tape is already unreproducible and
+    // only luck (or a short tape) is hiding it. Loud, but not a failure —
+    // nothing observable is wrong yet.
+    failed++;
+    const d = firstDrift.got - firstDrift.want;
+    console.log(`FAIL ${f}: every hash matched, but the RNG stream drifted at step ${firstDrift.step}`
+      + ` (recorded ${firstDrift.want} draws, replayed ${firstDrift.got}, ${d > 0 ? '+' : ''}${d})`);
+    console.log('     The worlds have not parted YET — they would have, given more tape.');
   } else {
     console.log(`pass ${f}  ${rec.end} steps, ${rec.checks.length} checkpoints (${Date.now() - t}ms)`);
   }

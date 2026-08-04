@@ -8,13 +8,14 @@
  * main.ts — `bootReplay` seeds the gameplay RNG (and sandboxes storage
  * when watching a replay) before any other module can touch either.
  */
-import { Replay, bootReplay, DialogueScene, GRAVITY, Projectile, skillDef, type Tilemap, type Recording } from '@engine/index';
+import { Replay, bootReplay, DialogueScene, GRAVITY, Projectile, skillDef, tiles, type Tilemap, type Recording } from '@engine/index';
 import { STORAGE_PREFIX, REPLAY_PENDING_KEY, type ActionGame, type Action, type RunStart, type GameEvents } from '../defs';
 import { Player } from '../actors/player';
 import { PLAYER_TUNING } from '../actors/player-tuning';
 import { Monster } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
 import { PlayScene } from '../scenes/play';
+import { Shockwave } from '../actors/shockwave';
 
 /**
  * A scene that can explain itself to an agent. Optional and duck-typed on
@@ -45,7 +46,6 @@ const ACTIONS = [
 export interface HarnessState {
   /** Sim steps since the current run started. */
   step: number;
-  timeScale: number;
   scenes: string[];
   dialogue: boolean;
   phase?: string;
@@ -78,9 +78,15 @@ export function attachHarness(game: ActionGame): void {
     actions: ACTIONS,
 
     state: (): HarnessState => {
+      // timeScale is deliberately NOT here. freezeT/slowT decay by wall-
+      // clock realDt, so "is slow-mo active at step N" depends on the
+      // recorder's frame rate — a live tape at 59.94Hz caught the boss-
+      // kill slow (0.45) still active at a checkpoint where a stepped
+      // replay at exactly 60 had it expired, and the tape failed with
+      // every WORLD field identical and the RNG in lockstep. A
+      // determinism hash may only assert what the sim determines.
       const out: HarnessState = {
         step: replay.relStep(),
-        timeScale: game.loop.timeScale,
         scenes: game.scenes.all().map((s) => s.constructor.name),
         dialogue: game.scenes.top instanceof DialogueScene,
         monsters: [],
@@ -160,6 +166,10 @@ function attachObserver(game: ActionGame): void {
   // thing in front of it is the one it just hit or its twin, and cannot
   // hold any belief about a monster across a turn boundary.
   const ids = new WeakMap<object, number>();
+  // When each knight last finished a swing, in sim steps. Observer-side
+  // memory of an observable event — anyone WATCHING knows she just
+  // swung; the game keeps no such field, so the observation does.
+  const lastSwing = new WeakMap<object, number>();
   let nextId = 1;
   const idOf = (o: object): number => {
     let n = ids.get(o);
@@ -269,6 +279,20 @@ function attachObserver(game: ActionGame): void {
         // attack, not the last one: `attackDur` is 0 until she has swung
         // once, and every combo step has its own length.
         commitT: round(planned.def?.duration ?? 0),
+        // Seconds since her last swing ENDED, capped at 2. Hit-and-run
+        // is a cycle — strike, step out, come back — and a memoryless
+        // policy cannot close a cycle unless something in its input
+        // varies around it. After a swing, busyT is already 0 and every
+        // other field looks like "fresh": same input, same output, so
+        // the best a net could express near a wall was to stand in the
+        // corner and trade. This is the phase variable the cycle needs,
+        // and it is physics — the rule bot keeps the identical fact in
+        // a private counter it calls recover.
+        sinceSwing: (() => {
+          if (p.fsm.is('attack')) { lastSwing.set(p, game.steps); return 0; }
+          const at = lastSwing.get(p);
+          return at === undefined ? 2 : Math.min(2, round((game.steps - at) / 60));
+        })(),
         // What a JUMP does, because an agent cannot choose a move whose
         // outcome it cannot predict. Everything else here describes the
         // horizontal world, so a hand-written policy considers only left,
@@ -321,7 +345,16 @@ function attachObserver(game: ActionGame): void {
         // it can reach you without touching you, and that it is winding
         // up to. The archer's draw is a real telegraph the artwork
         // already shows ("when the bow comes up, move").
-        const aiming = typeof m.state.mode === 'string' ? m.state.mode : undefined;
+        // A behaviour's named phase, from either place behaviours keep
+        // one. Simple monsters write `state.mode` ('aim'); FSM-driven
+        // ones — every boss, the brute — keep it in `state.fsm.state`
+        // ('slam', 'hop', 'pounce'). The Slime King's slam has a whole
+        // authored telegraph phase, and without this line the
+        // observation showed position and velocity only, so an agent's
+        // first hint of the attack was being under it.
+        const fsmState = (m.state.fsm as { state?: string } | undefined)?.state;
+        const aiming = typeof m.state.mode === 'string' ? m.state.mode
+          : typeof fsmState === 'string' ? fsmState : undefined;
         const shoots = m.def.rangedAt && gap < m.def.rangedAt ? true : undefined;
         if (gap > NEAR) {
           return {
@@ -350,6 +383,23 @@ function attachObserver(game: ActionGame): void {
           // their phases ('aim', 'creep', 'lunge'…), and that name is the
           // telegraph the artwork is already showing the human player.
           ...(aiming ? { mode: aiming } : {}),
+          // The telegraph as a VERDICT, not a name. `mode` is a string an
+          // LLM can read but a net cannot: the encoder never carried it,
+          // so "winding up to slam" and "standing idle" encoded to the
+          // same vector — the knight's first learnable evidence of a slam
+          // was the king already airborne. The def declares which of its
+          // own states are attack telegraphs (the same way it declares
+          // dmg), and this stays a plain 0/1 any policy can eat without
+          // the encoder ever learning a boss's name.
+          ...(aiming && m.def.telegraphs?.includes(aiming) ? { winding: true } : {}),
+          // Seconds in the current behaviour state. Telegraphs and
+          // recoveries have DURATIONS — "he has shivered for 0.4s of a
+          // 0.55s windup" is the dodge timing itself, and "he landed
+          // 0.1s ago" is the safe window to punish. One number, every
+          // FSM has it, no per-boss anything.
+          ...(typeof (m.state.fsm as { t?: number } | undefined)?.t === 'number'
+            ? { stateAge: Math.round((m.state.fsm as { t: number }).t * 100) / 100 }
+            : {}),
         };
       }),
       // HOSTILE shots only. Her own bow and flintlock rounds, and any
@@ -359,12 +409,34 @@ function attachObserver(game: ActionGame): void {
       // And only the ones actually coming at her: a shot that is not
       // closing is scenery, and reporting scenery every frame is how a
       // payload doubles for nothing.
-      shots: game.world.all().filter((e): e is Projectile =>
+      // Everything incoming rides in ONE list, as physics: a position,
+      // a velocity, a size. An arrow, a bullet and a ground shockwave
+      // are all "a hazard that will be here soon", and a policy that
+      // dodges one dodges the others without knowing any of their
+      // names. The Slime King's slam was the gap that forced this: its
+      // radius damage arrives as a Shockwave, which is not a Projectile,
+      // so the slam's actual damage dealer was invisible — an agent
+      // could watch him leap and still never see what hit her.
+      shots: (([] as { dx: number; dy: number; vx: number; vy: number; w?: number; h?: number }[])
+        .concat(game.world.all().filter((e): e is Shockwave =>
+          e instanceof Shockwave && !e.dead && e.targetTeam === 'player')
+          .flatMap((wv) => {
+            const cells = wv.crestCells();
+            if (!cells.length) return [];
+            const [cx, cy] = cells[0];        // the front cell, world px
+            const dx = cx + 4 - p.cx;
+            const dy = cy + 4 - p.cy;
+            const vx = wv.runDir * wv.speed;
+            // Same closing test as any shot: receding waves are scenery.
+            if (dx * vx >= 0 && Math.sign(dx) !== 0) return [];
+            return [{ dx: Math.round(dx), dy: Math.round(dy), vx: Math.round(vx), vy: 0, w: 8, h: 8 }];
+          })))
+        .concat(game.world.all().filter((e): e is Projectile =>
         e instanceof Projectile && !e.dead && e.targetTeam === 'player'
         && (e.x - p.cx) * e.vx + (e.y - p.cy) * e.vy < 0).map((s) => ({
         dx: Math.round(s.x - p.cx), dy: Math.round(s.y - p.cy),
         vx: Math.round(s.vx), vy: Math.round(s.vy),
-      })),
+      }))),
       // Where there is room to GO. An agent that can see monsters but not
       // the floor retreats into walls and off ledges — it backs away from
       // the thing chasing it and finds the corner with its shoulders. The
@@ -388,9 +460,63 @@ function attachObserver(game: ActionGame): void {
         })),
         weapon: p.equipment.slots().find(([slot]) => slot === 'weapon')?.[1] ?? null,
       },
+      // LOCAL GEOMETRY: an 11x7 window of tile cells around her, one
+      // number per cell. This is the field whose absence three results
+      // agree on: the rule bot corners itself, ES flatlined at 0/10 and
+      // PPO round one could not cross its own baseline, all in the one
+      // room where "cornered", "platform above" and "hazard floor"
+      // decide fights — and none of those is expressible in two rays
+      // and a drop. Values: 1 solid, 0.5 stand-through platform, -1
+      // hazard, 0 air. Moving solids (platforms, closed barriers) are
+      // stamped from the tilemap's own solids so a closed gate reads as
+      // the wall it is.
+      tiles: tileWindow(p),
       wave: play.replayState().wave,
     };
   };
+}
+
+/** Tile-window shape, exported for the feature encoder. */
+export const TILE_WIN = { w: 11, h: 7 } as const;
+
+/** The 11x7 cell window centred on the knight (see the caller). */
+function tileWindow(p: Player): number[] {
+  const map = p.collision as Tilemap;
+  const ts = map.tileSize;
+  const cx = Math.floor((p.x + p.w / 2) / ts);
+  const cy = Math.floor((p.y + p.h / 2) / ts);
+  const out: number[] = [];
+  for (let dy = -(TILE_WIN.h >> 1); dy <= (TILE_WIN.h >> 1); dy++) {
+    for (let dx = -(TILE_WIN.w >> 1); dx <= (TILE_WIN.w >> 1); dx++) {
+      const tx = cx + dx;
+      const ty = cy + dy;
+      // Beyond the room is a wall in every way that matters — the mover
+      // will not let her leave, so "cornered against the world edge"
+      // must LOOK like a corner. Encoding it as air made the one thing
+      // this window exists for invisible exactly at the boundary.
+      if (tx < 0 || ty < 0 || tx >= map.cols || ty >= map.rows) { out.push(1); continue; }
+      const id = map.tileAt(tx, ty);
+      const d = id ? tiles.get(id) : null;
+      out.push(d?.hazard ? -1 : d?.solid && !d.oneWay ? 1 : d?.oneWay ? 0.5 : 0);
+    }
+  }
+  // Moving solids and closed barriers are not tiles; stamp them in.
+  const x0 = (cx - (TILE_WIN.w >> 1)) * ts;
+  const y0 = (cy - (TILE_WIN.h >> 1)) * ts;
+  const win = { x: x0, y: y0, w: TILE_WIN.w * ts, h: TILE_WIN.h * ts };
+  for (const sld of map.solidsNear(win)) {
+    const gx0 = Math.max(0, Math.floor((sld.x - x0) / ts));
+    const gy0 = Math.max(0, Math.floor((sld.y - y0) / ts));
+    const gx1 = Math.min(TILE_WIN.w - 1, Math.floor((sld.x + sld.w - 1 - x0) / ts));
+    const gy1 = Math.min(TILE_WIN.h - 1, Math.floor((sld.y + sld.h - 1 - y0) / ts));
+    for (let gy = gy0; gy <= gy1; gy++) {
+      for (let gx = gx0; gx <= gx1; gx++) {
+        const i = gy * TILE_WIN.w + gx;
+        if (out[i] === 0) out[i] = sld.oneWay ? 0.5 : 1;
+      }
+    }
+  }
+  return out;
 }
 
 /**

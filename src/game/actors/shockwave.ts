@@ -74,8 +74,14 @@ export class Shockwave extends Entity {
   /** Seconds since the front ran out of surface, for the wake's fade. */
   private fade = 0;
   private readonly range: number;
-  private readonly speed: number;
+  readonly speed: number;
   private readonly colors: string[];
+
+  /** Which team this wave hurts — readable so an observer can tell a
+   * knight-cast wave from a boss-cast one without guessing from color. */
+  readonly targetTeam: Team;
+  /** Which way the crest runs, for anything predicting its path. */
+  readonly runDir: 1 | -1;
 
   constructor(
     private game: ActorHost,
@@ -94,6 +100,8 @@ export class Shockwave extends Entity {
   ) {
     super();
     this.layer = 2;
+    this.targetTeam = opts.targets ?? 'enemy';
+    this.runDir = dir;
     const T = SHOCKWAVE_TUNING;
     this.range = opts.range ?? T.range;
     this.speed = opts.speed ?? T.speed;

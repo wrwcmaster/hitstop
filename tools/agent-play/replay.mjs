@@ -97,16 +97,31 @@ async function replayOne(browser, baseUrl, file) {
 
   let ok = true;
   const fresh = [];
+  const freshDraws = [];
+  // The dice part before the world does — see replay-headless.mjs.
+  const drawLog = new Map((rec.draws ?? []).map(([s, n]) => [s, n]));
+  let firstDrift = null;
   for (const [target, expected] of rec.checks) {
-    const got = await session.page.evaluate((t) => {
+    const { got, drew } = await session.page.evaluate((t) => {
       window.__harness.runTo(t);
-      return window.__harness.hashNow();
+      return { got: window.__harness.hashNow(), drew: window.__harness.draws() };
     }, target);
     fresh.push([target, got]);
+    freshDraws.push([target, drew]);
+    if (firstDrift === null && drawLog.has(target) && drew !== drawLog.get(target)) {
+      firstDrift = { step: target, want: drawLog.get(target), got: drew };
+    }
     if (rerecord) continue;
     if (got !== expected) {
       ok = false;
       console.error(`  DIVERGED at step ${target} (${(target / 60).toFixed(1)}s): recorded ${expected}, replayed ${got}`);
+      if (firstDrift) {
+        const d = firstDrift.got - firstDrift.want;
+        console.error(`  RNG stream drifted first at step ${firstDrift.step}: recorded ${firstDrift.want} draws, replayed ${firstDrift.got} (${d > 0 ? '+' : ''}${d})`
+          + (firstDrift.step < target ? ` — ${target - firstDrift.step} steps before the worlds parted` : ''));
+      } else if (drawLog.size) {
+        console.error('  RNG stream stayed in lockstep — the difference is in the world, not the dice.');
+      }
       console.error('  replayed state:', JSON.stringify(await session.page.evaluate(() => window.__harness.state())));
       break;
     }
@@ -118,6 +133,7 @@ async function replayOne(browser, baseUrl, file) {
   if (ok && rerecord) {
     const changed = fresh.filter(([t, h], i) => rec.checks[i][0] !== t || rec.checks[i][1] !== h).length;
     rec.checks = fresh;
+    rec.draws = freshDraws;
     // Keep the file's own layout: some are pretty-printed by hand, some
     // came straight out of the browser as one line.
     const pretty = fs.readFileSync(file, 'utf8').includes('\n  "v"');

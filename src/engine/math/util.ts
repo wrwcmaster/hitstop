@@ -45,12 +45,39 @@ export function sign(v: number): number {
  * wall-clock frame, and letting it consume seeded numbers would tie the
  * simulation to the frame rate and break replays.
  */
-let random: () => number = Math.random;
+let source: () => number = Math.random;
+
+/**
+ * How many numbers this run has drawn — the stream's POSITION.
+ *
+ * The position is simulation state as surely as any coordinate, and it
+ * was the one piece of it nothing recorded. A tape can therefore drift
+ * invisibly: two runs agree on every hashed field while one has drawn a
+ * number the other has not, and nothing says so until a slime rolls its
+ * next hop seconds later and the worlds part. That is exactly how a live
+ * tape failed at step 540 with the preceding eight checkpoints clean, and
+ * the search for it cost a day, because "when did the WORLDS part" and
+ * "when did the STREAM part" are different questions and only the first
+ * was answerable. Recordings now carry this alongside each hash so the
+ * second one is answerable too.
+ */
+let draws = 0;
+
+const random = (): number => {
+  draws++;
+  return source();
+};
+
+/** Numbers drawn from the gameplay stream since the last seeding. */
+export function randomDraws(): number {
+  return draws;
+}
 
 /** Seed the gameplay stream (mulberry32). Recording/replay sets this at boot. */
 export function seedRandom(seed: number): void {
   let a = seed >>> 0;
-  random = () => {
+  draws = 0;
+  source = () => {
     a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;

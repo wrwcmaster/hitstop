@@ -5,3 +5,7 @@ dist-single/
 .DS_Store
 .claude/settings.local.json
 .claude/launch.json
+tools/agent-play/learn/traj.jsonl
+tools/agent-play/learn/weights-ppo.json
+tools/agent-play/learn/value.pt
+tools/agent-play/learn/demo.jsonl

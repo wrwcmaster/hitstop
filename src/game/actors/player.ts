@@ -1270,7 +1270,14 @@ export class Player extends Actor {
     // Still holding on: slide, don't hang.
     this.vx = side * 6; // stay pressed in so the contact survives the step
     this.vy = Math.min(this.vy, T.clingSlide);
-    if (Math.random() < dt * 8) {
+    // Seeded gate, deliberately: the burst LOOKS cosmetic, but its
+    // particles draw from the seeded gameplay stream, so an unseeded
+    // Math.random gate made the stream's position depend on a coin no
+    // replay could re-flip. The draws instrument caught it — both
+    // wall-cling fixtures drifted (-5, -15 draws) with every hash green.
+    // Gate and body now live on the same stream, so a cling consumes an
+    // identical number of draws in live, browser replay and headless.
+    if (chance(dt * 8)) {
       this.feel.burst(this.cx + side * this.w * 0.4, this.cy + this.h * 0.3, 1, {
         color: [COLORS.steelDark], speed: 18, life: 0.25, drag: 4, grav: 120,
       });
