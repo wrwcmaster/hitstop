@@ -10,14 +10,18 @@ export type Action =
 
 /** A key may serve several actions (ArrowUp jumps in-game, navigates in menus). */
 export const KEYMAP: Record<string, Action | Action[]> = {
-  ArrowLeft: 'left', KeyA: 'left',
-  ArrowRight: 'right', KeyD: 'right',
+  // Movement is the ARROWS, and only the arrows — WASD is gone by
+  // Scott's call: one authoritative binding per verb beats two ways to
+  // hold a direction. The left hand's whole job is the verb cluster
+  // (Z/X/C/V, Space) while the right hand steers.
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
   // The Up ARROW is purely directional (menu nav, aim up, look up) — it
-  // is NOT a jump. Jump is Space (as the title screen says) or WASD's W,
-  // which keeps swim-ascend/breach on the jump key: you rise and leap
-  // out of water with jump, never with the up arrow.
-  ArrowUp: 'up', KeyW: ['jump', 'up'],
-  ArrowDown: 'down', KeyS: 'down',
+  // is NOT a jump. Jump is Space alone; swim-ascend/breach rides the
+  // jump key, so you rise and leap out of water with Space, never the
+  // up arrow.
+  ArrowUp: 'up',
+  ArrowDown: 'down',
   Space: 'jump',
   KeyZ: ['attack', 'confirm'], KeyJ: ['attack', 'confirm'], Enter: 'confirm',
   KeyX: ['dash', 'cancel'], KeyK: ['dash', 'cancel'], ShiftLeft: 'dash',
