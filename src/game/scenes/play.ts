@@ -239,10 +239,15 @@ export class PlayScene implements Scene {
     this.waves = new WaveDirector(this.host);
     this.hud = new Hud(this.host);
     this.title = new TitleScreen(game, {
-      // First-ever run (no autosave yet) opens in the training yard.
-      // The decision is made HERE and rides the start object into the
-      // recording, so replays never depend on the machine's saves.
-      newGame: () => this.beginRun({ kind: 'new', tutorial: !saveStore.load() }),
+      // Every NEW GAME opens in the training yard — the skip door is the
+      // veteran path, and it is one step from where you wake up. The
+      // first cut gated this on 'no autosave yet', which meant anyone
+      // who had EVER played could not reach the tutorial at all — the
+      // first thing Scott noticed. The decision still rides the start
+      // object into the recording (old tapes carry {kind:'new'} alone
+      // and replay into the arena), and RESTART RUN uses kind:'autosave',
+      // so a mid-run restart never re-tutorials.
+      newGame: () => this.beginRun({ kind: 'new', tutorial: true }),
       continueRun: () => this.beginRun({ kind: 'continue' }),
       loadGame: () => {
         game.sfx.play('menuSelect');
