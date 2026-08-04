@@ -46,6 +46,11 @@
  },
  "entities": [
   {
+   "type": "veteran",
+   "x": 176,
+   "y": 196
+  },
+  {
    "type": "dummy",
    "x": 296,
    "y": 196
@@ -110,14 +115,14 @@
    }
   },
   {
-   "x": 196,
+   "x": 208,
    "y": 156,
-   "w": 48,
+   "w": 40,
    "h": 60,
    "event": "note",
    "once": false,
    "props": {
-    "text": "{menu}  BAG — EQUIP YOUR SWORD"
+    "text": "{menu}  EQUIP THE SWORD"
    }
   },
   {

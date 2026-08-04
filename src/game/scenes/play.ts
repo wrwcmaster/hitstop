@@ -543,13 +543,13 @@ export class PlayScene implements Scene {
     this.victoryT = 0;
     this.phase = 'play';
     this.setRoom(save?.roomId ?? roomOverride ?? this.startRoomId());
-    // The training yard teaches equipping with the sword she already
-    // owns: it starts in the BAG there (Scott: the helmet is gone; the
-    // rusty sword is the equipment lesson, before the attack test).
-    // Fists are the fallback weapon, so nothing bricks — the dummies
-    // just take long enough that the menu note starts looking wise.
+    // The training yard's opening beat: she arrives with EMPTY hands and
+    // an empty bag — the veteran by the ledges hands her the rusty sword
+    // and tells her to equip it (Scott: an NPC gives the sword, then
+    // teaches the menu). Fists are the fallback, so nothing bricks.
     if (roomOverride === 'tutorial' && this.player) {
       this.player.equipment.unequip('weapon');
+      this.player.inventory.remove('rusty-sword');
       this.player.syncStats();
     }
     this.game.sfx.play('menuSelect');
@@ -1019,10 +1019,12 @@ export class PlayScene implements Scene {
 
   private goToRoom(roomId: string, x?: number, y?: number): void {
     // No one walks out of the training yard unarmed — skip-door users
-    // included. If the lesson was skipped, the game quietly finishes it.
-    if (this.roomId === 'tutorial' && this.player
-        && !this.player.equipment.get('weapon')
-        && this.player.inventory.slots.some((sl) => sl.id === 'rusty-sword')) {
+    // and veteran-ignorers included. Whatever part of the lesson was
+    // skipped, the game quietly finishes it at the door.
+    if (this.roomId === 'tutorial' && this.player && !this.player.equipment.get('weapon')) {
+      if (!this.player.inventory.slots.some((sl) => sl.id === 'rusty-sword')) {
+        this.player.inventory.add('rusty-sword');
+      }
       this.player.equipment.equip('rusty-sword');
       this.player.syncStats();
     }

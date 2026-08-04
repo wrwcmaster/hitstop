@@ -5,6 +5,25 @@ import { defineConversation } from '@engine/index';
  * chain into other conversations via `then`. Dialogue is written in
  * sentence case; speaker names stay uppercase as headers.
  */
+// The training yard's veteran. He hands over the starting sword — a
+// GIVEN thing with a face attached teaches 'open the bag and equip'
+// better than any floating note (Scott's design).
+defineConversation('tutorial-arm', {
+  lines: [
+    { speaker: 'VETERAN', text: 'A knight without a blade is a target with ambitions.' },
+    { speaker: 'VETERAN', text: 'Here — my old rusty sword. It has outlived better knights than both of us.' },
+    { speaker: 'VETERAN', text: 'It goes in your BAG. Open the menu and equip it before those dummies die of old age.' },
+  ],
+  choices: [{ label: 'Take the sword.', action: 'take-sword' }],
+});
+
+defineConversation('tutorial-armed', {
+  lines: [
+    { speaker: 'VETERAN', text: 'Sword goes in hand, not in bag. Menu. Equip. Go.' },
+  ],
+  choices: [{ label: 'Right.' }],
+});
+
 defineConversation('intro', {
   lines: [
     { speaker: 'VOICE', text: 'Another knight. The arena remembers them all.' },
