@@ -27,6 +27,35 @@ function waterlineAbove(m: Monster, x: number): number {
   return Infinity;
 }
 
+// The training yard's target. Not a fight: it cannot hurt her, cannot
+// move, and pays nothing — it exists so the first swing of the game has
+// something to land on and the hit feedback (flash, numbers, gibs) can
+// do the actual teaching.
+defineMonster('dummy', {
+  hp: 60, damage: 0, w: 12, h: 20, score: 0, xp: 0,
+  colors: [COLORS.gold, COLORS.steelDark, COLORS.steel],
+  noContactDamage: true,
+  init(m) {
+    m.mass = 8; // a stake in the ground shrugs off knockback
+  },
+  update(m) {
+    m.vx = 0;
+  },
+  draw(g, m) {
+    const flash = m.flashT > 0;
+    const post = flash ? COLORS.white : COLORS.steelDark;
+    const head = flash ? COLORS.white : COLORS.gold;
+    g.fillStyle = post;
+    g.fillRect(m.x + 5, m.y + 6, 2, 14);          // stake
+    g.fillRect(m.x, m.y + 8, 12, 2);              // crossbar arms
+    g.fillStyle = head;
+    g.fillRect(m.x + 3, m.y, 6, 6);               // burlap head
+    g.fillStyle = post;
+    g.fillRect(m.x + 4, m.y + 2, 1, 1);           // stitched eyes
+    g.fillRect(m.x + 7, m.y + 2, 1, 1);
+  },
+});
+
 defineMonster('slime', {
   hp: 60, damage: 12, w: slimeSprite.hitbox.w, h: slimeSprite.hitbox.h, score: 100,
   colors: [COLORS.green, COLORS.greenDark, COLORS.greenLight],

@@ -206,7 +206,16 @@ export interface TestScenario {
  * a replay can start the run the exact same way.
  */
 export type RunStart =
-  | { kind: 'new' }
+  /**
+   * tutorial: begin in the training yard instead of the arena. Decided
+   * at MENU time (first-ever run = no autosave) and carried in the
+   * start object, which rides the recording — so every tape made before
+   * the tutorial existed still replays into the arena it was played in.
+   * Gating on saved state at DISPATCH time would have silently rerouted
+   * two historical fixtures (empty-storage 'new' starts) into a room
+   * that did not exist when they were recorded.
+   */
+  | { kind: 'new'; tutorial?: boolean }
   | { kind: 'continue' }
   | { kind: 'autosave' }
   | { kind: 'testroom' }

@@ -229,6 +229,7 @@ export class PlayScene implements Scene {
       get room() { return scene.room; },
       get roomId() { return scene.roomId; },
       banner: (text, seconds = 1.2) => this.showBanner(text, seconds),
+      showHint: (text, seconds) => this.showHint(text, seconds),
       goToRoom: (roomId, x, y) => this.goToRoom(roomId, x, y),
       openConversation: (id) => this.openConversation(id),
       hasFlag: (id) => this.flags.has(id),
@@ -238,7 +239,10 @@ export class PlayScene implements Scene {
     this.waves = new WaveDirector(this.host);
     this.hud = new Hud(this.host);
     this.title = new TitleScreen(game, {
-      newGame: () => this.beginRun({ kind: 'new' }),
+      // First-ever run (no autosave yet) opens in the training yard.
+      // The decision is made HERE and rides the start object into the
+      // recording, so replays never depend on the machine's saves.
+      newGame: () => this.beginRun({ kind: 'new', tutorial: !saveStore.load() }),
       continueRun: () => this.beginRun({ kind: 'continue' }),
       loadGame: () => {
         game.sfx.play('menuSelect');
@@ -394,7 +398,7 @@ export class PlayScene implements Scene {
   }
 
   /** The usage line under the banner (see `hint`). */
-  private showHint(text: string, seconds: number): void {
+  showHint(text: string, seconds: number): void {
     this.hint = text;
     this.hintT = seconds;
   }
@@ -452,7 +456,7 @@ export class PlayScene implements Scene {
     this.testRoom = this.pageRoom;
     this.game.events.emit('runStart', start);
     switch (start.kind) {
-      case 'new': return this.startRun(null);
+      case 'new': return this.startRun(null, start.tutorial ? 'tutorial' : undefined);
       case 'continue': return this.startRun(newestSave());
       case 'autosave': return this.startRun(saveStore.load());
       case 'slot': return this.loadSlot(start.slot);
@@ -500,7 +504,7 @@ export class PlayScene implements Scene {
     g.scenes.switch(guest);
   }
 
-  private startRun(save: SaveData | null): void {
+  private startRun(save: SaveData | null, roomOverride?: string): void {
     const g = this.game;
     g.world.clear();
     g.feel.reset();
@@ -533,7 +537,7 @@ export class PlayScene implements Scene {
     this.comboT = 0;
     this.victoryT = 0;
     this.phase = 'play';
-    this.setRoom(save?.roomId ?? this.startRoomId());
+    this.setRoom(save?.roomId ?? roomOverride ?? this.startRoomId());
     this.game.sfx.play('menuSelect');
   }
 
@@ -1445,6 +1449,9 @@ export class PlayScene implements Scene {
 
   /** The place a door leads, for its prompt (localized room name). */
   private doorLabel(z: TriggerDef): string {
+    // A door may name itself ('SKIP TUTORIAL') instead of its destination.
+    const custom = z.props?.label as string | undefined;
+    if (custom) return t(custom);
     const dest = z.props?.room as string | undefined;
     const name = dest ? ROOMS[dest]?.name : undefined;
     return name ? t(name.toUpperCase()) : t('DOOR');

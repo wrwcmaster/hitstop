@@ -19,6 +19,8 @@ export interface PlayHost {
 
   /** Show the big center-screen banner ("WAVE 3", "THE GATE IS LOCKED"). */
   banner(text: string, seconds?: number): void;
+  /** The usage line under the banner — small text, device-resolved. */
+  showHint(text: string, seconds: number): void;
   /** Begin a fade transition into another room. */
   goToRoom(roomId: string, x?: number, y?: number): void;
   /** Push the dialogue scene for a conversation id. */
