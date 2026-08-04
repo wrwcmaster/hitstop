@@ -285,7 +285,15 @@ export function decide(o) {
     // same verb that measured WORSE as a general movement option —
     // rejected there, correct here, because "escape this bullet" is the
     // narrow job an immunity is actually for.
-    if (p.dash?.ready) keys.push('dash');
+    //
+    // But only press it when she can USE it. Mid-swing (busyT > 0) the
+    // attack state cannot consume a dash, and the harness holds keys
+    // between turns — so a press spent into the commitment is GONE: no
+    // fresh edge fires when the swing ends, and the bullet that waited
+    // out the great-sword's 0.34s lands anyway (Codex review, PR #114).
+    // Withholding while busy makes the press land as a NEW edge on the
+    // first frame she can actually dodge.
+    if (p.dash?.ready && !(p.busyT > 0)) keys.push('dash');
     return go(best, keys);
   }
 
