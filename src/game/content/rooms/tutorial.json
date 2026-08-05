@@ -238,8 +238,7 @@
    "event": "door",
    "once": false,
    "props": {
-    "room": "kingsroad",
-    "label": "TO THE ARENA"
+    "room": "kingsroad"
    }
   }
  ]
