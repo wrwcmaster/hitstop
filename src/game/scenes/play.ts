@@ -1212,9 +1212,11 @@ export class PlayScene implements Scene {
   private rollDrops(m: Monster): void {
     if (!m.def.drops || !this.player) return;
     for (const drop of m.def.drops) {
-      // Equipment is once-per-save: skip if already owned.
+      // Equipment and KEY items are once-per-save: skip if already
+      // owned. Keys especially — a second gate key opens nothing, and
+      // dropping one anyway reads as loot when it is noise.
       const def = itemDef(drop.id);
-      if (def.kind === 'equipment' &&
+      if ((def.kind === 'equipment' || def.kind === 'key') &&
           (this.player.inventory.has(drop.id) || this.player.equipment.isEquipped(drop.id))) {
         continue;
       }

@@ -440,6 +440,9 @@ defineMonster('healing-chest', {
 defineMonster('gate-brute', {
   ...monsters.get('brute'),
   displayName: 'THE GATE WARDEN',
+  // Slain is slain: without this the warden respawned on every room
+  // entry — an infinite key dispenser and a 400-score farm.
+  persistent: true,
   drops: [
     { id: 'gate-key', chance: 1 },
     { id: 'potion', chance: 0.45 },
