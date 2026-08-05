@@ -127,9 +127,18 @@ export function actionLabel(
   return code ? prettyCode(code) : action.toUpperCase();
 }
 
-/** On-screen button glyphs for the touch column of `promptText`. */
+/** On-screen button glyphs for the touch column of `promptText`.
+ *
+ * Every action with an on-screen button names ITS OWN glyph here, so a
+ * prompt on a phone points at the control the thumb can actually reach.
+ * Codex caught the gap: the tutorial's {dash} note told touch players
+ * to press X \u2014 a key their device does not have \u2014 at the one gap that
+ * requires the dash. Keep this in lockstep with index.html's buttons. */
 const TOUCH_GLYPHS: Partial<Record<Action, string>> = {
+  left: '\u25c0', right: '\u25b6',
   down: '\u25bc', jump: '\u25b2', attack: '\u2694',
+  dash: '\u26a1', parry: '\u{1F6E1}', skill3: '\u2744',
+  menu: '\u2630', interact: 'TALK',
 };
 
 /**
