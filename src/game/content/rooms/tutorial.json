@@ -93,7 +93,7 @@
    "event": "door",
    "once": false,
    "props": {
-    "room": "arena",
+    "room": "kingsroad",
     "label": "SKIP TUTORIAL"
    }
   },
@@ -237,7 +237,7 @@
    "event": "door",
    "once": false,
    "props": {
-    "room": "arena",
+    "room": "kingsroad",
     "label": "TO THE ARENA"
    }
   }

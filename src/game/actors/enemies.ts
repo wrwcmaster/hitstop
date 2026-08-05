@@ -1,5 +1,5 @@
 import { rand, sign, tintOf, itemDef, ballisticVelocity, ballisticLob } from '@engine/index';
-import { defineMonster, Monster, type MonsterDef } from './monster';
+import { defineMonster, monsters, Monster, type MonsterDef } from './monster';
 import { shootArrow, shootBullet, muzzleFlash, ARROW_GRAVITY, BULLET_GRAVITY } from '../content/ballistics';
 import { drawBow } from '../content/weapon-visuals';
 import { SLIME1, SLIME2, BAT1, BAT2, PIKE1, PIKE2, CHEST, TEXEL, blit, slimeSprite, batSprite, pikeSprite, chestSprite } from '../content/sprites';
@@ -430,6 +430,20 @@ defineMonster('chest', chestDef([
 defineMonster('healing-chest', {
   ...chestDef([{ id: 'potion', chance: 1 }], true),
   displayName: 'HEALING CACHE',
+});
+
+// The gatehouse warden: a brute whose pockets matter. The gate-key used
+// to be the arena's wave-clear prize; with the waves off the main path
+// (Scott: keep the arena as a test room, author real scenes instead)
+// the key moved into the first REAL fight — one tough enemy, learned
+// honestly, exactly how bosses hand over their verbs.
+defineMonster('gate-brute', {
+  ...monsters.get('brute'),
+  displayName: 'THE GATE WARDEN',
+  drops: [
+    { id: 'gate-key', chance: 1 },
+    { id: 'potion', chance: 0.45 },
+  ],
 });
 
 /* ---- the ballistic shooters ---- */
