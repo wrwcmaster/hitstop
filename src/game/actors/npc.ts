@@ -197,6 +197,22 @@ defineNpc('blacksmith', forge({
   costs: FORGE_COSTS,
 }));
 
+// The training yard's drillmaster: hands the new knight her sword and
+// tells her to wear it. Re-greeting after the handoff nags about the
+// bag until she actually equips — the picker reads her REAL state.
+defineNpc('veteran', {
+  name: 'VETERAN',
+  sprite: merchantSprite,
+  greet: (ctx) => ctx.player.inventory.slots.some((sl) => sl.id === 'rusty-sword')
+    || ctx.player.equipment.get('weapon')
+    ? 'tutorial-armed'
+    : 'tutorial-arm',
+  onChoice(choice, ctx) {
+    if (choice.action !== 'take-sword') return;
+    ctx.player.inventory.add('rusty-sword');
+  },
+});
+
 defineNpc('elder', questGiver({
   name: 'ELDER',
   sprite: merchantSprite,

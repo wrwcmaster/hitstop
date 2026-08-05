@@ -10,14 +10,18 @@ export type Action =
 
 /** A key may serve several actions (ArrowUp jumps in-game, navigates in menus). */
 export const KEYMAP: Record<string, Action | Action[]> = {
-  ArrowLeft: 'left', KeyA: 'left',
-  ArrowRight: 'right', KeyD: 'right',
+  // Movement is the ARROWS, and only the arrows — WASD is gone by
+  // Scott's call: one authoritative binding per verb beats two ways to
+  // hold a direction. The left hand's whole job is the verb cluster
+  // (Z/X/C/V, Space) while the right hand steers.
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
   // The Up ARROW is purely directional (menu nav, aim up, look up) — it
-  // is NOT a jump. Jump is Space (as the title screen says) or WASD's W,
-  // which keeps swim-ascend/breach on the jump key: you rise and leap
-  // out of water with jump, never with the up arrow.
-  ArrowUp: 'up', KeyW: ['jump', 'up'],
-  ArrowDown: 'down', KeyS: 'down',
+  // is NOT a jump. Jump is Space alone; swim-ascend/breach rides the
+  // jump key, so you rise and leap out of water with Space, never the
+  // up arrow.
+  ArrowUp: 'up',
+  ArrowDown: 'down',
   Space: 'jump',
   KeyZ: ['attack', 'confirm'], KeyJ: ['attack', 'confirm'], Enter: 'confirm',
   KeyX: ['dash', 'cancel'], KeyK: ['dash', 'cancel'], ShiftLeft: 'dash',
@@ -123,9 +127,18 @@ export function actionLabel(
   return code ? prettyCode(code) : action.toUpperCase();
 }
 
-/** On-screen button glyphs for the touch column of `promptText`. */
+/** On-screen button glyphs for the touch column of `promptText`.
+ *
+ * Every action with an on-screen button names ITS OWN glyph here, so a
+ * prompt on a phone points at the control the thumb can actually reach.
+ * Codex caught the gap: the tutorial's {dash} note told touch players
+ * to press X \u2014 a key their device does not have \u2014 at the one gap that
+ * requires the dash. Keep this in lockstep with index.html's buttons. */
 const TOUCH_GLYPHS: Partial<Record<Action, string>> = {
+  left: '\u25c0', right: '\u25b6',
   down: '\u25bc', jump: '\u25b2', attack: '\u2694',
+  dash: '\u26a1', parry: '\u{1F6E1}', skill3: '\u2744',
+  menu: '\u2630', interact: 'TALK',
 };
 
 /**
@@ -145,7 +158,7 @@ export function promptText(game: ActionGame, text: string): string {
 }
 
 /** The actions a prompt may name. Anything else is left alone. */
-const PROMPTABLE = new Set<Action>(['left', 'right', 'up', 'down', 'jump', 'attack', 'dash', 'parry', 'interact']);
+const PROMPTABLE = new Set<Action>(['left', 'right', 'up', 'down', 'jump', 'attack', 'dash', 'parry', 'interact', 'menu', 'map', 'skill', 'skill3']);
 
 /** localStorage prefix for saves/settings — also scopes what the replay
  * recorder snapshots at run start. */
@@ -206,7 +219,16 @@ export interface TestScenario {
  * a replay can start the run the exact same way.
  */
 export type RunStart =
-  | { kind: 'new' }
+  /**
+   * tutorial: begin in the training yard instead of the arena. Decided
+   * at MENU time (first-ever run = no autosave) and carried in the
+   * start object, which rides the recording — so every tape made before
+   * the tutorial existed still replays into the arena it was played in.
+   * Gating on saved state at DISPATCH time would have silently rerouted
+   * two historical fixtures (empty-storage 'new' starts) into a room
+   * that did not exist when they were recorded.
+   */
+  | { kind: 'new'; tutorial?: boolean }
   | { kind: 'continue' }
   | { kind: 'autosave' }
   | { kind: 'testroom' }
