@@ -70,15 +70,29 @@ for (const seed of [33, 12, 21, 44, 55, 66]) {
   while (harness.state().roomId === 'kingsroad' && n++ < 1200 && alive()) {
     const bat = game.world.all().find((e) => e.type === 'bat' && !e.dead && Math.abs(e.x - P().x) < 42 && Math.abs(e.y - P().y) < 32);
     if (bat) { step(['attack'], 4); step([], 4); }
-    // the mill's east end is a ruin: walk off the broken roof into the
-    // bowl (momentum carries past the teeth) and stall-hop up the
-    // exposed stair to the door — the same reflex as every staircase
-    step(['right'], 3);
+    // the mill's east end is the wheel pit: walk off the broken roof,
+    // splash, surface-swim east (jump held = rise + auto-breach onto
+    // the staircase), then stall-hop up to the door
+    if (P().submersion > 0.2) step(['right', 'jump'], 3);
+    else step(['right'], 3);
     if (Math.abs(P().x - roofX) < 0.5 && P().onGround) { if (++roofStall > 2) { step(['right', 'jump'], 8); step(['right'], 10); settle(); roofStall = 0; } } else roofStall = 0;
     roofX = P().x;
   }
   step([], 40);
   if (harness.state().roomId !== 'gatehouse') { console.log('seed', seed, 'lost on the rooftops'); await close(); continue; }
+  // drink before the duel if the road has bled us — the play any
+  // survivor makes, through the real pause menu
+  if (P().hp < 70 && P().inventory.slots.some((sl) => sl.id === 'potion')) {
+    harness.step(['menu'], 3); harness.step([], 8);
+    let d = ui(); const inv = d.options.indexOf('INVENTORY');
+    for (let i = 0; i < inv; i++) { harness.step(['down'], 2); harness.step([], 4); }
+    harness.step(['confirm'], 3); harness.step([], 8);
+    d = ui(); const pot = d.options.findIndex((o) => /POTION/i.test(o));
+    for (let i = 0; i < pot; i++) { harness.step(['down'], 2); harness.step([], 4); }
+    harness.step(['confirm'], 3); harness.step([], 8);
+    harness.step(['menu'], 3); harness.step([], 6);
+    harness.step(['menu'], 3); harness.step([], 6);
+  }
   n = 0;
   while (game.world.all().some((e) => e.type === 'gate-brute' && !e.dead) && n++ < 700 && alive()) {
     const b = game.world.all().find((e) => e.type === 'gate-brute' && !e.dead);
