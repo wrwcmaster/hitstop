@@ -70,7 +70,10 @@ for (const seed of [33, 12, 21, 44, 55, 66]) {
   while (harness.state().roomId === 'kingsroad' && n++ < 1200 && alive()) {
     const bat = game.world.all().find((e) => e.type === 'bat' && !e.dead && Math.abs(e.x - P().x) < 42 && Math.abs(e.y - P().y) < 32);
     if (bat) { step(['attack'], 4); step([], 4); }
-    step(['right'], 3);
+    // the roof has two open shafts now — hop them, don't walk into them
+    const nearHole = (P().x > 1556 && P().x < 1588) || (P().x > 1682 && P().x < 1706);
+    if (nearHole && P().onGround) { step(['right', 'jump'], 9); step(['right'], 12); settle(); }
+    else step(['right'], 3);
   }
   step([], 40);
   if (harness.state().roomId !== 'gatehouse') { console.log('seed', seed, 'lost on the rooftops'); await close(); continue; }
