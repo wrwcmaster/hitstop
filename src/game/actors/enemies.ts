@@ -388,6 +388,15 @@ defineMonster('pike', {
 function chestDef(drops: NonNullable<MonsterDef['drops']>, healing = false): MonsterDef {
   return {
     hp: 40, damage: 0, w: chestSprite.hitbox.w, h: chestSprite.hitbox.h, score: 50, xp: 0,
+    // A strongbox is furniture: a hit rocks it back a step, not across
+    // the room. Mass softens the impulse, but the real fix is FRICTION —
+    // monsters damp their own vx in update, and a def with no update
+    // kept whatever push it got (measured: 30px per great-sword hit,
+    // identical at mass 6 and 10, because nothing ever slowed it down).
+    mass: 3,
+    update(m, dt) {
+      m.vx *= Math.pow(0.001, dt);
+    },
     noContactDamage: true,
     // A cracked-open chest is a change to the room, not a defeated foe:
     // it stays open when you come back, so the deep pays out once.

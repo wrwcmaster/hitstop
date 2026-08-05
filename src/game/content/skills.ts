@@ -28,11 +28,16 @@ defineSkill<SkillCtx>('fireball', {
     game.combat.shoot(
       {
         x: player.cx + dir * 8,
+        // The box runs from mid-body DOWN TO HER FEET. At h6 around the
+        // hand it overlapped a grounded slime by 3px and a hopping one
+        // by nothing — the starter spell whiffed the starter enemy
+        // (Scott caught it in the yard). Same top edge as before, so
+        // nothing that could be hit before is lost.
         y: player.cy - 1,
         vx: dir * 250,
         vy: 0,
         w: 6,
-        h: 6,
+        h: 10,
         life: 1.4,
         pierce: 2,
         strike: {
