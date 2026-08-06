@@ -87,6 +87,7 @@ const world = await page.evaluate(async () => {
 // when the approach provably needs a verb, and say which.
 const VERB_GATED = {
   'underground>riven-lip': 'impact-drop dig through the cracked cap',
+  'kingsroad>gatehouse': 'the exit is on the mill roof, 64px above the sweep approach',
 };
 
 console.log(`${world.length} door cases\n`);

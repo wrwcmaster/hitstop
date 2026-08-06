@@ -16,13 +16,18 @@ export const SWIM = {
   buoyancy: 0.82, // < 1× gravity: slightly heavy, so you sink slowly by default
   dragY: 0.1, // per-second velocity keep factors (heavy water)
   dragX: 0.5,
-  swimUp: 520, // px/s² upward while holding jump (ascend)
+  // 700, not 520: with 520 the held ascent CANCELS at the breach line
+  // (net +26 px/s² at sub 0.55, NEGATIVE at 0.50) — a swimmer holding
+  // jump hovered forever just under the surface, and Scott's tape shows
+  // 5.5 seconds of held Space rising zero pixels. The stroke must
+  // dominate PAST the threshold, not asymptote onto it.
+  swimUp: 700, // px/s² upward while holding jump (ascend)
   dive: 340, // px/s² downward while holding down (dive faster)
   maxRise: 95, // ascent cap while holding jump
   driftSink: 30, // gentle sink cap when not diving — "slowly sinking"
   maxSink: 100, // faster sink cap while holding down
   swimSpeed: 66, // horizontal cap in water (slower than the land runSpeed)
-  breachDepth: 0.55, // shallower than this, a jump press launches you out
+  breachDepth: 0.7, // shallower than this, a held/pressed jump launches you out
   airSeconds: 8,
   refillSeconds: 2,
   drownEvery: 1,

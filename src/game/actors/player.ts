@@ -1473,7 +1473,11 @@ export class Player extends Actor {
     // Water: how deep the body sits decides which physics rules apply.
     const sub = this.collision.submersion?.(this) ?? 0;
     const swimming = sub > 0.2 && !this.fsm.is('dead');
-    if (!swimming) this.breached = false; // re-arm the breach once clear of water
+    // Re-arm the breach once clear of the water — OR once properly deep
+    // again. Without the deep re-arm, a mid-pool pop that splashes back
+    // latched forever: you could reach the far wall and hold jump into
+    // nothing, the stuck-in-water bug's quieter cousin.
+    if (!swimming || sub >= 0.85) this.breached = false;
 
     // Gravity + jump physics (dash overrides velocity; the dead still fall).
     if (!this.fsm.is('dash')) {

@@ -1,6 +1,8 @@
 import { validateRoom, type RoomDef } from '@engine/index';
 import arenaJson from './arena.json';
 import tutorialJson from './tutorial.json';
+import kingsroadJson from './kingsroad.json';
+import gatehouseJson from './gatehouse.json';
 import cavernJson from './cavern.json';
 import throneJson from './throne.json';
 import townJson from './town.json';
@@ -31,6 +33,12 @@ export const ROOMS: Record<string, RoomDef> = {
   // The training yard: a first-ever run starts here (RunStart.tutorial),
   // one door skips it, the other finishes it — both land in the arena.
   tutorial: validateRoom(tutorialJson),
+  // The authored opening: tutorial -> kingsroad (the 1-1) -> gatehouse
+  // (the warden holds the gate-key) -> cavern. The arena and its waves
+  // left the main path but stay registered: two historical tapes start
+  // bare {kind:new} into it, and every trainer/trial names it by id.
+  kingsroad: validateRoom(kingsroadJson),
+  gatehouse: validateRoom(gatehouseJson),
   arena: validateRoom(arenaJson),
   cavern: validateRoom(cavernJson),
   throne: validateRoom(throneJson),
