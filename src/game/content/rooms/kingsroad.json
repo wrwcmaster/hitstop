@@ -51,7 +51,7 @@
  },
  "entities": [
   {
-   "type": "slime",
+   "type": "sentry-slime",
    "x": 230,
    "y": 200
   },
@@ -61,12 +61,12 @@
    "y": 120
   },
   {
-   "type": "slime",
+   "type": "sentry-slime",
    "x": 480,
    "y": 200
   },
   {
-   "type": "slime",
+   "type": "sentry-slime",
    "x": 545,
    "y": 204
   },
@@ -106,7 +106,7 @@
    "y": 110
   },
   {
-   "type": "slime",
+   "type": "sentry-slime",
    "x": 664,
    "y": 200
   },
@@ -141,7 +141,7 @@
    "y": 150
   },
   {
-   "type": "slime",
+   "type": "sentry-slime",
    "x": 1150,
    "y": 200
   },
@@ -151,7 +151,7 @@
    "y": 188
   },
   {
-   "type": "slime",
+   "type": "sentry-slime",
    "x": 1496,
    "y": 192
   }

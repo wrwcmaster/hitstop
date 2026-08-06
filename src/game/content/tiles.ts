@@ -242,6 +242,44 @@ tiles.register('archStone', {
   },
 });
 
+/**
+ * An iron grille: a wall to bodies, an open window to arrows.
+ *
+ * The pen a garrison can be kept in without being taken out of the
+ * fight. Solid masonry around a guard makes him furniture — he cannot
+ * leave, and he cannot reach you either — while bars let him shoot
+ * through and let you shoot back, so the barrier reads as a firing
+ * position rather than a cage. Drawn deliberately thin and gappy
+ * against the dark backing: if it is going to stop a body it has to
+ * LOOK like it stops a body, and if arrows pass it has to look like
+ * they can.
+ */
+tiles.register('grille', {
+  solid: true,
+  shootThrough: true,
+  traits: ['resonant'],
+  draw(g, px, py, size, _tx, ty) {
+    // The dark behind the bars, so you can tell it is not a wall.
+    g.fillStyle = '#1d2233';
+    g.fillRect(px, py, size, size);
+    // Uprights.
+    g.fillStyle = '#5c6880';
+    for (let i = 1; i < size; i += 3) g.fillRect(px + i, py, 1, size);
+    // A cross-rail every other course, riveted where the bars cross.
+    if (ty % 2 === 0) {
+      g.fillStyle = '#6b7893';
+      g.fillRect(px, py + 3, size, 2);
+      g.fillStyle = '#8794ad';
+      g.fillRect(px, py + 3, size, 1);
+    }
+    // Rust catching the torchlight, so a long run of bars is not uniform.
+    if ((_tx * 7 + ty * 5) % 6 === 0) {
+      g.fillStyle = '#7a5a3c';
+      g.fillRect(px + 1 + ((ty * 3) % 4), py + 5, 1, 2);
+    }
+  },
+});
+
 /** A corbelled shelf: jump-through masonry, the built answer to alpineLedge. */
 tiles.register('wallLedge', {
   oneWay: true,

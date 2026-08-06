@@ -84,6 +84,51 @@ defineMonster('slime', {
   },
 });
 
+/**
+ * Is there floor to land on `dir` of here?
+ *
+ * A hop covers roughly 30px, so the probe looks a hop ahead and a
+ * little below the feet. One-way tiles do not count: monsters move
+ * with `ignoreOneWay`, so a platform is not footing for them — it is
+ * a hole they have not fallen through yet.
+ */
+function hasFooting(m: Monster, dir: number): boolean {
+  const probe = { x: m.x + dir * 26, y: m.y + m.h + 2, w: m.w, h: 8 };
+  for (const s of m.collision.solidsNear(probe)) {
+    if (s.oneWay) continue;
+    if (probe.x < s.x + s.w && probe.x + probe.w > s.x && probe.y < s.y + s.h && probe.y + probe.h > s.y) return true;
+  }
+  return false;
+}
+
+/**
+ * A slime that looks before it leaps.
+ *
+ * Ordinary slimes hop at the player and nothing else, which is fine on
+ * open ground and useless anywhere with an edge: posted to a ledge,
+ * one hops straight off it and is on the floor below within seconds.
+ * The alternative was penning them behind bars, which reads as a cage
+ * and traps whoever jumps in after them. This one holds its post
+ * instead — it turns at a drop, and sits still if there is no footing
+ * either way — so a guard can be PLACED somewhere and simply stay
+ * there, with nothing built around it.
+ */
+defineMonster('sentry-slime', {
+  ...monsters.get('slime'),
+  update(m, dt) {
+    m.vx *= Math.pow(0.01, dt);
+    if (!m.onGround) return;
+    m.state.hopT = (m.state.hopT as number) - dt;
+    if ((m.state.hopT as number) > 0) return;
+    const player = m.player;
+    let d = player && player.cx > m.cx ? 1 : -1;
+    if (!hasFooting(m, d)) d = hasFooting(m, -d) ? -d : 0;
+    m.vy = -190;
+    m.vx = d * rand(55, 85);
+    m.state.hopT = rand(0.9, 1.7);
+  },
+});
+
 defineMonster('bat', {
   hp: 40, damage: 10, w: batSprite.hitbox.w, h: batSprite.hitbox.h, score: 150, flies: true,
   colors: [COLORS.purple, COLORS.purpleLight, COLORS.white],
