@@ -109,7 +109,7 @@ for (const seed of [33, 12, 21, 44, 55, 66, 77, 88, 99, 110]) {
       }
       continue;
     }
-    const bat = game.world.all().find((e) => e.type === 'bat' && !e.dead && Math.abs(e.x - P().x) < 42 && Math.abs(e.y - P().y) < 32);
+    const bat = game.world.all().find((e) => ['bat', 'slime'].includes(e.type) && !e.dead && Math.abs(e.x - P().x) < 42 && Math.abs(e.y - P().y) < 32);
     if (bat) { step(['attack'], 4); step([], 4); }
     // the mill's east end is the wheel pit: walk off the broken roof,
     // splash, surface-swim east (jump held = rise + auto-breach onto
