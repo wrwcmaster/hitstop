@@ -25,7 +25,7 @@ import { bootGame, close } from './headless.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(here, 'recordings', 'kingsroad-gate.json');
 
-for (const seed of [33, 12, 21, 44, 55, 66]) {
+for (const seed of [33, 12, 21, 44, 55, 66, 77, 88, 99, 110]) {
   const { harness, game } = await bootGame({ fresh: true, seed });
   const play = () => game.scenes.all().find((s) => s.constructor.name === 'PlayScene');
   const P = () => play().player;
@@ -65,7 +65,18 @@ for (const seed of [33, 12, 21, 44, 55, 66]) {
   // survivable (stall-hop escapes) but wastes tape
   walkTo(540); clearPack(640);
   walkTo(592); step(['right'], 4); step(['right', 'jump'], 11); step(['right'], 10); settle();
-  if (P().y > 228) walkTo(680);
+  if (P().y > 228) {
+    // in the bat cave: fleeing while chewed costs ~40hp — kill the
+    // nest first, then hop out
+    let m = 0;
+    while (m++ < 200 && alive()) {
+      const b = game.world.all().find((e) => e.type === 'bat' && !e.dead && Math.abs(e.x - P().x) < 80 && e.y > 200);
+      if (!b) break;
+      if (Math.abs(b.x - P().x) < 24) { step(['attack'], 4); step([], 8); }
+      else step([b.x > P().x ? 'right' : 'left'], 3);
+    }
+    walkTo(680);
+  }
   clearPack(740);
   if (!alive()) { console.log('seed', seed, 'died on the road'); await close(); continue; }
   walkTo(752); step(['right'], 12);
@@ -82,6 +93,22 @@ for (const seed of [33, 12, 21, 44, 55, 66]) {
   }
   let n = 0, roofX = 0, roofStall = 0;
   while (harness.state().roomId === 'kingsroad' && n++ < 1200 && alive()) {
+    // the wheel pit is the last gauntlet: two bats patrol the exit
+    // stairs, and bobbing at the wall while they juggle you is death
+    // (seed 33 bled 80hp doing exactly that). Once in the pit water,
+    // commit: breach onto the first step, THEN fight up the stairs.
+    if (P().x > 1590 && P().submersion > 0.2) {
+      let w = 0;
+      while (P().submersion > 0 && w++ < 200 && alive()) step(['right', 'jump'], 3);
+      while (harness.state().roomId === 'kingsroad' && n++ < 1200 && alive()) {
+        const b = game.world.all().find((e) => e.type === 'bat' && !e.dead && Math.abs(e.x - P().x) < 60 && Math.abs(e.y - P().y) < 60);
+        if (b && Math.abs(b.x - P().x) < 32 && Math.abs(b.y - P().y) < 30) { step(['attack'], 4); step([], 6); }
+        else if (b && b.y < P().y - 24 && Math.abs(b.x - P().x) < 24) { step(['jump', 'attack'], 8); step([], 6); }
+        else { step(['right', 'jump'], 7); step(['right'], 6); settle(); }
+        if (P().submersion > 0.2) break;   // knocked back in: re-breach
+      }
+      continue;
+    }
     const bat = game.world.all().find((e) => e.type === 'bat' && !e.dead && Math.abs(e.x - P().x) < 42 && Math.abs(e.y - P().y) < 32);
     if (bat) { step(['attack'], 4); step([], 4); }
     // the mill's east end is the wheel pit: walk off the broken roof,

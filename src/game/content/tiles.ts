@@ -520,6 +520,44 @@ tiles.register('platform', {
   },
 });
 
+/**
+ * A sod ledge: the grass lip of `rockTop` as a jump-through platform.
+ *
+ * Terraced ground (the mill-road hill) drew a grass fringe on every
+ * step, which promised three walkable decks and delivered one — the
+ * classic buried-lower-deck lie. This tile keeps the promise instead:
+ * every grass line IS a deck. Pair it with `earthBack` so the hill
+ * keeps its silhouette while the body stays passable.
+ */
+tiles.register('grassLedge', {
+  oneWay: true,
+  traits: ['rebound'],
+  draw(g, px, py, size) {
+    g.fillStyle = COLORS.green;
+    g.fillRect(px, py, size, 3);
+    g.fillStyle = COLORS.greenDark;
+    g.fillRect(px, py + 3, size, 1);
+    // A thin earthen underside so the sod reads as a shelf, not paint.
+    g.fillStyle = COLORS.navyDark;
+    g.fillRect(px + 1, py + 4, size - 2, 2);
+  },
+});
+
+/**
+ * Background earth: the hill's flesh, non-solid.
+ *
+ * `wallBack` for geology — the body of a mound you can walk through,
+ * drawn as rock in shadow so the passable interior is legible at a
+ * glance (background-dark means enterable, full-bright means wall).
+ */
+tiles.register('earthBack', {
+  draw(g, px, py, size) {
+    drawRock(g, px, py, size);
+    g.fillStyle = 'rgba(10,14,26,0.5)';
+    g.fillRect(px, py, size, size);
+  },
+});
+
 /** Deep water: swimmable, translucent, with drifting light motes. */
 tiles.register('water', {
   water: true,
