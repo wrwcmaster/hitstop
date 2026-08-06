@@ -134,6 +134,53 @@ for (const seed of [33, 12, 21, 44, 55, 66, 77, 88, 99, 110]) {
     harness.step(['menu'], 3); harness.step([], 6);
     harness.step(['menu'], 3); harness.step([], 6);
   }
+  // THE KEEP. The warden holds the tower roof now, ten storeys up, so
+  // the key is a climb: into the shaft, up the zigzag of landings
+  // (hold the overlap column and hammer jump, swatting the bats that
+  // share it), west onto the last landing, then out through the roof
+  // hatch onto his crown.
+  const nudge = (x, cap = 200) => { let m = 0; while (Math.abs(P().x - x) > 8 && m++ < cap && alive()) step([P().x < x ? 'right' : 'left'], 1); };
+  // any larder in reach is worth opening when the keep has bled us
+  const larder = (floor, near = 120) => {
+    for (let g = 0; g < 14; g++) {
+      const h = game.world.all().find((e) => e.type === 'healing-chest' && !e.dead && Math.abs(e.y - P().y) < 30 && Math.abs(e.x - P().x) < near);
+      if (!h || P().hp > floor) break;
+      if (Math.abs(h.x - P().x) > 14) nudge(h.x, 80); else { step(['attack'], 4); step([], 14); }
+    }
+  };
+  const swat = () => {
+    const b = game.world.all().find((e) => e.type === 'bat' && !e.dead && Math.abs(e.x - P().x) < 46 && Math.abs(e.y - P().y) < 40);
+    if (b) { step([b.x > P().x ? 'right' : 'left'], 1); step(['attack'], 4); step([], 6); return true; }
+    return false;
+  };
+  walkTo(210); nudge(210);
+  larder(115);   // the shaft-floor larder: drink before the ascent
+  n = 0;
+  while (P().y > 205 && n++ < 140 && alive()) {
+    if (swat()) continue;
+    nudge(210, 40); step(['jump'], 11); step([], 6); settle();
+  }
+  nudge(168, 80); step(['jump'], 11); step([], 8); settle();
+  // take the west end of the last landing before the roof hop: from
+  // mid-landing there is no run-up and the crown lip turns you back
+  nudge(150, 80);
+  step(['right', 'jump'], 11); step(['right'], 9); settle();
+  if (P().y > 160) { nudge(150, 80); step(['right', 'jump'], 11); step(['right'], 9); settle(); }
+  if (P().y > 160) { console.log('seed', seed, 'never made the roof - stalled at y', Math.round(P().y), 'x', Math.round(P().x), 'hp', P().hp); await close(); continue; }
+  // top up on the crown before the duel: the climb bleeds, and the
+  // warden does not wait
+  if (P().hp < 80 && P().inventory.slots.some((sl) => sl.id === 'potion')) {
+    harness.step(['menu'], 3); harness.step([], 8);
+    let d = ui(); const inv = d?.options ? d.options.indexOf('INVENTORY') : -1;
+    if (inv >= 0) {
+      for (let i = 0; i < inv; i++) { harness.step(['down'], 2); harness.step([], 4); }
+      harness.step(['confirm'], 3); harness.step([], 8);
+      d = ui(); const pot = d?.options ? d.options.findIndex((o) => /POTION/i.test(o)) : -1;
+      if (pot >= 0) { for (let i = 0; i < pot; i++) { harness.step(['down'], 2); harness.step([], 4); } harness.step(['confirm'], 3); harness.step([], 8); }
+    }
+    harness.step(['menu'], 3); harness.step([], 6);
+    harness.step(['menu'], 3); harness.step([], 6);
+  }
   n = 0;
   while (game.world.all().some((e) => e.type === 'gate-brute' && !e.dead) && n++ < 700 && alive()) {
     const b = game.world.all().find((e) => e.type === 'gate-brute' && !e.dead);
@@ -141,12 +188,34 @@ for (const seed of [33, 12, 21, 44, 55, 66, 77, 88, 99, 110]) {
     else step([b.x > P().x ? 'right' : 'left'], 3);
     step([], 4);
   }
-  // collect the key wherever it flew
+  // collect the key wherever it flew across the crown
   for (const p of game.world.all().filter((e) => e.constructor.name === 'Pickup')) {
     let m = 0; while (Math.abs(P().x - p.x) > 6 && m++ < 300) step([P().x < p.x ? 'right' : 'left'], 2);
     step([], 10);
   }
-  n = 0; while (harness.state().roomId === 'gatehouse' && n++ < 700) step(['right'], 3);
+  // down the shaft: each landing spills off one side or the other
+  n = 0;
+  while (P().y < 470 && n++ < 40 && alive()) {
+    const before = Math.round(P().y);
+    nudge(150, 260); settle();
+    if (Math.round(P().y) === before) { nudge(300, 260); settle(); }
+  }
+  larder(90);    // the yard well, on the way out to the gate
+  n = 0; let lastOut = -1, outStall = 0;
+  while (harness.state().roomId === 'gatehouse' && n++ < 900 && alive()) {
+    larder(80, 200);
+    const foe = game.world.all().find((e) => ['slime', 'bat', 'archer'].includes(e.type) && !e.dead && Math.abs(e.x - P().x) < 46 && Math.abs(e.y - P().y) < 34);
+    if (foe) { step([foe.x > P().x ? 'right' : 'left'], 1); step(['attack'], 4); step([], 6); continue; }
+    // the watch post is a wall across the yard with an archer on it -
+    // vault it rather than grinding into it under fire (every seed
+    // died at x406, the foot of that post)
+    if (Math.abs(P().x - lastOut) < 0.5 && P().onGround) {
+      if (++outStall > 2) { step(['right', 'jump'], 10); step(['right'], 10); settle(); outStall = 0; }
+    } else outStall = 0;
+    lastOut = P().x;
+    step(['right'], 3);
+  }
+  if (harness.state().roomId === 'gatehouse') { console.log('seed', seed, 'died crossing the yard - hp', P().hp, 'at x', Math.round(P().x)); await close(); continue; }
   step([], 40);
   const rec = globalThis.window.__harness.recording();
   const good = rec.start.kind === 'scenario' && harness.state().roomId === 'cavern' && P().hp > 0;
