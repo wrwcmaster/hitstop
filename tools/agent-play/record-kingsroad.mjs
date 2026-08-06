@@ -37,7 +37,7 @@ for (const seed of [33, 12, 21, 44, 55, 66, 77, 88, 99, 110]) {
   const pitHop = (lip) => { for (let a = 0; a < 3; a++) { walkTo(lip - 16); step(['right'], 10); step(['right', 'jump'], 10); step(['right'], 14); settle(); if (P().y < 210) return; step(['left', 'jump'], 12); step(['left'], 6); settle(); } };
   const clearPack = (xLimit) => {
     for (let c = 0; c < 3; c++) {
-      const s = game.world.all().find((e) => e.type === 'slime' && !e.dead && e.x < xLimit && e.x > P().x);
+      const s = game.world.all().find((e) => (e.type === 'slime' || e.type === 'sentry-slime') && !e.dead && e.x < xLimit && e.x > P().x);
       if (!s || P().mp < 20) break;
       step(['right'], 2); harness.step(['skill'], 4); step([], 90);
     }
@@ -49,7 +49,7 @@ for (const seed of [33, 12, 21, 44, 55, 66, 77, 88, 99, 110]) {
       // vertical filter: never chase foes on another storey (the cave
       // bats live 40px under the road — chasing their x walks the
       // recorder into the shaft)
-      const foe = game.world.all().find((e) => ['slime', 'bat'].includes(e.type) && !e.dead && e.x < xLimit && Math.abs(e.x - P().x) < 90 && Math.abs(e.y - P().y) < 36);
+      const foe = game.world.all().find((e) => ['slime', 'sentry-slime', 'bat'].includes(e.type) && !e.dead && e.x < xLimit && Math.abs(e.x - P().x) < 90 && Math.abs(e.y - P().y) < 36);
       if (!foe) break;
       if (Math.abs(foe.x - P().x) < 26 && Math.abs(foe.y - P().y) < 26) { step(['attack'], 4); step([P().x < foe.x ? 'left' : 'right'], 5); }
       else if (Math.abs(foe.y - P().y) > 28 && Math.abs(foe.x - P().x) < 20) step(['jump', 'attack'], 6);
@@ -109,7 +109,7 @@ for (const seed of [33, 12, 21, 44, 55, 66, 77, 88, 99, 110]) {
       }
       continue;
     }
-    const bat = game.world.all().find((e) => ['bat', 'slime'].includes(e.type) && !e.dead && Math.abs(e.x - P().x) < 42 && Math.abs(e.y - P().y) < 32);
+    const bat = game.world.all().find((e) => ['bat', 'slime', 'sentry-slime'].includes(e.type) && !e.dead && Math.abs(e.x - P().x) < 42 && Math.abs(e.y - P().y) < 32);
     if (bat) { step(['attack'], 4); step([], 4); }
     // the mill's east end is the wheel pit: walk off the broken roof,
     // splash, surface-swim east (jump held = rise + auto-breach onto
@@ -206,7 +206,7 @@ for (const seed of [33, 12, 21, 44, 55, 66, 77, 88, 99, 110]) {
   n = 0; let lastOut = -1, outStall = 0;
   while (harness.state().roomId === 'gatehouse' && n++ < 1600 && alive()) {
     larder(85, 40);   // only when practically standing on the well - a wider reach livelocks against the yard guard
-    const foe = game.world.all().find((e) => ['slime', 'bat', 'archer'].includes(e.type) && !e.dead && Math.abs(e.x - P().x) < 46 && Math.abs(e.y - P().y) < 34);
+    const foe = game.world.all().find((e) => ['slime', 'sentry-slime', 'bat', 'archer'].includes(e.type) && !e.dead && Math.abs(e.x - P().x) < 46 && Math.abs(e.y - P().y) < 34);
     if (foe) { step([foe.x > P().x ? 'right' : 'left'], 1); step(['attack'], 4); step([], 6); continue; }
     // the watch post is a wall across the yard with an archer on it -
     // vault it rather than grinding into it under fire (every seed
