@@ -197,9 +197,8 @@ for (const seed of [33, 12, 21, 44, 55, 66, 77, 88, 99, 110]) {
   n = 0;
   while (P().y < 470 && n++ < 40 && alive()) {
     const before = Math.round(P().y);
-    // stay WEST of the watch alcoves (x272+) on the way down: their
-    // pens catch a falling body as readily as a posted guard, and the
-    // only way out of one is a jump
+    // hug the west side on the way down - the straightest line through
+    // the zigzag, and it keeps clear of the watch shelves
     nudge(150, 260); settle();
     if (Math.round(P().y) === before) { nudge(250, 260); settle(); }
   }

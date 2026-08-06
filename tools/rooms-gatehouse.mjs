@@ -35,10 +35,12 @@ for (const [r, c0, c1] of LANDINGS) put(r, c0, c1, 'L');
 put(20, 16, 40, 'K'); put(20, 18, 23, '.');   // crown, hatch at the FAR WEST end
 box(17, 19, 16, 17, 'W'); box(17, 19, 39, 40, 'W');      // parapets
 put(16, 16, 17, 'C'); put(16, 39, 40, 'C');
-// Watch alcoves: a solid floor off the east wall with a lip that pens
-// the guard in. The climbing column (cols 24-28) and the descent side
-// (cols 18-23) both run clear of them.
-for (const r of [45, 33]) { put(r, 34, 38, 'K'); rows[r - 1][33] = 'F'; rows[r - 2][33] = 'F'; }
+// Watch shelves off the east wall. Bare ledges, no pen: the guards
+// posted on them are sentry-slimes, which turn at a drop instead of
+// hopping off one, so the floor is the only thing they need. The
+// climbing column (cols 24-28) and the descent side (cols 18-23) both
+// run clear of them.
+for (const r of [45, 33]) put(r, 34, 38, 'K');
 rows[57][22] = 'S'; rows[45][30] = 'S'; rows[33][22] = 'S'; rows[25][30] = 'S';   // stairwell torches
 
 // ================= THE RAMPART, out the tower's east flank ==============
@@ -94,8 +96,8 @@ const gh = {
     // firing range rather than a fight - every seed died on the same
     // tile. A guard you must come to is pressure; one you can never
     // reach is just a tax.
-    { type: 'slime', x: 285, y: 336 },      // the lower watch alcove
-    { type: 'slime', x: 285, y: 240 },      // the upper watch alcove
+    { type: 'sentry-slime', x: 285, y: 336 },   // the lower watch shelf
+    { type: 'sentry-slime', x: 285, y: 240 },   // the upper watch shelf
     // THE KEEPER, on the roof, with his hoard
     { type: 'gate-brute', x: 285, y: 136 }, { type: 'chest', x: 240, y: 140 },
     // The garrison larder, on the shaft floor - SOLID ground, because a
