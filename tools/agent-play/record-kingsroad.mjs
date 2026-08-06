@@ -197,13 +197,16 @@ for (const seed of [33, 12, 21, 44, 55, 66, 77, 88, 99, 110]) {
   n = 0;
   while (P().y < 470 && n++ < 40 && alive()) {
     const before = Math.round(P().y);
+    // stay WEST of the watch alcoves (x272+) on the way down: their
+    // pens catch a falling body as readily as a posted guard, and the
+    // only way out of one is a jump
     nudge(150, 260); settle();
-    if (Math.round(P().y) === before) { nudge(300, 260); settle(); }
+    if (Math.round(P().y) === before) { nudge(250, 260); settle(); }
   }
   larder(90);    // the yard well, on the way out to the gate
   n = 0; let lastOut = -1, outStall = 0;
-  while (harness.state().roomId === 'gatehouse' && n++ < 900 && alive()) {
-    larder(80, 200);
+  while (harness.state().roomId === 'gatehouse' && n++ < 1600 && alive()) {
+    larder(85, 40);   // only when practically standing on the well - a wider reach livelocks against the yard guard
     const foe = game.world.all().find((e) => ['slime', 'bat', 'archer'].includes(e.type) && !e.dead && Math.abs(e.x - P().x) < 46 && Math.abs(e.y - P().y) < 34);
     if (foe) { step([foe.x > P().x ? 'right' : 'left'], 1); step(['attack'], 4); step([], 6); continue; }
     // the watch post is a wall across the yard with an archer on it -

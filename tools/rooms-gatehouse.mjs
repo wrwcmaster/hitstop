@@ -35,10 +35,18 @@ for (const [r, c0, c1] of LANDINGS) put(r, c0, c1, 'L');
 put(20, 16, 40, 'K'); put(20, 18, 23, '.');   // crown, hatch at the FAR WEST end
 box(17, 19, 16, 17, 'W'); box(17, 19, 39, 40, 'W');      // parapets
 put(16, 16, 17, 'C'); put(16, 39, 40, 'C');
+// Watch alcoves: a solid floor off the east wall with a lip that pens
+// the guard in. The climbing column (cols 24-28) and the descent side
+// (cols 18-23) both run clear of them.
+for (const r of [45, 33]) { put(r, 34, 38, 'K'); rows[r - 1][33] = 'W'; rows[r - 2][33] = 'W'; }
 rows[57][22] = 'S'; rows[45][30] = 'S'; rows[33][22] = 'S'; rows[25][30] = 'S';   // stairwell torches
 
 // ================= THE RAMPART, out the tower's east flank ==============
 put(43, 39, 52, 'K'); put(44, 39, 52, 'W');
+// Merlons pen the sentry to his stretch of wall-walk - without them he
+// strolls west through the tower door and falls down the shaft. They
+// are a hop for anyone crossing, which is what a battlement should be.
+for (const c of [44, 49]) { rows[41][c] = 'W'; rows[42][c] = 'W'; }
 put(46, 54, 56, 'L'); put(49, 57, 59, 'L');   // corbels stepping down to the fort roof
 
 // ================= THE YARD: a watch post =================
@@ -71,13 +79,20 @@ const gh = {
   entities: [
     // the approach
     { type: 'slime', x: 96, y: 486 }, { type: 'slime', x: 136, y: 486 },
-    // NOTHING flies in the shaft. A climber is committed: mid-jump you
-    // cannot block, cannot retreat, cannot out-walk anything, and the
-    // landings are one-way so you cannot even hold a floor to fight
-    // from. One bat cost a 58hp climber 40hp and stalled the ascent
-    // outright; two killed it every seed. The climb IS the challenge -
-    // ten storeys of it - and the garrison lives where there is room to
-    // fight or run: the yard, the rampart, the fort, and the roof.
+    // THE TOWER WATCH, in walled alcoves off the east side of the
+    // shaft. Guards posted on the open landings do not stay: nothing in
+    // this game looks before it steps, so every one of them patrolled
+    // off its ledge and was on the ground floor within five seconds
+    // (the rampart archer walked off into the shaft too). Walled in,
+    // they hold their storey and shoot across the well at a climber who
+    // is on the far side and cannot answer. They hold MELEE, not bows:
+    // a 340px well has no cover anywhere in it, so an archer posted in
+    // it covers the climb AND the descent from one spot, and that is a
+    // firing range rather than a fight - every seed died on the same
+    // tile. A guard you must come to is pressure; one you can never
+    // reach is just a tax.
+    { type: 'slime', x: 285, y: 336 },      // the lower watch alcove
+    { type: 'slime', x: 285, y: 240 },      // the upper watch alcove
     // THE KEEPER, on the roof, with his hoard
     { type: 'gate-brute', x: 285, y: 136 }, { type: 'chest', x: 240, y: 140 },
     // The garrison larder, on the shaft floor - SOLID ground, because a
@@ -86,7 +101,7 @@ const gh = {
     // warden should be fought by someone who chose to arrive whole.
     { type: 'healing-chest', x: 232, y: 480 },
     // the rampart sentry
-    { type: 'archer', x: 350, y: 320 }, { type: 'slime', x: 300, y: 320 },
+    { type: 'archer', x: 372, y: 320 },
     // the yard
     { type: 'slime', x: 300, y: 486 }, { type: 'slime', x: 400, y: 486 },
     { type: 'bat', x: 450, y: 456 }, { type: 'archer', x: 420, y: 448 }, { type: 'healing-chest', x: 470, y: 480 },   // the yard well: the garrison drinks here, and so may you
