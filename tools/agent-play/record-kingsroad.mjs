@@ -43,7 +43,13 @@ for (const seed of [33, 12, 21, 44, 55, 66]) {
     }
     let n = 0;
     while (n++ < 300 && alive()) {
-      const foe = game.world.all().find((e) => ['slime', 'bat'].includes(e.type) && !e.dead && e.x < xLimit && Math.abs(e.x - P().x) < 90);
+      // knocked into a spike pit mid-fight: climb out east FIRST —
+      // seed 33 died swinging its sword on the spikes of pit B
+      if (P().y > 212 && P().onGround) { step(['jump'], 6); step(['right', 'jump'], 6); step(['right'], 8); settle(); continue; }
+      // vertical filter: never chase foes on another storey (the cave
+      // bats live 40px under the road — chasing their x walks the
+      // recorder into the shaft)
+      const foe = game.world.all().find((e) => ['slime', 'bat'].includes(e.type) && !e.dead && e.x < xLimit && Math.abs(e.x - P().x) < 90 && Math.abs(e.y - P().y) < 36);
       if (!foe) break;
       if (Math.abs(foe.x - P().x) < 26 && Math.abs(foe.y - P().y) < 26) { step(['attack'], 4); step([P().x < foe.x ? 'left' : 'right'], 5); }
       else if (Math.abs(foe.y - P().y) > 28 && Math.abs(foe.x - P().x) < 20) step(['jump', 'attack'], 6);
@@ -53,13 +59,21 @@ for (const seed of [33, 12, 21, 44, 55, 66]) {
   };
   harness.beginRun({ kind: 'scenario', scenario: { room: 'kingsroad', quiet: true, player: { x: 40, y: 190 } } });
   step([], 30);
-  clearPack(340); pitHop(240); clearPack(430); pitHop(448); clearPack(740);
+  clearPack(340); pitHop(240); clearPack(430); pitHop(448); clearPack(520);
+  // the hill: climb the mound, clear its garrison (slime + swooping
+  // bat), then HOP the cave shaft at the east foot — falling in is
+  // survivable (stall-hop escapes) but wastes tape
+  walkTo(540); clearPack(640);
+  walkTo(592); step(['right'], 4); step(['right', 'jump'], 11); step(['right'], 10); settle();
+  if (P().y > 228) walkTo(680);
+  clearPack(740);
   if (!alive()) { console.log('seed', seed, 'died on the road'); await close(); continue; }
   walkTo(752); step(['right'], 12);
   const swimTo = (until, dive) => { let n = 0; while (P().x < until && n++ < 400) step(dive ? ['right', 'down'] : ['right', 'jump'], 3); };
   swimTo(880, false); swimTo(925, true); swimTo(990, false); swimTo(1035, true); swimTo(1130, false);
   settle();
   if (!alive()) { console.log('seed', seed, 'died in the pond'); await close(); continue; }
+  clearPack(1240);   // the millyard slime
   walkTo(1230);
   for (let s = 0; s < 12 && harness.state().roomId === 'kingsroad'; s++) {
     const bat = game.world.all().find((e) => e.type === 'bat' && !e.dead && Math.abs(e.x - P().x) < 40 && Math.abs(e.y - P().y) < 34);
