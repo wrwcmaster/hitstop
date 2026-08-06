@@ -3,6 +3,9 @@ import { Rect } from '../math/rect';
 /** A solid rectangle in the world. `oneWay` = platform you can jump through. */
 export interface Solid extends Rect {
   oneWay?: boolean;
+  /** Solid to bodies, open to shots (a grille). Bodies resolve against it
+   * exactly like any wall; the projectile sweep skips it. */
+  shootThrough?: boolean;
   /** Runtime-moving/toggling solid (moving platform, barrier...). Static
    * tile solids omit this. Resolution is identical either way; contact
    * consumers use the bit to react to the surface appropriately. */

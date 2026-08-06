@@ -38,15 +38,18 @@ put(16, 16, 17, 'C'); put(16, 39, 40, 'C');
 // Watch alcoves: a solid floor off the east wall with a lip that pens
 // the guard in. The climbing column (cols 24-28) and the descent side
 // (cols 18-23) both run clear of them.
-for (const r of [45, 33]) { put(r, 34, 38, 'K'); rows[r - 1][33] = 'W'; rows[r - 2][33] = 'W'; }
+for (const r of [45, 33]) { put(r, 34, 38, 'K'); rows[r - 1][33] = 'F'; rows[r - 2][33] = 'F'; }
 rows[57][22] = 'S'; rows[45][30] = 'S'; rows[33][22] = 'S'; rows[25][30] = 'S';   // stairwell torches
 
 // ================= THE RAMPART, out the tower's east flank ==============
 put(43, 39, 52, 'K'); put(44, 39, 52, 'W');
-// Merlons pen the sentry to his stretch of wall-walk - without them he
-// strolls west through the tower door and falls down the shaft. They
-// are a hop for anyone crossing, which is what a battlement should be.
-for (const c of [44, 49]) { rows[41][c] = 'W'; rows[42][c] = 'W'; }
+// Iron bars pen the sentry to his stretch of wall-walk - without them
+// he strolls west through the tower door and falls down the shaft.
+// Bars rather than merlons because a shot passes through them: he can
+// work his bow from behind them, and you can answer with a fireball,
+// which stone would have made impossible in both directions. Still a
+// hop for anyone crossing.
+for (const c of [44, 49]) { rows[41][c] = 'F'; rows[42][c] = 'F'; }
 put(46, 54, 56, 'L'); put(49, 57, 59, 'L');   // corbels stepping down to the fort roof
 
 // ================= THE YARD: a watch post =================
@@ -73,7 +76,7 @@ box(59, 62, 89, 89, 'D');                     // the keyed gate
 
 const gh = {
   name: 'gatehouse', tileSize: 8,
-  legend: { '#': 'rockTop', '=': 'rock', 'D': 'gate', 'W': 'wallStone', 'K': 'wallWalk', 'C': 'wallCap', 'L': 'wallLedge', 'B': 'wallBack', 'A': 'archStone', 'S': 'sconce', 'V': 'spikesDown' },
+  legend: { '#': 'rockTop', '=': 'rock', 'D': 'gate', 'W': 'wallStone', 'K': 'wallWalk', 'C': 'wallCap', 'L': 'wallLedge', 'B': 'wallBack', 'A': 'archStone', 'S': 'sconce', 'V': 'spikesDown', 'F': 'grille' },
   tiles: rows.map((r) => r.join('')),
   playerSpawn: { x: 48, y: 480 },
   entities: [
