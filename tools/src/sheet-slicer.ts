@@ -27,6 +27,8 @@ let rects: SheetRect[] = [];
 let protectedRects: SheetRect[] = [];
 /** Per-frame placement inside the normalized shared cell. */
 let offsets: { x: number; y: number }[] = [];
+/** Optional per-frame source scale correction, as a percentage. */
+let frameScales: number[] = [];
 let prepared: HTMLCanvasElement | null = null;
 let normalizedCache: { canvas: HTMLCanvasElement; frameW: number; frameH: number } | null = null;
 /** In-progress drag rectangle (image pixel coords). */
@@ -116,6 +118,7 @@ function buildModeBtns(): void {
     b.onclick = () => {
       mode = m;
       offsets = [];
+      frameScales = [];
       invalidateApprovals();
       ($('gridControls') as HTMLElement).style.display = m === 'grid' ? '' : 'none';
       ($('rectControls') as HTMLElement).style.display = m === 'rects' ? '' : 'none';
@@ -136,6 +139,7 @@ function acceptImage(i: HTMLImageElement, name: string, afterLoad?: () => void):
   prepared = null;
   protectedRects = [];
   offsets = [];
+  frameScales = [];
   invalidateApprovals();
   flash(`loaded ${name} (${i.width}x${i.height})`);
   buildProtectionList();
@@ -203,6 +207,7 @@ $('btnLoadUrl').onclick = () => {
 for (const id of ['fw', 'fh', 'margin', 'spacing', 'texel']) {
   ($(id) as HTMLInputElement).onchange = () => {
     offsets = [];
+    frameScales = [];
     invalidateApprovals();
     buildAlignmentList();
     drawSheet();
@@ -355,7 +360,8 @@ $('btnAddProtection').onclick = () => {
 
 for (const id of [
   'keyEnabled', 'keyColor', 'keyTolerance', 'targetW', 'targetH',
-  'resampleMode', 'maxColors', 'lockProtectedPixels', 'trimTransparent',
+  'resampleMode', 'maxColors', 'paletteSource', 'harmonizeFrameColors',
+  'lockProtectedPixels', 'trimTransparent',
   'sharedTrimTop', 'sharedTrimRight', 'sharedTrimBottom', 'sharedTrimLeft',
 ]) {
   ($(id) as HTMLInputElement).onchange = sourcePreparationChanged;
@@ -433,6 +439,7 @@ function detectFrames(): void {
   mode = 'rects';
   viewMode = 'normalized';
   offsets = rects.map(() => ({ x: 0, y: 0 }));
+  frameScales = rects.map(() => 100);
   anims.idle.frames = rects.map((_, i) => i);
   invalidateApprovals();
   ($('gridControls') as HTMLElement).style.display = 'none';
@@ -545,6 +552,7 @@ sheet.addEventListener('mousedown', (e) => {
     if (hit >= 0) {
       rects.splice(hit, 1);
       offsets.splice(hit, 1);
+      frameScales.splice(hit, 1);
       invalidateApprovals();
       buildRectList();
       buildAlignmentList();
@@ -656,6 +664,7 @@ window.addEventListener('mouseup', () => {
     rects.push(placedRect(d.x, d.y));       // a tap on blank area → default-sized frame
   }
   offsets.push({ x: 0, y: 0 });
+  frameScales.push(100);
   invalidateApprovals();
   buildRectList();
   buildAlignmentList();
@@ -667,6 +676,7 @@ $('btnAddRect').onclick = () => {
   if (!img) { flash('load a sheet first'); return; }
   rects.push(placedRect(0, 0));             // add by coordinates — edit x/y/w/h in the list
   offsets.push({ x: 0, y: 0 });
+  frameScales.push(100);
   invalidateApprovals();
   buildRectList();
   buildAlignmentList();
@@ -702,6 +712,7 @@ function buildRectList(): void {
     del.onclick = () => {
       rects.splice(i, 1);
       offsets.splice(i, 1);
+      frameScales.splice(i, 1);
       invalidateApprovals();
       buildRectList();
       buildAlignmentList();
@@ -717,6 +728,8 @@ function ensureOffsets(): void {
   const count = normalizedFrameCount();
   while (offsets.length < count) offsets.push({ x: 0, y: 0 });
   offsets.length = count;
+  while (frameScales.length < count) frameScales.push(100);
+  frameScales.length = count;
 }
 
 function usedFrameIndices(): number[] {
@@ -745,14 +758,19 @@ function buildAlignmentList(): void {
     const yLabel = document.createElement('span'); yLabel.textContent = 'y';
     const y = document.createElement('input');
     y.type = 'number'; y.value = String(offset.y); y.style.width = '48px';
+    const scaleLabel = document.createElement('span'); scaleLabel.textContent = '%';
+    const scale = document.createElement('input');
+    scale.type = 'number'; scale.min = '25'; scale.max = '400';
+    scale.value = String(frameScales[i] ?? 100); scale.style.width = '56px';
     const commit = () => {
       offset.x = Number(x.value) || 0;
       offset.y = Number(y.value) || 0;
+      frameScales[i] = Math.max(25, Math.min(400, Number(scale.value) || 100));
       invalidateApprovals();
       syncIO();
     };
-    x.onchange = y.onchange = commit;
-    row.append(x, yLabel, y);
+    x.onchange = y.onchange = scale.onchange = commit;
+    row.append(x, yLabel, y, scaleLabel, scale);
     host.appendChild(row);
   }
 }
@@ -1014,12 +1032,18 @@ function lockProtectedPixelsAcrossFrames(
   ctx.putImageData(image, 0, 0);
 }
 
-function quantizeNormalizedPixels(canvas: HTMLCanvasElement, semanticRects: SheetRect[]): void {
+function quantizeNormalizedPixels(
+  canvas: HTMLCanvasElement,
+  semanticRects: SheetRect[],
+  frameW: number,
+): void {
   const ctx = canvas.getContext('2d')!;
   const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const samples: number[][] = [];
+  const referenceFrameOnly = ($('paletteSource') as HTMLSelectElement).value === 'frame0';
   for (let y = 0; y < image.height; y += 1) {
     for (let x = 0; x < image.width; x += 1) {
+      if (referenceFrameOnly && x >= frameW) continue;
       const p = (y * image.width + x) * 4;
       if (image.data[p + 3] < 128) continue;
       let contrast = 0;
@@ -1042,6 +1066,7 @@ function quantizeNormalizedPixels(canvas: HTMLCanvasElement, semanticRects: Shee
   const maxColors = Math.max(2, Math.min(CHARS.length, num('maxColors') || 32));
   const semanticSamples: number[][] = [];
   for (const rect of semanticRects) {
+    if (referenceFrameOnly && rect.x >= frameW) continue;
     for (let y = Math.max(0, rect.y); y < Math.min(image.height, rect.y + rect.h); y += 1) {
       for (let x = Math.max(0, rect.x); x < Math.min(image.width, rect.x + rect.w); x += 1) {
         const p = (y * image.width + x) * 4;
@@ -1073,6 +1098,68 @@ function quantizeNormalizedPixels(canvas: HTMLCanvasElement, semanticRects: Shee
   ctx.putImageData(image, 0, 0);
 }
 
+function harmonizeFrameColors(canvas: HTMLCanvasElement, frameW: number): void {
+  if (!(($('harmonizeFrameColors') as HTMLInputElement).checked)
+    || ($('paletteSource') as HTMLSelectElement).value !== 'frame0'
+    || frameW <= 0 || canvas.width <= frameW) return;
+  const ctx = canvas.getContext('2d')!;
+  const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const reference = new Map<string, { rgb: [number, number, number]; ys: number[] }>();
+  for (let y = 0; y < image.height; y += 1) {
+    for (let x = 0; x < frameW; x += 1) {
+      const p = (y * image.width + x) * 4;
+      if (image.data[p + 3] < 128) continue;
+      const rgb: [number, number, number] = [image.data[p], image.data[p + 1], image.data[p + 2]];
+      const key = rgb.join(',');
+      const profile = reference.get(key) ?? { rgb, ys: [] };
+      profile.ys.push(y);
+      reference.set(key, profile);
+    }
+  }
+  const profiles = [...reference.values()].map(({ rgb, ys }) => {
+    ys.sort((a, b) => a - b);
+    return {
+      rgb,
+      // Ignore isolated extrema so a stray highlight cannot claim an entire
+      // body height. The padding still permits ordinary gait displacement.
+      lowY: ys[Math.floor(ys.length * 0.1)],
+      highY: ys[Math.min(ys.length - 1, Math.floor(ys.length * 0.9))],
+    };
+  });
+  if (!profiles.length) return;
+
+  const frameCount = Math.floor(canvas.width / frameW);
+  for (let frame = 1; frame < frameCount; frame += 1) {
+    for (let y = 0; y < image.height; y += 1) {
+      for (let localX = 0; localX < frameW; localX += 1) {
+        const p = (y * image.width + frame * frameW + localX) * 4;
+        if (image.data[p + 3] < 128) continue;
+        const source: [number, number, number] = [image.data[p], image.data[p + 1], image.data[p + 2]];
+        let chosen = profiles[0];
+        let chosenScore = Infinity;
+        for (const profile of profiles) {
+          const dr = source[0] - profile.rgb[0];
+          const dg = source[1] - profile.rgb[1];
+          const db = source[2] - profile.rgb[2];
+          const distanceY = Math.max(0, profile.lowY - 4 - y, y - profile.highY - 4);
+          // Color remains the primary signal. Position only breaks a material
+          // ambiguity such as teal trousers borrowing the scarf ramp.
+          const score = dr * dr * 3 + dg * dg * 4 + db * db * 2
+            + distanceY * distanceY * 40;
+          if (score < chosenScore) {
+            chosen = profile;
+            chosenScore = score;
+          }
+        }
+        image.data[p] = chosen.rgb[0];
+        image.data[p + 1] = chosen.rgb[1];
+        image.data[p + 2] = chosen.rgb[2];
+      }
+    }
+  }
+  ctx.putImageData(image, 0, 0);
+}
+
 function normalizedSheet(): { canvas: HTMLCanvasElement; frameW: number; frameH: number } | null {
   if (normalizedCache) return normalizedCache;
   const src = sourceImage();
@@ -1095,8 +1182,9 @@ function normalizedSheet(): { canvas: HTMLCanvasElement; frameW: number; frameH:
   const ctx = canvas.getContext('2d')!;
   const placements: NormalizedPlacement[] = frames.map((r, i) => {
     const offset = offsets[i] ?? { x: 0, y: 0 };
-    const drawW = Math.max(1, Math.round(r.w * scale));
-    const drawH = Math.max(1, Math.round(r.h * scale));
+    const frameScale = Math.max(0.25, Math.min(4, (frameScales[i] ?? 100) / 100));
+    const drawW = Math.max(1, Math.round(r.w * scale * frameScale));
+    const drawH = Math.max(1, Math.round(r.h * scale * frameScale));
     return {
       r,
       drawW,
@@ -1145,7 +1233,8 @@ function normalizedSheet(): { canvas: HTMLCanvasElement; frameW: number; frameH:
   const semanticRects = projectedProtectionRects(placements);
   preserveProtectedKeyColors(sourceData, placements, canvas);
   lockProtectedPixelsAcrossFrames(canvas, semanticRects, placements.length);
-  quantizeNormalizedPixels(canvas, semanticRects);
+  quantizeNormalizedPixels(canvas, semanticRects, frameW);
+  harmonizeFrameColors(canvas, frameW);
   anchorNormalizedSheetToBottom(canvas, frameH);
   normalizedCache = ($('trimTransparent') as HTMLInputElement).checked
     ? fitSharedContentBounds(canvas, frameW, frameH)
@@ -1560,9 +1649,11 @@ interface WorkbenchUrlState {
   rects: SheetRect[];
   protectedRects?: SheetRect[];
   offsets: { x: number; y: number }[];
+  frameScales?: number[];
   anims: Record<string, { frames: number[]; fps: number }>;
   inputs: Record<string, string>;
   keyEnabled: boolean;
+  harmonizeFrameColors?: boolean;
   lockProtectedPixels?: boolean;
   trimTransparent?: boolean;
   playing: boolean;
@@ -1572,7 +1663,7 @@ interface WorkbenchUrlState {
 const persistedInputIds = [
   'fw', 'fh', 'margin', 'spacing', 'rw', 'rh', 'texel', 'maxColors',
   'detectPadding', 'keyColor', 'keyTolerance', 'protectSize', 'targetW', 'targetH',
-  'resampleMode', 'sharedTrimTop', 'sharedTrimRight', 'sharedTrimBottom', 'sharedTrimLeft',
+  'resampleMode', 'paletteSource', 'sharedTrimTop', 'sharedTrimRight', 'sharedTrimBottom', 'sharedTrimLeft',
 ] as const;
 
 function captureUrlState(): WorkbenchUrlState {
@@ -1586,12 +1677,14 @@ function captureUrlState(): WorkbenchUrlState {
     rects: rects.map((rect) => ({ ...rect })),
     protectedRects: protectedRects.map((rect) => ({ ...rect })),
     offsets: offsets.map((offset) => ({ ...offset })),
+    frameScales: [...frameScales],
     anims: Object.fromEntries(Object.entries(anims).map(([name, anim]) => [name, {
       frames: [...anim.frames],
       fps: anim.fps,
     }])),
     inputs: Object.fromEntries(persistedInputIds.map((id) => [id, ($(id) as HTMLInputElement).value])),
     keyEnabled: ($('keyEnabled') as HTMLInputElement).checked,
+    harmonizeFrameColors: ($('harmonizeFrameColors') as HTMLInputElement).checked,
     lockProtectedPixels: ($('lockProtectedPixels') as HTMLInputElement).checked,
     trimTransparent: ($('trimTransparent') as HTMLInputElement).checked,
     playing: ($('playing') as HTMLInputElement).checked,
@@ -1626,6 +1719,7 @@ function restoreUrlState(state: WorkbenchUrlState): void {
     if (typeof value === 'string') ($(id) as HTMLInputElement).value = value;
   }
   ($('keyEnabled') as HTMLInputElement).checked = !!state.keyEnabled;
+  ($('harmonizeFrameColors') as HTMLInputElement).checked = !!state.harmonizeFrameColors;
   ($('lockProtectedPixels') as HTMLInputElement).checked = state.lockProtectedPixels !== false;
   ($('trimTransparent') as HTMLInputElement).checked = !!state.trimTransparent;
   ($('playing') as HTMLInputElement).checked = state.playing !== false;
@@ -1640,6 +1734,9 @@ function restoreUrlState(state: WorkbenchUrlState): void {
     ? state.protectedRects.map((rect) => ({ ...rect }))
     : [];
   offsets = Array.isArray(state.offsets) ? state.offsets.map((offset) => ({ ...offset })) : [];
+  frameScales = Array.isArray(state.frameScales)
+    ? state.frameScales.map((scale) => Math.max(25, Math.min(400, Number(scale) || 100)))
+    : [];
   for (const name of Object.keys(anims)) delete anims[name];
   for (const [name, animation] of Object.entries(state.anims ?? {})) {
     if (!Array.isArray(animation.frames)) continue;
@@ -1678,6 +1775,9 @@ $('btnExport').onclick = () => {
 $('btnExportPng').onclick = () => {
   const normalized = normalizedSheet();
   if (!normalized) { flash('load and slice an image first'); return; }
+  // Keep the exact export available to the in-app browser's isolated
+  // automation world; its download manager is intentionally opaque.
+  ($('agentNormalized') as HTMLTextAreaElement).value = normalized.canvas.toDataURL('image/png');
   normalized.canvas.toBlob((blob) => {
     if (!blob) { flash('could not encode normalized PNG'); return; }
     const a = document.createElement('a');
@@ -1708,6 +1808,36 @@ $('btnExportSprite').onclick = () => {
 for (const id of ['playing', 'onion']) {
   ($(id) as HTMLInputElement).onchange = syncUrlState;
 }
+
+/**
+ * Read-only bridge for agent-driven review. Browser downloads are deliberately
+ * opaque to the automation session; exposing the already-computed canvas keeps
+ * agents on the exact workbench pipeline instead of duplicating normalization
+ * in a one-off script.
+ */
+type SheetSlicerAgentBridge = {
+  normalized(): {
+    dataUrl: string;
+    frameW: number;
+    frameH: number;
+    frameCount: number;
+    descriptor: ReturnType<typeof descriptor>;
+  } | null;
+};
+
+(window as unknown as { __sheetSlicer: SheetSlicerAgentBridge }).__sheetSlicer = {
+  normalized() {
+    const normalized = normalizedSheet();
+    if (!normalized) return null;
+    return {
+      dataUrl: normalized.canvas.toDataURL('image/png'),
+      frameW: normalized.frameW,
+      frameH: normalized.frameH,
+      frameCount: normalizedFrameCount(),
+      descriptor: descriptor(),
+    };
+  },
+};
 
 buildModeBtns();
 buildViewBtns();

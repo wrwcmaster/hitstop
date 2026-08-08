@@ -59,6 +59,7 @@
     <button id="btnViewSource">generated source</button>
     <button id="btnViewNormalized">normalized pixels</button>
     <input type="file" id="fileInput" accept=".png,image/png,image/*" style="display:none">
+    <textarea id="agentNormalized" hidden aria-hidden="true"></textarea>
     <span id="status"></span>
   </header>
   <main>
@@ -84,6 +85,12 @@
         <span class="hint">src px per logical px</span></label>
       <label>max colors <input id="maxColors" type="number" min="2" max="70" value="32">
         <span class="hint">palette size for “to sprite json”</span></label>
+      <label>palette source <select id="paletteSource">
+        <option value="all" selected>all frames</option>
+        <option value="frame0">frame 0 reference</option>
+      </select></label>
+      <label><input id="harmonizeFrameColors" type="checkbox"> harmonize frame shading to frame 0</label>
+      <p class="hint">With frame 0 reference selected, maps later pixels to colours used in the same vertical material neighbourhood, separating scarf, torso, trousers, and boots without named-colour rules.</p>
       <h2>source preparation</h2>
       <label><input id="keyEnabled" type="checkbox"> remove chroma key</label>
       <label>key <input id="keyColor" type="color" value="#00ff00">
@@ -110,9 +117,9 @@
         <option value="nearest">nearest-neighbor sampling</option>
       </select></label>
       <p class="hint">0 keeps the detected size. Coverage-aware reduction integrates each source footprint; local edge contrast protects bounded details during palette selection.</p>
-      <p class="hint">Detection, reduction, palette selection, preview, normalized PNG, and JSON all honor the same protected subject colors.</p>
+      <p class="hint">Frame 0 reference forces separately generated frames onto one approved material palette. Detection, reduction, preview, normalized PNG, and JSON all honor the same protected subject colors.</p>
       <h2>frame alignment</h2>
-      <p class="hint">Every crop is bottom-centered in one shared frame. Use offsets for the final origin and baseline.</p>
+      <p class="hint">Every crop is bottom-centered in one shared frame. Use x/y for origin and baseline; % corrects scale drift between separately generated frames.</p>
       <div id="alignmentList"></div>
       <h2>animations</h2>
       <div id="anims"></div>

@@ -210,6 +210,11 @@ Enable **fit shared content bounds** after alignment to crop one union box over
 all frames; it never rescales frames or changes their relative motion. The
 top/right/bottom/left shared-trim values can then crop additional logical
 output pixels identically from every frame.
+Frame alignment also offers an opt-in per-frame scale percentage. Keep it at
+100 for a coherent generated sheet; use it only to correct measurable scale
+drift between separately generated frames, matching corresponding poses by
+head, torso, and limb proportions rather than forcing every pose to the same
+height.
 Preview **− / +** changes its zoom independently from the sheet, **fit** fits
 the current stage, and the scrollable viewport keeps large source frames usable.
 **previous** overlays the prior frame to expose baseline drift and silhouette
@@ -223,6 +228,15 @@ weight to bounded local contrast, preserving small details without rules for a
 specific hue or brightness. **nearest-neighbor sampling** remains available as
 a diagnostic comparison. Do not infer a pseudo-pixel lattice from generated
 art unless its block size and phase are known to be consistent.
+
+For a multi-generation animation whose material colours drift, select
+**frame 0 reference** as the palette source. This makes every frame use the
+approved first frame's exact colour set. If colours still cross materials
+(for example, trousers borrow the scarf ramp), enable **harmonize frame shading
+to frame 0**. It adds a vertical-neighbourhood cue to colour matching, so the
+same palette can distinguish scarf, torso, trousers, and boots while preserving
+the later frame's pose and clusters. It is opt-in because a real lighting or
+palette-changing animation should keep its authored colour shift.
 Before conversion, approve the generated source, normalized identity/silhouette,
 motion/cadence, and origin/baseline. **export normalized png** saves that
 approved image-stage artifact. **to sprite json** remains locked until all four
@@ -237,6 +251,12 @@ the same review state; approvals intentionally reset and must be confirmed by
 the reviewer again. Local file uploads cannot survive refresh because browsers
 do not allow a page to reopen an arbitrary local file.
 
+Agent review reads the workbench's own normalized canvas through the read-only
+`window.__sheetSlicer.normalized()` bridge. **Export normalized png** also mirrors
+that exact data URL into the hidden `#agentNormalized` field for browser drivers
+running in an isolated page world. Both paths reuse the interactive pipeline;
+agents must not reimplement normalization in a separate script.
+
 When a real subject detail is close to the chroma key, use **protect subject
 color** in generated-source view. Click a detail to place the configured-size
 mask, or drag a tight custom rectangle over it. Chroma
@@ -245,6 +265,11 @@ colors in them are also carried through reduction and reserved in the palette.
 The cyan regions are part of the URL state, so refresh and handoff preserve the
 mask without hidden browser storage. Right-click a region to remove it, or use
 **clear protection**.
+
+Gemini image outputs may include a small sparkle watermark on the reserved
+magenta field. The ordinary chroma-key and spill-suppression stage removes it;
+verify that the normalized PNG contains only the subject before approval. Keep
+the source PNG unchanged as the audit/reference artifact.
 
 When there is exactly one corresponding protected region per frame, **lock one
 protected feature per frame to frame 0** makes frame 0's reduced pixels the

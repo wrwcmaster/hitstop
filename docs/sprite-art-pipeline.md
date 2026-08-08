@@ -76,6 +76,13 @@ locked until those gates are checked. Do not manufacture animation by warping
 or duplicating the converted JSON: that hides design decisions in a one-off
 script, bypasses image approval, and does not scale to other characters.
 
+When separately generated frames drift in colour, use **frame 0 reference**
+for one exact shared palette. If a material still selects the wrong part of
+that palette, enable **harmonize frame shading to frame 0**. The workbench uses
+the first frame's vertical colour neighborhoods as a soft material cue; it
+does not contain character-specific colour names. Leave it off for intentional
+lighting changes or palette-swap animation.
+
 Workspace-image review state lives entirely in the workbench URL. Refreshing
 or sharing it restores the image, crops, offsets, normalization settings,
 animations, and active view; approval checkboxes deliberately reset.
@@ -95,6 +102,68 @@ feature per frame to frame 0**. The workbench carries frame 0's approved target
 pixel cluster into each region after reduction and before palette selection.
 Use this for an iris, insignia, or fixed buckle—not for hair, cloth, limbs, or
 anything whose shape is supposed to move.
+
+### Use an approved frame as a consistency control
+
+An identity reference plus a pose reference is not enough by itself. An image
+model can follow the requested pose while quietly changing the character's
+logical pixel resolution, head construction, hair clusters, scarf silhouette,
+limb thickness, palette ramps, or outline language. A plausible new pose is
+not necessarily the same character.
+
+Use one isolated, approved frame as the master control. Do not use a full
+animation sheet as the primary identity reference when a single frame is the
+authority; the model may average details across the sheet.
+
+Give every input exactly one role:
+
+- **Master control:** identity, proportions, logical pixel size, palette,
+  outlines, pixel clusters, material rendering, origin, and ground baseline.
+- **Pose reference:** anatomy and limb arrangement only. It does not define
+  character design, colors, rendering style, texture, or pixel grid.
+
+Work in two stages.
+
+#### Diagnostic: make style drift visible
+
+First ask for a two-cell comparison image in one generation:
+
+1. Cell A recreates the approved control pose.
+2. Cell B shows the same character in the requested new pose.
+3. Both cells use equal canvases, the same baseline, the same logical pixel
+   grid, and the same palette.
+
+Compare generated Cell A with the actual approved control, not merely with
+Cell B. If Cell A drifts, reject the entire output even when the two generated
+cells look internally consistent. Check at least:
+
+- hair silhouette, bangs, face construction, eye, and iris;
+- scarf outline and fold clusters;
+- torso width, shoulders, limb thickness, and hands;
+- leg spacing, boots, origin, and ground baseline;
+- texel size, outline stair steps, palette ramps, and texture density.
+
+The [idle/run consistency experiment](art/knight-v2-idle-run-consistency-test-01.png)
+is the reference failure. Its two generated cells are coherent with each
+other, but its generated idle cell changes the hair, scarf, arms, gloves,
+torso, and leg spacing compared with the
+[approved idle control](art/knight-v2-idle-frame-style-reference.png). That
+means the run pose is not a valid extension of the approved character.
+
+#### Production: keep the control literally unchanged
+
+After the diagnostic makes the remaining drift obvious, build the production
+comparison with the approved control copied byte-for-byte into Cell A. Generate
+or edit only Cell B. Prefer a masked or region-limited edit; if that is not
+available, generate Cell B separately and composite it beside the unchanged
+control deterministically. Never ask the model to redraw the production
+control cell.
+
+Review the new pose beside that immutable control at source scale, normalized
+scale, and in-game scale. Approve it only when it reads as motion applied to
+the same approved character. Keep the paired control image with the candidate
+until the new frame is approved; it is both a visual contract and a regression
+reference.
 
 ## 3. Normalize without destroying the pixels
 
