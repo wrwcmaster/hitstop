@@ -89,13 +89,13 @@ interface Transition {
 
 const TRANSITION_TIME = 0.6;
 /**
- * How far she may walk into the new room before stopping.
+ * How far she walks after arriving, before stopping.
  *
- * She should end the crossing standing IN the doorway she came through,
- * not somewhere down the road from it. Wide enough to clear the opening
- * and read as a step; short enough that the door is still under her.
+ * She arrives standing in the threshold, so this is the whole visible
+ * step out of it — long enough to read as walking through a door,
+ * short enough to leave her still standing in it.
  */
-const WALK_IN_MAX = 2;
+const WALK_IN_MAX = 8;
 /**
  * A vertical seam does not use Transition at all: the room swaps at the
  * exact step of the crossing and the simulation never pauses, so every
@@ -997,14 +997,25 @@ export class PlayScene implements Scene {
       const at = settle(verticalX(), back.y + back.h - ph);
       return at && { ...at, carry: true };
     }
-    // Step OUT of the doorway, not into it. Landing on the trigger was
-    // fine while doors waited for interact, but an open doorway now
-    // fires on contact — arriving inside one would throw you straight
-    // back the way you came, forever. Emerging beside it also just reads
-    // better: you walk out of the door into the room.
+    // Arrive IN the doorway, one pixel past the point where it would
+    // take you back.
+    //
+    // Landing wholly outside it (the old +2px) is what killed the
+    // walk-out: with the step capped short there was nothing left to
+    // watch, so she simply appeared beside the door instead of coming
+    // through it. Landing wholly INSIDE it is the other failure — an
+    // open doorway fires on contact, so it would throw her straight
+    // back, forever.
+    //
+    // The gate is the seam between those: it fires on her CENTRE
+    // reaching the opening, so a body placed with its centre a pixel
+    // clear of that line stands visibly in the threshold while the door
+    // stays quiet — and every step she takes from there is outward, so
+    // the centre only ever moves further from firing.
     const roomW = Math.max(...dest.tiles.map((r) => r.length)) * dest.tileSize;
     const outward = back.x + back.w / 2 < roomW / 2 ? 1 : -1;
-    const x = outward === 1 ? back.x + back.w + 2 : back.x - pw - 2;
+    const half = Math.ceil(pw / 2);
+    const x = outward === 1 ? back.x + back.w - half + 1 : back.x + half - pw - 1;
     // A horizontal seam maps the exact height at which it was crossed,
     // rather than pinning every arrival to the destination floor. Equal
     // trigger heights preserve Y offset exactly; unequal ones scale it.
