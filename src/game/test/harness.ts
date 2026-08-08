@@ -15,6 +15,7 @@ import { PLAYER_TUNING } from '../actors/player-tuning';
 import { Monster } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
 import { PlayScene } from '../scenes/play';
+import { ROOMS } from '../content/rooms';
 import { Shockwave } from '../actors/shockwave';
 
 /**
@@ -31,7 +32,23 @@ declare global {
   interface Window {
     /** Rich perception for agents — see attachObserver. Never hashed. */
     __observe?: () => unknown;
+    /** Draw-and-measure overlay for visual claims — see attachMeasure. */
+    __measure?: (opts?: MeasureOpts) => unknown;
   }
+}
+
+/** What to draw over the last rendered frame. Everything defaults on. */
+export interface MeasureOpts {
+  /** Outline every trigger in the room, labelled with its size. */
+  zones?: boolean;
+  /** Outline the player'''s hitbox, labelled with its size. */
+  body?: boolean;
+  /** Bracket the gap between the player and the nearest door zone. */
+  gap?: boolean;
+  /** A caption drawn top-left — what the picture is meant to show. */
+  note?: string;
+  /** Extra world rects to outline: [x, y, w, h, label?]. */
+  rects?: [number, number, number, number, string?][];
 }
 
 export const BOOT = bootReplay({ storagePrefix: STORAGE_PREFIX, pendingKey: REPLAY_PENDING_KEY });
@@ -132,6 +149,7 @@ export function attachHarness(game: ActionGame): void {
   game.events.on('runStart', (start) => replay.runStarted(start));
   replay.install();
   attachObserver(game);
+  attachMeasure(game);
 }
 
 /**
@@ -584,4 +602,127 @@ function room(p: Player): {
   const l = scan(-1);
   const r = scan(1);
   return { left: l.room, right: r.room, ledgeLeft: l.ledge, ledgeRight: r.ledge, below };
+}
+
+/**
+ * Draw-and-measure: an annotated overlay on the last rendered frame.
+ *
+ * Screenshots are how visual claims get settled — "the door zone is too
+ * big", "she stops too far out" — and an eyeballed screenshot settles
+ * nothing, because the thing under discussion is a distance in game
+ * pixels and a screenshot is a picture of a scaled canvas. This draws
+ * the rectangles the game is actually reasoning about, to scale, in the
+ * frame, and RETURNS the same numbers it drew. The picture and the
+ * measurement cannot disagree, because they come from one call.
+ *
+ * It renders over the last presented frame rather than into the render
+ * loop, so it never touches what the game draws for a player and cannot
+ * affect a hash. Under the stepped harness the frame stands still, which
+ * is exactly when you want to measure it.
+ *
+ *   __measure()                                  // everything, labelled
+ *   __measure({ note: 'after the crossing' })    // with a caption
+ *   __measure({ zones: false, body: true })      // just the body
+ *   __measure({ rects: [[8, 472, 8, 32, 'old zone']] })
+ */
+function attachMeasure(game: ActionGame): void {
+  const RED = '#ff4040';
+  const CYAN = '#40e0ff';
+  const GREEN = '#7dff8a';
+  const GREY = '#8a8a99';
+  const GOLD = '#ffd070';
+
+  window.__measure = (opts: MeasureOpts = {}) => {
+    const { zones = true, body = true, gap = true, note, rects = [] } = opts;
+    const play = game.scenes.all().find((s): s is PlayScene => s instanceof PlayScene);
+    const p = game.world.all().find((e): e is Player => e instanceof Player && e.isLocal);
+    // Through the public replay state and the room table — the scene's
+    // own room field is private, and a measuring instrument has no
+    // business prising a scene open to read it.
+    const room = play ? ROOMS[play.replayState().roomId] : undefined;
+    const cam = game.camera;
+    const ctx = game.screen.ctx;
+    const canvas = game.screen.canvas;
+    // Device pixels per world pixel, derived rather than assumed: the
+    // canvas may be scaled for the display and the world zoomed on top.
+    const s = canvas.width / cam.viewW;
+    const X = (wx: number): number => (wx - cam.x) * s;
+    const Y = (wy: number): number => (wy - cam.y) * s;
+
+    const out: Record<string, unknown> = {
+      camera: { x: cam.x, y: cam.y, zoom: cam.zoom, viewW: cam.viewW, viewH: cam.viewH },
+    };
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.lineWidth = Math.max(2, Math.round(s / 3));
+    ctx.font = `bold ${Math.round(s * 3.2)}px monospace`;
+    ctx.textBaseline = 'top';
+    const label = (text: string, wx: number, wy: number, color: string): void => {
+      ctx.fillStyle = color;
+      ctx.fillText(text, X(wx) - 4, Y(wy) - s * 4.2);
+    };
+
+    if (zones && room) {
+      const drawn = [];
+      for (const z of room.triggers ?? []) {
+        const tint = z.event === 'door' ? RED : GOLD;
+        ctx.fillStyle = tint === RED ? 'rgba(255,64,64,0.2)' : 'rgba(255,208,112,0.16)';
+        ctx.fillRect(X(z.x), Y(z.y), z.w * s, z.h * s);
+        ctx.strokeStyle = tint;
+        ctx.strokeRect(X(z.x), Y(z.y), z.w * s, z.h * s);
+        const name = z.event === 'door' ? String(z.props?.room ?? 'door') : z.event;
+        label(`${name.toUpperCase()} ${z.w}x${z.h}`, z.x, z.y, tint);
+        drawn.push({ event: z.event, to: z.props?.room, x: z.x, y: z.y, w: z.w, h: z.h });
+      }
+      out.zones = drawn;
+    }
+
+    if (body && p) {
+      ctx.strokeStyle = CYAN;
+      ctx.strokeRect(X(p.x), Y(p.y), p.w * s, p.h * s);
+      label(`BODY ${p.w}x${p.h}`, p.x, p.y, CYAN);
+      out.body = { x: Math.round(p.x), y: Math.round(p.y), w: p.w, h: p.h, cx: Math.round(p.cx), cy: Math.round(p.cy) };
+    }
+
+    if (gap && p && room) {
+      // The nearest door, and the honest horizontal gap to it: negative
+      // means she is standing inside the zone.
+      let best: { z: { x: number; y: number; w: number; h: number; props?: Record<string, unknown> }; d: number } | null = null;
+      for (const z of room.triggers ?? []) {
+        if (z.event !== 'door') continue;
+        const d = Math.max(z.x - (p.x + p.w), p.x - (z.x + z.w));
+        if (!best || d < best.d) best = { z, d };
+      }
+      if (best) {
+        const { z, d } = best;
+        const from = p.x > z.x ? z.x + z.w : z.x;
+        const to = p.x > z.x ? p.x : p.x + p.w;
+        const gy = p.y + p.h + 2;
+        ctx.strokeStyle = GREEN;
+        ctx.beginPath();
+        ctx.moveTo(X(from), Y(gy)); ctx.lineTo(X(to), Y(gy));
+        ctx.moveTo(X(from), Y(gy) - s); ctx.lineTo(X(from), Y(gy) + s);
+        ctx.moveTo(X(to), Y(gy) - s); ctx.lineTo(X(to), Y(gy) + s);
+        ctx.stroke();
+        label(`${Math.round(d)} px`, Math.min(from, to), gy + 5, GREEN);
+        out.gap = { toRoom: z.props?.room, px: Math.round(d) };
+      }
+    }
+
+    for (const [x, y, w, h, text] of rects) {
+      ctx.setLineDash([s, s]);
+      ctx.strokeStyle = GREY;
+      ctx.strokeRect(X(x), Y(y), w * s, h * s);
+      ctx.setLineDash([]);
+      if (text) label(text, x, y, GREY);
+    }
+
+    if (note) {
+      ctx.fillStyle = GOLD;
+      ctx.fillText(note, s * 2, s * 2);
+    }
+    ctx.restore();
+    return out;
+  };
 }

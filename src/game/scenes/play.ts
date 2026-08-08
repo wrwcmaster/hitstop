@@ -73,6 +73,8 @@ interface Transition {
   open?: { left: number; x: number; y: number; w: number; h: number };
   /** Horizontal edge gaps keep the knight moving naturally through the fade. */
   walk?: { out: -1 | 1; into: -1 | 1 };
+  /** Pixels already walked on the far side, against WALK_IN_MAX. */
+  walked?: number;
   /**
    * The surface the knight was standing on when this crossing began, if
    * she was standing at all. A threshold HAS a floor: the two rooms' floors
@@ -86,6 +88,14 @@ interface Transition {
 }
 
 const TRANSITION_TIME = 0.6;
+/**
+ * How far she walks after arriving, before stopping.
+ *
+ * She arrives standing in the threshold, so this is the whole visible
+ * step out of it — long enough to read as walking through a door,
+ * short enough to leave her still standing in it.
+ */
+const WALK_IN_MAX = 8;
 /**
  * A vertical seam does not use Transition at all: the room swaps at the
  * exact step of the crossing and the simulation never pauses, so every
@@ -987,14 +997,25 @@ export class PlayScene implements Scene {
       const at = settle(verticalX(), back.y + back.h - ph);
       return at && { ...at, carry: true };
     }
-    // Step OUT of the doorway, not into it. Landing on the trigger was
-    // fine while doors waited for interact, but an open doorway now
-    // fires on contact — arriving inside one would throw you straight
-    // back the way you came, forever. Emerging beside it also just reads
-    // better: you walk out of the door into the room.
+    // Arrive IN the doorway, one pixel past the point where it would
+    // take you back.
+    //
+    // Landing wholly outside it (the old +2px) is what killed the
+    // walk-out: with the step capped short there was nothing left to
+    // watch, so she simply appeared beside the door instead of coming
+    // through it. Landing wholly INSIDE it is the other failure — an
+    // open doorway fires on contact, so it would throw her straight
+    // back, forever.
+    //
+    // The gate is the seam between those: it fires on her CENTRE
+    // reaching the opening, so a body placed with its centre a pixel
+    // clear of that line stands visibly in the threshold while the door
+    // stays quiet — and every step she takes from there is outward, so
+    // the centre only ever moves further from firing.
     const roomW = Math.max(...dest.tiles.map((r) => r.length)) * dest.tileSize;
     const outward = back.x + back.w / 2 < roomW / 2 ? 1 : -1;
-    const x = outward === 1 ? back.x + back.w + 2 : back.x - pw - 2;
+    const half = Math.ceil(pw / 2);
+    const x = outward === 1 ? back.x + back.w - half + 1 : back.x + half - pw - 1;
     // A horizontal seam maps the exact height at which it was crossed,
     // rather than pinning every arrival to the destination floor. Equal
     // trigger heights preserve Y offset exactly; unequal ones scale it.
@@ -1014,7 +1035,18 @@ export class PlayScene implements Scene {
     // you FALL down has no beside — the town well is two tiles wide with
     // rock either side — so let the caller fall back to the room's spawn
     // rather than burying you in stone.
-    return buried(x, y) ? null : { x, y, carry: edgePair };
+    // A mapped height can land a pixel or two inside the floor — the two
+    // rooms' sills rarely agree exactly — and bailing out here sent her
+    // to the ROOM'S SPAWN instead, which is how one crossing dropped her
+    // 40px down the road from the door she walked through. Nudge her
+    // clear of whatever she overlaps, near side first, and only give up
+    // if the doorway is genuinely walled.
+    if (!buried(x, y)) return { x, y, carry: edgePair };
+    for (let d = 1; d <= 2 * dest.tileSize; d++) {
+      if (!buried(x, y - d)) return { x, y: y - d, carry: edgePair };
+      if (!buried(x, y + d)) return { x, y: y + d, carry: edgePair };
+    }
+    return null;
   }
 
   private goToRoom(roomId: string, x?: number, y?: number): void {
@@ -1340,6 +1372,45 @@ export class PlayScene implements Scene {
    * broken. Watch each doorway's locked state and re-arm the trigger the
    * moment it relents.
    */
+  /**
+   * Has she actually reached the doorway, or merely brushed its edge?
+   *
+   * A trigger fires the instant two rectangles touch, which for a
+   * sideways door means the far corner of her hitbox clipping the far
+   * corner of the opening — most of a body-width short of the threshold,
+   * with the room swapping while she is still plainly outside it. This
+   * asks for her CENTRE to be inside the opening instead: she is in the
+   * doorway, not near it.
+   *
+   * It rides the Triggers `gate`, which exists for exactly this — a
+   * gated entry is not recorded at all, so the door re-tests every frame
+   * and fires the moment she is far enough in, with no stepping out and
+   * back. Only horizontal doorways are gated: vertical seams own their
+   * own timing (see updateVerticalSeams), and an interior door waits for
+   * a key press anyway.
+   */
+  private standingInDoorway(def: TriggerDef): boolean {
+    if (def.event !== 'door' || !this.player) return true;
+    if (def.props?.fallIn === true || def.props?.leapUp === true) return true;
+    const side = edgeDoorSide(this.room, def);
+    if (side === null) return true;
+    // Ask which side she is LEAVING by, and test only that edge, so the
+    // condition is monotonic in her direction of travel: once she is
+    // deep enough it stays true. "Centre within the zone" would be a
+    // window instead of a threshold, and an 8px window is four frames at
+    // a walk but barely one at a dash — a fast enough crossing would
+    // step straight over it and the door would never fire at all.
+    const cx = this.player.cx;
+    const inX = side === -1 ? cx <= def.x + def.w : cx >= def.x;
+    // And she has to be AT the opening's height, not merely brushing its
+    // edge. A body is 18px and a doorway 32, so one clipped pixel used to
+    // be enough: sailing over the mill-roof door fired it on 1px of
+    // overlap, and standing on the road below its sill fired it on 2.
+    // Her centre inside the opening means she is in the doorway.
+    const cy = this.player.cy;
+    return inX && cy >= def.y && cy <= def.y + def.h;
+  }
+
   private rearmUnsealedDoors(): void {
     (this.room.triggers ?? []).forEach((def, index) => {
       if (def.event !== 'door') return;
@@ -1594,8 +1665,25 @@ export class PlayScene implements Scene {
         this.setRoom(tr.roomId, liveLanding?.x ?? tr.x, liveLanding?.y ?? tr.y);
         if (carriedVy !== null && this.player) this.player.vy = carriedVy;
       }
+      // Step OUT of the doorway — a step, not a stroll. Walking the whole
+      // fade-in carried her 22px clear of the door she had just come
+      // through, so she stopped in open room with the doorway behind her
+      // and no sense of having just used it. Capped, she clears the
+      // opening and stands in it.
       const inDt = Math.max(0, after - half) - Math.max(0, before - half);
-      if (tr.walk) this.moveThroughEdge(tr.walk.into, inDt);
+      if (tr.walk && this.player) {
+        if ((tr.walked ?? 0) < WALK_IN_MAX) {
+          const from = this.player.x;
+          this.moveThroughEdge(tr.walk.into, inDt);
+          tr.walked = (tr.walked ?? 0) + Math.abs(this.player.x - from);
+        }
+        // Stop her HERE, not at the end of the fade. Edge pairs carry
+        // velocity across the swap, so a knight who walked in still has
+        // the walk in her legs: clearing tr.walk to end the step also
+        // skipped the stop, and she coasted 31px past the door on a walk
+        // and 42px on a dash - further than before the cap existed.
+        if ((tr.walked ?? 0) >= WALK_IN_MAX) this.player.vx = 0;
+      }
       if (tr.t >= TRANSITION_TIME) {
         if (tr.walk && this.player) this.player.vx = 0;
         if (this.player) this.player.interactionsEnabled = true;
@@ -1703,7 +1791,7 @@ export class PlayScene implements Scene {
       this.triggers.update(
         this.player,
         (f) => this.handleTrigger(f.def),
-        (def) => this.assembled(def) && !seamStillApproaching(def),
+        (def) => this.assembled(def) && !seamStillApproaching(def) && this.standingInDoorway(def),
       );
       // Doors & portals: stand on one and press interact to use it. Checked
       // after the world step so an NPC in range wins the key first.
