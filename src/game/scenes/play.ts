@@ -95,7 +95,7 @@ const TRANSITION_TIME = 0.6;
  * not somewhere down the road from it. Wide enough to clear the opening
  * and read as a step; short enough that the door is still under her.
  */
-const WALK_IN_MAX = 8;
+const WALK_IN_MAX = 2;
 /**
  * A vertical seam does not use Transition at all: the room swaps at the
  * exact step of the crossing and the simulation never pauses, so every
@@ -1024,7 +1024,18 @@ export class PlayScene implements Scene {
     // you FALL down has no beside — the town well is two tiles wide with
     // rock either side — so let the caller fall back to the room's spawn
     // rather than burying you in stone.
-    return buried(x, y) ? null : { x, y, carry: edgePair };
+    // A mapped height can land a pixel or two inside the floor — the two
+    // rooms' sills rarely agree exactly — and bailing out here sent her
+    // to the ROOM'S SPAWN instead, which is how one crossing dropped her
+    // 40px down the road from the door she walked through. Nudge her
+    // clear of whatever she overlaps, near side first, and only give up
+    // if the doorway is genuinely walled.
+    if (!buried(x, y)) return { x, y, carry: edgePair };
+    for (let d = 1; d <= 2 * dest.tileSize; d++) {
+      if (!buried(x, y - d)) return { x, y: y - d, carry: edgePair };
+      if (!buried(x, y + d)) return { x, y: y + d, carry: edgePair };
+    }
+    return null;
   }
 
   private goToRoom(roomId: string, x?: number, y?: number): void {
@@ -1379,7 +1390,14 @@ export class PlayScene implements Scene {
     // a walk but barely one at a dash — a fast enough crossing would
     // step straight over it and the door would never fire at all.
     const cx = this.player.cx;
-    return side === -1 ? cx <= def.x + def.w : cx >= def.x;
+    const inX = side === -1 ? cx <= def.x + def.w : cx >= def.x;
+    // And she has to be AT the opening's height, not merely brushing its
+    // edge. A body is 18px and a doorway 32, so one clipped pixel used to
+    // be enough: sailing over the mill-roof door fired it on 1px of
+    // overlap, and standing on the road below its sill fired it on 2.
+    // Her centre inside the opening means she is in the doorway.
+    const cy = this.player.cy;
+    return inX && cy >= def.y && cy <= def.y + def.h;
   }
 
   private rearmUnsealedDoors(): void {
@@ -1643,10 +1661,17 @@ export class PlayScene implements Scene {
       // opening and stands in it.
       const inDt = Math.max(0, after - half) - Math.max(0, before - half);
       if (tr.walk && this.player) {
-        const from = this.player.x;
-        this.moveThroughEdge(tr.walk.into, inDt);
-        tr.walked = (tr.walked ?? 0) + Math.abs(this.player.x - from);
-        if (tr.walked >= WALK_IN_MAX) tr.walk = undefined;
+        if ((tr.walked ?? 0) < WALK_IN_MAX) {
+          const from = this.player.x;
+          this.moveThroughEdge(tr.walk.into, inDt);
+          tr.walked = (tr.walked ?? 0) + Math.abs(this.player.x - from);
+        }
+        // Stop her HERE, not at the end of the fade. Edge pairs carry
+        // velocity across the swap, so a knight who walked in still has
+        // the walk in her legs: clearing tr.walk to end the step also
+        // skipped the stop, and she coasted 31px past the door on a walk
+        // and 42px on a dash - further than before the cap existed.
+        if ((tr.walked ?? 0) >= WALK_IN_MAX) this.player.vx = 0;
       }
       if (tr.t >= TRANSITION_TIME) {
         if (tr.walk && this.player) this.player.vx = 0;
