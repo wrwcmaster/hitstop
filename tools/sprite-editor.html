@@ -21,6 +21,7 @@
     #toolbar .separator { width: 1px; height: 24px; margin: 0 5px; background: #33447f; }
     #toolbar label { display: flex; align-items: center; gap: 3px; margin: 0; }
     #gridZoomPercent { width: 72px; text-align: right; }
+    #brushSize { width: 58px; text-align: right; }
     main { flex: 1; display: flex; min-height: 0; }
     #side-left, #side-right { width: 260px; padding: 10px; background: #101430; overflow-y: auto; flex-shrink: 0; }
     /* The composite preview renders at the game's on-screen scale (8px
@@ -30,7 +31,26 @@
     canvas { image-rendering: pixelated; }
     #grid { cursor: crosshair; border: 1px solid #33447f; }
     #grid.selecting { cursor: cell; }
+    #grid.selecting.selection-movable { cursor: move; }
     #grid.picking { cursor: copy; }
+    #grid.soft-tool { cursor: none; }
+    #brushCursor {
+      position: fixed; display: none; pointer-events: none; z-index: 100;
+      border: 2px dashed #ffcd75; border-radius: 50%;
+      background: rgba(255, 205, 117, 0.08);
+      box-shadow: 0 0 0 1px rgba(7, 7, 13, 0.8);
+      transform: translate(-50%, -50%);
+    }
+    #brushCursor.blur {
+      border-color: #68c6ff;
+      background: rgba(104, 198, 255, 0.08);
+    }
+    #brushCursor::after {
+      content: ''; position: absolute; left: 50%; top: 50%; width: 3px; height: 3px;
+      border: 1px solid currentColor; background: #07070d;
+      transform: translate(-50%, -50%);
+    }
+    #selectionTransforms input { width: 48px; text-align: right; }
     h2 { font-size: 12px; color: #ffcd75; margin: 14px 0 6px; text-transform: uppercase; }
     h2:first-child { margin-top: 0; }
     button, select, input {
@@ -100,16 +120,32 @@
   </header>
   <div id="toolbar" role="toolbar" aria-label="sprite editing tools">
     <div class="group" aria-label="paint tools">
-      <button id="btnToolDraw" class="active" title="Pencil">pencil</button>
-      <button id="btnToolFill" title="Fill">fill</button>
+      <button id="btnToolDraw" class="active" title="Pencil (P)">pencil</button>
+      <button id="btnToolBrush" title="Soft brush (B)">brush</button>
+      <button id="btnToolBlur" title="Blur brush (U)">blur</button>
+      <button id="btnToolFill" title="Fill (G)">fill</button>
       <button id="btnToolPicker" title="Pick a color from the canvas (hold Alt)">picker</button>
       <button id="btnToolSelect" title="Select a rectangular pixel region (M)">select</button>
+    </div>
+    <div class="group" aria-label="brush size">
+      <button id="btnBrushSizeDown" title="Decrease brush size" aria-label="Decrease brush size">&minus;</button>
+      <label>size <input id="brushSize" type="number" min="1" max="32" step="1" value="5"> px</label>
+      <button id="btnBrushSizeUp" title="Increase brush size" aria-label="Increase brush size">+</button>
     </div>
     <span class="separator" aria-hidden="true"></span>
     <div class="group" aria-label="selection clipboard">
       <button id="btnCut" title="Cut selected pixels (Ctrl+X)" disabled>cut</button>
       <button id="btnCopy" title="Copy selected pixels (Ctrl+C)" disabled>copy</button>
       <button id="btnPaste" title="Paste pixels at the selection (Ctrl+V)">paste</button>
+    </div>
+    <div id="selectionTransforms" class="group" aria-label="selection transforms">
+      <button id="btnRotateSelectionLeft" title="Rotate selection 90 degrees counter-clockwise" disabled>↶ 90°</button>
+      <button id="btnRotateSelectionRight" title="Rotate selection 90 degrees clockwise" disabled>↷ 90°</button>
+      <label>rotate <input id="selectionAngle" type="number" min="-359" max="359" step="1" value="0" disabled>°</label>
+      <button id="btnRotateSelection" title="Rotate selection by any angle using nearest-neighbor inverse mapping" disabled>apply</button>
+      <label>w <input id="selectionW" type="number" min="1" max="160" value="1" disabled></label>
+      <label>h <input id="selectionH" type="number" min="1" max="160" value="1" disabled></label>
+      <button id="btnResizeSelection" title="Resize selection with nearest-neighbor sampling" disabled>resize</button>
     </div>
     <span id="selectionStatus" class="hint">selection: none</span>
     <span class="separator" aria-hidden="true"></span>
@@ -122,7 +158,10 @@
   </div>
   <main>
     <div id="side-left">
-      <h2>palette</h2>
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px">
+        <h2 style="margin:0">palette <span id="paletteStatus" class="hint"></span></h2>
+        <button id="btnCompactPalette" title="Merge duplicate colors and remove unused palette entries">compact</button>
+      </div>
       <div id="palette"></div>
       <div class="swatch">
         <input type="color" id="newColor" value="#38b764">
@@ -169,6 +208,7 @@
 
     <div id="center">
       <canvas id="grid"></canvas>
+      <div id="brushCursor" aria-hidden="true"></div>
     </div>
 
     <div id="side-right">
@@ -191,6 +231,7 @@
       <div style="display:flex; gap:4px; margin-bottom:10px">
         <button id="btnAddFrame" style="flex:1">+ frame</button>
         <button id="btnDupFrame" style="flex:1">dup</button>
+        <button id="btnFrameFirst" style="flex:1" title="Rotate this animation so the selected frame becomes frame 1">make first</button>
         <button id="btnDelFrame" style="flex:1">del</button>
       </div>
 
@@ -242,7 +283,9 @@
       <h2>sprite json</h2>
       <textarea id="io" spellcheck="false" style="height:100px; margin-bottom:6px;"></textarea>
       <p class="hint" style="margin:0">
-        paint: left-drag &middot; erase: right-drag<br>
+        paint: left-drag &middot; erase: right-drag &middot; picker: Alt<br>
+        pencil P &middot; brush B &middot; blur U &middot; fill G &middot; select M<br>
+        selection: drag inside to move &middot; drag square handles to resize &middot; drag green handle to rotate &middot; Shift snaps 15&deg;<br>
         export/import JSON (content/sprites/*.json)
       </p>
     </div>

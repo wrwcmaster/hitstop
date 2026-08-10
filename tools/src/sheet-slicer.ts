@@ -1530,6 +1530,11 @@ function buildPalette(
       running += sorted[cut - 1].count;
       if (running >= midpoint) break;
     }
+    // When the highest-valued color owns more than half the samples, the
+    // weighted midpoint is only crossed by the final entry.  The loop then
+    // exits with `cut === sorted.length`, which used to create an empty box
+    // and eventually a `#NaNNaNNaN` palette entry.  Keep both halves nonempty.
+    cut = Math.max(1, Math.min(sorted.length - 1, cut));
     boxes.splice(splitIndex, 1, colorBox(sorted.slice(0, cut)), colorBox(sorted.slice(cut)));
   }
 
