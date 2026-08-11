@@ -6,7 +6,7 @@
  * cheerfully optimise the gap.
  */
 import { encode, MOVES } from './features.mjs';
-import { forward, SHAPE } from './net.mjs';
+import { forward, forwardLogits, SHAPE } from './net.mjs';
 
 /**
  * Frames a training episode is allowed.
@@ -63,7 +63,14 @@ export const REWARD = {
  *
  * Returns the fitness plus the numbers worth watching while it trains.
  */
-export function episode(harness, game, act, { frames = EPISODE, runSeed = null } = {}) {
+/**
+ * One episode. `room` picks the task: the arena teaches wave-fighting;
+ * the throne teaches the Slime King, who the net can now SEE telegraph
+ * (mode + kinematics) but has never once trained against — every
+ * previous run only ever met slimes and bats, so "do not stand under
+ * the falling king" had no episodes to be learned in.
+ */
+export function episode(harness, game, act, { frames = EPISODE, runSeed = null, room = 'arena' } = {}) {
   const play = () => game.scenes.all().find((s) => s.constructor.name === 'PlayScene');
   let waves = 0;
   // `on` hands back an unsubscribe — there is no `off`. A training run is
@@ -85,8 +92,9 @@ export function episode(harness, game, act, { frames = EPISODE, runSeed = null }
   // score -188, -188, -188.
   if (runSeed !== null) globalThis.window.__harness.pinSeed(runSeed);
   harness.beginRun({ kind: 'scenario', scenario: {
-    room: 'arena', quiet: true,
-    player: { x: 230, y: 192, give: ['great-sword'], equip: ['great-sword'] },
+    room, quiet: true,
+    player: { ...(room === 'throne' ? { x: 120, y: 100 } : { x: 230, y: 192 }),
+      give: ['great-sword'], equip: ['great-sword'] },
   } });
   // Pin BEFORE beginRun, not after. Every candidate must face the same
   // arena, or an antithetic pair compares two different problems and the
@@ -98,6 +106,9 @@ export function episode(harness, game, act, { frames = EPISODE, runSeed = null }
   // its wave queue are already built by then.
   harness.step([], 30);
 
+  // A boss episode is scored on the boss. Grab him now; his absence at
+  // the end IS the win condition.
+  const boss0 = game.world.all().find((e) => e.def?.boss && !e.dead);
   let hp = play()?.player?.hp ?? 0;
   let hits = 0;
   let score = 0;
@@ -119,14 +130,15 @@ export function episode(harness, game, act, { frames = EPISODE, runSeed = null }
   }
   stopListening();
 
-  const cleared = waves >= 5;
+  const bossDead = !!boss0 && (boss0.dead || boss0.hp <= 0);
+  const cleared = room === 'throne' ? bossDead : waves >= 5;
   const fitness = REWARD.wave * waves
     + (cleared ? REWARD.clear : 0)
     + REWARD.kill * score
     + REWARD.hit * hits
     + REWARD.frame * f
     + (died ? REWARD.death : 0);
-  return { fitness, waves, hits, score, frames: f, died, cleared };
+  return { fitness, waves, hits, score, frames: f, died, cleared, bossDead };
 }
 
 /**
@@ -138,7 +150,18 @@ export function episode(harness, game, act, { frames = EPISODE, runSeed = null }
  * world, and putting it in `__observe()` would make the game responsible
  * for knowing where an agent wants to go.
  */
-export function actor(weights, shape = SHAPE, goalOf = null) {
+/**
+ * Make a policy function from weights.
+ *
+ * temp 0 (default) is argmax — every deployment so far. temp > 0 samples
+ * from softmax(logits/temp): the DICE the trainer actually optimises.
+ * The gap between those two is this week's recurring failure — updates
+ * that improve the sampled policy while argmax falls off its ridge — so
+ * the dice are now deployable, with an optional seeded rng so a sampled
+ * evaluation can still be reproduced exactly.
+ */
+export function actor(weights, shape = SHAPE, goalOf = null, opts = {}) {
+  const { temp = 0, rng = Math.random } = opts;
   const scratch = {};
   const x = encode({ player: null, monsters: [], shots: [] });
   return (o) => {
@@ -148,6 +171,14 @@ export function actor(weights, shape = SHAPE, goalOf = null) {
     if (o?.ui?.blocking) return ['confirm'];
     if (!o?.player) return [];
     encode(o, x, goalOf ? goalOf() : null);
-    return MOVES[forward(weights, x, shape, scratch)];
+    if (temp <= 0) return MOVES[forward(weights, x, shape, scratch)];
+    const lg = forwardLogits(weights, x, shape, scratch);
+    let mx = -Infinity;
+    for (const v of lg) if (v > mx) mx = v;
+    const ex = lg.map((v) => Math.exp((v - mx) / temp));
+    const Z = ex.reduce((a, c) => a + c, 0);
+    let r = rng() * Z;
+    for (let j = 0; j < ex.length; j++) { r -= ex[j]; if (r <= 0) return MOVES[j]; }
+    return MOVES[ex.length - 1];
   };
 }

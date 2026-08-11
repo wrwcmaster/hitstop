@@ -66,6 +66,10 @@ const resume = process.argv.includes('--resume');
 // final score is reported on, so validation cannot flatter either.
 const VALID_SEEDS = arg('--valid', '201,202').split(',').map(Number);
 const VALIDATE_EVERY = Number(arg('--validate-every', 4));
+// Which task to train: 'arena' (waves) or 'throne' (the Slime King).
+// Validation runs the SAME room — validating boss training on arena
+// episodes would reject every boss improvement as a regression.
+const ROOM = arg('--room', 'arena');
 
 const N = paramCount();
 const rand = rng(Number(arg('--rng', 12345)));
@@ -81,7 +85,8 @@ if (resume && fs.existsSync(OUT)) {
   // overwrites a better policy with a worse one. Only reusable when the
   // validation seeds match; otherwise the two numbers are not comparable
   // and the honest thing is to re-score what we just loaded.
-  const sameSeeds = JSON.stringify(prev.validSeeds ?? []) === JSON.stringify(VALID_SEEDS);
+  const sameSeeds = JSON.stringify(prev.validSeeds ?? []) === JSON.stringify(VALID_SEEDS)
+    && (prev.room ?? 'arena') === ROOM;
   if (sameSeeds && typeof prev.validFitness === 'number') {
     bestValid = prev.validFitness;
     savedAt = prev.generation ?? 0;
@@ -107,7 +112,7 @@ async function validate(weights) {
   let v = 0;
   for (const seed of VALID_SEEDS) {
     const { harness: vh, game: vg } = await bootGame({ fresh: true, seed });
-    v += episode(vh, vg, actor(weights), { runSeed: seed }).fitness / VALID_SEEDS.length;
+    v += episode(vh, vg, actor(weights), { runSeed: seed, room: ROOM }).fitness / VALID_SEEDS.length;
     await close();
   }
   return v;
@@ -152,7 +157,7 @@ for (let g = 1; g <= GENS; g++) {
       const e = eps[pair * 2];
       const w = new Float64Array(N);
       for (let i = 0; i < N; i++) w[i] = mu[i] + sign * SIGMA * e[i];
-      const r = episode(harness, game, actor(w), { runSeed: seed });
+      const r = episode(harness, game, actor(w), { runSeed: seed, room: ROOM });
       fitness[c] += r.fitness / TRAIN_SEEDS.length;
       const acc = stats[c];
       acc.waves += r.waves; acc.hits += r.hits; acc.score += r.score; acc.died += r.died ? 1 : 0;
@@ -194,7 +199,7 @@ for (let g = 1; g <= GENS; g++) {
     if (better) {
       bestValid = v;
       fs.writeFileSync(OUT, JSON.stringify({
-        shape: SHAPE, note: 'ES-trained arena policy', trainSeeds: POOL,
+        shape: SHAPE, note: `ES-trained ${ROOM} policy`, trainSeeds: POOL, room: ROOM,
         generation: g, validFitness: Math.round(v), validSeeds: VALID_SEEDS,
         weights: Array.from(mu),
       }));

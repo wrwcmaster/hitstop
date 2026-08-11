@@ -273,6 +273,9 @@ defineMonster('slime-king', {
   mass: 6,
   boss: true,
   displayName: 'THE SLIME KING',
+  // Attack phases a player reads as "move": the observation turns these
+  // into the winding flag. Names stay HERE, next to the FSM that owns them.
+  telegraphs: ['slam', 'spit', 'stickySpit'],
   // Placeholder pairing: the design plan gives Impact Drop to a new first
   // boss (docs/gameplay-progression.md), which does not exist yet. Hanging
   // it on today's first mandatory boss makes the reward path real and
@@ -620,6 +623,9 @@ defineMonster('duelist', {
   mass: 1.4,
   boss: true,
   displayName: 'THE DUELIST',
+  // Attack phases a player reads as "move": the observation turns these
+  // into the winding flag. Names stay HERE, next to the FSM that owns them.
+  telegraphs: ['combo', 'blur', 'pistol', 'volley'],
   epilogue: 'duelist-fallen',
   // Placeholder pairing, as above — a second reward proves the catalog is
   // data and not a one-off.
@@ -971,6 +977,9 @@ defineMonster('vise', {
   boss: true,
   flies: true, // it is always holding the wall; the floor is not its business
   displayName: 'VISE, THE WALL BEAST',
+  // Attack phases a player reads as "move": the observation turns these
+  // into the winding flag. Names stay HERE, next to the FSM that owns them.
+  telegraphs: ['lunge', 'rockfall', 'pinSlam'],
   epilogue: 'vise-fallen',
   grants: 'wall-grip',
   colors: [VISE_BODY, VISE_LIMB, COLORS.white],
@@ -1358,6 +1367,9 @@ defineMonster('mourn', {
   score: 11000,
   boss: true,
   displayName: 'MOURN, THE BELL BELOW',
+  // Attack phases a player reads as "move": the observation turns these
+  // into the winding flag. Names stay HERE, next to the FSM that owns them.
+  telegraphs: ['toll', 'pounce', 'keen'],
   epilogue: 'mourn-fallen',
   grants: 'shockwave',
   colors: [MOURN_BODY, MOURN_KNOT, COLORS.white],

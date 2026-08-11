@@ -1,4 +1,4 @@
-import { GRAVITY, MAX_FALL, Registry, conversations, items, type TriggerDef } from '@engine/index';
+import { GRAVITY, MAX_FALL, Registry, conversations, items, t, type TriggerDef } from '@engine/index';
 import { COLORS } from '../../content/palette';
 import type { PlayHost } from './host';
 import { Monster } from '../../actors/monster';
@@ -6,6 +6,7 @@ import { optionalString, rejectUnknownProps, requireString } from '../../content
 import { provideTriggerValidators } from '../../content/room-features';
 import { cutscenes } from '../../content/cutscenes';
 import { edgeDoorSide } from './doorways';
+import { promptText } from '../../defs';
 
 /**
  * What each trigger `event` name means in the game. Room JSON stays pure
@@ -60,6 +61,22 @@ defineTriggerAction('talk', {
   },
 });
 
+// A zone that teaches: walking in shows one line on the HUD's hint slot
+// and nothing else — no scene push, no pause, nothing to dismiss. Prompts
+// resolve per device ('{jump}' names Space on keys and the pad's button
+// when one is connected), so a tutorial never lies about the controls.
+// once:false in the room JSON makes it refire on re-entry, which is what
+// a station wants: come back confused, get told again.
+defineTriggerAction('note', {
+  validateProps(props, path) {
+    rejectUnknownProps(props, ['text'], path);
+    requireString(props, 'text', path);
+  },
+  run(def, host) {
+    host.showHint(promptText(host.game, t(def.props!.text as string)), 4);
+  },
+});
+
 defineTriggerAction('door', {
   validateProps(props, path) {
     // No arrival coordinates: a door lands you at the destination's door
@@ -67,7 +84,7 @@ defineTriggerAction('door', {
     // can disagree. See PlayScene.doorLanding.
     rejectUnknownProps(
       props,
-      ['room', 'key', 'flag', 'lockedText', 'bossSeal', 'fallIn', 'leapUp', 'trackX'],
+      ['room', 'key', 'flag', 'lockedText', 'bossSeal', 'fallIn', 'leapUp', 'trackX', 'label'],
       path,
     );
     for (const key of ['bossSeal', 'fallIn', 'leapUp', 'trackX']) {
@@ -76,6 +93,7 @@ defineTriggerAction('door', {
       }
     }
     requireString(props, 'room', path);
+    optionalString(props, 'label', path); // sign text override ('SKIP TUTORIAL')
     const key = optionalString(props, 'key', path);
     if (key && !items.has(key)) throw new Error(`${path}.key: unknown item "${key}"`);
     optionalString(props, 'flag', path);

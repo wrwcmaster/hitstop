@@ -119,7 +119,7 @@ defineItem<ItemCtx>('haste-draught', {
 
 defineItem<ItemCtx>('gate-key', {
   name: 'GATE KEY',
-  desc: 'Unlocks the arena gate.',
+  desc: 'Unlocks the cavern gate.',
   icon: ICON_KEY,
   kind: 'key',
 });

@@ -1,5 +1,5 @@
 import { rand, sign, tintOf, itemDef, ballisticVelocity, ballisticLob } from '@engine/index';
-import { defineMonster, Monster, type MonsterDef } from './monster';
+import { defineMonster, monsters, Monster, type MonsterDef } from './monster';
 import { shootArrow, shootBullet, muzzleFlash, ARROW_GRAVITY, BULLET_GRAVITY } from '../content/ballistics';
 import { drawBow } from '../content/weapon-visuals';
 import { SLIME1, SLIME2, BAT1, BAT2, PIKE1, PIKE2, CHEST, TEXEL, blit, slimeSprite, batSprite, pikeSprite, chestSprite } from '../content/sprites';
@@ -27,6 +27,35 @@ function waterlineAbove(m: Monster, x: number): number {
   return Infinity;
 }
 
+// The training yard's target. Not a fight: it cannot hurt her, cannot
+// move, and pays nothing — it exists so the first swing of the game has
+// something to land on and the hit feedback (flash, numbers, gibs) can
+// do the actual teaching.
+defineMonster('dummy', {
+  hp: 60, damage: 0, w: 12, h: 20, score: 0, xp: 0,
+  colors: [COLORS.gold, COLORS.steelDark, COLORS.steel],
+  noContactDamage: true,
+  init(m) {
+    m.mass = 8; // a stake in the ground shrugs off knockback
+  },
+  update(m) {
+    m.vx = 0;
+  },
+  draw(g, m) {
+    const flash = m.flashT > 0;
+    const post = flash ? COLORS.white : COLORS.steelDark;
+    const head = flash ? COLORS.white : COLORS.gold;
+    g.fillStyle = post;
+    g.fillRect(m.x + 5, m.y + 6, 2, 14);          // stake
+    g.fillRect(m.x, m.y + 8, 12, 2);              // crossbar arms
+    g.fillStyle = head;
+    g.fillRect(m.x + 3, m.y, 6, 6);               // burlap head
+    g.fillStyle = post;
+    g.fillRect(m.x + 4, m.y + 2, 1, 1);           // stitched eyes
+    g.fillRect(m.x + 7, m.y + 2, 1, 1);
+  },
+});
+
 defineMonster('slime', {
   hp: 60, damage: 12, w: slimeSprite.hitbox.w, h: slimeSprite.hitbox.h, score: 100,
   colors: [COLORS.green, COLORS.greenDark, COLORS.greenLight],
@@ -52,6 +81,51 @@ defineMonster('slime', {
   },
   draw(g, m) {
     blit(g, m.img(m.onGround ? SLIME1 : SLIME2), m.x - slimeSprite.hitbox.x, m.y - slimeSprite.hitbox.y);
+  },
+});
+
+/**
+ * Is there floor to land on `dir` of here?
+ *
+ * A hop covers roughly 30px, so the probe looks a hop ahead and a
+ * little below the feet. One-way tiles do not count: monsters move
+ * with `ignoreOneWay`, so a platform is not footing for them — it is
+ * a hole they have not fallen through yet.
+ */
+function hasFooting(m: Monster, dir: number): boolean {
+  const probe = { x: m.x + dir * 26, y: m.y + m.h + 2, w: m.w, h: 8 };
+  for (const s of m.collision.solidsNear(probe)) {
+    if (s.oneWay) continue;
+    if (probe.x < s.x + s.w && probe.x + probe.w > s.x && probe.y < s.y + s.h && probe.y + probe.h > s.y) return true;
+  }
+  return false;
+}
+
+/**
+ * A slime that looks before it leaps.
+ *
+ * Ordinary slimes hop at the player and nothing else, which is fine on
+ * open ground and useless anywhere with an edge: posted to a ledge,
+ * one hops straight off it and is on the floor below within seconds.
+ * The alternative was penning them behind bars, which reads as a cage
+ * and traps whoever jumps in after them. This one holds its post
+ * instead — it turns at a drop, and sits still if there is no footing
+ * either way — so a guard can be PLACED somewhere and simply stay
+ * there, with nothing built around it.
+ */
+defineMonster('sentry-slime', {
+  ...monsters.get('slime'),
+  update(m, dt) {
+    m.vx *= Math.pow(0.01, dt);
+    if (!m.onGround) return;
+    m.state.hopT = (m.state.hopT as number) - dt;
+    if ((m.state.hopT as number) > 0) return;
+    const player = m.player;
+    let d = player && player.cx > m.cx ? 1 : -1;
+    if (!hasFooting(m, d)) d = hasFooting(m, -d) ? -d : 0;
+    m.vy = -190;
+    m.vx = d * rand(55, 85);
+    m.state.hopT = rand(0.9, 1.7);
   },
 });
 
@@ -359,6 +433,15 @@ defineMonster('pike', {
 function chestDef(drops: NonNullable<MonsterDef['drops']>, healing = false): MonsterDef {
   return {
     hp: 40, damage: 0, w: chestSprite.hitbox.w, h: chestSprite.hitbox.h, score: 50, xp: 0,
+    // A strongbox is furniture: a hit rocks it back a step, not across
+    // the room. Mass softens the impulse, but the real fix is FRICTION —
+    // monsters damp their own vx in update, and a def with no update
+    // kept whatever push it got (measured: 30px per great-sword hit,
+    // identical at mass 6 and 10, because nothing ever slowed it down).
+    mass: 3,
+    update(m, dt) {
+      m.vx *= Math.pow(0.001, dt);
+    },
     noContactDamage: true,
     // A cracked-open chest is a change to the room, not a defeated foe:
     // it stays open when you come back, so the deep pays out once.
@@ -394,6 +477,23 @@ defineMonster('healing-chest', {
   displayName: 'HEALING CACHE',
 });
 
+// The gatehouse warden: a brute whose pockets matter. The gate-key used
+// to be the arena's wave-clear prize; with the waves off the main path
+// (Scott: keep the arena as a test room, author real scenes instead)
+// the key moved into the first REAL fight — one tough enemy, learned
+// honestly, exactly how bosses hand over their verbs.
+defineMonster('gate-brute', {
+  ...monsters.get('brute'),
+  displayName: 'THE GATE WARDEN',
+  // Slain is slain: without this the warden respawned on every room
+  // entry — an infinite key dispenser and a 400-score farm.
+  persistent: true,
+  drops: [
+    { id: 'gate-key', chance: 1 },
+    { id: 'potion', chance: 0.45 },
+  ],
+});
+
 /* ---- the ballistic shooters ---- */
 
 const CLOAK = '#3f5e3a';
@@ -411,6 +511,7 @@ const ARCHER_AIM = 0.45;
  * telegraph: when the bow comes up, move.
  */
 defineMonster('archer', {
+  telegraphs: ['aim'], // the drawn bow / raised gun IS the warning
   hp: 60, damage: 18, w: 12, h: 17, score: 350,
   rangedAt: 300, // it looses at anything inside this
   colors: [CLOAK, CLOAK_DARK, WOOD],
@@ -498,6 +599,7 @@ defineMonster('archer', {
  * fast, nearly-flat bullet. Long reload — punish it.
  */
 defineMonster('gunner', {
+  telegraphs: ['aim'], // the drawn bow / raised gun IS the warning
   hp: 80, damage: 26, w: 13, h: 14, score: 450,
   rangedAt: 320, // levels the musket at anything near-flat inside this
   colors: [COLORS.redDark, COLORS.steel, COLORS.gold],

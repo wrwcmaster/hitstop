@@ -451,6 +451,21 @@ world (`ui.blocking`, plus whatever a scene's optional `describe()`
 returns): a menu on top of `PlayScene` freezes the sim and takes the
 keyboard, and an agent that cannot see one simply stops playing.
 
+Visual claims get settled with `window.__measure()`, the harness's
+draw-and-measure overlay. An eyeballed screenshot settles nothing when
+the argument is a distance in game pixels — a screenshot is a picture of
+a scaled canvas, and "that gap looks too big" and "that gap is 24px" are
+different sentences. `__measure()` outlines the rectangles the game is
+actually reasoning about (trigger zones with their sizes, the player's
+hitbox, a bracketed gap to the nearest door), to scale, over the last
+rendered frame — and RETURNS the same numbers it drew, so the picture
+and the measurement cannot disagree. It renders after the frame is
+presented, never into the render loop, so it cannot touch a hash.
+
+    __measure()                                   // everything, labelled
+    __measure({ note: 'after the crossing' })     // with a caption
+    __measure({ rects: [[8, 472, 8, 32, 'old zone']] })   // ghosts to compare against
+
 The headless verbs run the game's own modules in Node through
 `tools/agent-play/headless.mjs` (vite `ssrLoadModule`; `offscreen()`
 returns a drawing sink when there is no document). All 22 recordings

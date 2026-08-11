@@ -1270,7 +1270,14 @@ export class Player extends Actor {
     // Still holding on: slide, don't hang.
     this.vx = side * 6; // stay pressed in so the contact survives the step
     this.vy = Math.min(this.vy, T.clingSlide);
-    if (Math.random() < dt * 8) {
+    // Seeded gate, deliberately: the burst LOOKS cosmetic, but its
+    // particles draw from the seeded gameplay stream, so an unseeded
+    // Math.random gate made the stream's position depend on a coin no
+    // replay could re-flip. The draws instrument caught it — both
+    // wall-cling fixtures drifted (-5, -15 draws) with every hash green.
+    // Gate and body now live on the same stream, so a cling consumes an
+    // identical number of draws in live, browser replay and headless.
+    if (chance(dt * 8)) {
       this.feel.burst(this.cx + side * this.w * 0.4, this.cy + this.h * 0.3, 1, {
         color: [COLORS.steelDark], speed: 18, life: 0.25, drag: 4, grav: 120,
       });
@@ -1466,7 +1473,11 @@ export class Player extends Actor {
     // Water: how deep the body sits decides which physics rules apply.
     const sub = this.collision.submersion?.(this) ?? 0;
     const swimming = sub > 0.2 && !this.fsm.is('dead');
-    if (!swimming) this.breached = false; // re-arm the breach once clear of water
+    // Re-arm the breach once clear of the water — OR once properly deep
+    // again. Without the deep re-arm, a mid-pool pop that splashes back
+    // latched forever: you could reach the far wall and hold jump into
+    // nothing, the stuck-in-water bug's quieter cousin.
+    if (!swimming || sub >= 0.85) this.breached = false;
 
     // Gravity + jump physics (dash overrides velocity; the dead still fall).
     if (!this.fsm.is('dash')) {

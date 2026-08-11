@@ -19,6 +19,16 @@ export interface TileDef {
   /** Contact damage dealt to bodies overlapping this tile (spikes, lava).
    * Non-solid; the game decides who gets hurt and how often. */
   hazard?: number;
+  /**
+   * Solid to BODIES, open to SHOTS: a grille, a portcullis, a palisade.
+   *
+   * The counterpart to `oneWay`, which splits collision by direction;
+   * this splits it by what is doing the colliding. A pen built out of
+   * it holds its occupant without silencing them — the guard behind it
+   * still shoots, and can still be shot — which is the difference
+   * between a cage and a wall you happen to be standing behind.
+   */
+  shootThrough?: boolean;
   /** Draw one tile at pixel position (px, py). (tx, ty) are tile coords for variation. */
   draw?(g: CanvasRenderingContext2D, px: number, py: number, size: number, tx: number, ty: number): void;
 }
@@ -326,7 +336,7 @@ export class Tilemap implements CollisionSource {
       for (let tx = x0; tx <= x1; tx++) {
         const def = tiles.get(this.grid[ty][tx]);
         if (def.solid || def.oneWay) {
-          yield { x: tx * ts, y: ty * ts, w: ts, h: ts, oneWay: def.oneWay };
+          yield { x: tx * ts, y: ty * ts, w: ts, h: ts, oneWay: def.oneWay, shootThrough: def.shootThrough };
         }
       }
     }

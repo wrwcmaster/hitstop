@@ -133,7 +133,10 @@ export class Projectile extends Entity {
       const dy = this.y - (from.y + from.h / 2);
       let firstT: number | null = null;
       for (const s of this.collision.solidsNear(swept)) {
-        if (s.oneWay || !overlaps(swept, s)) continue;
+        // Platforms and grilles are not walls to a shot: a one-way ledge
+        // is open from every side an arrow can arrive from, and a
+        // `shootThrough` solid is a grille by definition.
+        if (s.oneWay || s.shootThrough || !overlaps(swept, s)) continue;
         const t = sweepEntry(from, dx, dy, s);
         if (t !== null && (firstT === null || t < firstT)) firstT = t;
       }

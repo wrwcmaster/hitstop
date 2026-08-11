@@ -242,6 +242,44 @@ tiles.register('archStone', {
   },
 });
 
+/**
+ * An iron grille: a wall to bodies, an open window to arrows.
+ *
+ * The pen a garrison can be kept in without being taken out of the
+ * fight. Solid masonry around a guard makes him furniture — he cannot
+ * leave, and he cannot reach you either — while bars let him shoot
+ * through and let you shoot back, so the barrier reads as a firing
+ * position rather than a cage. Drawn deliberately thin and gappy
+ * against the dark backing: if it is going to stop a body it has to
+ * LOOK like it stops a body, and if arrows pass it has to look like
+ * they can.
+ */
+tiles.register('grille', {
+  solid: true,
+  shootThrough: true,
+  traits: ['resonant'],
+  draw(g, px, py, size, _tx, ty) {
+    // The dark behind the bars, so you can tell it is not a wall.
+    g.fillStyle = '#1d2233';
+    g.fillRect(px, py, size, size);
+    // Uprights.
+    g.fillStyle = '#5c6880';
+    for (let i = 1; i < size; i += 3) g.fillRect(px + i, py, 1, size);
+    // A cross-rail every other course, riveted where the bars cross.
+    if (ty % 2 === 0) {
+      g.fillStyle = '#6b7893';
+      g.fillRect(px, py + 3, size, 2);
+      g.fillStyle = '#8794ad';
+      g.fillRect(px, py + 3, size, 1);
+    }
+    // Rust catching the torchlight, so a long run of bars is not uniform.
+    if ((_tx * 7 + ty * 5) % 6 === 0) {
+      g.fillStyle = '#7a5a3c';
+      g.fillRect(px + 1 + ((ty * 3) % 4), py + 5, 1, 2);
+    }
+  },
+});
+
 /** A corbelled shelf: jump-through masonry, the built answer to alpineLedge. */
 tiles.register('wallLedge', {
   oneWay: true,
@@ -517,6 +555,44 @@ tiles.register('platform', {
     g.fillRect(px, py, size, 2);
     g.fillStyle = COLORS.navyDark;
     g.fillRect(px, py + size - 2, size, 2);
+  },
+});
+
+/**
+ * A sod ledge: the grass lip of `rockTop` as a jump-through platform.
+ *
+ * Terraced ground (the mill-road hill) drew a grass fringe on every
+ * step, which promised three walkable decks and delivered one — the
+ * classic buried-lower-deck lie. This tile keeps the promise instead:
+ * every grass line IS a deck. Pair it with `earthBack` so the hill
+ * keeps its silhouette while the body stays passable.
+ */
+tiles.register('grassLedge', {
+  oneWay: true,
+  traits: ['rebound'],
+  draw(g, px, py, size) {
+    g.fillStyle = COLORS.green;
+    g.fillRect(px, py, size, 3);
+    g.fillStyle = COLORS.greenDark;
+    g.fillRect(px, py + 3, size, 1);
+    // A thin earthen underside so the sod reads as a shelf, not paint.
+    g.fillStyle = COLORS.navyDark;
+    g.fillRect(px + 1, py + 4, size - 2, 2);
+  },
+});
+
+/**
+ * Background earth: the hill's flesh, non-solid.
+ *
+ * `wallBack` for geology — the body of a mound you can walk through,
+ * drawn as rock in shadow so the passable interior is legible at a
+ * glance (background-dark means enterable, full-bright means wall).
+ */
+tiles.register('earthBack', {
+  draw(g, px, py, size) {
+    drawRock(g, px, py, size);
+    g.fillStyle = 'rgba(10,14,26,0.5)';
+    g.fillRect(px, py, size, size);
   },
 });
 

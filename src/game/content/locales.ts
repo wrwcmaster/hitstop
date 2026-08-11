@@ -20,7 +20,7 @@ defineLocale('zh', {
     'TEST ROOM': '测试房间',
     'OPTIONS': '设置',
     'Game feel is the foundation': '手感即根基',
-    'Move: Arrows / WASD - Jump: Space': '移动:方向键/WASD - 跳跃:空格',
+    'Move: Arrows - Jump: Space': '移动:方向键 - 跳跃:空格',
     'Attack: Z - Dash: X - Parry: F - Skill: C': '攻击:Z - 冲刺:X - 格挡:F - 技能:C',
     'Z or Enter to select': '按 Z 或回车选择',
 

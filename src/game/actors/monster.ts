@@ -66,6 +66,15 @@ export interface MonsterDef {
   /** Touching this monster doesn't hurt (it attacks some other way). */
   noContactDamage?: boolean;
   /**
+   * Behaviour states (FSM names or `state.mode` values) during which this
+   * monster is winding up or delivering an attack — the phases a player
+   * reads as "get out of the way". Content declares the semantics, the
+   * observation carries a plain `winding` flag, and nothing downstream
+   * ever needs to know a boss's state names. Same contract as `damage`:
+   * the def says what it means, the world just reports it.
+   */
+  telegraphs?: string[];
+  /**
    * How far away this one can still hurt you, in px, when it hurts you
    * without touching. Authored rather than inferred: nothing about a
    * behaviour tells an observer that it shoots, and "far away" means

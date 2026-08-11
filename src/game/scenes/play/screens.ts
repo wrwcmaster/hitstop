@@ -75,7 +75,7 @@ export class TitleScreen {
     // (desktop) and the screen bottom (touch).
     this.menu.render(g, gm.width / 2 - 24, COARSE_POINTER ? 140 : 146, { lineHeight: menuLine(12), width: 60 });
     if (!COARSE_POINTER) {
-      drawText(g, t('Move: Arrows / WASD - Jump: Space'), gm.width / 2, 232, COLORS.steelDark, 1, 'center');
+      drawText(g, t('Move: Arrows - Jump: Space'), gm.width / 2, 232, COLORS.steelDark, 1, 'center');
       drawText(g, t('Attack: Z - Dash: X - Parry: F - Skill: C'), gm.width / 2, 242, COLORS.steelDark, 1, 'center');
       drawText(g, t('Z or Enter to select'), gm.width / 2, 254, COLORS.gold, 1, 'center');
     }

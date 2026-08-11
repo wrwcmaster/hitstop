@@ -27,6 +27,8 @@ export class PauseScene implements Scene {
   private invMenu: Menu<Action> = new Menu([], MENU_ACTIONS);
   /** "SAVED!" flash on the SAVE REPLAY row, in seconds remaining. */
   private replaySavedT = 0;
+  /** "SAVED!" flash on the SAVE LAST RUN row. */
+  private lastSavedT = 0;
 
   constructor(
     private game: ActionGame,
@@ -86,6 +88,24 @@ export class PauseScene implements Scene {
             this.game.sfx.play('menuSelect');
           },
         },
+        // The run that just ended — present only once one has. Dying
+        // starts a fresh run at the respawn, so without this row the
+        // fight that killed you was unsaveable: SAVE REPLAY captured an
+        // 8-second stub of menus and the loss itself was gone. Losses
+        // are the tapes that teach (recovery states are exactly what a
+        // clean win never shows), so the death tape gets its own row.
+        ...(window.__replay?.last?.()
+          ? [{
+              label: 'SAVE LAST RUN',
+              hint: (): string => (this.lastSavedT > 0 ? t('SAVED!') : ''),
+              onSelect: (): void => {
+                if (!window.__replay) return;
+                window.__replay.saveLast();
+                this.lastSavedT = 3;
+                this.game.sfx.play('menuSelect');
+              },
+            }]
+          : []),
         {
           label: 'OPTIONS',
           onSelect: () => {
@@ -199,6 +219,7 @@ export class PauseScene implements Scene {
 
   update(dt: number): void {
     if (this.replaySavedT > 0) this.replaySavedT -= dt;
+    if (this.lastSavedT > 0) this.lastSavedT -= dt;
     const input = this.game.input;
     if (input.consumePress('menu') || input.consumePress('cancel')) {
       if (this.page !== 'main') {
