@@ -192,7 +192,7 @@ those exact approved colors without performing another visual conversion.
 
 ## 4. Convert to versioned game-native data
 
-Create a new prototype such as `knight-v2.json`; do not replace the playable asset yet. Most animated and composited art uses a `SpriteFile`. Tiles, icon atlases, and other registries should use their existing native content format rather than introducing a special case.
+Create a versioned prototype before replacing a playable asset. Knight V2 followed this gate and is now the canonical player body; future redesigns should use a fresh name until their identity, animation, equipment, and gameplay checks pass. Most animated and composited art uses a `SpriteFile`. Tiles, icon atlases, and other registries should use their existing native content format rather than introducing a special case.
 
 A `SpriteFile` prototype contains:
 

@@ -4,13 +4,13 @@ The player should read as a capable, weathered adventurer before any equipment i
 
 ## Native scale
 
-- Player and worn-gear sheets are **48×80 source pixels** with `hd: false`: four source pixels equal one logical game pixel.
-- They draw at **12×20 logical pixels**.
-- The current collision box is `{ x: 1, y: 2, w: 10, h: 18 }`. Hair, scarf, shoulders, and attack poses may use the transparent overhang without changing collision.
-- Feet stay on source row 79. Every frame uses the same canvas and origin.
+- The canonical player body is `knight-v2.json`, authored at **80×110 source pixels** with `hd: false`: four source pixels equal one logical game pixel.
+- It draws at **20×27.5 logical pixels**.
+- The collision box is `{ x: 5, y: 9.5, w: 10, h: 18 }`. This preserves the original gameplay body and feet origin while the taller head, hair, scarf, and shoulders use transparent overhang.
+- Every frame uses the same canvas and feet origin.
 - Weapon sheets remain **128×128 source pixels** with the player origin at logical `{ x: 16, y: 16 }`, leaving room for large swing silhouettes.
 
-`knight-v2.json` is an intentionally separate identity prototype at **64×112 source pixels / 16×28 logical pixels** with a proposed `{ x: 3, y: 4, w: 10, h: 24 }` hitbox. It does not replace this playable contract until its idle, motion, equipment, weapon, and gameplay gates are approved.
+Knight V2 completed its identity, idle, run, weapon-composite, and gameplay gates and replaced the original 48×80 body. New body prototypes stay separate until they pass the same checks.
 
 ## Visual language
 
@@ -25,9 +25,9 @@ The player should read as a capable, weathered adventurer before any equipment i
 
 | Animation | Frames | Purpose |
 | --- | ---: | --- |
-| `idle` | 4 | Breathing and scarf movement without sliding the feet |
+| `idle` | 5 | Breathing and scarf movement without sliding the feet |
 | `run` | 8 | Full opposing arm/leg gait with a two-beat body bob |
-| `air` | 1 | Neutral apex pose |
+| `air` | idle alias | Temporary airborne fallback until a dedicated jump pass |
 | `rise` | 2, non-looping | Compressed upward silhouette |
 | `fall` | 2, non-looping | Open descending silhouette |
 

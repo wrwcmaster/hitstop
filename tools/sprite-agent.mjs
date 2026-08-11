@@ -106,7 +106,7 @@ switch (command) {
 
 usage:
   npm run agent-sprite -- list
-  npm run agent-sprite -- open knight.json [--force]
+  npm run agent-sprite -- open knight-v2.json [--force]
   npm run agent-sprite -- state
   npm run agent-sprite -- selection
   npm run agent-sprite -- preview sprite-preview.png

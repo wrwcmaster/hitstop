@@ -1,6 +1,6 @@
 import { loadSprite, loadSheet, loadImage, withFacing, type SpriteFile, type SheetDescriptor } from '@engine/index';
 import { PAL } from './palette';
-import knightJson from './sprites/knight.json';
+import knightJson from './sprites/knight-v2.json';
 import duelistJson from './sprites/duelist.json';
 import slimeJson from './sprites/slime.json';
 import batJson from './sprites/bat.json';
@@ -11,6 +11,7 @@ import iconsJson from './sprites/icons.json';
 import hudJson from './sprites/hud.json';
 
 export const TEXEL = 4;
+export const PLAYER_BODY_SPRITE_PATH = 'knight-v2.json';
 
 export function blit(g: CanvasRenderingContext2D, img: HTMLCanvasElement, x: number, y: number): void {
   const q = (v: number) => Math.round(v * TEXEL) / TEXEL;

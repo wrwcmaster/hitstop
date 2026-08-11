@@ -17,7 +17,11 @@ import {
   rebuildSpriteWeapon,
 } from '@game/content/weapon-visuals';
 import { weapons, weaponTypeOf, allAttacks } from '@game/content/weapons';
-import { KNIGHT_ANIMS, rebuildKnightSprite } from '@game/content/sprites';
+import {
+  KNIGHT_ANIMS,
+  PLAYER_BODY_SPRITE_PATH,
+  rebuildKnightSprite,
+} from '@game/content/sprites';
 import { rebuildGearVisual } from '@game/content/gear-visuals';
 // The "player (full)" body drives a REAL Player — body-english, gear
 // layers, held weapon and trail all come from Player.render, posed via
@@ -2124,7 +2128,7 @@ let rebuiltVersion = -1;
 function maybeRebakeEditedEquipment(): void {
   if (rebuiltVersion === editVersion) return;
   rebuiltVersion = editVersion;
-  if (currentRepoPath === 'knight.json' || currentFileName === 'knight.json') {
+  if (currentRepoPath === PLAYER_BODY_SPRITE_PATH) {
     rebuildKnightSprite(file);
     // Player copied the old anim set during construction; rebuild the
     // render-only mannequin so the shared draft appears immediately.

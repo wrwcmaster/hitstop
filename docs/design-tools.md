@@ -131,13 +131,13 @@ A single static sprite is just one animation with one frame. `loadSprite` (`src/
 - **frames** — numbered buttons switch frames within the selected animation. **+ frame** adds a blank frame, **dup** inserts a copy after the selected frame, and **← / →** moves that selected frame through the sequence while carrying its anchors with it. **del** removes it.
 - **size (w × h) → resize** — reshape every frame across all animations (content preserved top-left), keeping the sprite uniform.
 - **top toolbar** — keeps compact icon buttons for the immediate canvas tools, selection status, zoom out, an editable percentage, zoom in, and **fit** without mixing in operation-specific controls. Brush and blur size live in the contextual **Tool** tab. Tooltips retain each tool name and shortcut.
-- **zoom / fit** — zoom is shown as a percentage (100%–6400%); **− / +** step through useful editing scales and **fit** chooses the largest scale that keeps the whole frame visible. Grids may be up to 160×160, so the editor can author the 48×80 player and existing 128×128 weapon layers directly.
+- **zoom / fit** — zoom is shown as a percentage (100%–6400%); **− / +** step through useful editing scales and **fit** chooses the largest scale that keeps the whole frame visible. Grids may be up to 160×160, so the editor can author the 80×110 player and existing 128×128 weapon layers directly.
 - **preview** — plays the selected animation at its authored fps. The previous/next buttons pause and step the visible timeline one frame at a time, with a current/total frame counter; in a composite, the selected body owns that timeline even when its attached weapon has only one frame. The **hd** checkbox toggles between the raw art and the EPX-upscaled version the game actually renders, at the same on-screen size.
 - **existing sprite** is populated recursively from every `.json` file under `content/sprites/`, including nested equipment sheets; the reference selector uses the same catalog. **load file / download** can open any other `.json` sprite from disk and download the current one. **copy JSON / apply JSON** in **Data** are the clipboard/textarea equivalents (the older single-animation `{ palette, frames, fps }` shape is accepted too).
 
 ### Live agent collaboration
 
-Under `npm run dev`, Vite hosts a development-only, loopback-only bridge at `/__sprite-editor`. Open a sprite directly with `tools/sprite-editor.html?sprite=knight.json`. The status in the header shows its shared revision and whether it has unsaved changes.
+Under `npm run dev`, Vite hosts a development-only, loopback-only bridge at `/__sprite-editor`. Open the playable body directly with `tools/sprite-editor.html?sprite=knight-v2.json`. The status in the header shows its shared revision and whether it has unsaved changes.
 
 - Browser edits publish the complete `SpriteFile` after each stroke. An agent reading `GET /__sprite-editor/state` therefore sees the user's current work, including changes not written to disk yet.
 - Agent edits use `PUT /__sprite-editor/state`; the open browser receives them immediately over a server-sent event and adds the previous version to undo history.
@@ -172,7 +172,7 @@ For the end-to-end workflow from generated concept to approved animation-ready J
 
 Sprites may carry named attachment points under `anchors` (`frontHand`, `rearHand`, `head`, and future points). Sprite weapons use the same mechanism with a single `grip` point, which is pinned to the character's `frontHand`. Choose one in the **Rig** workspace; its x/y values are logical pixels from the sprite's top-left. Shift+Alt-click the grid to place it on the selected frame. Anchor arrays follow frame add/duplicate/delete, animation rename/delete, undo/redo, and nudge operations so art and equipment cannot silently drift apart.
 
-The full-player composite re-bakes unsaved edits to `knight.json`, registered gear layers, and sprite-backed weapons. This makes the collaboration bridge useful before saving: an agent can change the shared document and the human immediately sees the actual player/equipment result, not a stale disk-loaded mannequin.
+The full-player composite re-bakes unsaved edits to the canonical `knight-v2.json` body, registered gear layers, and sprite-backed weapons. This makes the collaboration bridge useful before saving: an agent can change the shared document and the human immediately sees the actual player/equipment result, not a stale disk-loaded mannequin.
 
 ### Composite preview: sprites in company
 
