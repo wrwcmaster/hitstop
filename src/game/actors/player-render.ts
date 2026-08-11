@@ -3,7 +3,10 @@ import { baseKnight } from '../content/sprites';
 import { gearLayers, DEBUG_ANCHORS } from '../content/gear-visuals';
 import { COLORS } from '../content/palette';
 import { IMPACT_DROP_PLUNGE } from '../content/weapons';
-import { drawHeldWeapon, drawWeaponTrail, drawNeutralTrail } from '../content/weapon-visuals';
+import {
+  drawHeldWeapon, drawWeaponTrail, drawNeutralTrail, heldWeaponHands,
+  type HeldWeaponCtx,
+} from '../content/weapon-visuals';
 import { PLAYER_TUNING } from './player-tuning';
 import type { Player } from './player';
 
@@ -79,9 +82,11 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
   // I-frame blink (god mode holds i-frames but shouldn't strobe).
   if (p.invulnT > 0 && !p.godMode && !p.fsm.is('dead') && Math.floor(p.invulnT * 20) % 2) return;
 
+  const set = p.facing === 1 ? p.animSet.right : p.animSet.left;
   let anim = 'air';
   if (p.onGround) anim = Math.abs(p.vx) > 8 ? 'run' : 'idle';
-  const set = p.facing === 1 ? p.animSet.right : p.animSet.left;
+  else if (p.vy < -35 && set.rise) anim = 'rise';
+  else if (p.vy > 45 && set.fall) anim = 'fall';
   let img = frameAt(set, anim, p.animT);
   if (p.flashT > 0) img = whiteOf(img);
 
@@ -138,15 +143,22 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
       ? Math.min(Math.floor(p.animT * animObj.fps), animObj.frames.length - 1)
       : Math.floor(p.animT * animObj.fps) % animObj.frames.length)
     : 0;
+  const bodyAnchor = (name: string): { x: number; y: number } | undefined => {
+    const anchor = baseKnight.anchor?.(name, anim, frameIdx);
+    if (!anchor) return undefined;
+    // Sprite points are authored in the right-facing sheet. Individual
+    // weapon visuals already mirror by `ctx.facing`, exactly like their art.
+    return { x: anchor.x - dw / 2, y: anchor.y - dh };
+  };
   
-  // Visible gear draws as registered layers over the body (armor under
-  // helmet, etc). Any equipped slot with a visual in the gear-visuals
-  // registry composites here — new gear slots need no player changes.
+  // Visible gear draws as registered item layers over the body (armor
+  // under helmet, etc). The registry matches each exact equipped item to
+  // its declared slot, so adding another helmet needs no player changes.
+  const equippedGear = gearLayers(p.equipment);
   if (p.flashT <= 0 && !isSwallowed) {
     const f = p.facing;
 
-    for (const [slot, visual] of gearLayers()) {
-      if (p.equipment.get(slot) === null) continue;
+    for (const [, visual] of equippedGear) {
       const layerSet = f === 1 ? visual.anims.right : visual.anims.left;
       const layerImg = frameAt(layerSet, anim, p.animT);
       const anchor = visual.anchors?.[anim]?.[frameIdx] ?? { x: 0, y: 0, angle: 0 };
@@ -171,13 +183,15 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
   if (p.flashT <= 0) {
     if (p.equipment.get('charm')) renderCharm(g, dh);
     const weapon = p.weapon;
-    drawHeldWeapon(g, weapon.visual, {
+    const weaponCtx: HeldWeaponCtx = {
       facing: p.facing,
       anim,
       frame: frameIdx,
       animT: p.animT,
       bodyW: dw,
       bodyH: dh,
+      frontHand: bodyAnchor('frontHand'),
+      rearHand: bodyAnchor('rearHand'),
       attack: p.fsm.is('attack')
         ? {
             progress: Math.min(1, p.fsm.t / p.attackDur),
@@ -193,7 +207,29 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
         : p.fsm.is('attack') && p.attackDef?.aim === 'down'
           ? 'plunge'
           : undefined,
-    });
+    };
+    drawHeldWeapon(g, weapon.visual, weaponCtx);
+
+    // The weapon is between the palm and the foreground knuckles. This
+    // tiny final layer is what makes every weapon look held instead of
+    // pasted over the character, while armor supplies its own gauntlet
+    // colors through the gear registry.
+    const grip = equippedGear.flatMap(([, visual]) => visual.grip ? [visual.grip] : []).at(-1)
+      ?? { outline: '#171625', fill: '#684037', highlight: '#9a5b45' };
+    const drawGrip = (anchor: { x: number; y: number } | undefined): void => {
+      if (!anchor) return;
+      const x = anchor.x * p.facing;
+      const y = anchor.y;
+      g.fillStyle = grip.outline;
+      g.fillRect(x - 0.75, y - 0.65, 1.5, 1.3);
+      g.fillStyle = grip.fill;
+      g.fillRect(x - 0.5, y - 0.4, 1, 0.85);
+      g.fillStyle = grip.highlight;
+      g.fillRect(x + (p.facing > 0 ? 0.1 : -0.35), y - 0.35, 0.3, 0.3);
+    };
+    for (const hand of heldWeaponHands(weapon.visual, p.fsm.is('draw'))) {
+      drawGrip(hand === 'front' ? weaponCtx.frontHand : weaponCtx.rearHand);
+    }
   }
   g.restore();
   g.globalAlpha = 1;

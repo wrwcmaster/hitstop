@@ -9,7 +9,7 @@ Open them:
 | Level editor | `http://localhost:5173/tools/level-editor.html` | `…/hitstop/tools/level-editor.html` |
 | Sprite editor | `http://localhost:5173/tools/sprite-editor.html` | `…/hitstop/tools/sprite-editor.html` |
 
-Both tools are **client-only**. Nothing autosaves to the repo — you edit, then explicitly **download** or **export** (copy) the result and paste it into a source file. Shipping content is always a deliberate step (see "Getting your work into the game" in each section).
+The hosted tools are **client-only**. During local development the sprite editor also has a revisioned collaboration bridge: a browser and an agent can share the active sprite and preview, while **save to repo** remains an explicit action. The level editor and hosted sprite editor still download/export only.
 
 ---
 
@@ -120,23 +120,69 @@ A single static sprite is just one animation with one frame. `loadSprite` (`src/
 
 ### Controls
 
+- **color picker** - choose **picker** in the top toolbar, or hold Alt to temporarily sample from the current frame without losing the previously selected tool. The palette highlights the sampled character immediately. Shift+Alt-click remains the shortcut for placing a selected frame anchor.
+- **select / clipboard** - drag a pixel rectangle, then cut/copy/paste it from **Menu** or with Ctrl/Cmd+X/C/V. Paste uses the selection's top-left as its destination and clips safely at the frame edge. Copy also writes a self-describing JSON envelope to the system clipboard; Escape or right-click clears the selection. The toolbar shows its bounds and confirms that the region is shared with the agent bridge.
+
 - **Paint / erase** — left-drag paints the selected palette character; right-drag erases (`.` = transparent).
-- **palette** — click a swatch to select it; **add** takes a character + color and adds it to the file's palette.
-- **animations** — a button per animation; click to edit it. **+ anim** / **rename** / **del**, and an **fps** for the selected one.
-- **frames** — numbered buttons switch frames within the selected animation. **+ frame** (blank), **dup**, **del**.
+- **palette** — click a compact color-grid swatch to select it; hover for its character and hex value. **add** takes a character + color and adds it to the file's palette. Swatches are display-sorted into neutral and hue/lightness ramps so related colors stay together; their palette characters and frame data are not reordered.
+- **persistent preview** — the live sprite/composite canvas and a compact context label sit above the right workspace and remain visible while editing any tab. **Animate** owns the composite controls, onion skin, animations, and frames; **Transform** owns rotation, resize, and nudge; **Rig** owns sprite/physical size, hitbox, and anchors; **Data** owns JSON exchange. Choosing Select automatically opens Transform. The left panel separates **Colors**, contextual **Tool** settings, and **Reference**; choosing Brush or Blur opens Tool automatically, while size controls remain hidden for tools that do not use them.
+- **Menu** — Undo, Redo, Cut, Copy, and Paste stay available when needed without permanently occupying the header or inspector. Their Ctrl/Cmd shortcuts remain the fastest path.
+- **animations** — a button per animation in **Animate**; click to edit it. **+ anim** / **rename** / **del**, and an **fps** for the selected one.
+- **frames** — numbered buttons switch frames within the selected animation. **+ frame** adds a blank frame, **dup** inserts a copy after the selected frame, and **← / →** moves that selected frame through the sequence while carrying its anchors with it. **del** removes it.
 - **size (w × h) → resize** — reshape every frame across all animations (content preserved top-left), keeping the sprite uniform.
-- **preview** — plays **every animation at once** at its own fps. The **hd** checkbox toggles between the raw art and the EPX-upscaled version the game actually renders, at the same on-screen size.
-- **existing sprite** is populated recursively from every `.json` file under `content/sprites/`, including nested equipment sheets; the reference selector uses the same catalog. **load file / save** can open any other `.json` sprite from disk and download the current one. **export / import** are the clipboard/textarea equivalents (the older single-animation `{ palette, frames, fps }` shape is accepted too).
+- **top toolbar** — keeps compact icon buttons for the immediate canvas tools, selection status, zoom out, an editable percentage, zoom in, and **fit** without mixing in operation-specific controls. Brush and blur size live in the contextual **Tool** tab. Tooltips retain each tool name and shortcut.
+- **zoom / fit** — zoom is shown as a percentage (100%–6400%); **− / +** step through useful editing scales and **fit** chooses the largest scale that keeps the whole frame visible. Grids may be up to 160×160, so the editor can author the 80×110 player and existing 128×128 weapon layers directly.
+- **preview** — plays the selected animation at its authored fps. The previous/next buttons pause and step the visible timeline one frame at a time, with a current/total frame counter; in a composite, the selected body owns that timeline even when its attached weapon has only one frame. The **hd** checkbox toggles between the raw art and the EPX-upscaled version the game actually renders, at the same on-screen size.
+- **existing sprite** is populated recursively from every `.json` file under `content/sprites/`, including nested equipment sheets; the reference selector uses the same catalog. **load file / download** can open any other `.json` sprite from disk and download the current one. **copy JSON / apply JSON** in **Data** are the clipboard/textarea equivalents (the older single-animation `{ palette, frames, fps }` shape is accepted too).
+
+### Live agent collaboration
+
+Under `npm run dev`, Vite hosts a development-only, loopback-only bridge at `/__sprite-editor`. Open the playable body directly with `tools/sprite-editor.html?sprite=knight-v2.json`. The status in the header shows its shared revision and whether it has unsaved changes.
+
+- Browser edits publish the complete `SpriteFile` after each stroke. An agent reading `GET /__sprite-editor/state` therefore sees the user's current work, including changes not written to disk yet.
+- Agent edits use `PUT /__sprite-editor/state`; the open browser receives them immediately over a server-sent event and adds the previous version to undo history.
+- Every write supplies `baseRevision`. A stale write receives `409 revision conflict`, so neither side silently overwrites the other.
+- `GET /__sprite-editor/preview.png` returns the editor's real preview canvas for the active revision, including the selected composite, equipment, weapon, and hitbox settings.
+- `GET /__sprite-editor/selection` returns the active animation, frame, bounds, and exact text-grid rows. Selection is transient collaboration metadata: pointing at art never dirties the sprite or advances its document revision.
+- The browser keeps each repository sprite's unsaved document as a path-keyed local draft. Switching sprites or reloading restores that draft automatically; **save all** writes every modified draft and clears each one only after the batch is acknowledged. The bridge still exposes one active document to agents, but it is no longer the only place work in progress exists.
+- **save all** (or `POST /__sprite-editor/save-all`) is the workspace operation that writes under `src/game/content/sprites/`. The complete batch is path-checked and validated before any file is written, and saving never switches the active sprite or resets the active animation, frame, panels, composite controls, preview position, selection, or zoom—even when Vite reloads after a JSON write. The older single-document `/save` endpoint remains available to CLI clients.
+
+The useful endpoints are:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /__sprite-editor/sprites` | List editable repository sprite paths |
+| `POST /__sprite-editor/open` `{ path, source, force? }` | Open a repository sprite; refuses to discard a dirty shared document unless explicitly forced |
+| `GET /__sprite-editor/state` | Read `{ path, file, revision, source, dirty }` |
+| `PUT /__sprite-editor/state` `{ path, file, baseRevision, source }` | Replace the live document without saving it |
+| `GET /__sprite-editor/selection` | Read the active pixel selection and its rows |
+| `PUT /__sprite-editor/selection` `{ selection }` | Share or clear transient selection metadata without editing the document |
+| `GET /__sprite-editor/events` | Subscribe to live `state` events |
+| `GET /__sprite-editor/preview.png` | Inspect the active visual preview |
+| `POST /__sprite-editor/save` `{ path?, baseRevision, source }` | Explicitly write the active revision to the repo |
+| `POST /__sprite-editor/save-all` `{ documents: [{ path, file }], baseRevision, source }` | Validate and write all modified workspace sprites without switching the active document |
+
+Browser automation can use `window.__editor`: `open(path)`, `replace(file, path)`, `setPixels(...)`, and `save()` are the mutation seam; the existing file, selection, edit-version, and bridge getters expose observation. The HTTP API is preferable for an agent that does not need to drive the UI.
+
+`npm run agent-sprite -- <command>` is a thin CLI over that HTTP API. It supports `list`, `open`, `state`, `selection`, `preview`, `apply`, and `save`. The `selection` command is the handoff seam for requests such as "fix this eye": it gives the agent unambiguous frame coordinates and the selected pixel rows. `open` refuses to throw away unsaved shared work; pass `--force` only after deliberately deciding to discard it. Set `SPRITE_EDITOR_URL` when Vite uses a port other than 5173; for example, in PowerShell: `$env:SPRITE_EDITOR_URL='http://127.0.0.1:5174'`.
+
+For the end-to-end workflow from generated concept to approved animation-ready JSON, including comparison gates and pixel-polish rules, see [Sprite art pipeline](sprite-art-pipeline.md).
+
+### Frame anchors
+
+Sprites may carry named attachment points under `anchors` (`frontHand`, `rearHand`, `head`, and future points). Sprite weapons use the same mechanism with a single `grip` point, which is pinned to the character's `frontHand`. Choose one in the **Rig** workspace; its x/y values are logical pixels from the sprite's top-left. Shift+Alt-click the grid to place it on the selected frame. Anchor arrays follow frame add/duplicate/delete, animation rename/delete, undo/redo, and nudge operations so art and equipment cannot silently drift apart.
+
+The full-player composite re-bakes unsaved edits to the canonical `knight-v2.json` body, registered gear layers, and sprite-backed weapons. This makes the collaboration bridge useful before saving: an agent can change the shared document and the human immediately sees the actual player/equipment result, not a stale disk-loaded mannequin.
 
 ### Composite preview: sprites in company
 
-Pixel art for this game is rarely seen alone — an attack is the knight's body, the weapon in her hand, and the slash effect sweeping over both. The **composite** panel previews that joint effect, drawn by the game's *own renderers* (`drawHeldWeapon`, `drawWeaponTrail`), not an editor imitation. The weapon's per-frame anchors and the slash trail are code, not sprites, so no sprite-only overlay could show it truthfully.
+Pixel art for this game is rarely seen alone — an attack is the knight's body, the weapon in her hand, and the slash effect sweeping over both. The persistent **composite** preview draws that joint effect with the game's *own renderers* (`drawHeldWeapon`, `drawWeaponTrail`), not an editor imitation, and stays visible while Animate, Transform, Rig, or Data is open. The weapon's `grip` track lives in its sprite JSON while the attachment and slash-trail behavior live in the game renderer, so a sprite-only overlay still could not show the final result truthfully.
 
 - **weapon** — any registered weapon; the composite shows the body holding it, and on animations that have an attack (the weapon type's moveset names them), the attack pose and slash trail play on one clock: the attack's real duration plus a beat of hold.
 - **move** — which of the weapon's moves to pose: the combo swings and the contextuals (aerial, plunge, upper, dash). They usually share ONE sheet animation while differing in trail, timing, aim and body motion — the sheet alone cannot say which move you are looking at, so the label always names it. Auto = the opening combo swing.
-- **body** — the sheet being edited, the raw knight sheet, or **player (full)**: a real `Player` instance posed via `Player.poseAttack`, so the composite is the actual in-game knight — attack body-english (lean, shear), gear layers, held weapon and trail, all from `Player.render` itself. She is constructed against no-op stand-ins for the game and tilemap; posing draws, it never simulates. Loading a weapon sheet (`equipment/*.json`) selects this automatically — the view you want when touching up a sword's attack frames.
+- **body** — the sheet being edited, any sprite whose editor metadata sets `canEquipWeapon: true`, or **player (full)**: a real `Player` instance posed via `Player.poseAttack`, so the composite is the actual in-game knight — attack body-english (lean, shear), gear layers, held weapon and trail, all from `Player.render` itself. Weapon-capable sheets are discovered from content rather than hardcoded in the tool, so alternate bodies such as Knight V2 appear automatically. During neutral animation the selected body owns both the frame number and preview clock, so a one-frame held item cannot truncate a longer body idle/run cycle. The full player is constructed against no-op stand-ins for the game and tilemap; posing draws, it never simulates. Loading a weapon sheet (`equipment/*.json`) selects this automatically — the view you want when touching up a sword's attack frames.
 - **gear (helmet + plate)** — equips the iron helmet and steel armor on the full player, so you can check art against the armored silhouette too.
-- **live re-bake** — while a weapon sheet is being edited, every stroke re-bakes it into its registered visual (via `rebuildSpriteWeapon`), so the composite shows your edits in the knight's hand as you paint. The art swaps; the origins and anchors stay.
+- **live re-bake** — while a weapon sheet is being edited, every stroke re-bakes it into its registered visual (via `rebuildSpriteWeapon`), so the composite shows your edits and `grip` track in the knight's hand as you paint. Registration-only fallback origins stay in code.
 - **attack hitbox** — draws the move's hit region, placed by the same rules as Player.attackBox: a dim outline while merely placed, red while the active window makes it able to hit. The one view where art, trail and hitbox can disagree in front of you.
 - **attack trail** — toggles the slash effect, on the full player too (a tooling-only knob on Player; the game itself never hides a swing's trail).
 
@@ -158,6 +204,83 @@ Pick `-- no weapon --` to return to the plain preview.
 
 ## Sprite-sheet slicer (PNG)
 
+The slicer is also the **sprite animation workbench**: it is the approval stage
+between an ImageGen candidate and game-native JSON. Load a local PNG or a
+workspace URL, optionally remove a chroma key, use **detect frames** to find
+separated figures, and align every crop inside one shared bottom-centered
+frame. The animation preview follows the active **generated source** or
+**normalized pixels** view, so it always shows the stage being reviewed.
+Enable **fit shared content bounds** after alignment to crop one union box over
+all frames; it never rescales frames or changes their relative motion. The
+top/right/bottom/left shared-trim values can then crop additional logical
+output pixels identically from every frame.
+Frame alignment also offers an opt-in per-frame scale percentage. Keep it at
+100 for a coherent generated sheet; use it only to correct measurable scale
+drift between separately generated frames, matching corresponding poses by
+head, torso, and limb proportions rather than forcing every pose to the same
+height.
+Preview **− / +** changes its zoom independently from the sheet, **fit** fits
+the current stage, and the scrollable viewport keeps large source frames usable.
+**previous** overlays the prior frame to expose baseline drift and silhouette
+flicker.
+
+Use **generated source** to judge the model output, then **normalized pixels**
+to inspect the actual target-size, palette-limited cells produced by cropping
+and reduction. **coverage-aware pixel reduction** integrates every source pixel
+that contributes to a destination cell. Palette selection then gives extra
+weight to bounded local contrast, preserving small details without rules for a
+specific hue or brightness. **nearest-neighbor sampling** remains available as
+a diagnostic comparison. Do not infer a pseudo-pixel lattice from generated
+art unless its block size and phase are known to be consistent.
+
+For a multi-generation animation whose material colours drift, select
+**frame 0 reference** as the palette source. This makes every frame use the
+approved first frame's exact colour set. If colours still cross materials
+(for example, trousers borrow the scarf ramp), enable **harmonize frame shading
+to frame 0**. It adds a vertical-neighbourhood cue to colour matching, so the
+same palette can distinguish scarf, torso, trousers, and boots while preserving
+the later frame's pose and clusters. It is opt-in because a real lighting or
+palette-changing animation should keep its authored colour shift.
+Before conversion, approve the generated source, normalized identity/silhouette,
+motion/cadence, and origin/baseline. **export normalized png** saves that
+approved image-stage artifact. **to sprite json** remains locked until all four
+approvals are set, so animation is never silently authored by post-conversion
+JSON transforms.
+
+The workbench is URL-stateless for workspace images: its mode, view, sheet and
+preview zoom,
+crops, offsets, animation definitions, chroma key, target size, and conversion
+controls are encoded in the current URL. Refreshing or sharing that URL rebuilds
+the same review state; approvals intentionally reset and must be confirmed by
+the reviewer again. Local file uploads cannot survive refresh because browsers
+do not allow a page to reopen an arbitrary local file.
+
+Agent review reads the workbench's own normalized canvas through the read-only
+`window.__sheetSlicer.normalized()` bridge. **Export normalized png** also mirrors
+that exact data URL into the hidden `#agentNormalized` field for browser drivers
+running in an isolated page world. Both paths reuse the interactive pipeline;
+agents must not reimplement normalization in a separate script.
+
+When a real subject detail is close to the chroma key, use **protect subject
+color** in generated-source view. Click a detail to place the configured-size
+mask, or drag a tight custom rectangle over it. Chroma
+transparency and spill removal skip protected regions; key-adjacent subject
+colors in them are also carried through reduction and reserved in the palette.
+The cyan regions are part of the URL state, so refresh and handoff preserve the
+mask without hidden browser storage. Right-click a region to remove it, or use
+**clear protection**.
+
+Gemini image outputs may include a small sparkle watermark on the reserved
+magenta field. The ordinary chroma-key and spill-suppression stage removes it;
+verify that the normalized PNG contains only the subject before approval. Keep
+the source PNG unchanged as the audit/reference artifact.
+
+When there is exactly one corresponding protected region per frame, **lock one
+protected feature per frame to frame 0** makes frame 0's reduced pixels the
+canonical cluster for those regions. This removes sampling flicker from tiny
+fixed identity details such as an iris. Leave it off when the protected feature
+is meant to deform or change during the animation.
+
 Source: `tools/sheet-slicer.html` + `tools/src/sheet-slicer.ts`.
 
 The text-grid format is great for small hand-drawn sprites, but for **full-colour art** — a sheet drawn elsewhere (an illustration tool, an image model, a marketplace asset) — use a PNG **sprite sheet** instead. The slicer turns a sheet into a **descriptor** the game loads with `loadSheet` (`src/engine/gfx/spritesheet.ts`).
@@ -178,8 +301,16 @@ The text-grid format is great for small hand-drawn sprites, but for **full-colou
 
 **to sprite json** turns the slices into the engine's native text-grid format (the same `{ palette, anims }` the sprite editor uses), so the result loads through the ordinary `loadSprite` path and is fully editable in the **sprite editor** — one unified pipeline, no PNG shipped.
 
-- Each frame is sampled at **logical resolution** (frame size ÷ `texel`), so set `texel` to the art's native scale (`1` for art already drawn at logical size).
-- Colours are quantized to a palette of at most **max colors** entries (fully-transparent pixels become `.`). Lower it for a tighter palette, raise it for fidelity — pixel art usually needs few. The flash message reports how many colours the export actually used.
+- Conversion reads the approved normalized pixels without another resize or
+  color reduction. Set
+  `texel` to `4` for dense 4x art (`hd: false`) or `1` for logical-resolution
+  art (`hd: true`).
+- Colours are quantized with edge-weighted median cut to a palette of at most
+  **70 max colors** entries, then every opaque source color is mapped to its
+  nearest palette entry (fully-transparent pixels become `.`). Local contrast
+  gives small bounded details more influence without hue-specific rules. Lower
+  the limit for a tighter palette or raise it for fidelity; dense character art
+  defaults to 32. The flash message reports how many colours the export used.
 - The output copies to the clipboard; **paste it into the sprite editor** to tweak, or save it as `src/game/content/sprites/<name>.json` and wire it up exactly like any hand-drawn sprite. This is the best route for **pixel-art** sheets; keep `loadSheet` (below) for genuinely full-colour illustration where a small palette would lose too much.
 
 ### Using a sheet in the game

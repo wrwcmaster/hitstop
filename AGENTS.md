@@ -321,9 +321,12 @@ Details and code samples: `docs/adding-content.md`. The short version —
   `onChoice`: each returns an `NpcDef` from data (sprite + conversation +
   a cost/quest id), so a new service NPC is one call. A choice opens an
   attached `shop` when its `action` is `'shop'`.
-- **Visible gear slot**: equipment JSON sheet on the knight's frame grid
-  (transparent except the gear) + `defineGearVisual(slot, ...)` in
-  `content/gear-visuals.ts`. No player-render changes.
+- **Visible gear item**: equipment JSON sheet on the knight's frame grid
+  (transparent except the gear) + `defineGearVisual(itemId, { slot, ... })`
+  in `content/gear-visuals.ts`. Visuals are item-keyed so two helmets can
+  differ; `slot` controls which equipped bucket activates one. No
+  player-render changes. See `docs/player-art-direction.md` for the shared
+  48×80 grid, anchors, layering, and palette contract.
 - **Cheat**: one entry in `play/cheats.ts` (legend updates itself).
 - **Language**: gettext-style — the English string IS the key. Add a
   table to `content/locales.ts` (`defineLocale('ja', { name, strings })`)
@@ -555,4 +558,6 @@ a port with `-- --port 5174`), then drive the real game:
 - `docs/adding-content.md` — step-by-step content recipes
 - `docs/design-tools.md` — level editor, sprite editor, sheet slicer
 - `docs/game-feel.md` — the feel toolkit and its tuning philosophy
+- `docs/player-art-direction.md` — player scale, palette, animation, anchors, and equipment layering
+- `docs/sprite-art-pipeline.md` — concept generation, JSON conversion, editor comparison, approval gates, and pixel polish
 - `docs/game-dev-primer.md` — background concepts

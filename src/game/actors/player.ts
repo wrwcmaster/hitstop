@@ -909,7 +909,7 @@ export class Player extends Actor {
     // Spawn ON the weapon: the same feet-relative hand line the held
     // visual draws at (see RANGED_HAND_Y), plus the weapon's small trim —
     // never a body-center guess that drifts from the art.
-    const mx = this.cx + this.facing * 7;
+    const mx = this.cx + this.facing * (r.muzzleX ?? 7);
     const my = this.y + this.h + RANGED_HAND_Y + (r.muzzleY ?? 0);
     const shot = {
       x: mx, y: my, vx, vy,

@@ -1,6 +1,6 @@
 import { loadSprite, loadSheet, loadImage, withFacing, type SpriteFile, type SheetDescriptor } from '@engine/index';
 import { PAL } from './palette';
-import knightJson from './sprites/knight.json';
+import knightJson from './sprites/knight-v2.json';
 import duelistJson from './sprites/duelist.json';
 import slimeJson from './sprites/slime.json';
 import batJson from './sprites/bat.json';
@@ -11,6 +11,7 @@ import iconsJson from './sprites/icons.json';
 import hudJson from './sprites/hud.json';
 
 export const TEXEL = 4;
+export const PLAYER_BODY_SPRITE_PATH = 'knight-v2.json';
 
 export function blit(g: CanvasRenderingContext2D, img: HTMLCanvasElement, x: number, y: number): void {
   const q = (v: number) => Math.round(v * TEXEL) / TEXEL;
@@ -30,12 +31,20 @@ export let baseKnight = load(knightJson);
 export let KNIGHT_ANIMS = withFacing(baseKnight.animSet());
 export let KNIGHT_IDLE_SPRITE = baseKnight.frame('idle', 0);
 
+function applyKnight(sprite: typeof baseKnight): void {
+  baseKnight = sprite;
+  KNIGHT_ANIMS = withFacing(sprite.animSet());
+  KNIGHT_IDLE_SPRITE = sprite.frame('idle', 0);
+}
+
+/** Tooling seam: make an in-memory editor draft the live player body. */
+export function rebuildKnightSprite(file: SpriteFile): void {
+  applyKnight(loadSprite(file, PAL));
+}
+
 export async function loadKnightSheet(imageUrl: string, desc: SheetDescriptor): Promise<void> {
   const img = await loadImage(imageUrl);
-  const sheet = loadSheet(img, desc);
-  baseKnight = sheet;
-  KNIGHT_ANIMS = withFacing(sheet.animSet());
-  KNIGHT_IDLE_SPRITE = sheet.frame('idle', 0);
+  applyKnight(loadSheet(img, desc));
 }
 
 /* ---------------- the Duelist (human boss) ---------------- */

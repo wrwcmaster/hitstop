@@ -1,6 +1,9 @@
 /// <reference types="vite/client" />
 
-import { resolveSpriteGeometry, resolveAnim, sprite, epx, type Palette, type SpriteFile, type SpriteAnimData } from '@engine/index';
+import {
+  resolveSpriteGeometry, resolveAnim, sprite, epx,
+  type Palette, type SpriteFile, type SpriteAnimData, type SpriteAnchor,
+} from '@engine/index';
 import { PAL } from '@game/content/palette';
 // Composite preview: the editor borrows the GAME's renderers rather than
 // imitating them, so what you see here — held weapon anchored to the
@@ -14,7 +17,12 @@ import {
   rebuildSpriteWeapon,
 } from '@game/content/weapon-visuals';
 import { weapons, weaponTypeOf, allAttacks } from '@game/content/weapons';
-import { KNIGHT_ANIMS, baseKnight } from '@game/content/sprites';
+import {
+  KNIGHT_ANIMS,
+  PLAYER_BODY_SPRITE_PATH,
+  rebuildKnightSprite,
+} from '@game/content/sprites';
+import { rebuildGearVisual } from '@game/content/gear-visuals';
 // The "player (full)" body drives a REAL Player — body-english, gear
 // layers, held weapon and trail all come from Player.render, posed via
 // its poseAttack seam. Content self-registers on import (the game's
@@ -35,7 +43,8 @@ import '@game/content/skilltree';
  * "hd" density), then export/import the exact file the game loads.
  */
 
-const CELL = 24;
+const MAX_GRID_SIZE = 160;
+let cellSize = 24;
 
 /* ---------------- state ---------------- */
 
@@ -46,15 +55,160 @@ let file: SpriteFile = {
 };
 let animName = 'idle';
 let frameIdx = 0;
+let previewStepFrame = 0;
+let previewStepping = false;
 let currentChar = firstPaintChar();
 let painting = false;
 let erasing = false;
-let currentTool: 'draw' | 'fill' = 'draw';
+type EditorTool = 'draw' | 'brush' | 'blur' | 'fill' | 'picker' | 'select';
+let currentTool: EditorTool = 'draw';
+let altPickerActive = false;
+let picking = false;
+let lastPaintCell: { x: number; y: number } | null = null;
+let hoverPointer: { x: number; y: number } | null = null;
+let strokePaletteChanged = false;
+interface PixelRect { x: number; y: number; w: number; h: number }
+interface PixelClipboard { w: number; h: number; rows: string[] }
+interface SelectionMove {
+  start: { x: number; y: number };
+  original: PixelRect;
+  source: PixelClipboard;
+  baseFrame: string[];
+  last: { x: number; y: number };
+  moved: boolean;
+}
+type SelectionResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+type SelectionHandle = SelectionResizeHandle | 'rotate';
+interface SelectionHandleTransform {
+  handle: SelectionHandle;
+  original: PixelRect;
+  source: PixelClipboard;
+  baseFrame: string[];
+  startPointer: { x: number; y: number };
+  startAngle: number;
+  lastKey: string;
+  moved: boolean;
+}
+interface SharedSelection extends PixelRect {
+  path: string | null;
+  anim: string;
+  frame: number;
+  rows: string[];
+  source: string;
+  updatedAt: number;
+}
+let selection: PixelRect | null = null;
+let selectionStart: { x: number; y: number } | null = null;
+let selectionMove: SelectionMove | null = null;
+let selectionHandleTransform: SelectionHandleTransform | null = null;
+let pixelClipboard: PixelClipboard | null = null;
 let refFile: SpriteFile | null = null;
 let currentFileName = 'new sprite.json';
+let currentRepoPath: string | null = null;
+let selectedAnchorName = '';
 const undoStack: string[] = [];
 const redoStack: string[] = [];
 const MAX_HISTORY = 100;
+
+interface BridgeState {
+  path: string | null;
+  file: SpriteFile;
+  revision: number;
+  source: string;
+  updatedAt: number;
+  dirty: boolean;
+}
+
+/** Editor-only content metadata. The engine ignores it; tools use it to
+ * discover capabilities without hardcoding character file names. */
+interface SpriteEditorMetadata {
+  canEquipWeapon?: boolean;
+}
+
+type EditorSpriteFile = SpriteFile & {
+  editor?: SpriteEditorMetadata;
+};
+
+const BRIDGE = '/__sprite-editor';
+const bridgeClientId = `editor-${crypto.randomUUID()}`;
+let bridgeRevision = 0;
+let bridgeDirty = false;
+let bridgeConnected = false;
+let bridgeConflict = false;
+let bridgePublishing = false;
+let lastSharedFile = '';
+let lastRepositoryFile = '';
+let previewTimer = 0;
+const DRAFT_PREFIX = 'hitstop.sprite-editor.draft:';
+let lastDraftSignature = '';
+let editorViewReady = false;
+
+interface StoredSpriteDraft {
+  v: 1;
+  path: string;
+  file: SpriteFile;
+  baseFile: string;
+  updatedAt: number;
+}
+
+function draftKey(path: string): string {
+  return `${DRAFT_PREFIX}${encodeURIComponent(path)}`;
+}
+
+function readDraft(path: string): StoredSpriteDraft | null {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(draftKey(path)) ?? 'null') as StoredSpriteDraft | null;
+    if (parsed?.v !== 1 || parsed.path !== path || !parsed.file?.anims) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function storedDrafts(): StoredSpriteDraft[] {
+  const drafts: StoredSpriteDraft[] = [];
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index);
+    if (!key?.startsWith(DRAFT_PREFIX)) continue;
+    try {
+      const draft = JSON.parse(localStorage.getItem(key) ?? 'null') as StoredSpriteDraft | null;
+      if (draft?.v === 1 && typeof draft.path === 'string' && draft.file?.anims) drafts.push(draft);
+    } catch {
+      // A damaged draft is ignored here and remains in storage for manual
+      // recovery; saving healthy documents must still be possible.
+    }
+  }
+  return drafts.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+function clearDraft(path: string): void {
+  localStorage.removeItem(draftKey(path));
+  if (lastDraftSignature.startsWith(`${path}\0`)) lastDraftSignature = '';
+}
+
+function persistCurrentDraft(): void {
+  if (!currentRepoPath) return;
+  const serialized = JSON.stringify(file);
+  if (lastRepositoryFile && serialized === lastRepositoryFile) {
+    clearDraft(currentRepoPath);
+    return;
+  }
+  const signature = `${currentRepoPath}\0${lastRepositoryFile}\0${serialized}`;
+  if (signature === lastDraftSignature) return;
+  try {
+    const draft: StoredSpriteDraft = {
+      v: 1,
+      path: currentRepoPath,
+      file,
+      baseFile: lastRepositoryFile,
+      updatedAt: Date.now(),
+    };
+    localStorage.setItem(draftKey(currentRepoPath), JSON.stringify(draft));
+    lastDraftSignature = signature;
+  } catch (error) {
+    flash(`local draft failed: ${(error as Error).message}`);
+  }
+}
 
 function emptyFrame(w: number, h: number): string[] {
   return Array.from({ length: h }, () => '.'.repeat(w));
@@ -80,6 +234,39 @@ const concreteAnims = (): [string, SpriteAnimData][] =>
 const cur = () => anim().frames[frameIdx];
 const W = () => cur()[0].length;
 const H = () => cur().length;
+const density = () => file.hd === false ? 4 : 1;
+
+function concreteAnimName(name = animName): string {
+  return concreteAnimNameOf(file, name);
+}
+
+function concreteAnimNameOf(spriteFile: SpriteFile, name: string): string {
+  const seen = new Set<string>();
+  let current = name;
+  while (typeof spriteFile.anims[current] === 'string' && !seen.has(current)) {
+    seen.add(current);
+    current = spriteFile.anims[current] as string;
+  }
+  return current;
+}
+
+function currentAnchor(): SpriteAnchor | undefined {
+  if (!selectedAnchorName) return undefined;
+  return file.anchors?.[selectedAnchorName]?.[concreteAnimName()]?.[frameIdx];
+}
+
+function ensureCurrentAnchor(): SpriteAnchor {
+  if (!selectedAnchorName) throw new Error('select an anchor first');
+  const name = concreteAnimName();
+  const target = resolveAnim(file, name)!;
+  const group = (file.anchors ??= {})[selectedAnchorName] ??= {};
+  const points = group[name] ??= Array.from(
+    { length: target.frames.length },
+    () => ({ x: W() / density() / 2, y: H() / density() / 2 }),
+  );
+  while (points.length < target.frames.length) points.push({ ...points.at(-1)! });
+  return points[frameIdx];
+}
 
 function gridSize(rows: string[]): { w: number; h: number } {
   return {
@@ -99,6 +286,7 @@ function geometryOf(spriteFile: SpriteFile, rows: string[]) {
 const $ = (id: string) => document.getElementById(id)!;
 const grid = $('grid') as HTMLCanvasElement;
 const gctx = grid.getContext('2d')!;
+const brushCursor = $('brushCursor');
 const preview = $('preview') as HTMLCanvasElement;
 const pctx = preview.getContext('2d')!;
 
@@ -106,7 +294,7 @@ const SPRITE_ROOT = '/src/game/content/sprites/';
 const spriteModules = import.meta.glob('/src/game/content/sprites/**/*.json', {
   eager: true,
   import: 'default',
-}) as Record<string, SpriteFile>;
+}) as Record<string, EditorSpriteFile>;
 const existingSprites = new Map(
   Object.entries(spriteModules)
     .map(([modulePath, spriteFile]) => [modulePath.slice(SPRITE_ROOT.length), spriteFile] as const)
@@ -133,8 +321,203 @@ function existingSprite(path: string): SpriteFile {
   return normalize(structuredClone(spriteFile));
 }
 
+function configureCompositeForPath(path: string): void {
+  const body = $('compBody') as HTMLSelectElement;
+  const weapon = $('compWeapon') as HTMLSelectElement;
+  const gear = $('compGear') as HTMLInputElement;
+  previewStepping = false;
+  previewStepFrame = 0;
+
+  if (path.includes('equipment/')) {
+    const stem = path.split('/').at(-1)!.replace(/\.json$/, '');
+    body.value = 'player';
+    if (weapons.has(stem)) {
+      weapon.value = stem;
+      gear.checked = false;
+      rebuildMoveSelect(stem);
+    } else {
+      weapon.value = '';
+      gear.checked = true;
+      rebuildMoveSelect('');
+    }
+    return;
+  }
+
+  // Composite controls describe the file currently being edited, rather
+  // than global editor preferences. Without resetting them here, opening a
+  // character after a weapon left the preview rendering the previous full
+  // player + weapon while the grid correctly showed the new sprite.
+  body.value = 'edited';
+  weapon.value = '';
+  gear.checked = false;
+  rebuildMoveSelect('');
+}
+
 populateSpriteSelect('selectSprite');
 populateSpriteSelect('selectRefSprite');
+
+function activatePanel(group: 'left' | 'right', target: string): void {
+  document.querySelectorAll<HTMLButtonElement>(`[data-panel-tab="${group}"]`).forEach((button) => {
+    const active = button.dataset.panelTarget === target;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+  document.querySelectorAll<HTMLElement>(`[data-panel-page="${group}"]`).forEach((panel) => {
+    panel.hidden = panel.id !== target;
+  });
+}
+
+for (const group of ['left', 'right'] as const) {
+  document.querySelectorAll<HTMLButtonElement>(`[data-panel-tab="${group}"]`).forEach((button) => {
+    button.onclick = () => activatePanel(group, button.dataset.panelTarget!);
+  });
+}
+
+const VIEW_STATE_KEY = 'hitstop.sprite-editor.view';
+
+interface EditorViewState {
+  v: 1;
+  path: string | null;
+  anim: string;
+  frame: number;
+  paintChar: string;
+  tool: EditorTool;
+  zoom: number;
+  anchor: string;
+  selection: PixelRect | null;
+  leftPanel?: string;
+  rightPanel?: string;
+  preview: { playing: boolean; stepping: boolean; frame: number };
+  composite: {
+    weapon: string;
+    move: string;
+    body: string;
+    trail: boolean;
+    hitbox: boolean;
+    gear: boolean;
+  };
+  toggles: {
+    showRef: boolean;
+    onionSkin: boolean;
+    showAnchors: boolean;
+    showHitbox: boolean;
+  };
+  referencePath: string;
+}
+
+function activePanel(group: 'left' | 'right'): string | undefined {
+  return document.querySelector<HTMLButtonElement>(`[data-panel-tab="${group}"].active`)?.dataset.panelTarget;
+}
+
+function captureEditorViewState(): EditorViewState {
+  return {
+    v: 1,
+    path: currentRepoPath,
+    anim: animName,
+    frame: frameIdx,
+    paintChar: currentChar,
+    tool: currentTool,
+    zoom: cellSize,
+    anchor: selectedAnchorName,
+    selection: selection ? { ...selection } : null,
+    leftPanel: activePanel('left'),
+    rightPanel: activePanel('right'),
+    preview: {
+      playing: ($('previewPlay') as HTMLInputElement).checked,
+      stepping: previewStepping,
+      frame: previewStepFrame,
+    },
+    composite: {
+      weapon: ($('compWeapon') as HTMLSelectElement).value,
+      move: ($('compMove') as HTMLSelectElement).value,
+      body: ($('compBody') as HTMLSelectElement).value,
+      trail: ($('compTrail') as HTMLInputElement).checked,
+      hitbox: ($('compHitbox') as HTMLInputElement).checked,
+      gear: ($('compGear') as HTMLInputElement).checked,
+    },
+    toggles: {
+      showRef: ($('showRef') as HTMLInputElement).checked,
+      onionSkin: ($('onionSkin') as HTMLInputElement).checked,
+      showAnchors: ($('showAnchors') as HTMLInputElement).checked,
+      showHitbox: ($('showHitbox') as HTMLInputElement).checked,
+    },
+    referencePath: ($('selectRefSprite') as HTMLSelectElement).value,
+  };
+}
+
+function persistEditorViewState(state: EditorViewState = captureEditorViewState()): void {
+  try {
+    sessionStorage.setItem(VIEW_STATE_KEY, JSON.stringify(state));
+  } catch {
+    // View continuity is a convenience; storage denial must never block save.
+  }
+}
+
+function restoreEditorViewState(saved?: EditorViewState): void {
+  try {
+    const state = saved ?? JSON.parse(sessionStorage.getItem(VIEW_STATE_KEY) ?? 'null') as EditorViewState | null;
+    if (!state || state.v !== 1 || state.path !== currentRepoPath) return;
+
+    if (file.anims[state.anim]) animName = state.anim;
+    frameIdx = Math.max(0, Math.min(state.frame, anim().frames.length - 1));
+    if (state.paintChar in (file.palette ?? {})) currentChar = state.paintChar;
+    if ((['draw', 'brush', 'blur', 'fill', 'picker', 'select'] as EditorTool[]).includes(state.tool)) {
+      currentTool = state.tool;
+    }
+    selectedAnchorName = state.anchor;
+    previewStepping = state.preview.stepping;
+    previewStepFrame = state.preview.frame;
+
+    const weapon = $('compWeapon') as HTMLSelectElement;
+    if ([...weapon.options].some((option) => option.value === state.composite.weapon)) {
+      weapon.value = state.composite.weapon;
+    }
+    rebuildMoveSelect(weapon.value);
+    const move = $('compMove') as HTMLSelectElement;
+    if ([...move.options].some((option) => option.value === state.composite.move)) move.value = state.composite.move;
+    const body = $('compBody') as HTMLSelectElement;
+    if ([...body.options].some((option) => option.value === state.composite.body)) body.value = state.composite.body;
+
+    ($('previewPlay') as HTMLInputElement).checked = state.preview.playing;
+    ($('compTrail') as HTMLInputElement).checked = state.composite.trail;
+    ($('compHitbox') as HTMLInputElement).checked = state.composite.hitbox;
+    ($('compGear') as HTMLInputElement).checked = state.composite.gear;
+    ($('showRef') as HTMLInputElement).checked = state.toggles.showRef;
+    ($('onionSkin') as HTMLInputElement).checked = state.toggles.onionSkin;
+    ($('showAnchors') as HTMLInputElement).checked = state.toggles.showAnchors;
+    ($('showHitbox') as HTMLInputElement).checked = state.toggles.showHitbox;
+
+    const reference = $('selectRefSprite') as HTMLSelectElement;
+    if (state.referencePath && existingSprites.has(state.referencePath)) {
+      reference.value = state.referencePath;
+      refFile = existingSprite(state.referencePath);
+    }
+
+    refreshUI();
+    updateToolUI();
+    setGridZoom(state.zoom);
+    if (state.leftPanel) activatePanel('left', state.leftPanel);
+    if (state.rightPanel) activatePanel('right', state.rightPanel);
+    const selected = state.selection;
+    setSelection(selected
+      && selected.x >= 0 && selected.y >= 0
+      && selected.x + selected.w <= W() && selected.y + selected.h <= H()
+      ? selected
+      : null);
+    schedulePreviewUpload();
+    void publishSelection();
+  } catch {
+    // Ignore obsolete/malformed session UI state and use editor defaults.
+  }
+}
+
+const editMenu = $('editMenu') as HTMLDetailsElement;
+for (const id of ['btnUndo', 'btnRedo', 'btnCut', 'btnCopy', 'btnPaste']) {
+  $(id).addEventListener('click', () => { editMenu.open = false; });
+}
+document.addEventListener('pointerdown', (event) => {
+  if (editMenu.open && !editMenu.contains(event.target as Node)) editMenu.open = false;
+});
 
 function flash(msg: string): void {
   const s = $('status');
@@ -144,30 +527,458 @@ function flash(msg: string): void {
   }, 2000);
 }
 
+/* ---------------- live agent bridge ---------------- */
+
+let pendingBridgeState: BridgeState | null = null;
+
+function updateBridgeStatus(): void {
+  const status = $('bridgeStatus');
+  status.className = '';
+  if (bridgeConflict) {
+    status.classList.add('conflict');
+    status.textContent = 'bridge: conflict (click to accept remote)';
+    status.title = 'Your unsent edits and a remote edit overlap. Click to keep the remote revision; undo restores your local version.';
+  } else if (!bridgeConnected) {
+    status.textContent = 'bridge: offline';
+    status.title = 'Start the Vite development server to share this document with an agent.';
+  } else {
+    status.classList.add(bridgeDirty ? 'dirty' : 'connected');
+    const name = currentRepoPath ?? 'unsaved sprite';
+    status.textContent = `bridge: ${name} r${bridgeRevision}${bridgeDirty ? ' *' : ''}`;
+    status.title = bridgeDirty ? 'Shared changes have not been written to the repository.' : 'Browser and agent share this revision.';
+  }
+  const save = $('btnSaveRepo') as HTMLButtonElement;
+  const draftCount = storedDrafts().length;
+  save.disabled = !bridgeConnected || bridgeConflict || (!bridgeDirty && draftCount === 0);
+  save.title = draftCount
+    ? `Save ${draftCount} modified sprite${draftCount === 1 ? '' : 's'} to the repository`
+    : 'Save all modified sprites to the repository';
+}
+
+function historySnapshot(spriteFile: SpriteFile = file, selected: PixelRect | null = selection): string {
+  return JSON.stringify({ v: 1, file: spriteFile, selection: selected });
+}
+
+function parseHistorySnapshot(snapshot: string): { file: SpriteFile; selection: PixelRect | null } {
+  const parsed = JSON.parse(snapshot) as { v?: unknown; file?: unknown; selection?: PixelRect | null };
+  if (parsed?.v === 1 && parsed.file) {
+    return { file: parsed.file as SpriteFile, selection: parsed.selection ?? null };
+  }
+  // Accept snapshots created before selection transforms were added during a
+  // hot-reload session.
+  return { file: parsed as unknown as SpriteFile, selection: null };
+}
+
+function rememberForUndo(snapshot = JSON.stringify(file)): void {
+  const state = historySnapshot(JSON.parse(snapshot) as SpriteFile, selection);
+  if (undoStack[undoStack.length - 1] !== state) undoStack.push(state);
+  if (undoStack.length > MAX_HISTORY) undoStack.shift();
+  redoStack.length = 0;
+}
+
+function updateBridgeMeta(state: BridgeState): void {
+  bridgeConnected = true;
+  bridgeRevision = state.revision;
+  bridgeDirty = state.dirty;
+  currentRepoPath = state.path;
+  if (state.path) currentFileName = state.path.split('/').at(-1)!;
+  // The shared document is authoritative. Keep the picker in sync on every
+  // acknowledgement too, not only when a remote file body is applied: an
+  // async <select> change can otherwise leave its old option painted while
+  // the canvas and bridge have already switched to the requested sprite.
+  const spriteSelect = $('selectSprite') as HTMLSelectElement;
+  spriteSelect.value = state.path ?? '';
+  if (state.path) {
+    // The URL is the reload contract for this stateless tool. Vite may reload
+    // after a JSON write; keeping the active sprite here prevents that reload
+    // from reopening the original/default query-string sprite.
+    const url = new URL(location.href);
+    if (url.searchParams.get('sprite') !== state.path) {
+      url.searchParams.set('sprite', state.path);
+      history.replaceState(null, '', url);
+    }
+  }
+  // Compare like with like. `normalize` supplies editor-only defaults for
+  // older files (for example `hd: true`); remembering the raw server shape
+  // made the publish timer treat a freshly opened, untouched sprite as an
+  // edit and immediately lock the shared document dirty.
+  lastSharedFile = JSON.stringify(normalize(structuredClone(state.file)));
+  if (!state.dirty) lastRepositoryFile = lastSharedFile;
+  bridgeConflict = false;
+  pendingBridgeState = null;
+  updateBridgeStatus();
+  schedulePreviewUpload();
+}
+
+function applyBridgeState(state: BridgeState, force = false): void {
+  if (!force && state.revision <= bridgeRevision) return;
+  const switchedSprite = state.path !== currentRepoPath;
+  const local = JSON.stringify(file);
+  const unsentLocalEdit = Boolean(lastSharedFile) && local !== lastSharedFile;
+  if (!force && state.source === bridgeClientId && unsentLocalEdit) {
+    // The bridge may echo a stroke or transform revision while the same
+    // pointer gesture has already advanced locally. Treat that echo as an
+    // acknowledgement, not an incoming document: replacing the canvas here
+    // would also clear the live selection halfway through a drag. Keeping the
+    // older shared snapshot in lastSharedFile makes publishSharedSprite send
+    // the newer local pixels immediately after the in-flight request settles.
+    updateBridgeMeta(state);
+    return;
+  }
+  if (!force && state.source !== bridgeClientId && unsentLocalEdit) {
+    pendingBridgeState = state;
+    bridgeConflict = true;
+    updateBridgeStatus();
+    return;
+  }
+
+  const incoming = JSON.stringify(state.file);
+  if (incoming !== local) {
+    if (switchedSprite) persistCurrentDraft();
+    rememberForUndo();
+    clearSelection(false);
+    file = normalize(structuredClone(state.file));
+    if (!file.anims[animName]) animName = Object.keys(file.anims)[0];
+    frameIdx = Math.min(frameIdx, anim().frames.length - 1);
+    currentChar = firstPaintChar();
+    editVersion++;
+    refreshUI();
+    updateUndoRedoButtons();
+    if (switchedSprite) fitGrid();
+    if (state.source !== bridgeClientId) flash(`updated by ${state.source}`);
+  }
+  updateBridgeMeta(state);
+  if (switchedSprite && state.path) configureCompositeForPath(state.path);
+}
+
+async function bridgeJson(path: string, init?: RequestInit): Promise<{ response: Response; body: Record<string, unknown> }> {
+  const response = await fetch(`${BRIDGE}${path}`, init);
+  const body = await response.json() as Record<string, unknown>;
+  return { response, body };
+}
+
+function selectionSnapshot(): SharedSelection | null {
+  if (!selection) return null;
+  return {
+    ...selection,
+    path: currentRepoPath,
+    anim: concreteAnimName(),
+    frame: frameIdx,
+    rows: cur().slice(selection.y, selection.y + selection.h)
+      .map((row) => row.slice(selection!.x, selection!.x + selection!.w)),
+    source: bridgeClientId,
+    updatedAt: Date.now(),
+  };
+}
+
+async function publishSelection(): Promise<void> {
+  if (!bridgeConnected) return;
+  try {
+    await bridgeJson('/selection', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selection: selectionSnapshot() }),
+    });
+  } catch {
+    // Selection is collaboration metadata, never worth taking the editor offline.
+  }
+}
+
+const WEAPON_BODY_PREFIX = 'sprite:';
+
+function spriteLabel(path: string): string {
+  return path
+    .replace(/\.json$/, '')
+    .replaceAll('-', ' ')
+    .replaceAll('/', ' / ');
+}
+
+function populateCompositeBodySelect(): void {
+  const select = $('compBody') as HTMLSelectElement;
+  for (const [path, spriteFile] of existingSprites) {
+    if (spriteFile.editor?.canEquipWeapon !== true) continue;
+    const option = document.createElement('option');
+    option.value = `${WEAPON_BODY_PREFIX}${path}`;
+    option.textContent = `body: ${spriteLabel(path)}`;
+    select.appendChild(option);
+  }
+}
+
+function selectedWeaponBody(bodySelection: string): SpriteFile | null {
+  if (!bodySelection.startsWith(WEAPON_BODY_PREFIX)) return null;
+  return existingSprites.get(bodySelection.slice(WEAPON_BODY_PREFIX.length)) ?? null;
+}
+
+populateCompositeBodySelect();
+
+async function openSharedSprite(path: string): Promise<boolean> {
+  try {
+    // A stroke can be waiting for the 160 ms publish tick when the user
+    // changes the selector. Flush it, then keep a browser-local draft keyed
+    // by sprite path. Switching documents must never require a repository
+    // save merely to protect work in progress.
+    if (lastSharedFile && JSON.stringify(file) !== lastSharedFile) {
+      await publishSharedSprite();
+    }
+    persistCurrentDraft();
+    const draft = readDraft(path);
+    const { response, body } = await bridgeJson('/open', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // The editor has just persisted the previous document. `force` only
+      // releases the bridge's single active slot; it never writes or deletes
+      // either document in the repository.
+      body: JSON.stringify({ path, source: bridgeClientId, force: true }),
+    });
+    if (response.status === 409) {
+      const shared = (body.state as BridgeState | null) ?? null;
+      if (shared) applyBridgeState(shared, true);
+      flash('could not switch the shared sprite');
+      return false;
+    }
+    if (!response.ok) throw new Error(String(body.error ?? response.statusText));
+    applyBridgeState(body as unknown as BridgeState, true);
+    if (draft) {
+      const restored = normalize(structuredClone(draft.file));
+      if (JSON.stringify(restored) !== JSON.stringify(file)) {
+        rememberForUndo();
+        clearSelection(false);
+        file = restored;
+        if (!file.anims[animName]) animName = Object.keys(file.anims)[0];
+        frameIdx = Math.min(frameIdx, anim().frames.length - 1);
+        currentChar = firstPaintChar();
+        editVersion++;
+        refreshUI();
+        fitGrid();
+        persistCurrentDraft();
+        await publishSharedSprite();
+        flash(draft.baseFile && draft.baseFile !== lastRepositoryFile
+          ? `restored local draft for ${path} (repository changed)`
+          : `restored local draft for ${path}`);
+        return true;
+      }
+      clearDraft(path);
+    }
+    flash(`opened shared ${path}`);
+    return true;
+  } catch {
+    bridgeConnected = false;
+    updateBridgeStatus();
+    return false;
+  }
+}
+
+async function publishSharedSprite(): Promise<void> {
+  if (bridgePublishing || bridgeConflict) return;
+  const serialized = JSON.stringify(file);
+  if (serialized === lastSharedFile) return;
+  bridgePublishing = true;
+  try {
+    const { response, body } = await bridgeJson('/state', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        path: currentRepoPath,
+        file,
+        baseRevision: bridgeRevision,
+        source: bridgeClientId,
+      }),
+    });
+    if (response.status === 409) {
+      pendingBridgeState = (body.state as BridgeState | null) ?? null;
+      bridgeConflict = true;
+      bridgeConnected = true;
+      updateBridgeStatus();
+      return;
+    }
+    if (!response.ok) throw new Error(String(body.error ?? response.statusText));
+    updateBridgeMeta(body as unknown as BridgeState);
+  } catch {
+    bridgeConnected = false;
+    updateBridgeStatus();
+  } finally {
+    bridgePublishing = false;
+    // A paint stroke may have continued while its previous version was sent.
+    if (!bridgeConflict && JSON.stringify(file) !== lastSharedFile) void publishSharedSprite();
+  }
+}
+
+async function saveWorkspaceSprites(): Promise<void> {
+  if (bridgeConflict) return;
+  persistCurrentDraft();
+  const documents = new Map<string, SpriteFile>();
+  for (const draft of storedDrafts()) documents.set(draft.path, draft.file);
+  // The in-memory document is newer than both the bridge and localStorage
+  // during a live pointer gesture, so it always wins for the active path.
+  if (currentRepoPath && (bridgeDirty || JSON.stringify(file) !== lastRepositoryFile)) {
+    documents.set(currentRepoPath, file);
+  }
+  if (!documents.size) {
+    flash('all sprites are already saved');
+    updateBridgeStatus();
+    return;
+  }
+  // Writing imported JSON modules can make Vite reload this page. Preserve
+  // the editing context separately from sprite data so Save All is visually
+  // inert: the same animation, frame, panels, composite, and selection return.
+  const viewState = captureEditorViewState();
+  persistEditorViewState(viewState);
+  try {
+    const { response, body } = await bridgeJson('/save-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        documents: [...documents].map(([path, spriteFile]) => ({ path, file: spriteFile })),
+        baseRevision: bridgeRevision,
+        source: bridgeClientId,
+      }),
+    });
+    if (response.status === 409) {
+      pendingBridgeState = (body.state as BridgeState | null) ?? null;
+      bridgeConflict = true;
+      updateBridgeStatus();
+      return;
+    }
+    if (!response.ok) throw new Error(String(body.error ?? response.statusText));
+    const saved = Array.isArray(body.saved) ? body.saved.map(String) : [];
+    for (const path of saved) clearDraft(path);
+    const state = body.state as BridgeState | null;
+    if (state) applyBridgeState(state, true);
+    restoreEditorViewState(viewState);
+    updateBridgeStatus();
+    flash(`saved ${saved.length} sprite${saved.length === 1 ? '' : 's'}`);
+  } catch (error) {
+    flash(`repo save failed: ${(error as Error).message}`);
+  }
+}
+
+function schedulePreviewUpload(): void {
+  window.clearTimeout(previewTimer);
+  if (!bridgeConnected || !bridgeRevision) return;
+  previewTimer = window.setTimeout(() => {
+    preview.toBlob((blob) => {
+      if (!blob) return;
+      void fetch(`${BRIDGE}/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'image/png', 'X-Sprite-Revision': String(bridgeRevision) },
+        body: blob,
+      }).catch(() => {});
+    }, 'image/png');
+  }, 180);
+}
+
+function connectBridgeEvents(): void {
+  const events = new EventSource(`${BRIDGE}/events`);
+  events.onopen = () => {
+    bridgeConnected = true;
+    updateBridgeStatus();
+  };
+  events.onerror = () => {
+    bridgeConnected = false;
+    updateBridgeStatus();
+  };
+  events.addEventListener('state', (event) => {
+    const state = JSON.parse((event as MessageEvent<string>).data) as BridgeState;
+    applyBridgeState(state);
+  });
+}
+
+async function initializeBridge(): Promise<void> {
+  connectBridgeEvents();
+  const requested = new URLSearchParams(location.search).get('sprite');
+  if (requested && await openSharedSprite(requested)) return;
+  try {
+    const { response, body } = await bridgeJson('/state');
+    if (response.ok) applyBridgeState(body as unknown as BridgeState, true);
+    else void publishSharedSprite();
+  } catch {
+    bridgeConnected = false;
+    updateBridgeStatus();
+  }
+}
+
+$('bridgeStatus').onclick = () => {
+  if (bridgeConflict && pendingBridgeState) applyBridgeState(pendingBridgeState, true);
+};
+$('btnSaveRepo').onclick = () => void saveWorkspaceSprites();
+
 /* ---------------- palette ui ---------------- */
+
+interface PaletteSortColor {
+  hue: number;
+  saturation: number;
+  lightness: number;
+  neutral: boolean;
+}
+
+function paletteSortColor(hex: string): PaletteSortColor | null {
+  const match = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!match) return null;
+  const value = Number.parseInt(match[1], 16);
+  const r = ((value >> 16) & 0xff) / 255;
+  const g = ((value >> 8) & 0xff) / 255;
+  const b = (value & 0xff) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const chroma = max - min;
+  const lightness = (max + min) / 2;
+  const saturation = chroma === 0 ? 0 : chroma / (1 - Math.abs(2 * lightness - 1));
+  let hue = 0;
+  if (chroma !== 0) {
+    if (max === r) hue = ((g - b) / chroma) % 6;
+    else if (max === g) hue = (b - r) / chroma + 2;
+    else hue = (r - g) / chroma + 4;
+    hue = (hue * 60 + 360) % 360;
+  }
+  // Hue becomes visually meaningless for near-grey ramps. Keep those ramps
+  // together and order them by value instead of scattering them around the
+  // chromatic palette.
+  return { hue, saturation, lightness, neutral: chroma < 0.08 || saturation < 0.12 };
+}
+
+function sortedPaletteEntries(): [string, string][] {
+  return Object.entries(pal())
+    .filter((entry): entry is [string, string] => entry[0] !== '.' && typeof entry[1] === 'string')
+    .map(([ch, color], index) => ({ ch, color, index, sort: paletteSortColor(color) }))
+    .sort((a, b) => {
+      if (!a.sort || !b.sort) return a.sort ? -1 : b.sort ? 1 : a.index - b.index;
+      if (a.sort.neutral !== b.sort.neutral) return a.sort.neutral ? -1 : 1;
+      if (a.sort.neutral) {
+        return a.sort.lightness - b.sort.lightness
+          || a.sort.saturation - b.sort.saturation
+          || a.index - b.index;
+      }
+      return a.sort.hue - b.sort.hue
+        || a.sort.lightness - b.sort.lightness
+        || a.sort.saturation - b.sort.saturation
+        || a.index - b.index;
+    })
+    .map(({ ch, color }) => [ch, color]);
+}
 
 function buildPalette(): void {
   const host = $('palette');
   host.innerHTML = '';
-  // Always ensure transparent/erase is at the top of the palette list
-  const entries: [string, string | null][] = [['.', null], ...Object.entries(pal()).filter(([ch]) => ch !== '.')];
+  // Sorting is display-only: palette characters and every authored frame stay
+  // byte-for-byte unchanged.
+  const entries: [string, string | null][] = [['.', null], ...sortedPaletteEntries()];
   for (const [ch, color] of entries) {
-    const row = document.createElement('div');
-    row.className = 'swatch';
-    const chip = document.createElement('span');
-    chip.className = 'chip' + (color ? '' : ' none');
-    if (color) chip.style.background = color;
     const b = document.createElement('button');
-    b.textContent = `${ch} ${color ?? '(erase)'}`;
-    b.className = ch === currentChar ? 'active' : '';
+    b.type = 'button';
+    b.className = `palette-cell${color ? '' : ' none'}${ch === currentChar ? ' active' : ''}`;
+    b.title = color ? `${ch}  ${color}` : '.  erase';
+    b.setAttribute('aria-label', color ? `palette ${ch}, ${color}` : 'erase transparent pixels');
+    if (color) b.style.background = color;
     b.onclick = () => {
       currentChar = ch;
       buildPalette();
     };
-    row.appendChild(chip);
-    row.appendChild(b);
-    host.appendChild(row);
+    host.appendChild(b);
   }
+  const usage = paletteUsage();
+  const total = Object.keys(pal()).filter((ch) => ch !== '.').length;
+  const used = [...usage.keys()].filter((ch) => ch !== '.' && ch in pal()).length;
+  $('paletteStatus').textContent = `${used}/${total}`;
 }
 
 $('btnAddColor').onclick = () => {
@@ -179,6 +990,87 @@ $('btnAddColor').onclick = () => {
   buildPalette();
   redraw();
 };
+
+/* ---------------- attachment anchors ---------------- */
+
+function buildAnchors(): void {
+  const names = Object.keys(file.anchors ?? {});
+  if (selectedAnchorName && !names.includes(selectedAnchorName)) selectedAnchorName = '';
+  // For player sheets, open on the primary weapon grip instead of whichever
+  // anchor happens to be serialized first.  After handedness is corrected,
+  // rearHand is often first and its screen-right marker looks like a broken
+  // weapon anchor even though it is the knight's left/off hand.
+  if (!selectedAnchorName && names.length) {
+    selectedAnchorName = names.includes('frontHand') ? 'frontHand' : names[0];
+  }
+
+  const select = $('anchorName') as HTMLSelectElement;
+  select.innerHTML = '<option value="">-- none --</option>';
+  for (const name of names) {
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = name;
+    select.appendChild(option);
+  }
+  select.value = selectedAnchorName;
+
+  const point = currentAnchor();
+  const x = $('anchorX') as HTMLInputElement;
+  const y = $('anchorY') as HTMLInputElement;
+  x.disabled = y.disabled = !selectedAnchorName;
+  x.value = point ? String(point.x) : '';
+  y.value = point ? String(point.y) : '';
+  ($('btnDelAnchor') as HTMLButtonElement).disabled = !selectedAnchorName;
+}
+
+($('anchorName') as HTMLSelectElement).onchange = (event) => {
+  selectedAnchorName = (event.target as HTMLSelectElement).value;
+  buildAnchors();
+  redraw();
+};
+
+$('btnAddAnchor').onclick = () => {
+  const name = prompt('anchor name (e.g. frontHand, rearHand, head):', '')?.trim();
+  if (!name) return;
+  if (file.anchors?.[name]) {
+    flash('anchor already exists');
+    return;
+  }
+  saveHistory();
+  const groups: Record<string, SpriteAnchor[]> = {};
+  for (const [animId, entry] of concreteAnims()) {
+    groups[animId] = entry.frames.map(() => ({
+      x: entry.frames[0][0].length / density() / 2,
+      y: entry.frames[0].length / density() / 2,
+    }));
+  }
+  (file.anchors ??= {})[name] = groups;
+  selectedAnchorName = name;
+  refreshUI();
+};
+
+$('btnDelAnchor').onclick = () => {
+  if (!selectedAnchorName || !file.anchors) return;
+  saveHistory();
+  delete file.anchors[selectedAnchorName];
+  selectedAnchorName = '';
+  refreshUI();
+};
+
+function onAnchorChange(): void {
+  if (!selectedAnchorName) return;
+  const x = ($('anchorX') as HTMLInputElement).valueAsNumber;
+  const y = ($('anchorY') as HTMLInputElement).valueAsNumber;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+  saveHistory();
+  Object.assign(ensureCurrentAnchor(), { x, y });
+  redraw();
+  syncIO();
+}
+
+($('anchorX') as HTMLInputElement).onchange = onAnchorChange;
+($('anchorY') as HTMLInputElement).onchange = onAnchorChange;
+($('showAnchors') as HTMLInputElement).onchange = () => redraw();
 
 /* ---------------- animations ui ---------------- */
 
@@ -197,9 +1089,14 @@ function buildAnims(): void {
     b.className = name === animName ? 'active' : '';
     b.style.marginRight = '4px';
     b.onclick = () => {
+      clearSelection(false);
       animName = name;
       frameIdx = 0;
+      previewStepping = false;
+      previewStepFrame = 0;
       refreshUI();
+      schedulePreviewUpload();
+      void publishSelection();
     };
     host.appendChild(b);
   }
@@ -215,6 +1112,9 @@ $('btnAddAnim').onclick = () => {
   }
   saveHistory();
   file.anims[name] = { fps: 8, frames: [emptyFrame(W(), H())] };
+  for (const anchors of Object.values(file.anchors ?? {})) {
+    anchors[name] = [{ x: W() / density() / 2, y: H() / density() / 2 }];
+  }
   animName = name;
   frameIdx = 0;
   refreshUI();
@@ -231,6 +1131,12 @@ $('btnRenameAnim').onclick = () => {
   const next: SpriteFile['anims'] = {};
   for (const [k, v] of Object.entries(file.anims)) next[k === animName ? name : k] = v;
   file.anims = next;
+  for (const anchors of Object.values(file.anchors ?? {})) {
+    if (anchors[animName]) {
+      anchors[name] = anchors[animName];
+      delete anchors[animName];
+    }
+  }
   animName = name;
   refreshUI();
 };
@@ -242,6 +1148,7 @@ $('btnDelAnim').onclick = () => {
   }
   saveHistory();
   delete file.anims[animName];
+  for (const anchors of Object.values(file.anchors ?? {})) delete anchors[animName];
   animName = Object.keys(file.anims)[0];
   frameIdx = 0;
   refreshUI();
@@ -256,7 +1163,224 @@ $('btnDelAnim').onclick = () => {
 function setPixel(x: number, y: number, ch: string): void {
   if (x < 0 || y < 0 || x >= W() || y >= H()) return;
   const f = cur();
+  if (f[y][x] === ch) return;
   f[y] = f[y].slice(0, x) + ch + f[y].slice(x + 1);
+  editVersion++;
+}
+
+interface Rgb { r: number; g: number; b: number }
+
+// Sprite files address colors with one-character palette keys. Soft tools
+// therefore bake their result into real palette entries rather than hiding
+// browser-only alpha in the canvas preview. Excluding dot, quote, and slash
+// keeps rows easy to read while leaving ample room for generated blends.
+const AUTO_PALETTE_CHARS =
+  '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#@$%&*+=!?~^;:,<>[]{}()_-|`';
+
+function parseRgb(color: string | null | undefined): Rgb | null {
+  const match = /^#([0-9a-f]{6})$/i.exec(color ?? '');
+  if (!match) return null;
+  const value = Number.parseInt(match[1], 16);
+  return { r: (value >> 16) & 0xff, g: (value >> 8) & 0xff, b: value & 0xff };
+}
+
+function rgbHex(color: Rgb): string {
+  const byte = (value: number) => Math.max(0, Math.min(255, Math.round(value)))
+    .toString(16).padStart(2, '0');
+  return `#${byte(color.r)}${byte(color.g)}${byte(color.b)}`;
+}
+
+function mixRgb(from: Rgb, to: Rgb, amount: number): Rgb {
+  return {
+    r: from.r + (to.r - from.r) * amount,
+    g: from.g + (to.g - from.g) * amount,
+    b: from.b + (to.b - from.b) * amount,
+  };
+}
+
+function colorDistance(a: Rgb, b: Rgb): number {
+  return (a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2;
+}
+
+function paletteUsage(): Map<string, number> {
+  const usage = new Map<string, number>();
+  for (const [, target] of concreteAnims()) {
+    for (const frame of target.frames) {
+      for (const row of frame) {
+        for (const ch of row) usage.set(ch, (usage.get(ch) ?? 0) + 1);
+      }
+    }
+  }
+  return usage;
+}
+
+interface PaletteCompaction { changed: boolean; merged: number; removed: number }
+
+function compactPalette(removeUnused = true): PaletteCompaction {
+  const usage = paletteUsage();
+  const groups = new Map<string, string[]>();
+  for (const [ch, color] of Object.entries(pal())) {
+    if (ch === '.' || typeof color !== 'string') continue;
+    const key = color.toLowerCase();
+    const group = groups.get(key) ?? [];
+    group.push(ch);
+    groups.set(key, group);
+  }
+
+  const remap = new Map<string, string>();
+  for (const chars of groups.values()) {
+    if (chars.length < 2) continue;
+    // Preserve the selected key when possible; otherwise keep the most-used
+    // key so the compacted JSON remains stable and readable.
+    const canonical = chars.includes(currentChar)
+      ? currentChar
+      : [...chars].sort((a, b) => (usage.get(b) ?? 0) - (usage.get(a) ?? 0))[0];
+    for (const ch of chars) if (ch !== canonical) remap.set(ch, canonical);
+  }
+
+  if (remap.size) {
+    for (const [, target] of concreteAnims()) {
+      target.frames = target.frames.map((frame) => frame.map((row) =>
+        [...row].map((ch) => remap.get(ch) ?? ch).join(''),
+      ));
+    }
+    currentChar = remap.get(currentChar) ?? currentChar;
+    for (const ch of remap.keys()) delete (file.palette ?? {})[ch];
+  }
+
+  const afterRemapUsage = paletteUsage();
+  let removed = 0;
+  if (removeUnused) {
+    for (const ch of Object.keys(pal())) {
+      if (ch === '.' || ch === currentChar || afterRemapUsage.has(ch)) continue;
+      delete (file.palette ?? {})[ch];
+      removed++;
+    }
+  }
+
+  const changed = remap.size > 0 || removed > 0;
+  if (changed) editVersion++;
+  return { changed, merged: remap.size, removed };
+}
+
+function paletteCharFor(color: Rgb): string {
+  // Small quantization absorbs imperceptible differences caused by repeated
+  // feathered stamps and lets neighboring edge pixels reuse colors.
+  const quantized = {
+    r: Math.min(255, Math.round(color.r / 8) * 8),
+    g: Math.min(255, Math.round(color.g / 8) * 8),
+    b: Math.min(255, Math.round(color.b / 8) * 8),
+  };
+  const hex = rgbHex(quantized);
+  let nearest = '';
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  for (const [ch, value] of Object.entries(pal())) {
+    const rgb = parseRgb(value);
+    if (!rgb) continue;
+    if ((value ?? '').toLowerCase() === hex) return ch;
+    const distance = colorDistance(quantized, rgb);
+    if (distance < nearestDistance) {
+      nearest = ch;
+      nearestDistance = distance;
+    }
+  }
+
+  // Reuse a visually equivalent swatch. Otherwise add the blend while a
+  // readable palette key remains, then degrade gracefully to the closest
+  // existing color instead of corrupting the one-character frame format.
+  if (nearest && nearestDistance <= 12 ** 2) return nearest;
+  const free = [...AUTO_PALETTE_CHARS].find((ch) => !(ch in pal()));
+  // A stroke can make a source color unused before the automatic compaction
+  // at mouse-up. Recycle that slot when the key space is full.
+  const usage = free ? null : paletteUsage();
+  const recyclable = free ?? Object.keys(pal()).find((ch) =>
+    ch !== '.' && ch !== currentChar && !usage?.has(ch),
+  );
+  if (!recyclable) return nearest || currentChar;
+  (file.palette ??= {})[recyclable] = hex;
+  strokePaletteChanged = true;
+  return recyclable;
+}
+
+function brushSize(): number {
+  const input = $('brushSize') as HTMLInputElement;
+  const value = Math.round(input.valueAsNumber || 1);
+  return Math.max(1, Math.min(32, value));
+}
+
+function brushStrength(dx: number, dy: number, size = brushSize()): number {
+  const distance = Math.hypot(dx, dy);
+  const outer = (size + 1) / 2;
+  if (distance >= outer) return 0;
+  const core = Math.max(0.55, outer * 0.55);
+  if (distance <= core) return 1;
+  return (outer - distance) / Math.max(0.001, outer - core);
+}
+
+function paintBrush(centerX: number, centerY: number, erase: boolean): void {
+  const selected = parseRgb(pal()[currentChar]);
+  if (!erase && (!selected || currentChar === '.')) erase = true;
+  const extent = Math.ceil((brushSize() + 1) / 2);
+  for (let dy = -extent; dy <= extent; dy++) {
+    for (let dx = -extent; dx <= extent; dx++) {
+      const strength = brushStrength(dx, dy);
+      if (strength <= 0) continue;
+      const x = centerX + dx;
+      const y = centerY + dy;
+      if (x < 0 || y < 0 || x >= W() || y >= H()) continue;
+      if (erase) {
+        setPixel(x, y, '.');
+        continue;
+      }
+      const oldChar = cur()[y][x];
+      const old = parseRgb(pal()[oldChar]);
+      if (strength >= 0.995) setPixel(x, y, currentChar);
+      else if (old) setPixel(x, y, paletteCharFor(mixRgb(old, selected!, strength)));
+      // The format has binary transparency. At the silhouette edge, use a
+      // half-coverage cutoff rather than inventing a matte-background color.
+      else if (strength >= 0.5) setPixel(x, y, currentChar);
+    }
+  }
+}
+
+function blurBrush(centerX: number, centerY: number, erase: boolean): void {
+  if (erase) {
+    paintBrush(centerX, centerY, true);
+    return;
+  }
+  const source = cur().slice();
+  const size = brushSize();
+  const extent = Math.ceil((size + 1) / 2);
+  const sampleRadius = Math.max(1, Math.floor(size / 2));
+  for (let dy = -extent; dy <= extent; dy++) {
+    for (let dx = -extent; dx <= extent; dx++) {
+      const strength = brushStrength(dx, dy, size);
+      if (strength <= 0) continue;
+      const x = centerX + dx;
+      const y = centerY + dy;
+      if (x < 0 || y < 0 || x >= W() || y >= H()) continue;
+      const original = parseRgb(pal()[source[y][x]]);
+      if (!original) continue; // blur color, but never grow the silhouette
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let count = 0;
+      for (let sy = -sampleRadius; sy <= sampleRadius; sy++) {
+        for (let sx = -sampleRadius; sx <= sampleRadius; sx++) {
+          if (Math.hypot(sx, sy) > sampleRadius + 0.25) continue;
+          const sample = parseRgb(pal()[source[y + sy]?.[x + sx]]);
+          if (!sample) continue;
+          r += sample.r;
+          g += sample.g;
+          b += sample.b;
+          count++;
+        }
+      }
+      if (!count) continue;
+      const average = { r: r / count, g: g / count, b: b / count };
+      setPixel(x, y, paletteCharFor(mixRgb(original, average, strength)));
+    }
+  }
 }
 
 function floodFill(startX: number, startY: number, fillChar: string): void {
@@ -288,29 +1412,437 @@ function floodFill(startX: number, startY: number, fillChar: string): void {
 
 grid.addEventListener('contextmenu', (e) => e.preventDefault());
 grid.addEventListener('mousedown', (e) => {
+  if (e.altKey && e.shiftKey && selectedAnchorName) {
+    e.preventDefault();
+    const bounds = grid.getBoundingClientRect();
+    const sourceX = Math.floor((e.clientX - bounds.left) / cellSize);
+    const sourceY = Math.floor((e.clientY - bounds.top) / cellSize);
+    saveHistory();
+    Object.assign(ensureCurrentAnchor(), { x: sourceX / density(), y: sourceY / density() });
+    buildAnchors();
+    redraw();
+    syncIO();
+    return;
+  }
+  if (e.altKey || currentTool === 'picker') {
+    e.preventDefault();
+    if (e.button !== 0) return;
+    picking = true;
+    pickColor(e);
+    return;
+  }
+  if (currentTool === 'select') {
+    e.preventDefault();
+    if (e.button === 2) {
+      setSelection(null);
+      void publishSelection();
+      return;
+    }
+    if (e.button !== 0) return;
+    const handle = selectionHandleAt(e);
+    if (selection && handle) {
+      beginSelectionHandleTransform(handle, e);
+      return;
+    }
+    const point = gridCell(e);
+    if (selection && pointInRect(point, selection)) {
+      beginSelectionMove(point);
+      return;
+    }
+    selectionStart = point;
+    ($('selectionAngle') as HTMLInputElement).value = '0';
+    setSelection({ x: point.x, y: point.y, w: 1, h: 1 });
+    return;
+  }
   saveHistory();
   erasing = e.button === 2;
   painting = true;
+  lastPaintCell = null;
   paint(e);
 });
 grid.addEventListener('mousemove', (e) => {
+  hoverPointer = { x: e.clientX, y: e.clientY };
+  updateBrushCursor();
+  if (picking) {
+    pickColor(e, false);
+    return;
+  }
+  if (selectionHandleTransform) {
+    updateSelectionHandleTransform(e);
+    return;
+  }
+  if (selectionStart) {
+    const point = gridCell(e);
+    const x = Math.min(selectionStart.x, point.x);
+    const y = Math.min(selectionStart.y, point.y);
+    setSelection({ x, y, w: Math.abs(point.x - selectionStart.x) + 1, h: Math.abs(point.y - selectionStart.y) + 1 });
+    return;
+  }
+  if (selectionMove) {
+    moveSelectionDrag(gridCell(e));
+    return;
+  }
+  updateSelectionCursor(e);
   if (painting && currentTool !== 'fill') paint(e); // Don't drag-fill for bucket
 });
+grid.addEventListener('mouseleave', () => {
+  hoverPointer = null;
+  grid.classList.remove('selection-movable');
+  if (!selectionHandleTransform) grid.style.cursor = '';
+  updateBrushCursor();
+});
 window.addEventListener('mouseup', () => {
+  picking = false;
+  if (selectionStart) {
+    selectionStart = null;
+    void publishSelection();
+  }
+  if (selectionMove) {
+    const moved = selectionMove.moved;
+    selectionMove = null;
+    if (moved) {
+      syncIO();
+      void publishSelection();
+    }
+  }
+  if (selectionHandleTransform) {
+    const moved = selectionHandleTransform.moved;
+    const handle = selectionHandleTransform.handle;
+    selectionHandleTransform = null;
+    if (moved) {
+      syncIO();
+      void publishSelection();
+      flash(handle === 'rotate' ? 'rotated selection' : 'resized selection');
+    }
+    ($('selectionAngle') as HTMLInputElement).value = '0';
+    grid.style.cursor = currentTool === 'select' ? 'cell' : '';
+  }
   if (painting) {
     painting = false;
+    lastPaintCell = null;
+    if (strokePaletteChanged) {
+      // Keep deliberately prepared but unused swatches during ordinary
+      // painting. The manual compact action is the explicit opt-in to remove
+      // those; automatic maintenance only coalesces exact duplicates.
+      compactPalette(false);
+      buildPalette();
+    }
+    strokePaletteChanged = false;
     syncIO();
   }
 });
 
+function gridCell(e: MouseEvent): { x: number; y: number } {
+  const r = grid.getBoundingClientRect();
+  return {
+    x: Math.max(0, Math.min(W() - 1, Math.floor((e.clientX - r.left) / cellSize))),
+    y: Math.max(0, Math.min(H() - 1, Math.floor((e.clientY - r.top) / cellSize))),
+  };
+}
+
+function pickColor(e: MouseEvent, announce = true): void {
+  const { x, y } = gridCell(e);
+  currentChar = cur()[y][x];
+  buildPalette();
+  if (announce) {
+    const color = pal()[currentChar];
+    flash(currentChar === '.' ? `picked transparency at ${x},${y}` : `picked ${currentChar} ${color} at ${x},${y}`);
+  }
+}
+
+function pointInRect(point: { x: number; y: number }, rect: PixelRect): boolean {
+  return point.x >= rect.x && point.y >= rect.y
+    && point.x < rect.x + rect.w && point.y < rect.y + rect.h;
+}
+
+function pixelsInRect(rect: PixelRect, rows = cur()): PixelClipboard {
+  return {
+    w: rect.w,
+    h: rect.h,
+    rows: Array.from({ length: rect.h }, (_, y) =>
+      rows[rect.y + y].slice(rect.x, rect.x + rect.w),
+    ),
+  };
+}
+
+function clearRect(rows: string[], rect: PixelRect): void {
+  for (let y = rect.y; y < rect.y + rect.h; y++) {
+    rows[y] = rows[y].slice(0, rect.x) + '.'.repeat(rect.w) + rows[y].slice(rect.x + rect.w);
+  }
+}
+
+function pastePixels(
+  rows: string[],
+  clip: PixelClipboard,
+  x: number,
+  y: number,
+  ignoreTransparent = false,
+): void {
+  const pastedW = Math.min(clip.w, rows[0].length - x);
+  const pastedH = Math.min(clip.h, rows.length - y);
+  for (let dy = 0; dy < pastedH; dy++) {
+    if (!ignoreTransparent) {
+      rows[y + dy] = rows[y + dy].slice(0, x)
+        + clip.rows[dy].slice(0, pastedW)
+        + rows[y + dy].slice(x + pastedW);
+      continue;
+    }
+    const destination = [...rows[y + dy]];
+    for (let dx = 0; dx < pastedW; dx++) {
+      const pixel = clip.rows[dy][dx];
+      if (pixel !== '.') destination[x + dx] = pixel;
+    }
+    rows[y + dy] = destination.join('');
+  }
+}
+
+function beginSelectionMove(point: { x: number; y: number }): void {
+  if (!selection) return;
+  const original = { ...selection };
+  const baseFrame = cur().slice();
+  const source = pixelsInRect(original, baseFrame);
+  clearRect(baseFrame, original);
+  selectionMove = {
+    start: point,
+    original,
+    source,
+    baseFrame,
+    last: { x: original.x, y: original.y },
+    moved: false,
+  };
+}
+
+function moveSelectionDrag(point: { x: number; y: number }): void {
+  if (!selectionMove) return;
+  const x = Math.max(0, Math.min(W() - selectionMove.original.w,
+    selectionMove.original.x + point.x - selectionMove.start.x));
+  const y = Math.max(0, Math.min(H() - selectionMove.original.h,
+    selectionMove.original.y + point.y - selectionMove.start.y));
+  if (x === selectionMove.last.x && y === selectionMove.last.y) return;
+  if (!selectionMove.moved) saveHistory();
+  selectionMove.moved = true;
+  selectionMove.last = { x, y };
+  const rows = selectionMove.baseFrame.slice();
+  pastePixels(rows, selectionMove.source, x, y, true);
+  anim().frames[frameIdx] = rows;
+  editVersion++;
+  setSelection({ x, y, w: selectionMove.original.w, h: selectionMove.original.h });
+}
+
+function gridPointer(e: MouseEvent): { x: number; y: number } {
+  const bounds = grid.getBoundingClientRect();
+  return {
+    x: (e.clientX - bounds.left) / cellSize,
+    y: (e.clientY - bounds.top) / cellSize,
+  };
+}
+
+function selectionHandlePositions(rect: PixelRect): Array<{
+  handle: SelectionHandle;
+  x: number;
+  y: number;
+  stemX?: number;
+  stemY?: number;
+}> {
+  const left = rect.x;
+  const right = rect.x + rect.w;
+  const top = rect.y;
+  const bottom = rect.y + rect.h;
+  const middleX = (left + right) / 2;
+  const middleY = (top + bottom) / 2;
+  const rotationGap = 24 / cellSize;
+  const rotateAbove = top * cellSize >= 32;
+  const rotateBelow = (H() - bottom) * cellSize >= 32;
+  const rotationHandle = rotateAbove
+    ? { handle: 'rotate' as const, x: middleX, y: top - rotationGap, stemX: middleX, stemY: top }
+    : rotateBelow
+      ? { handle: 'rotate' as const, x: middleX, y: bottom + rotationGap, stemX: middleX, stemY: bottom }
+      : { handle: 'rotate' as const, x: middleX, y: top + Math.min(rect.h / 2, rotationGap), stemX: middleX, stemY: top };
+  return [
+    { handle: 'nw', x: left, y: top },
+    { handle: 'n', x: middleX, y: top },
+    { handle: 'ne', x: right, y: top },
+    { handle: 'e', x: right, y: middleY },
+    { handle: 'se', x: right, y: bottom },
+    { handle: 's', x: middleX, y: bottom },
+    { handle: 'sw', x: left, y: bottom },
+    { handle: 'w', x: left, y: middleY },
+    rotationHandle,
+  ];
+}
+
+function selectionHandleAt(e: MouseEvent): SelectionHandle | null {
+  if (currentTool !== 'select' || !selection) return null;
+  const pointer = gridPointer(e);
+  const handles = selectionHandlePositions(selection);
+  // Rotation wins where a very small selection makes handles overlap.
+  handles.sort((a, b) => Number(b.handle === 'rotate') - Number(a.handle === 'rotate'));
+  for (const handle of handles) {
+    const distance = Math.hypot(
+      (pointer.x - handle.x) * cellSize,
+      (pointer.y - handle.y) * cellSize,
+    );
+    if (distance <= (handle.handle === 'rotate' ? 11 : 9)) return handle.handle;
+  }
+  return null;
+}
+
+function updateSelectionCursor(e?: MouseEvent): void {
+  grid.classList.remove('selection-movable');
+  if (currentTool !== 'select' || !selection || !e) {
+    grid.style.cursor = '';
+    return;
+  }
+  const handle = selectionHandleAt(e);
+  const cursors: Partial<Record<SelectionHandle, string>> = {
+    nw: 'nwse-resize', n: 'ns-resize', ne: 'nesw-resize', e: 'ew-resize',
+    se: 'nwse-resize', s: 'ns-resize', sw: 'nesw-resize', w: 'ew-resize',
+    rotate: 'grab',
+  };
+  if (handle) {
+    grid.style.cursor = cursors[handle] ?? 'default';
+    return;
+  }
+  if (pointInRect(gridCell(e), selection)) {
+    grid.classList.add('selection-movable');
+    grid.style.cursor = 'move';
+  } else {
+    grid.style.cursor = 'cell';
+  }
+}
+
+function beginSelectionHandleTransform(handle: SelectionHandle, e: MouseEvent): void {
+  if (!selection) return;
+  const original = { ...selection };
+  const sourceFrame = cur().slice();
+  const baseFrame = sourceFrame.slice();
+  clearRect(baseFrame, original);
+  const pointer = gridPointer(e);
+  const centerX = original.x + original.w / 2;
+  const centerY = original.y + original.h / 2;
+  selectionHandleTransform = {
+    handle,
+    original,
+    source: pixelsInRect(original, sourceFrame),
+    baseFrame,
+    startPointer: pointer,
+    startAngle: Math.atan2(pointer.y - centerY, pointer.x - centerX),
+    lastKey: '',
+    moved: false,
+  };
+  grid.style.cursor = handle === 'rotate' ? 'grabbing' : grid.style.cursor;
+}
+
+function applyLiveSelectionTransform(
+  transform: SelectionHandleTransform,
+  clip: PixelClipboard,
+  x: number,
+  y: number,
+  key: string,
+): void {
+  if (key === transform.lastKey) return;
+  if (!transform.moved) saveHistory();
+  transform.moved = true;
+  transform.lastKey = key;
+  const rows = transform.baseFrame.slice();
+  pastePixels(rows, clip, x, y, true);
+  anim().frames[frameIdx] = rows;
+  editVersion++;
+  setSelection({ x, y, w: clip.w, h: clip.h });
+}
+
+function updateSelectionHandleTransform(e: MouseEvent): void {
+  const transform = selectionHandleTransform;
+  if (!transform) return;
+  const pointer = gridPointer(e);
+  if (transform.handle === 'rotate') {
+    const centerX = transform.original.x + transform.original.w / 2;
+    const centerY = transform.original.y + transform.original.h / 2;
+    const angle = Math.atan2(pointer.y - centerY, pointer.x - centerX);
+    let degrees = (angle - transform.startAngle) * 180 / Math.PI;
+    degrees = ((degrees + 540) % 360) - 180;
+    if (e.shiftKey) degrees = Math.round(degrees / 15) * 15;
+    if (Math.abs(degrees) < 0.5) degrees = 0;
+    const roundedDegrees = Math.round(degrees * 10) / 10;
+    ($('selectionAngle') as HTMLInputElement).value = String(roundedDegrees);
+    const rotated = rotateSelectionRows(transform.source, roundedDegrees);
+    if (rotated.w > W() || rotated.h > H()) return;
+    const x = Math.max(0, Math.min(W() - rotated.w,
+      Math.round(centerX - rotated.w / 2)));
+    const y = Math.max(0, Math.min(H() - rotated.h,
+      Math.round(centerY - rotated.h / 2)));
+    applyLiveSelectionTransform(transform, rotated, x, y, `rotate:${roundedDegrees}`);
+    return;
+  }
+
+  const original = transform.original;
+  let left = original.x;
+  let right = original.x + original.w;
+  let top = original.y;
+  let bottom = original.y + original.h;
+  if (transform.handle.includes('w')) left = Math.max(0, Math.min(right - 1, Math.round(pointer.x)));
+  if (transform.handle.includes('e')) right = Math.max(left + 1, Math.min(W(), Math.round(pointer.x)));
+  if (transform.handle.includes('n')) top = Math.max(0, Math.min(bottom - 1, Math.round(pointer.y)));
+  if (transform.handle.includes('s')) bottom = Math.max(top + 1, Math.min(H(), Math.round(pointer.y)));
+  const width = right - left;
+  const height = bottom - top;
+  const scaled = scaleSelectionRows(transform.source, width, height);
+  applyLiveSelectionTransform(transform, scaled, left, top, `resize:${left},${top},${width},${height}`);
+}
+
+function setSelection(next: PixelRect | null): void {
+  selection = next;
+  ($('btnCut') as HTMLButtonElement).disabled = !selection;
+  ($('btnCopy') as HTMLButtonElement).disabled = !selection;
+  for (const id of ['btnRotateSelectionLeft', 'btnRotateSelectionRight', 'btnRotateSelection', 'btnResizeSelection']) {
+    ($(id) as HTMLButtonElement).disabled = !selection;
+  }
+  const selectionW = $('selectionW') as HTMLInputElement;
+  const selectionH = $('selectionH') as HTMLInputElement;
+  const selectionAngle = $('selectionAngle') as HTMLInputElement;
+  selectionW.disabled = !selection;
+  selectionH.disabled = !selection;
+  selectionAngle.disabled = !selection;
+  if (selection) {
+    selectionW.value = String(selection.w);
+    selectionH.value = String(selection.h);
+  }
+  $('selectionStatus').textContent = selection
+    ? `selection: ${selection.w}x${selection.h} at ${selection.x},${selection.y} · shared with agent`
+    : 'selection: none';
+  redraw();
+}
+
+function clearSelection(publish = true): void {
+  selectionStart = null;
+  selectionMove = null;
+  selectionHandleTransform = null;
+  grid.classList.remove('selection-movable');
+  grid.style.cursor = '';
+  setSelection(null);
+  if (publish) void publishSelection();
+}
+
 function paint(e: MouseEvent): void {
   const r = grid.getBoundingClientRect();
-  const x = Math.floor((e.clientX - r.left) / CELL);
-  const y = Math.floor((e.clientY - r.top) / CELL);
+  const x = Math.floor((e.clientX - r.left) / cellSize);
+  const y = Math.floor((e.clientY - r.top) / cellSize);
   if (currentTool === 'fill') {
     floodFill(x, y, erasing ? '.' : currentChar);
-  } else {
+  } else if (currentTool === 'draw') {
     setPixel(x, y, erasing ? '.' : currentChar);
+  } else if (currentTool === 'brush' || currentTool === 'blur') {
+    const previous = lastPaintCell;
+    if (previous?.x === x && previous.y === y) return;
+    const steps = previous ? Math.max(Math.abs(x - previous.x), Math.abs(y - previous.y)) : 0;
+    for (let step = 0; step <= steps; step++) {
+      const amount = steps ? step / steps : 1;
+      const stampX = previous ? Math.round(previous.x + (x - previous.x) * amount) : x;
+      const stampY = previous ? Math.round(previous.y + (y - previous.y) * amount) : y;
+      if (currentTool === 'brush') paintBrush(stampX, stampY, erasing);
+      else blurBrush(stampX, stampY, erasing);
+    }
+    lastPaintCell = { x, y };
   }
   redraw();
 }
@@ -325,37 +1857,80 @@ function buildFrames(): void {
     b.textContent = String(i + 1);
     b.className = i === frameIdx ? 'active' : '';
     b.onclick = () => {
+      clearSelection(false);
       frameIdx = i;
+      previewStepping = false;
       buildFrames();
+      buildAnchors();
       redraw();
+      schedulePreviewUpload();
+      void publishSelection();
     };
     host.appendChild(b);
   });
   $('frameOf').textContent = `${animName} · ${frameIdx + 1}/${anim().frames.length}`;
+  ($('btnFrameLeft') as HTMLButtonElement).disabled = frameIdx === 0;
+  ($('btnFrameRight') as HTMLButtonElement).disabled = frameIdx === anim().frames.length - 1;
 }
 
 $('btnAddFrame').onclick = () => {
   saveHistory();
   anim().frames.push(emptyFrame(W(), H()));
+  for (const anchors of Object.values(file.anchors ?? {})) {
+    const points = anchors[concreteAnimName()];
+    if (points) points.push({ ...(points.at(-1) ?? { x: W() / density() / 2, y: H() / density() / 2 }) });
+  }
   frameIdx = anim().frames.length - 1;
   buildFrames();
+  buildAnchors();
   redraw();
   syncIO();
 };
 $('btnDupFrame').onclick = () => {
   saveHistory();
   anim().frames.splice(frameIdx + 1, 0, [...cur()]);
+  for (const anchors of Object.values(file.anchors ?? {})) {
+    const points = anchors[concreteAnimName()];
+    if (points) points.splice(frameIdx + 1, 0, { ...(points[frameIdx] ?? { x: W() / density() / 2, y: H() / density() / 2 }) });
+  }
   frameIdx++;
   buildFrames();
+  buildAnchors();
   redraw();
   syncIO();
 };
+function moveSelectedFrame(delta: -1 | 1): void {
+  const frames = anim().frames;
+  const target = frameIdx + delta;
+  if (target < 0 || target >= frames.length) return;
+  saveHistory();
+  [frames[frameIdx], frames[target]] = [frames[target], frames[frameIdx]];
+  for (const anchors of Object.values(file.anchors ?? {})) {
+    const points = anchors[concreteAnimName()];
+    if (points?.length === frames.length) {
+      [points[frameIdx], points[target]] = [points[target], points[frameIdx]];
+    }
+  }
+  frameIdx = target;
+  previewStepping = false;
+  buildFrames();
+  buildAnchors();
+  redraw();
+  syncIO();
+  schedulePreviewUpload();
+  void publishSelection();
+}
+
+$('btnFrameLeft').onclick = () => moveSelectedFrame(-1);
+$('btnFrameRight').onclick = () => moveSelectedFrame(1);
 $('btnDelFrame').onclick = () => {
   if (anim().frames.length <= 1) return;
   saveHistory();
   anim().frames.splice(frameIdx, 1);
+  for (const anchors of Object.values(file.anchors ?? {})) anchors[concreteAnimName()]?.splice(frameIdx, 1);
   frameIdx = Math.min(frameIdx, anim().frames.length - 1);
   buildFrames();
+  buildAnchors();
   redraw();
   syncIO();
 };
@@ -363,7 +1938,7 @@ $('btnDelFrame').onclick = () => {
 $('btnResize').onclick = () => {
   const w = Number(($('w') as HTMLInputElement).value);
   const h = Number(($('h') as HTMLInputElement).value);
-  if (!(w >= 1 && h >= 1 && w <= 64 && h <= 64)) return;
+  if (!(w >= 1 && h >= 1 && w <= MAX_GRID_SIZE && h <= MAX_GRID_SIZE)) return;
   saveHistory();
   // Resize every frame of every animation so the sprite stays uniform.
   for (const [, a] of concreteAnims()) {
@@ -378,8 +1953,8 @@ $('btnResize').onclick = () => {
 };
 
 function redraw(): void {
-  grid.width = W() * CELL;
-  grid.height = H() * CELL;
+  grid.width = W() * cellSize;
+  grid.height = H() * cellSize;
   gctx.imageSmoothingEnabled = false;
 
   // 1. Draw base background (gaps/borders)
@@ -387,14 +1962,14 @@ function redraw(): void {
   gctx.fillRect(0, 0, grid.width, grid.height);
 
   // 2. Draw inset checkerboard for all cells
-  const inset = 3;
+  const inset = Math.max(1, Math.min(3, Math.floor(cellSize / 8)));
   for (let y = 0; y < H(); y++) {
     for (let x = 0; x < W(); x++) {
       gctx.fillStyle = (x + y) % 2 ? '#141830' : '#0f1226';
-      gctx.fillRect(x * CELL + inset, y * CELL + inset, CELL - inset * 2, CELL - inset * 2);
+      gctx.fillRect(x * cellSize + inset, y * cellSize + inset, cellSize - inset * 2, cellSize - inset * 2);
       
       gctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
-      gctx.strokeRect(x * CELL + inset + 0.5, y * CELL + inset + 0.5, CELL - inset * 2 - 1, CELL - inset * 2 - 1);
+      gctx.strokeRect(x * cellSize + inset + 0.5, y * cellSize + inset + 0.5, cellSize - inset * 2 - 1, cellSize - inset * 2 - 1);
     }
   }
 
@@ -414,7 +1989,7 @@ function redraw(): void {
               const color = (refFile.palette ?? {})[char] ?? PAL[char];
               if (color) {
                 gctx.fillStyle = color;
-                gctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+                gctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
               }
             }
           }
@@ -436,7 +2011,7 @@ function redraw(): void {
           const color = pal()[prevFrame[y]?.[x]];
           if (color) {
             gctx.fillStyle = color;
-            gctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+            gctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
           }
         }
       }
@@ -450,7 +2025,7 @@ function redraw(): void {
       const color = pal()[cur()[y][x]];
       if (color) {
         gctx.fillStyle = color;
-        gctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+        gctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
       }
     }
   }
@@ -459,15 +2034,84 @@ function redraw(): void {
   gctx.strokeStyle = 'rgba(148,176,194,0.1)';
   for (let x = 0; x <= W(); x++) {
     gctx.beginPath();
-    gctx.moveTo(x * CELL + 0.5, 0);
-    gctx.lineTo(x * CELL + 0.5, H() * CELL);
+    gctx.moveTo(x * cellSize + 0.5, 0);
+    gctx.lineTo(x * cellSize + 0.5, H() * cellSize);
     gctx.stroke();
   }
   for (let y = 0; y <= H(); y++) {
     gctx.beginPath();
-    gctx.moveTo(0, y * CELL + 0.5);
-    gctx.lineTo(W() * CELL, y * CELL + 0.5);
+    gctx.moveTo(0, y * cellSize + 0.5);
+    gctx.lineTo(W() * cellSize, y * cellSize);
     gctx.stroke();
+  }
+
+  if (selection) {
+    const x = selection.x * cellSize;
+    const y = selection.y * cellSize;
+    const w = selection.w * cellSize;
+    const h = selection.h * cellSize;
+    gctx.save();
+    gctx.fillStyle = 'rgba(255,205,117,0.12)';
+    gctx.fillRect(x, y, w, h);
+    gctx.strokeStyle = '#ffcd75';
+    gctx.lineWidth = 2;
+    gctx.setLineDash([Math.max(3, cellSize / 3), Math.max(2, cellSize / 5)]);
+    gctx.strokeRect(x + 1, y + 1, Math.max(0, w - 2), Math.max(0, h - 2));
+    gctx.restore();
+
+    const handles = selectionHandlePositions(selection);
+    const rotation = handles.find((handle) => handle.handle === 'rotate');
+    gctx.save();
+    gctx.setLineDash([]);
+    gctx.lineWidth = 2;
+    if (rotation?.stemX !== undefined && rotation.stemY !== undefined) {
+      gctx.strokeStyle = '#ffcd75';
+      gctx.beginPath();
+      gctx.moveTo(rotation.stemX * cellSize, rotation.stemY * cellSize);
+      gctx.lineTo(rotation.x * cellSize, rotation.y * cellSize);
+      gctx.stroke();
+    }
+    for (const handle of handles) {
+      const handleX = handle.x * cellSize;
+      const handleY = handle.y * cellSize;
+      if (handle.handle === 'rotate') {
+        gctx.fillStyle = '#38b764';
+        gctx.strokeStyle = '#07070d';
+        gctx.beginPath();
+        gctx.arc(handleX, handleY, 6, 0, Math.PI * 2);
+        gctx.fill();
+        gctx.stroke();
+      } else {
+        gctx.fillStyle = '#f4f4f4';
+        gctx.strokeStyle = '#33447f';
+        gctx.fillRect(handleX - 4, handleY - 4, 8, 8);
+        gctx.strokeRect(handleX - 4, handleY - 4, 8, 8);
+      }
+    }
+    gctx.restore();
+  }
+
+  if (($('showAnchors') as HTMLInputElement)?.checked) {
+    const point = currentAnchor();
+    if (point) {
+      const x = point.x * density() * cellSize;
+      const y = point.y * density() * cellSize;
+      const radius = Math.max(4, Math.min(10, cellSize * 0.7));
+      gctx.save();
+      gctx.strokeStyle = '#ffcd75';
+      gctx.lineWidth = 2;
+      gctx.beginPath();
+      gctx.moveTo(x - radius, y); gctx.lineTo(x + radius, y);
+      gctx.moveTo(x, y - radius); gctx.lineTo(x, y + radius);
+      gctx.stroke();
+      gctx.fillStyle = '#07070d';
+      gctx.fillRect(x - 2, y - 2, 4, 4);
+      gctx.font = `${Math.max(10, Math.min(14, cellSize))}px monospace`;
+      gctx.textBaseline = 'bottom';
+      gctx.fillStyle = '#ffcd75';
+      gctx.fillText(selectedAnchorName, x + radius + 3, y - 3);
+      gctx.restore();
+    }
   }
 }
 
@@ -481,12 +2125,21 @@ function redraw(): void {
 let editVersion = 0;
 let rebuiltVersion = -1;
 
-function maybeRebakeEditedWeapon(): void {
+function maybeRebakeEditedEquipment(): void {
   if (rebuiltVersion === editVersion) return;
   rebuiltVersion = editVersion;
+  if (currentRepoPath === PLAYER_BODY_SPRITE_PATH) {
+    rebuildKnightSprite(file);
+    // Player copied the old anim set during construction; rebuild the
+    // render-only mannequin so the shared draft appears immediately.
+    posePlayer = null;
+    posePlayerError = '';
+  }
   // "rusty-sword.json" -> visual id "rusty-sword"; a no-op for sheets
   // that aren't a registered sprite weapon.
-  rebuildSpriteWeapon(currentFileName.replace(/\.json$/, ''), file);
+  const id = currentFileName.replace(/\.json$/, '');
+  rebuildSpriteWeapon(id, file);
+  rebuildGearVisual(id, file);
 }
 
 /**
@@ -618,6 +2271,33 @@ function ensureEquipped(p: Player, slot: string, id: string | null): void {
   p.syncStats();
 }
 
+/** The body is the authority for a neutral composite's frame clock. */
+function resolveCompositeBodyClock(bodySelection: string) {
+  const selectedBody = selectedWeaponBody(bodySelection);
+  const bodyFile = selectedBody ?? file;
+  const requestedBodyAnim = resolveAnim(bodyFile, animName)
+    ? animName
+    : resolveAnim(bodyFile, 'idle')
+      ? 'idle'
+      : Object.keys(bodyFile.anims)[0];
+  const bodyAnim = resolveAnim(bodyFile, requestedBodyAnim);
+  const fullPlayerAnim = bodySelection === 'player'
+    ? KNIGHT_ANIMS.right[animName] ?? KNIGHT_ANIMS.right.idle ?? Object.values(KNIGHT_ANIMS.right)[0]
+    : undefined;
+  const renderedAnim = fullPlayerAnim ?? bodyAnim;
+  const fps = renderedAnim?.fps || 1;
+  const frameCount = Math.max(1, renderedAnim?.frames.length ?? 1);
+  return {
+    bodyFile,
+    requestedBodyAnim,
+    bodyAnim,
+    fps,
+    frameCount,
+    loop: renderedAnim?.loop !== false,
+    cycle: frameCount / fps,
+  };
+}
+
 /**
  * The joint view: body + held weapon + attack trail on one clock,
  * drawn by the same code the game uses (see Player.render — body at a
@@ -629,19 +2309,34 @@ function ensureEquipped(p: Player, slot: string, id: string | null): void {
  */
 function renderComposite(t: number): boolean {
   const weaponId = ($('compWeapon') as HTMLSelectElement).value;
-  if (!weaponId || !weapons.has(weaponId)) return false;
+  const hasWeapon = Boolean(weaponId && weapons.has(weaponId));
+  const bodySel = ($('compBody') as HTMLSelectElement).value;
+  // A full player is useful without a weapon when editing armor. Raw
+  // edited/knight sheets only become a composite when a weapon is chosen.
+  if (!hasWeapon && bodySel !== 'player') return false;
   const a = anim();
   if (!a || !a.frames.length) return false;
-  maybeRebakeEditedWeapon();
 
-  const wdef = weapons.get(weaponId);
-  const moves = movesOf(weaponId);
+  // Neutral equipment is frame-aligned to the selected body, so the body
+  // must own the preview clock too. Otherwise a one-frame weapon animation
+  // restarts the whole composite before a longer body animation can advance.
+  const bodyClock = resolveCompositeBodyClock(bodySel);
+  const {
+    bodyFile,
+    requestedBodyAnim,
+    bodyAnim,
+    fps: bodyFps,
+    cycle: bodyCycle,
+  } = bodyClock;
+
+  const wdef = hasWeapon ? weapons.get(weaponId) : null;
+  const moves = hasWeapon ? movesOf(weaponId) : [];
   // A move is a candidate when its animation is the one on screen — or
   // when its animation is MISSING from the sheet and the screen shows
   // 'attack', the pattern it falls back to in game. So the base swing
   // still previews every un-arted move via the selector, and a move
   // gains its own art the moment its animation exists.
-  const sheetHas = (name: string) => !!weaponVisuals.get(wdef.visual).animations?.includes(name);
+  const sheetHas = (name: string) => !!wdef && !!weaponVisuals.get(wdef.visual).animations?.includes(name);
   const candidates = moves.filter((m) =>
     m.def.animation === animName || (animName === 'attack' && !sheetHas(m.def.animation)));
   const wantKey = ($('compMove') as HTMLSelectElement).value;
@@ -659,20 +2354,20 @@ function renderComposite(t: number): boolean {
   const moveTag = move ? ` [${move.label}${speedup > 1 ? ` x${speedup.toFixed(1)}` : ''}]` : '';
   // When the previewed anim isn't one this weapon attacks WITH, say
   // where the attack lives instead of only that it's absent.
-  const noAttackHint = atkDef
+  const noAttackHint = !hasWeapon || atkDef
     ? ''
     : `  (attacks play on: ${[...new Set(moves.map((m) => m.def.animation))].join(', ') || 'none'})`;
 
   const fps = a.fps || 1;
-  const animCycle = a.frames.length / fps;
   const dur = Math.min(realDur, ATTACK_PREVIEW_CAP);
+  // An attack retains its authored weapon/attack timing. Everywhere else,
+  // body and attached weapon are one layered animation on the body's clock.
+  const animCycle = atkDef ? a.frames.length / fps : bodyCycle;
   const cycle = Math.max(animCycle, dur + 0.35);
   const tIn = t % cycle;
   const pose = atkDef && tIn <= dur
     ? { progress: Math.min(1, tIn / dur), def: atkDef }
     : undefined;
-
-  const bodySel = ($('compBody') as HTMLSelectElement).value;
 
   // Game parity: the game draws a world pixel at 8 screen px (ZOOM 4 x
   // WORLD_ZOOM 2), and judging attack art at any other size is judging
@@ -698,7 +2393,7 @@ function renderComposite(t: number): boolean {
   if (bodySel === 'player') {
     const p = getPosePlayer();
     if (p) {
-      ensureEquipped(p, 'weapon', weaponId);
+      ensureEquipped(p, 'weapon', hasWeapon ? weaponId : null);
       const gearOn = ($('compGear') as HTMLInputElement).checked;
       ensureEquipped(p, 'helmet', gearOn ? 'iron-helmet' : null);
       ensureEquipped(p, 'armor', gearOn ? 'steel-armor' : null);
@@ -723,7 +2418,7 @@ function renderComposite(t: number): boolean {
       pctx.fillText(
         posePlayerError
           ? 'player render failed: ' + posePlayerError.slice(0, 40)
-          : `${animName}${moveTag} + ${weaponId} (full player)${noAttackHint}`,
+          : `${animName}${moveTag}${hasWeapon ? ` + ${weaponId}` : ''} (full player)${noAttackHint}`,
         6, preview.height - 6,
       );
       return true;
@@ -744,46 +2439,55 @@ function renderComposite(t: number): boolean {
   let frame: number;
   let dw: number;
   let dh: number;
-  if (bodySel === 'knight') {
-    const set = KNIGHT_ANIMS.right;
-    const ka = set[animName] ?? set.idle ?? Object.values(set)[0];
-    frame = ka.loop === false
-      ? Math.min(Math.floor(tIn * ka.fps), ka.frames.length - 1)
-      : Math.floor(tIn * ka.fps) % ka.frames.length;
-    bodyImg = ka.frames[frame];
-    dw = baseKnight.w;
-    dh = baseKnight.h;
-  } else {
-    frame = a.loop === false
-      ? Math.min(Math.floor(tIn * fps), a.frames.length - 1)
-      : Math.floor(tIn * fps) % a.frames.length;
-    const rows = a.frames[frame] ?? [];
-    bodyImg = sprite(file.hd === false ? rows : epx(epx(rows)), pal());
-    const geo = geometryOf(file, rows);
-    dw = geo.w;
-    dh = geo.h;
+  if (!bodyAnim?.frames.length) {
+    pctx.restore();
+    return false;
   }
+  frame = bodyAnim.loop === false
+    ? Math.min(Math.floor(tIn * bodyFps), bodyAnim.frames.length - 1)
+    : Math.floor(tIn * bodyFps) % bodyAnim.frames.length;
+  const rows = bodyAnim.frames[frame] ?? [];
+  bodyImg = sprite(
+    bodyFile.hd === false ? rows : epx(epx(rows)),
+    bodyFile.palette ?? PAL,
+  );
+  const bodyGeometry = geometryOf(bodyFile, rows);
+  dw = bodyGeometry.w;
+  dh = bodyGeometry.h;
 
   pctx.save();
   pctx.translate(fx, fy);
   pctx.drawImage(bodyImg, -dw / 2, -dh, dw, dh);
+  // Attachment points are authored from the sheet's top-left, while
+  // held-weapon renderers work from the player's feet-centred origin.
+  // Feed the raw-sheet composite the same converted hand anchors that
+  // Player.render uses; otherwise it silently falls back to a generic
+  // hand position and cannot reveal handedness mistakes in draft art.
+  const sheetAnchor = (name: string): { x: number; y: number } | undefined => {
+    const concreteBodyAnim = concreteAnimNameOf(bodyFile, requestedBodyAnim);
+    const point = bodyFile.anchors?.[name]?.[concreteBodyAnim]?.[frame];
+    return point ? { x: point.x - dw / 2, y: point.y - dh } : undefined;
+  };
   // The weapon draw needs an animation its sheet actually has; outside
   // an attack pose, fall back to idle rather than throwing mid-paint.
-  const known = weaponVisuals.get(wdef.visual).animations;
+  const known = weaponVisuals.get(wdef!.visual).animations;
   const weaponAnim = !known || known.includes(animName) ? animName : 'idle';
   try {
-    drawHeldWeapon(pctx, wdef.visual, {
+    drawHeldWeapon(pctx, wdef!.visual, {
       facing: 1, anim: weaponAnim, frame, animT: tIn,
-      bodyW: dw, bodyH: dh, attack: pose,
+      bodyW: dw, bodyH: dh,
+      frontHand: sheetAnchor('frontHand'),
+      rearHand: sheetAnchor('rearHand'),
+      attack: pose,
     });
   } catch { /* a half-painted sheet mid-edit; next frame will catch up */ }
   pctx.restore();
 
   if (pose && ($('compTrail') as HTMLInputElement).checked) {
     try {
-      drawWeaponTrail(pctx, wdef.visual, {
+      drawWeaponTrail(pctx, wdef!.visual, {
         x: fx, y: fy - dh * 0.45, facing: 1,
-        colors: [...wdef.colors], attack: pose,
+        colors: [...wdef!.colors], attack: pose,
       });
     } catch { /* ditto */ }
   }
@@ -803,27 +2507,74 @@ function renderComposite(t: number): boolean {
   return true;
 }
 
+function currentPreviewTiming(): { fps: number; frameCount: number; loop: boolean } {
+  const bodySelection = ($('compBody') as HTMLSelectElement).value;
+  const weaponId = ($('compWeapon') as HTMLSelectElement).value;
+  if ((weaponId && weapons.has(weaponId)) || bodySelection === 'player') {
+    const clock = resolveCompositeBodyClock(bodySelection);
+    return { fps: clock.fps, frameCount: clock.frameCount, loop: clock.loop };
+  }
+  const a = anim();
+  return {
+    fps: a?.fps || 1,
+    frameCount: Math.max(1, a?.frames.length ?? 1),
+    loop: a?.loop !== false,
+  };
+}
+
+function previewFrameAt(t: number, timing: ReturnType<typeof currentPreviewTiming>): number {
+  const raw = Math.floor(t * timing.fps);
+  return timing.loop
+    ? ((raw % timing.frameCount) + timing.frameCount) % timing.frameCount
+    : Math.min(raw, timing.frameCount - 1);
+}
+
 function renderPreview(): void {
+  maybeRebakeEditedEquipment();
   const hd = ($('hd') as HTMLInputElement).checked;
   const p = pal();
-  const t = performance.now() / 1000;
+  const a = anim();
+  // Editing is frame-oriented: the game-scale preview must show the frame
+  // selected in the grid unless the author explicitly asks to play the
+  // animation. Previously the preview always ran on wall-clock time, so its
+  // body, reference, and weapon anchors rarely matched the frame being edited.
+  const previewPlaying = ($('previewPlay') as HTMLInputElement).checked;
+  const timing = currentPreviewTiming();
+  const pausedFrame = previewStepping
+    ? ((previewStepFrame % timing.frameCount) + timing.frameCount) % timing.frameCount
+    : Math.min(frameIdx, timing.frameCount - 1);
+  const t = previewPlaying ? performance.now() / 1000 : pausedFrame / timing.fps;
+  const displayedFrame = previewPlaying ? previewFrameAt(t, timing) : pausedFrame;
+  $('previewFrame').textContent = `${displayedFrame + 1}/${timing.frameCount}`;
 
   const composite = renderComposite(t);
-  // Give the game-scale composite the panel width it needs; hand the
-  // space back the moment the weapon is deselected.
+  const context = $('previewContext');
+  if (composite) {
+    const weapon = ($('compWeapon') as HTMLSelectElement).value || 'no weapon';
+    const bodySelect = $('compBody') as HTMLSelectElement;
+    const body = bodySelect.selectedOptions[0]?.textContent?.replace(/^body:\s*/, '') ?? bodySelect.value;
+    const moveSelect = $('compMove') as HTMLSelectElement;
+    const move = moveSelect.value
+      ? moveSelect.selectedOptions[0]?.textContent?.replace(/^move:\s*/, '')
+      : undefined;
+    context.textContent = [animName, weapon, body, move].filter(Boolean).join(' · ');
+  } else {
+    context.textContent = `${animName} · sprite`;
+  }
+  // The preview is persistent across workspace tabs, so its composite
+  // determines the panel width regardless of which editor panel is open.
   $('side-right').classList.toggle('wide', composite);
   if (composite) {
     requestAnimationFrame(renderPreview);
     return;
   }
 
-  const a = anim();
   if (!a || !a.frames.length) {
     requestAnimationFrame(renderPreview);
     return;
   }
 
-  const idx = Math.floor(t * (a.fps || 1)) % a.frames.length;
+  const idx = displayedFrame;
   const rows = a.frames[idx] ?? [];
 
   const { w, h, hitbox } = geometryOf(file, rows);
@@ -855,7 +2606,11 @@ function renderPreview(): void {
   if (refFile && showRef) {
     const refAnim = resolveAnim(refFile, animName in refFile.anims ? animName : Object.keys(refFile.anims)[0]);
     if (refAnim) {
-      const refIdx = refAnim.frames.length ? Math.floor(t * (refAnim.fps || 1)) % refAnim.frames.length : 0;
+      const refIdx = refAnim.frames.length
+        ? previewPlaying
+          ? Math.floor(t * (refAnim.fps || 1)) % refAnim.frames.length
+          : Math.min(displayedFrame, refAnim.frames.length - 1)
+        : 0;
       const refRows = refAnim.frames[refIdx] ?? [];
 
       const refGeometry = geometryOf(refFile, refRows);
@@ -924,11 +2679,13 @@ $('btnLoad').onclick = () => ($('fileInput') as HTMLInputElement).click();
       frameIdx = 0;
       currentChar = firstPaintChar();
       currentFileName = f.name;
+      currentRepoPath = null;
       editVersion++;
       undoStack.length = 0;
       redoStack.length = 0;
       updateUndoRedoButtons();
       refreshUI();
+      fitGrid();
       flash(`loaded ${f.name}`);
       ($('selectSprite') as HTMLSelectElement).value = ''; // clear dropdown
     } catch (err) {
@@ -939,9 +2696,14 @@ $('btnLoad').onclick = () => ($('fileInput') as HTMLInputElement).click();
   input.value = ''; // allow re-loading the same file
 };
 
-$('selectSprite').onchange = (e) => {
+$('selectSprite').onchange = async (e) => {
   const val = (e.target as HTMLSelectElement).value;
   if (!val) return;
+  if (await openSharedSprite(val)) return;
+  // A connected bridge returning false refused the switch to protect dirty
+  // shared work. Do not then load a local copy anyway: that would make the
+  // picker, canvas, preview, and bridge each describe different sprites.
+  if (bridgeConnected) return;
   try {
     file = existingSprite(val);
     animName = Object.keys(file.anims)[0];
@@ -951,23 +2713,15 @@ $('selectSprite').onchange = (e) => {
 
     const parts = val.split('/');
     currentFileName = parts[parts.length - 1];
+    currentRepoPath = val;
 
-    // Loading a weapon sheet sets the composite up for it: the knight
-    // underneath, this weapon in hand — the view you actually want when
-    // touching up a sword's attack frames.
-    const stem = currentFileName.replace(/\.json$/, '');
-    if (val.includes('equipment/') && weapons.has(stem)) {
-      ($('compWeapon') as HTMLSelectElement).value = stem;
-      ($('compBody') as HTMLSelectElement).value = 'player';
-      // Setting .value programmatically fires no change event, so the
-      // move list must be rebuilt by hand or it stays empty.
-      rebuildMoveSelect(stem);
-    }
+    configureCompositeForPath(val);
 
     undoStack.length = 0;
     redoStack.length = 0;
     updateUndoRedoButtons();
     refreshUI();
+    fitGrid();
     flash(`loaded ${val}`);
   } catch (err) {
     flash(`load failed: ${(err as Error).message}`);
@@ -1023,16 +2777,350 @@ function normalize(raw: unknown): SpriteFile {
 
 /* ---------------- tools & reference & nudge ---------------- */
 
-$('btnToolDraw').onclick = () => {
-  currentTool = 'draw';
-  $('btnToolDraw').classList.add('active');
-  $('btnToolFill').classList.remove('active');
+function updateToolUI(): void {
+  const visibleTool: EditorTool = altPickerActive ? 'picker' : currentTool;
+  $('btnToolDraw').classList.toggle('active', visibleTool === 'draw');
+  $('btnToolBrush').classList.toggle('active', visibleTool === 'brush');
+  $('btnToolBlur').classList.toggle('active', visibleTool === 'blur');
+  $('btnToolFill').classList.toggle('active', visibleTool === 'fill');
+  $('btnToolPicker').classList.toggle('active', visibleTool === 'picker');
+  $('btnToolSelect').classList.toggle('active', visibleTool === 'select');
+  grid.classList.toggle('selecting', visibleTool === 'select');
+  grid.classList.toggle('picking', visibleTool === 'picker');
+  grid.classList.toggle('soft-tool', visibleTool === 'brush' || visibleTool === 'blur');
+  if (visibleTool !== 'select') {
+    grid.classList.remove('selection-movable');
+    grid.style.cursor = '';
+  } else if (!selectionHandleTransform) {
+    grid.style.cursor = 'cell';
+  }
+  const hasSize = currentTool === 'brush' || currentTool === 'blur';
+  $('brushSizeConfig').hidden = !hasSize;
+  $('toolConfigEmpty').hidden = hasSize;
+  $('toolConfigTitle').textContent = hasSize
+    ? `${currentTool === 'brush' ? 'soft brush' : 'blur'} settings`
+    : 'tool settings';
+  $('brushSizeLabel').textContent = currentTool === 'blur' ? 'blur size' : 'brush size';
+  $('toolConfigHint').textContent = currentTool === 'blur'
+    ? 'Averages neighboring colors at the center and feathers the effect toward the edge.'
+    : 'The solid center overwrites color; the soft edge blends into neighboring pixels.';
+  updateBrushCursor();
+}
+
+function updateBrushCursor(): void {
+  const visible = Boolean(hoverPointer)
+    && !altPickerActive
+    && (currentTool === 'brush' || currentTool === 'blur');
+  brushCursor.style.display = visible ? 'block' : 'none';
+  if (!visible || !hoverPointer) return;
+  const diameter = Math.max(3, (brushSize() + 1) * cellSize);
+  brushCursor.style.left = `${hoverPointer.x}px`;
+  brushCursor.style.top = `${hoverPointer.y}px`;
+  brushCursor.style.width = `${diameter}px`;
+  brushCursor.style.height = `${diameter}px`;
+  brushCursor.style.color = currentTool === 'blur' ? '#68c6ff' : '#ffcd75';
+  brushCursor.classList.toggle('blur', currentTool === 'blur');
+}
+
+function setTool(tool: EditorTool): void {
+  currentTool = tool;
+  if (tool === 'brush' || tool === 'blur') activatePanel('left', 'left-tool');
+  if (tool === 'select') activatePanel('right', 'right-transform');
+  updateToolUI();
+  redraw();
+}
+
+$('btnToolDraw').onclick = () => setTool('draw');
+$('btnToolBrush').onclick = () => setTool('brush');
+$('btnToolBlur').onclick = () => setTool('blur');
+$('btnToolFill').onclick = () => setTool('fill');
+$('btnToolPicker').onclick = () => setTool('picker');
+$('btnToolSelect').onclick = () => setTool('select');
+
+$('btnCompactPalette').onclick = () => {
+  const before = JSON.stringify(file);
+  const result = compactPalette();
+  if (!result.changed) {
+    flash('palette already compact');
+    return;
+  }
+  rememberForUndo(before);
+  updateUndoRedoButtons();
+  buildPalette();
+  redraw();
+  syncIO();
+  flash(`palette compacted: ${result.merged} duplicate, ${result.removed} unused`);
 };
-$('btnToolFill').onclick = () => {
-  currentTool = 'fill';
-  $('btnToolFill').classList.add('active');
-  $('btnToolDraw').classList.remove('active');
+
+function setBrushSize(next: number): void {
+  const input = $('brushSize') as HTMLInputElement;
+  input.value = String(Math.max(1, Math.min(32, Math.round(next))));
+  updateBrushCursor();
+}
+
+($('brushSize') as HTMLInputElement).oninput = (e) => {
+  setBrushSize((e.target as HTMLInputElement).valueAsNumber);
 };
+$('btnBrushSizeDown').onclick = () => setBrushSize(brushSize() - 1);
+$('btnBrushSizeUp').onclick = () => setBrushSize(brushSize() + 1);
+
+function copySelection(): PixelClipboard | null {
+  const snapshot = selectionSnapshot();
+  if (!snapshot) return null;
+  pixelClipboard = { w: snapshot.w, h: snapshot.h, rows: snapshot.rows };
+  const envelope = JSON.stringify({ kind: 'hitstop-sprite-selection', v: 1, ...snapshot });
+  void navigator.clipboard?.writeText(envelope).catch(() => {});
+  flash(`copied ${snapshot.w}x${snapshot.h} pixels`);
+  return pixelClipboard;
+}
+
+function cutSelection(): void {
+  if (!selection || !copySelection()) return;
+  saveHistory();
+  for (let y = selection.y; y < selection.y + selection.h; y++) {
+    const row = cur()[y];
+    cur()[y] = row.slice(0, selection.x) + '.'.repeat(selection.w) + row.slice(selection.x + selection.w);
+  }
+  redraw();
+  syncIO();
+  void publishSelection();
+  flash(`cut ${selection.w}x${selection.h} pixels`);
+}
+
+function parsePixelClipboard(text: string): PixelClipboard | null {
+  try {
+    const value = JSON.parse(text) as { kind?: unknown; w?: unknown; h?: unknown; rows?: unknown };
+    if (value.kind !== 'hitstop-sprite-selection' || !Number.isInteger(value.w) || !Number.isInteger(value.h)
+      || !Array.isArray(value.rows) || !value.rows.every((row) => typeof row === 'string')) return null;
+    const w = Number(value.w);
+    const h = Number(value.h);
+    if (w < 1 || h < 1 || value.rows.length !== h || value.rows.some((row) => row.length !== w)) return null;
+    return { w, h, rows: value.rows as string[] };
+  } catch {
+    return null;
+  }
+}
+
+async function pasteSelection(): Promise<void> {
+  let clip = pixelClipboard;
+  if (!clip) {
+    try { clip = parsePixelClipboard(await navigator.clipboard.readText()); } catch { /* permission denied */ }
+  }
+  if (!clip) {
+    flash('copy a sprite selection first');
+    return;
+  }
+  const x = selection?.x ?? 0;
+  const y = selection?.y ?? 0;
+  const pastedW = Math.min(clip.w, W() - x);
+  const pastedH = Math.min(clip.h, H() - y);
+  if (pastedW <= 0 || pastedH <= 0) return;
+  saveHistory();
+  const rows = cur().slice();
+  // A copied selection behaves like an image object: transparent pixels
+  // reveal the destination instead of punching holes through it.
+  pastePixels(rows, clip, x, y, true);
+  anim().frames[frameIdx] = rows;
+  editVersion++;
+  setSelection({ x, y, w: pastedW, h: pastedH });
+  syncIO();
+  void publishSelection();
+  flash(`pasted ${pastedW}x${pastedH} pixels`);
+}
+
+function commitSelectionPixels(
+  clip: PixelClipboard,
+  x: number,
+  y: number,
+  message: string,
+): void {
+  if (!selection) return;
+  saveHistory();
+  const rows = cur().slice();
+  clearRect(rows, selection);
+  pastePixels(rows, clip, x, y, true);
+  anim().frames[frameIdx] = rows;
+  editVersion++;
+  setSelection({ x, y, w: clip.w, h: clip.h });
+  syncIO();
+  void publishSelection();
+  flash(message);
+}
+
+function moveSelectionBy(dx: number, dy: number): void {
+  if (!selection) return;
+  const x = Math.max(0, Math.min(W() - selection.w, selection.x + dx));
+  const y = Math.max(0, Math.min(H() - selection.h, selection.y + dy));
+  if (x === selection.x && y === selection.y) return;
+  commitSelectionPixels(pixelsInRect(selection), x, y, `moved selection to ${x},${y}`);
+}
+
+function scaleSelectionRows(source: PixelClipboard, w: number, h: number): PixelClipboard {
+  return {
+    w,
+    h,
+    rows: Array.from({ length: h }, (_, y) => {
+      const sourceY = Math.min(source.h - 1, Math.floor(y * source.h / h));
+      return Array.from({ length: w }, (_, x) => {
+        const sourceX = Math.min(source.w - 1, Math.floor(x * source.w / w));
+        return source.rows[sourceY][sourceX];
+      }).join('');
+    }),
+  };
+}
+
+function resizeSelection(): void {
+  if (!selection) return;
+  const requestedW = Math.round(($('selectionW') as HTMLInputElement).valueAsNumber);
+  const requestedH = Math.round(($('selectionH') as HTMLInputElement).valueAsNumber);
+  if (!(requestedW >= 1 && requestedH >= 1 && requestedW <= W() && requestedH <= H())) {
+    flash(`selection size must fit ${W()}x${H()} canvas`);
+    setSelection(selection);
+    return;
+  }
+  if (requestedW === selection.w && requestedH === selection.h) {
+    flash('selection already has that size');
+    return;
+  }
+  const source = pixelsInRect(selection);
+  const scaled = scaleSelectionRows(source, requestedW, requestedH);
+  const x = Math.max(0, Math.min(W() - requestedW,
+    Math.round(selection.x + (selection.w - requestedW) / 2)));
+  const y = Math.max(0, Math.min(H() - requestedH,
+    Math.round(selection.y + (selection.h - requestedH) / 2)));
+  commitSelectionPixels(scaled, x, y, `resized selection to ${requestedW}x${requestedH}`);
+}
+
+function rotateSelectionQuarter(source: PixelClipboard, clockwise: boolean): PixelClipboard {
+  return {
+    w: source.h,
+    h: source.w,
+    rows: Array.from({ length: source.w }, (_, y) =>
+      Array.from({ length: source.h }, (_, x) => clockwise
+        ? source.rows[source.h - 1 - x][y]
+        : source.rows[x][source.w - 1 - y],
+      ).join(''),
+    ),
+  };
+}
+
+/**
+ * Rotates indexed sprite pixels without creating gaps. Each destination
+ * pixel is mapped back into the original selection and samples its nearest
+ * source pixel. Quarter turns stay lossless; arbitrary angles necessarily
+ * rasterize onto a new axis-aligned pixel grid.
+ */
+function rotateSelectionRows(source: PixelClipboard, degrees: number): PixelClipboard {
+  const normalized = ((degrees % 360) + 360) % 360;
+  const quarterTurns = Math.round(normalized / 90) % 4;
+  const quarterAngle = quarterTurns * 90;
+  if (Math.abs(normalized - quarterAngle) < 0.0001 || Math.abs(normalized - 360) < 0.0001) {
+    let result = source;
+    for (let turn = 0; turn < quarterTurns; turn++) result = rotateSelectionQuarter(result, true);
+    return result;
+  }
+
+  const radians = degrees * Math.PI / 180;
+  const cosine = Math.cos(radians);
+  const sine = Math.sin(radians);
+  const width = Math.max(1, Math.ceil(
+    Math.abs(source.w * cosine) + Math.abs(source.h * sine) - 1e-9,
+  ));
+  const height = Math.max(1, Math.ceil(
+    Math.abs(source.w * sine) + Math.abs(source.h * cosine) - 1e-9,
+  ));
+  return {
+    w: width,
+    h: height,
+    rows: Array.from({ length: height }, (_, y) =>
+      Array.from({ length: width }, (_, x) => {
+        const destinationX = x + 0.5 - width / 2;
+        const destinationY = y + 0.5 - height / 2;
+        const sourceX = cosine * destinationX + sine * destinationY + source.w / 2;
+        const sourceY = -sine * destinationX + cosine * destinationY + source.h / 2;
+        const sampleX = Math.floor(sourceX);
+        const sampleY = Math.floor(sourceY);
+        return sampleX >= 0 && sampleX < source.w && sampleY >= 0 && sampleY < source.h
+          ? source.rows[sampleY][sampleX]
+          : '.';
+      }).join(''),
+    ),
+  };
+}
+
+function rotateSelectionBy(degrees: number, message?: string): void {
+  if (!selection || !Number.isFinite(degrees)) return;
+  if (Math.abs(degrees % 360) < 0.0001) {
+    flash('enter a non-zero rotation');
+    return;
+  }
+  const source = pixelsInRect(selection);
+  const rotated = rotateSelectionRows(source, degrees);
+  if (rotated.w > W() || rotated.h > H()) {
+    flash(`rotated selection does not fit ${W()}x${H()} canvas`);
+    return;
+  }
+  const x = Math.max(0, Math.min(W() - rotated.w,
+    Math.round(selection.x + (selection.w - rotated.w) / 2)));
+  const y = Math.max(0, Math.min(H() - rotated.h,
+    Math.round(selection.y + (selection.h - rotated.h) / 2)));
+  commitSelectionPixels(rotated, x, y, message ?? `rotated selection by ${degrees}°`);
+}
+
+function rotateSelection(clockwise: boolean): void {
+  rotateSelectionBy(clockwise ? 90 : -90, `rotated selection ${clockwise ? 'right' : 'left'} 90°`);
+}
+
+$('btnCopy').onclick = () => { copySelection(); };
+$('btnCut').onclick = () => cutSelection();
+$('btnPaste').onclick = () => void pasteSelection();
+$('btnRotateSelectionLeft').onclick = () => rotateSelection(false);
+$('btnRotateSelectionRight').onclick = () => rotateSelection(true);
+$('btnRotateSelection').onclick = () => {
+  const input = $('selectionAngle') as HTMLInputElement;
+  rotateSelectionBy(input.valueAsNumber);
+  input.value = '0';
+};
+$('btnResizeSelection').onclick = () => resizeSelection();
+($('selectionW') as HTMLInputElement).addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') resizeSelection();
+});
+($('selectionH') as HTMLInputElement).addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') resizeSelection();
+});
+($('selectionAngle') as HTMLInputElement).addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') return;
+  const input = event.currentTarget as HTMLInputElement;
+  rotateSelectionBy(input.valueAsNumber);
+  input.value = '0';
+});
+
+const GRID_ZOOMS = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64];
+
+function setGridZoom(value: number): void {
+  cellSize = Math.max(GRID_ZOOMS[0], Math.min(GRID_ZOOMS.at(-1)!, Math.round(value)));
+  ($('gridZoomPercent') as HTMLInputElement).value = String(cellSize * 100);
+  redraw();
+}
+
+function fitGrid(): void {
+  const center = $('center');
+  const availableW = Math.max(1, center.clientWidth - 40);
+  const availableH = Math.max(1, center.clientHeight - 40);
+  const ideal = Math.floor(Math.min(availableW / W(), availableH / H()));
+  setGridZoom([...GRID_ZOOMS].reverse().find((size) => size <= ideal) ?? GRID_ZOOMS[0]);
+}
+
+($('gridZoomPercent') as HTMLInputElement).onchange = (event) => {
+  setGridZoom(Number((event.target as HTMLInputElement).value) / 100);
+};
+$('btnGridZoomOut').onclick = () => {
+  setGridZoom([...GRID_ZOOMS].reverse().find((size) => size < cellSize) ?? GRID_ZOOMS[0]);
+};
+$('btnGridZoomIn').onclick = () => {
+  setGridZoom(GRID_ZOOMS.find((size) => size > cellSize) ?? GRID_ZOOMS.at(-1)!);
+};
+$('btnFitGrid').onclick = () => fitGrid();
 
 $('btnLoadRef').onclick = () => ($('refFileInput') as HTMLInputElement).click();
 ($('refFileInput') as HTMLInputElement).onchange = (e) => {
@@ -1044,6 +3132,7 @@ $('btnLoadRef').onclick = () => ($('refFileInput') as HTMLInputElement).click();
     try {
       refFile = normalize(JSON.parse(String(reader.result)));
       redraw();
+      schedulePreviewUpload();
       flash(`loaded reference: ${f.name}`);
       ($('selectRefSprite') as HTMLSelectElement).value = ''; // clear dropdown
     } catch (err) {
@@ -1059,18 +3148,23 @@ $('selectRefSprite').onchange = (e) => {
   if (!val) {
     refFile = null;
     redraw();
+    schedulePreviewUpload();
     return;
   }
   try {
     refFile = existingSprite(val);
     redraw();
+    schedulePreviewUpload();
     flash(`loaded reference: ${val}`);
   } catch (err) {
     flash(`reference load failed: ${(err as Error).message}`);
   }
 };
 
-($('showRef') as HTMLInputElement).onchange = () => redraw();
+($('showRef') as HTMLInputElement).onchange = () => {
+  redraw();
+  schedulePreviewUpload();
+};
 ($('onionSkin') as HTMLInputElement).onchange = () => redraw();
 
 $('btnNudgeLeft').onclick = () => nudge(-1, 0);
@@ -1096,6 +3190,18 @@ function nudge(dx: number, dy: number): void {
   }
   
   anim().frames[frameIdx] = next;
+  const logicalW = w / density();
+  const logicalH = h / density();
+  const concrete = concreteAnimName();
+  let movedAnchor = false;
+  for (const groups of Object.values(file.anchors ?? {})) {
+    const point = groups[concrete]?.[frameIdx];
+    if (!point) continue;
+    point.x = (point.x + dx / density() + logicalW) % logicalW;
+    point.y = (point.y + dy / density() + logicalH) % logicalH;
+    movedAnchor = true;
+  }
+  if (movedAnchor) buildAnchors();
   redraw();
   syncIO();
 }
@@ -1104,7 +3210,7 @@ function nudge(dx: number, dy: number): void {
 
 function saveHistory(): void {
   editVersion++; // every mutation funnels through here first
-  const stateStr = JSON.stringify(file);
+  const stateStr = historySnapshot();
   if (undoStack.length > 0 && undoStack[undoStack.length - 1] === stateStr) {
     return;
   }
@@ -1118,11 +3224,12 @@ function saveHistory(): void {
 
 function undo(): void {
   if (undoStack.length === 0) return;
-  const currentStr = JSON.stringify(file);
+  const currentStr = historySnapshot();
   redoStack.push(currentStr);
   
   const prevStateStr = undoStack.pop()!;
-  file = normalize(JSON.parse(prevStateStr));
+  const previous = parseHistorySnapshot(prevStateStr);
+  file = normalize(previous.file);
   editVersion++;
   
   if (!file.anims[animName]) {
@@ -1130,19 +3237,22 @@ function undo(): void {
   }
   const maxIdx = anim().frames.length - 1;
   frameIdx = Math.min(frameIdx, maxIdx);
-  
+  selection = null;
   refreshUI();
+  setSelection(previous.selection);
+  void publishSelection();
   updateUndoRedoButtons();
   flash('undo');
 }
 
 function redo(): void {
   if (redoStack.length === 0) return;
-  const currentStr = JSON.stringify(file);
+  const currentStr = historySnapshot();
   undoStack.push(currentStr);
   
   const nextStateStr = redoStack.pop()!;
-  file = normalize(JSON.parse(nextStateStr));
+  const next = parseHistorySnapshot(nextStateStr);
+  file = normalize(next.file);
   editVersion++;
   
   if (!file.anims[animName]) {
@@ -1150,8 +3260,10 @@ function redo(): void {
   }
   const maxIdx = anim().frames.length - 1;
   frameIdx = Math.min(frameIdx, maxIdx);
-  
+  selection = null;
   refreshUI();
+  setSelection(next.selection);
+  void publishSelection();
   updateUndoRedoButtons();
   flash('redo');
 }
@@ -1167,7 +3279,61 @@ $('btnUndo').onclick = () => undo();
 $('btnRedo').onclick = () => redo();
 
 window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && editMenu.open) {
+    e.preventDefault();
+    editMenu.open = false;
+    return;
+  }
+  if (e.key === 'Alt') {
+    e.preventDefault();
+    altPickerActive = true;
+    updateToolUI();
+    return;
+  }
+  const target = e.target as HTMLElement | null;
+  const typing = target?.matches('input, textarea, select, [contenteditable="true"]') ?? false;
   const key = e.key.toLowerCase();
+  if (!typing && (e.ctrlKey || e.metaKey) && key === 'c' && selection) {
+    e.preventDefault();
+    copySelection();
+  }
+  if (!typing && (e.ctrlKey || e.metaKey) && key === 'x' && selection) {
+    e.preventDefault();
+    cutSelection();
+  }
+  if (!typing && (e.ctrlKey || e.metaKey) && key === 'v') {
+    e.preventDefault();
+    void pasteSelection();
+  }
+  if (!typing && key === 'escape' && selection) {
+    e.preventDefault();
+    clearSelection();
+  }
+  if (!typing && key === 'm' && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault();
+    setTool('select');
+  }
+  if (!typing && selection && currentTool === 'select' && key.startsWith('arrow')) {
+    e.preventDefault();
+    const distance = e.shiftKey ? 4 : 1;
+    if (key === 'arrowleft') moveSelectionBy(-distance, 0);
+    else if (key === 'arrowright') moveSelectionBy(distance, 0);
+    else if (key === 'arrowup') moveSelectionBy(0, -distance);
+    else if (key === 'arrowdown') moveSelectionBy(0, distance);
+  }
+  if (!typing && !e.ctrlKey && !e.metaKey) {
+    const shortcut: Partial<Record<string, EditorTool>> = {
+      p: 'draw',
+      b: 'brush',
+      u: 'blur',
+      g: 'fill',
+    };
+    const tool = shortcut[key];
+    if (tool) {
+      e.preventDefault();
+      setTool(tool);
+    }
+  }
   if ((e.ctrlKey || e.metaKey) && key === 'z') {
     e.preventDefault();
     if (e.shiftKey) {
@@ -1182,9 +3348,23 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+window.addEventListener('keyup', (e) => {
+  if (e.key !== 'Alt') return;
+  e.preventDefault();
+  altPickerActive = false;
+  updateToolUI();
+});
+
+window.addEventListener('blur', () => {
+  altPickerActive = false;
+  picking = false;
+  updateToolUI();
+});
+
 ($('hd') as HTMLInputElement).onchange = (e) => {
   file.hd = (e.target as HTMLInputElement).checked;
   syncIO();
+  schedulePreviewUpload();
 };
 
 // Physical size inputs → write to file.w / file.h
@@ -1236,11 +3416,13 @@ function refreshUI(): void {
   buildPalette();
   buildAnims();
   buildFrames();
+  buildAnchors();
   redraw();
   syncIO();
 
   const hdCheckbox = $('hd') as HTMLInputElement;
   if (hdCheckbox) hdCheckbox.checked = file.hd ?? true;
+  updateBridgeStatus();
 }
 
 refreshUI();
@@ -1250,15 +3432,66 @@ Object.defineProperty(window, '__editor', {
   value: {
     get file() { return file; },
     get currentFileName() { return currentFileName; },
+    get currentRepoPath() { return currentRepoPath; },
+    get animName() { return animName; },
+    get frameIdx() { return frameIdx; },
     get editVersion() { return editVersion; },
     get rebuiltVersion() { return rebuiltVersion; },
+    get selection() { return selectionSnapshot(); },
+    get bridge() {
+      return {
+        connected: bridgeConnected,
+        revision: bridgeRevision,
+        dirty: bridgeDirty,
+        conflict: bridgeConflict,
+        clientId: bridgeClientId,
+      };
+    },
+    open(path: string) { return openSharedSprite(path); },
+    replace(next: SpriteFile, path: string | null = currentRepoPath) {
+      rememberForUndo();
+      file = normalize(structuredClone(next));
+      currentRepoPath = path;
+      currentFileName = path?.split('/').at(-1) ?? currentFileName;
+      animName = Object.keys(file.anims)[0];
+      frameIdx = 0;
+      currentChar = firstPaintChar();
+      editVersion++;
+      refreshUI();
+      updateUndoRedoButtons();
+      void publishSharedSprite();
+    },
+    setPixels(changes: { anim?: string; frame?: number; pixels: { x: number; y: number; char: string }[] }) {
+      const targetName = changes.anim ?? animName;
+      const targetAnim = resolveAnim(file, targetName);
+      if (!targetAnim) throw new Error(`unknown animation "${targetName}"`);
+      const targetFrame = changes.frame ?? frameIdx;
+      const rows = targetAnim.frames[targetFrame];
+      if (!rows) throw new Error(`unknown frame ${targetFrame} in "${targetName}"`);
+      rememberForUndo();
+      for (const pixel of changes.pixels) {
+        if (pixel.char.length !== 1) throw new Error('pixel char must be one character');
+        if (pixel.y < 0 || pixel.y >= rows.length || pixel.x < 0 || pixel.x >= rows[pixel.y].length) continue;
+        rows[pixel.y] = rows[pixel.y].slice(0, pixel.x) + pixel.char + rows[pixel.y].slice(pixel.x + 1);
+      }
+      editVersion++;
+      refreshUI();
+      updateUndoRedoButtons();
+      void publishSharedSprite();
+    },
+    save() { return saveWorkspaceSprites(); },
   },
 });
 
 // Composite weapon picker: every registered weapon except bare hands.
 {
   const sel = $('compWeapon') as HTMLSelectElement;
-  sel.onchange = () => rebuildMoveSelect(sel.value);
+  sel.onchange = () => {
+    previewStepping = false;
+    previewStepFrame = 0;
+    rebuildMoveSelect(sel.value);
+    schedulePreviewUpload();
+  };
   for (const id of weapons.ids()) {
     if (id === 'unarmed') continue;
     const o = document.createElement('option');
@@ -1268,5 +3501,53 @@ Object.defineProperty(window, '__editor', {
   }
 }
 
+function stepPreview(delta: number): void {
+  const play = $('previewPlay') as HTMLInputElement;
+  const timing = currentPreviewTiming();
+  const start = previewStepping
+    ? previewStepFrame
+    : play.checked
+      ? previewFrameAt(performance.now() / 1000, timing)
+      : Math.min(frameIdx, timing.frameCount - 1);
+  play.checked = false;
+  previewStepFrame = ((start + delta) % timing.frameCount + timing.frameCount) % timing.frameCount;
+  previewStepping = true;
+  schedulePreviewUpload();
+}
+
+$('previewPrev').onclick = () => stepPreview(-1);
+$('previewNext').onclick = () => stepPreview(1);
+($('previewPlay') as HTMLInputElement).addEventListener('change', () => {
+  if (($('previewPlay') as HTMLInputElement).checked) previewStepping = false;
+});
+for (const id of ['compMove', 'compBody']) {
+  $(id).addEventListener('change', () => {
+    previewStepping = false;
+    previewStepFrame = 0;
+  });
+}
+
+// These controls change only the rendered preview, not the sprite document.
+// Keep the bridge snapshot in lockstep so agents and other editor clients see
+// the same selected pose/composite as the author looking at this tab.
+for (const id of ['previewPlay', 'compMove', 'compBody', 'compTrail', 'compHitbox', 'compGear', 'showHitbox']) {
+  ($(id) as HTMLInputElement | HTMLSelectElement).addEventListener('change', schedulePreviewUpload);
+}
+
 rebuildMoveSelect(($('compWeapon') as HTMLSelectElement).value);
 renderPreview();
+updateBridgeStatus();
+void initializeBridge().then(() => {
+  restoreEditorViewState();
+  editorViewReady = true;
+  persistEditorViewState();
+});
+window.setInterval(() => {
+  persistCurrentDraft();
+  if (editorViewReady) persistEditorViewState();
+  void publishSharedSprite();
+}, 160);
+window.addEventListener('beforeunload', () => {
+  persistCurrentDraft();
+  if (editorViewReady) persistEditorViewState();
+});
