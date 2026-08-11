@@ -57,6 +57,8 @@ Gear visuals are registered by **item id**, not by slot. A visual declares its `
 
 Sprite-backed blades carry idle/run/air and attack-aligned art. Ranged weapons use the body anchors directly: the bow's full draw reaches from `frontHand` to `rearHand`, and projectile muzzle offsets remain weapon-type data.
 
+Sprite-backed weapons may author one weapon-side `grip` anchor per frame. The renderer pins that point to the character's `frontHand`; mirrored art mirrors both points, so the same track works in either facing direction. Outside attacks, the body owns the animation clock and the weapon selects the same numbered frame; shorter looping weapon tracks repeat, while non-looping tracks hold their last frame. A row without `grip` metadata temporarily keeps its legacy feet-origin alignment, allowing an artist to rig one animation at a time. We intentionally use one grip for now—two-handed placement can be introduced later without changing this attachment contract.
+
 ## Authoring loop
 
 Use the full [sprite art pipeline](sprite-art-pipeline.md): generate and approve one versioned idle prototype before producing animation or equipment. Render every revision in the editor, compare it with the original visual source at native and game scale, and pixel-polish identity features before advancing.

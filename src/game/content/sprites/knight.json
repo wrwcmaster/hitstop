@@ -1,5 +1,8 @@
 {
   "hd": false,
+  "editor": {
+    "canEquipWeapon": true
+  },
   "w": 12,
   "h": 20,
   "hitbox": {

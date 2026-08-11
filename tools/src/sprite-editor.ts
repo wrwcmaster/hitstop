@@ -17,7 +17,7 @@ import {
   rebuildSpriteWeapon,
 } from '@game/content/weapon-visuals';
 import { weapons, weaponTypeOf, allAttacks } from '@game/content/weapons';
-import { KNIGHT_ANIMS, baseKnight, rebuildKnightSprite } from '@game/content/sprites';
+import { KNIGHT_ANIMS, rebuildKnightSprite } from '@game/content/sprites';
 import { rebuildGearVisual } from '@game/content/gear-visuals';
 // The "player (full)" body drives a REAL Player — body-english, gear
 // layers, held weapon and trail all come from Player.render, posed via
@@ -51,6 +51,8 @@ let file: SpriteFile = {
 };
 let animName = 'idle';
 let frameIdx = 0;
+let previewStepFrame = 0;
+let previewStepping = false;
 let currentChar = firstPaintChar();
 let painting = false;
 let erasing = false;
@@ -113,6 +115,16 @@ interface BridgeState {
   dirty: boolean;
 }
 
+/** Editor-only content metadata. The engine ignores it; tools use it to
+ * discover capabilities without hardcoding character file names. */
+interface SpriteEditorMetadata {
+  canEquipWeapon?: boolean;
+}
+
+type EditorSpriteFile = SpriteFile & {
+  editor?: SpriteEditorMetadata;
+};
+
 const BRIDGE = '/__sprite-editor';
 const bridgeClientId = `editor-${crypto.randomUUID()}`;
 let bridgeRevision = 0;
@@ -121,7 +133,78 @@ let bridgeConnected = false;
 let bridgeConflict = false;
 let bridgePublishing = false;
 let lastSharedFile = '';
+let lastRepositoryFile = '';
 let previewTimer = 0;
+const DRAFT_PREFIX = 'hitstop.sprite-editor.draft:';
+let lastDraftSignature = '';
+let editorViewReady = false;
+
+interface StoredSpriteDraft {
+  v: 1;
+  path: string;
+  file: SpriteFile;
+  baseFile: string;
+  updatedAt: number;
+}
+
+function draftKey(path: string): string {
+  return `${DRAFT_PREFIX}${encodeURIComponent(path)}`;
+}
+
+function readDraft(path: string): StoredSpriteDraft | null {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(draftKey(path)) ?? 'null') as StoredSpriteDraft | null;
+    if (parsed?.v !== 1 || parsed.path !== path || !parsed.file?.anims) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function storedDrafts(): StoredSpriteDraft[] {
+  const drafts: StoredSpriteDraft[] = [];
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index);
+    if (!key?.startsWith(DRAFT_PREFIX)) continue;
+    try {
+      const draft = JSON.parse(localStorage.getItem(key) ?? 'null') as StoredSpriteDraft | null;
+      if (draft?.v === 1 && typeof draft.path === 'string' && draft.file?.anims) drafts.push(draft);
+    } catch {
+      // A damaged draft is ignored here and remains in storage for manual
+      // recovery; saving healthy documents must still be possible.
+    }
+  }
+  return drafts.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+function clearDraft(path: string): void {
+  localStorage.removeItem(draftKey(path));
+  if (lastDraftSignature.startsWith(`${path}\0`)) lastDraftSignature = '';
+}
+
+function persistCurrentDraft(): void {
+  if (!currentRepoPath) return;
+  const serialized = JSON.stringify(file);
+  if (lastRepositoryFile && serialized === lastRepositoryFile) {
+    clearDraft(currentRepoPath);
+    return;
+  }
+  const signature = `${currentRepoPath}\0${lastRepositoryFile}\0${serialized}`;
+  if (signature === lastDraftSignature) return;
+  try {
+    const draft: StoredSpriteDraft = {
+      v: 1,
+      path: currentRepoPath,
+      file,
+      baseFile: lastRepositoryFile,
+      updatedAt: Date.now(),
+    };
+    localStorage.setItem(draftKey(currentRepoPath), JSON.stringify(draft));
+    lastDraftSignature = signature;
+  } catch (error) {
+    flash(`local draft failed: ${(error as Error).message}`);
+  }
+}
 
 function emptyFrame(w: number, h: number): string[] {
   return Array.from({ length: h }, () => '.'.repeat(w));
@@ -150,11 +233,15 @@ const H = () => cur().length;
 const density = () => file.hd === false ? 4 : 1;
 
 function concreteAnimName(name = animName): string {
+  return concreteAnimNameOf(file, name);
+}
+
+function concreteAnimNameOf(spriteFile: SpriteFile, name: string): string {
   const seen = new Set<string>();
   let current = name;
-  while (typeof file.anims[current] === 'string' && !seen.has(current)) {
+  while (typeof spriteFile.anims[current] === 'string' && !seen.has(current)) {
     seen.add(current);
-    current = file.anims[current] as string;
+    current = spriteFile.anims[current] as string;
   }
   return current;
 }
@@ -203,7 +290,7 @@ const SPRITE_ROOT = '/src/game/content/sprites/';
 const spriteModules = import.meta.glob('/src/game/content/sprites/**/*.json', {
   eager: true,
   import: 'default',
-}) as Record<string, SpriteFile>;
+}) as Record<string, EditorSpriteFile>;
 const existingSprites = new Map(
   Object.entries(spriteModules)
     .map(([modulePath, spriteFile]) => [modulePath.slice(SPRITE_ROOT.length), spriteFile] as const)
@@ -231,21 +318,202 @@ function existingSprite(path: string): SpriteFile {
 }
 
 function configureCompositeForPath(path: string): void {
-  if (!path.includes('equipment/')) return;
-  const stem = path.split('/').at(-1)!.replace(/\.json$/, '');
-  ($('compBody') as HTMLSelectElement).value = 'player';
-  if (weapons.has(stem)) {
-    ($('compWeapon') as HTMLSelectElement).value = stem;
-    rebuildMoveSelect(stem);
-  } else {
-    ($('compWeapon') as HTMLSelectElement).value = '';
-    ($('compGear') as HTMLInputElement).checked = true;
-    rebuildMoveSelect('');
+  const body = $('compBody') as HTMLSelectElement;
+  const weapon = $('compWeapon') as HTMLSelectElement;
+  const gear = $('compGear') as HTMLInputElement;
+  previewStepping = false;
+  previewStepFrame = 0;
+
+  if (path.includes('equipment/')) {
+    const stem = path.split('/').at(-1)!.replace(/\.json$/, '');
+    body.value = 'player';
+    if (weapons.has(stem)) {
+      weapon.value = stem;
+      gear.checked = false;
+      rebuildMoveSelect(stem);
+    } else {
+      weapon.value = '';
+      gear.checked = true;
+      rebuildMoveSelect('');
+    }
+    return;
   }
+
+  // Composite controls describe the file currently being edited, rather
+  // than global editor preferences. Without resetting them here, opening a
+  // character after a weapon left the preview rendering the previous full
+  // player + weapon while the grid correctly showed the new sprite.
+  body.value = 'edited';
+  weapon.value = '';
+  gear.checked = false;
+  rebuildMoveSelect('');
 }
 
 populateSpriteSelect('selectSprite');
 populateSpriteSelect('selectRefSprite');
+
+function activatePanel(group: 'left' | 'right', target: string): void {
+  document.querySelectorAll<HTMLButtonElement>(`[data-panel-tab="${group}"]`).forEach((button) => {
+    const active = button.dataset.panelTarget === target;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+  document.querySelectorAll<HTMLElement>(`[data-panel-page="${group}"]`).forEach((panel) => {
+    panel.hidden = panel.id !== target;
+  });
+}
+
+for (const group of ['left', 'right'] as const) {
+  document.querySelectorAll<HTMLButtonElement>(`[data-panel-tab="${group}"]`).forEach((button) => {
+    button.onclick = () => activatePanel(group, button.dataset.panelTarget!);
+  });
+}
+
+const VIEW_STATE_KEY = 'hitstop.sprite-editor.view';
+
+interface EditorViewState {
+  v: 1;
+  path: string | null;
+  anim: string;
+  frame: number;
+  paintChar: string;
+  tool: EditorTool;
+  zoom: number;
+  anchor: string;
+  selection: PixelRect | null;
+  leftPanel?: string;
+  rightPanel?: string;
+  preview: { playing: boolean; stepping: boolean; frame: number };
+  composite: {
+    weapon: string;
+    move: string;
+    body: string;
+    trail: boolean;
+    hitbox: boolean;
+    gear: boolean;
+  };
+  toggles: {
+    showRef: boolean;
+    onionSkin: boolean;
+    showAnchors: boolean;
+    showHitbox: boolean;
+  };
+  referencePath: string;
+}
+
+function activePanel(group: 'left' | 'right'): string | undefined {
+  return document.querySelector<HTMLButtonElement>(`[data-panel-tab="${group}"].active`)?.dataset.panelTarget;
+}
+
+function captureEditorViewState(): EditorViewState {
+  return {
+    v: 1,
+    path: currentRepoPath,
+    anim: animName,
+    frame: frameIdx,
+    paintChar: currentChar,
+    tool: currentTool,
+    zoom: cellSize,
+    anchor: selectedAnchorName,
+    selection: selection ? { ...selection } : null,
+    leftPanel: activePanel('left'),
+    rightPanel: activePanel('right'),
+    preview: {
+      playing: ($('previewPlay') as HTMLInputElement).checked,
+      stepping: previewStepping,
+      frame: previewStepFrame,
+    },
+    composite: {
+      weapon: ($('compWeapon') as HTMLSelectElement).value,
+      move: ($('compMove') as HTMLSelectElement).value,
+      body: ($('compBody') as HTMLSelectElement).value,
+      trail: ($('compTrail') as HTMLInputElement).checked,
+      hitbox: ($('compHitbox') as HTMLInputElement).checked,
+      gear: ($('compGear') as HTMLInputElement).checked,
+    },
+    toggles: {
+      showRef: ($('showRef') as HTMLInputElement).checked,
+      onionSkin: ($('onionSkin') as HTMLInputElement).checked,
+      showAnchors: ($('showAnchors') as HTMLInputElement).checked,
+      showHitbox: ($('showHitbox') as HTMLInputElement).checked,
+    },
+    referencePath: ($('selectRefSprite') as HTMLSelectElement).value,
+  };
+}
+
+function persistEditorViewState(state: EditorViewState = captureEditorViewState()): void {
+  try {
+    sessionStorage.setItem(VIEW_STATE_KEY, JSON.stringify(state));
+  } catch {
+    // View continuity is a convenience; storage denial must never block save.
+  }
+}
+
+function restoreEditorViewState(saved?: EditorViewState): void {
+  try {
+    const state = saved ?? JSON.parse(sessionStorage.getItem(VIEW_STATE_KEY) ?? 'null') as EditorViewState | null;
+    if (!state || state.v !== 1 || state.path !== currentRepoPath) return;
+
+    if (file.anims[state.anim]) animName = state.anim;
+    frameIdx = Math.max(0, Math.min(state.frame, anim().frames.length - 1));
+    if (state.paintChar in (file.palette ?? {})) currentChar = state.paintChar;
+    if ((['draw', 'brush', 'blur', 'fill', 'picker', 'select'] as EditorTool[]).includes(state.tool)) {
+      currentTool = state.tool;
+    }
+    selectedAnchorName = state.anchor;
+    previewStepping = state.preview.stepping;
+    previewStepFrame = state.preview.frame;
+
+    const weapon = $('compWeapon') as HTMLSelectElement;
+    if ([...weapon.options].some((option) => option.value === state.composite.weapon)) {
+      weapon.value = state.composite.weapon;
+    }
+    rebuildMoveSelect(weapon.value);
+    const move = $('compMove') as HTMLSelectElement;
+    if ([...move.options].some((option) => option.value === state.composite.move)) move.value = state.composite.move;
+    const body = $('compBody') as HTMLSelectElement;
+    if ([...body.options].some((option) => option.value === state.composite.body)) body.value = state.composite.body;
+
+    ($('previewPlay') as HTMLInputElement).checked = state.preview.playing;
+    ($('compTrail') as HTMLInputElement).checked = state.composite.trail;
+    ($('compHitbox') as HTMLInputElement).checked = state.composite.hitbox;
+    ($('compGear') as HTMLInputElement).checked = state.composite.gear;
+    ($('showRef') as HTMLInputElement).checked = state.toggles.showRef;
+    ($('onionSkin') as HTMLInputElement).checked = state.toggles.onionSkin;
+    ($('showAnchors') as HTMLInputElement).checked = state.toggles.showAnchors;
+    ($('showHitbox') as HTMLInputElement).checked = state.toggles.showHitbox;
+
+    const reference = $('selectRefSprite') as HTMLSelectElement;
+    if (state.referencePath && existingSprites.has(state.referencePath)) {
+      reference.value = state.referencePath;
+      refFile = existingSprite(state.referencePath);
+    }
+
+    refreshUI();
+    updateToolUI();
+    setGridZoom(state.zoom);
+    if (state.leftPanel) activatePanel('left', state.leftPanel);
+    if (state.rightPanel) activatePanel('right', state.rightPanel);
+    const selected = state.selection;
+    setSelection(selected
+      && selected.x >= 0 && selected.y >= 0
+      && selected.x + selected.w <= W() && selected.y + selected.h <= H()
+      ? selected
+      : null);
+    schedulePreviewUpload();
+    void publishSelection();
+  } catch {
+    // Ignore obsolete/malformed session UI state and use editor defaults.
+  }
+}
+
+const editMenu = $('editMenu') as HTMLDetailsElement;
+for (const id of ['btnUndo', 'btnRedo', 'btnCut', 'btnCopy', 'btnPaste']) {
+  $(id).addEventListener('click', () => { editMenu.open = false; });
+}
+document.addEventListener('pointerdown', (event) => {
+  if (editMenu.open && !editMenu.contains(event.target as Node)) editMenu.open = false;
+});
 
 function flash(msg: string): void {
   const s = $('status');
@@ -276,7 +544,11 @@ function updateBridgeStatus(): void {
     status.title = bridgeDirty ? 'Shared changes have not been written to the repository.' : 'Browser and agent share this revision.';
   }
   const save = $('btnSaveRepo') as HTMLButtonElement;
-  save.disabled = !bridgeConnected || bridgeConflict || !currentRepoPath || !bridgeDirty;
+  const draftCount = storedDrafts().length;
+  save.disabled = !bridgeConnected || bridgeConflict || (!bridgeDirty && draftCount === 0);
+  save.title = draftCount
+    ? `Save ${draftCount} modified sprite${draftCount === 1 ? '' : 's'} to the repository`
+    : 'Save all modified sprites to the repository';
 }
 
 function historySnapshot(spriteFile: SpriteFile = file, selected: PixelRect | null = selection): string {
@@ -306,7 +578,28 @@ function updateBridgeMeta(state: BridgeState): void {
   bridgeDirty = state.dirty;
   currentRepoPath = state.path;
   if (state.path) currentFileName = state.path.split('/').at(-1)!;
-  lastSharedFile = JSON.stringify(state.file);
+  // The shared document is authoritative. Keep the picker in sync on every
+  // acknowledgement too, not only when a remote file body is applied: an
+  // async <select> change can otherwise leave its old option painted while
+  // the canvas and bridge have already switched to the requested sprite.
+  const spriteSelect = $('selectSprite') as HTMLSelectElement;
+  spriteSelect.value = state.path ?? '';
+  if (state.path) {
+    // The URL is the reload contract for this stateless tool. Vite may reload
+    // after a JSON write; keeping the active sprite here prevents that reload
+    // from reopening the original/default query-string sprite.
+    const url = new URL(location.href);
+    if (url.searchParams.get('sprite') !== state.path) {
+      url.searchParams.set('sprite', state.path);
+      history.replaceState(null, '', url);
+    }
+  }
+  // Compare like with like. `normalize` supplies editor-only defaults for
+  // older files (for example `hd: true`); remembering the raw server shape
+  // made the publish timer treat a freshly opened, untouched sprite as an
+  // edit and immediately lock the shared document dirty.
+  lastSharedFile = JSON.stringify(normalize(structuredClone(state.file)));
+  if (!state.dirty) lastRepositoryFile = lastSharedFile;
   bridgeConflict = false;
   pendingBridgeState = null;
   updateBridgeStatus();
@@ -337,6 +630,7 @@ function applyBridgeState(state: BridgeState, force = false): void {
 
   const incoming = JSON.stringify(state.file);
   if (incoming !== local) {
+    if (switchedSprite) persistCurrentDraft();
     rememberForUndo();
     clearSelection(false);
     file = normalize(structuredClone(state.file));
@@ -350,8 +644,6 @@ function applyBridgeState(state: BridgeState, force = false): void {
     if (state.source !== bridgeClientId) flash(`updated by ${state.source}`);
   }
   updateBridgeMeta(state);
-  const select = $('selectSprite') as HTMLSelectElement;
-  select.value = state.path ?? '';
   if (switchedSprite && state.path) configureCompositeForPath(state.path);
 }
 
@@ -388,31 +680,81 @@ async function publishSelection(): Promise<void> {
   }
 }
 
+const WEAPON_BODY_PREFIX = 'sprite:';
+
+function spriteLabel(path: string): string {
+  return path
+    .replace(/\.json$/, '')
+    .replaceAll('-', ' ')
+    .replaceAll('/', ' / ');
+}
+
+function populateCompositeBodySelect(): void {
+  const select = $('compBody') as HTMLSelectElement;
+  for (const [path, spriteFile] of existingSprites) {
+    if (spriteFile.editor?.canEquipWeapon !== true) continue;
+    const option = document.createElement('option');
+    option.value = `${WEAPON_BODY_PREFIX}${path}`;
+    option.textContent = `body: ${spriteLabel(path)}`;
+    select.appendChild(option);
+  }
+}
+
+function selectedWeaponBody(bodySelection: string): SpriteFile | null {
+  if (!bodySelection.startsWith(WEAPON_BODY_PREFIX)) return null;
+  return existingSprites.get(bodySelection.slice(WEAPON_BODY_PREFIX.length)) ?? null;
+}
+
+populateCompositeBodySelect();
+
 async function openSharedSprite(path: string): Promise<boolean> {
   try {
     // A stroke can be waiting for the 160 ms publish tick when the user
-    // changes the selector. Flush it first so `/open` sees a dirty shared
-    // document and cannot replace work that existed only in this tab.
+    // changes the selector. Flush it, then keep a browser-local draft keyed
+    // by sprite path. Switching documents must never require a repository
+    // save merely to protect work in progress.
     if (lastSharedFile && JSON.stringify(file) !== lastSharedFile) {
       await publishSharedSprite();
-      if (JSON.stringify(file) !== lastSharedFile || bridgeConflict) {
-        flash('finish resolving the current shared edit before opening another');
-        return false;
-      }
     }
+    persistCurrentDraft();
+    const draft = readDraft(path);
     const { response, body } = await bridgeJson('/open', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, source: bridgeClientId }),
+      // The editor has just persisted the previous document. `force` only
+      // releases the bridge's single active slot; it never writes or deletes
+      // either document in the repository.
+      body: JSON.stringify({ path, source: bridgeClientId, force: true }),
     });
     if (response.status === 409) {
       const shared = (body.state as BridgeState | null) ?? null;
       if (shared) applyBridgeState(shared, true);
-      flash('save the current shared sprite before opening another');
+      flash('could not switch the shared sprite');
       return false;
     }
     if (!response.ok) throw new Error(String(body.error ?? response.statusText));
     applyBridgeState(body as unknown as BridgeState, true);
+    if (draft) {
+      const restored = normalize(structuredClone(draft.file));
+      if (JSON.stringify(restored) !== JSON.stringify(file)) {
+        rememberForUndo();
+        clearSelection(false);
+        file = restored;
+        if (!file.anims[animName]) animName = Object.keys(file.anims)[0];
+        frameIdx = Math.min(frameIdx, anim().frames.length - 1);
+        currentChar = firstPaintChar();
+        editVersion++;
+        refreshUI();
+        fitGrid();
+        persistCurrentDraft();
+        await publishSharedSprite();
+        flash(draft.baseFile && draft.baseFile !== lastRepositoryFile
+          ? `restored local draft for ${path} (repository changed)`
+          : `restored local draft for ${path}`);
+        return true;
+      }
+      clearDraft(path);
+    }
     flash(`opened shared ${path}`);
     return true;
   } catch {
@@ -457,13 +799,35 @@ async function publishSharedSprite(): Promise<void> {
   }
 }
 
-async function saveSharedSprite(): Promise<void> {
-  if (!currentRepoPath || bridgeConflict) return;
+async function saveWorkspaceSprites(): Promise<void> {
+  if (bridgeConflict) return;
+  persistCurrentDraft();
+  const documents = new Map<string, SpriteFile>();
+  for (const draft of storedDrafts()) documents.set(draft.path, draft.file);
+  // The in-memory document is newer than both the bridge and localStorage
+  // during a live pointer gesture, so it always wins for the active path.
+  if (currentRepoPath && (bridgeDirty || JSON.stringify(file) !== lastRepositoryFile)) {
+    documents.set(currentRepoPath, file);
+  }
+  if (!documents.size) {
+    flash('all sprites are already saved');
+    updateBridgeStatus();
+    return;
+  }
+  // Writing imported JSON modules can make Vite reload this page. Preserve
+  // the editing context separately from sprite data so Save All is visually
+  // inert: the same animation, frame, panels, composite, and selection return.
+  const viewState = captureEditorViewState();
+  persistEditorViewState(viewState);
   try {
-    const { response, body } = await bridgeJson('/save', {
+    const { response, body } = await bridgeJson('/save-all', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: currentRepoPath, baseRevision: bridgeRevision, source: bridgeClientId }),
+      body: JSON.stringify({
+        documents: [...documents].map(([path, spriteFile]) => ({ path, file: spriteFile })),
+        baseRevision: bridgeRevision,
+        source: bridgeClientId,
+      }),
     });
     if (response.status === 409) {
       pendingBridgeState = (body.state as BridgeState | null) ?? null;
@@ -472,8 +836,13 @@ async function saveSharedSprite(): Promise<void> {
       return;
     }
     if (!response.ok) throw new Error(String(body.error ?? response.statusText));
-    updateBridgeMeta(body as unknown as BridgeState);
-    flash(`saved ${currentRepoPath}`);
+    const saved = Array.isArray(body.saved) ? body.saved.map(String) : [];
+    for (const path of saved) clearDraft(path);
+    const state = body.state as BridgeState | null;
+    if (state) applyBridgeState(state, true);
+    restoreEditorViewState(viewState);
+    updateBridgeStatus();
+    flash(`saved ${saved.length} sprite${saved.length === 1 ? '' : 's'}`);
   } catch (error) {
     flash(`repo save failed: ${(error as Error).message}`);
   }
@@ -527,7 +896,7 @@ async function initializeBridge(): Promise<void> {
 $('bridgeStatus').onclick = () => {
   if (bridgeConflict && pendingBridgeState) applyBridgeState(pendingBridgeState, true);
 };
-$('btnSaveRepo').onclick = () => void saveSharedSprite();
+$('btnSaveRepo').onclick = () => void saveWorkspaceSprites();
 
 /* ---------------- palette ui ---------------- */
 
@@ -719,7 +1088,10 @@ function buildAnims(): void {
       clearSelection(false);
       animName = name;
       frameIdx = 0;
+      previewStepping = false;
+      previewStepFrame = 0;
       refreshUI();
+      schedulePreviewUpload();
       void publishSelection();
     };
     host.appendChild(b);
@@ -1483,15 +1855,18 @@ function buildFrames(): void {
     b.onclick = () => {
       clearSelection(false);
       frameIdx = i;
+      previewStepping = false;
       buildFrames();
       buildAnchors();
       redraw();
+      schedulePreviewUpload();
       void publishSelection();
     };
     host.appendChild(b);
   });
   $('frameOf').textContent = `${animName} · ${frameIdx + 1}/${anim().frames.length}`;
-  ($('btnFrameFirst') as HTMLButtonElement).disabled = frameIdx === 0;
+  ($('btnFrameLeft') as HTMLButtonElement).disabled = frameIdx === 0;
+  ($('btnFrameRight') as HTMLButtonElement).disabled = frameIdx === anim().frames.length - 1;
 }
 
 $('btnAddFrame').onclick = () => {
@@ -1520,23 +1895,30 @@ $('btnDupFrame').onclick = () => {
   redraw();
   syncIO();
 };
-$('btnFrameFirst').onclick = () => {
-  if (frameIdx === 0) return;
-  saveHistory();
-  const first = frameIdx;
+function moveSelectedFrame(delta: -1 | 1): void {
   const frames = anim().frames;
-  frames.push(...frames.splice(0, first));
+  const target = frameIdx + delta;
+  if (target < 0 || target >= frames.length) return;
+  saveHistory();
+  [frames[frameIdx], frames[target]] = [frames[target], frames[frameIdx]];
   for (const anchors of Object.values(file.anchors ?? {})) {
     const points = anchors[concreteAnimName()];
-    if (points?.length === frames.length) points.push(...points.splice(0, first));
+    if (points?.length === frames.length) {
+      [points[frameIdx], points[target]] = [points[target], points[frameIdx]];
+    }
   }
-  frameIdx = 0;
+  frameIdx = target;
+  previewStepping = false;
   buildFrames();
   buildAnchors();
   redraw();
   syncIO();
-  flash(`frame ${first + 1} is now frame 1`);
-};
+  schedulePreviewUpload();
+  void publishSelection();
+}
+
+$('btnFrameLeft').onclick = () => moveSelectedFrame(-1);
+$('btnFrameRight').onclick = () => moveSelectedFrame(1);
 $('btnDelFrame').onclick = () => {
   if (anim().frames.length <= 1) return;
   saveHistory();
@@ -1885,6 +2267,33 @@ function ensureEquipped(p: Player, slot: string, id: string | null): void {
   p.syncStats();
 }
 
+/** The body is the authority for a neutral composite's frame clock. */
+function resolveCompositeBodyClock(bodySelection: string) {
+  const selectedBody = selectedWeaponBody(bodySelection);
+  const bodyFile = selectedBody ?? file;
+  const requestedBodyAnim = resolveAnim(bodyFile, animName)
+    ? animName
+    : resolveAnim(bodyFile, 'idle')
+      ? 'idle'
+      : Object.keys(bodyFile.anims)[0];
+  const bodyAnim = resolveAnim(bodyFile, requestedBodyAnim);
+  const fullPlayerAnim = bodySelection === 'player'
+    ? KNIGHT_ANIMS.right[animName] ?? KNIGHT_ANIMS.right.idle ?? Object.values(KNIGHT_ANIMS.right)[0]
+    : undefined;
+  const renderedAnim = fullPlayerAnim ?? bodyAnim;
+  const fps = renderedAnim?.fps || 1;
+  const frameCount = Math.max(1, renderedAnim?.frames.length ?? 1);
+  return {
+    bodyFile,
+    requestedBodyAnim,
+    bodyAnim,
+    fps,
+    frameCount,
+    loop: renderedAnim?.loop !== false,
+    cycle: frameCount / fps,
+  };
+}
+
 /**
  * The joint view: body + held weapon + attack trail on one clock,
  * drawn by the same code the game uses (see Player.render — body at a
@@ -1903,6 +2312,18 @@ function renderComposite(t: number): boolean {
   if (!hasWeapon && bodySel !== 'player') return false;
   const a = anim();
   if (!a || !a.frames.length) return false;
+
+  // Neutral equipment is frame-aligned to the selected body, so the body
+  // must own the preview clock too. Otherwise a one-frame weapon animation
+  // restarts the whole composite before a longer body animation can advance.
+  const bodyClock = resolveCompositeBodyClock(bodySel);
+  const {
+    bodyFile,
+    requestedBodyAnim,
+    bodyAnim,
+    fps: bodyFps,
+    cycle: bodyCycle,
+  } = bodyClock;
 
   const wdef = hasWeapon ? weapons.get(weaponId) : null;
   const moves = hasWeapon ? movesOf(weaponId) : [];
@@ -1934,8 +2355,10 @@ function renderComposite(t: number): boolean {
     : `  (attacks play on: ${[...new Set(moves.map((m) => m.def.animation))].join(', ') || 'none'})`;
 
   const fps = a.fps || 1;
-  const animCycle = a.frames.length / fps;
   const dur = Math.min(realDur, ATTACK_PREVIEW_CAP);
+  // An attack retains its authored weapon/attack timing. Everywhere else,
+  // body and attached weapon are one layered animation on the body's clock.
+  const animCycle = atkDef ? a.frames.length / fps : bodyCycle;
   const cycle = Math.max(animCycle, dur + 0.35);
   const tIn = t % cycle;
   const pose = atkDef && tIn <= dur
@@ -2012,25 +2435,21 @@ function renderComposite(t: number): boolean {
   let frame: number;
   let dw: number;
   let dh: number;
-  if (bodySel === 'knight') {
-    const set = KNIGHT_ANIMS.right;
-    const ka = set[animName] ?? set.idle ?? Object.values(set)[0];
-    frame = ka.loop === false
-      ? Math.min(Math.floor(tIn * ka.fps), ka.frames.length - 1)
-      : Math.floor(tIn * ka.fps) % ka.frames.length;
-    bodyImg = ka.frames[frame];
-    dw = baseKnight.w;
-    dh = baseKnight.h;
-  } else {
-    frame = a.loop === false
-      ? Math.min(Math.floor(tIn * fps), a.frames.length - 1)
-      : Math.floor(tIn * fps) % a.frames.length;
-    const rows = a.frames[frame] ?? [];
-    bodyImg = sprite(file.hd === false ? rows : epx(epx(rows)), pal());
-    const geo = geometryOf(file, rows);
-    dw = geo.w;
-    dh = geo.h;
+  if (!bodyAnim?.frames.length) {
+    pctx.restore();
+    return false;
   }
+  frame = bodyAnim.loop === false
+    ? Math.min(Math.floor(tIn * bodyFps), bodyAnim.frames.length - 1)
+    : Math.floor(tIn * bodyFps) % bodyAnim.frames.length;
+  const rows = bodyAnim.frames[frame] ?? [];
+  bodyImg = sprite(
+    bodyFile.hd === false ? rows : epx(epx(rows)),
+    bodyFile.palette ?? PAL,
+  );
+  const bodyGeometry = geometryOf(bodyFile, rows);
+  dw = bodyGeometry.w;
+  dh = bodyGeometry.h;
 
   pctx.save();
   pctx.translate(fx, fy);
@@ -2041,9 +2460,8 @@ function renderComposite(t: number): boolean {
   // Player.render uses; otherwise it silently falls back to a generic
   // hand position and cannot reveal handedness mistakes in draft art.
   const sheetAnchor = (name: string): { x: number; y: number } | undefined => {
-    const point = bodySel === 'knight'
-      ? baseKnight.anchor?.(name, animName, frame)
-      : file.anchors?.[name]?.[concreteAnimName()]?.[frame];
+    const concreteBodyAnim = concreteAnimNameOf(bodyFile, requestedBodyAnim);
+    const point = bodyFile.anchors?.[name]?.[concreteBodyAnim]?.[frame];
     return point ? { x: point.x - dw / 2, y: point.y - dh } : undefined;
   };
   // The weapon draw needs an animation its sheet actually has; outside
@@ -2085,28 +2503,74 @@ function renderComposite(t: number): boolean {
   return true;
 }
 
+function currentPreviewTiming(): { fps: number; frameCount: number; loop: boolean } {
+  const bodySelection = ($('compBody') as HTMLSelectElement).value;
+  const weaponId = ($('compWeapon') as HTMLSelectElement).value;
+  if ((weaponId && weapons.has(weaponId)) || bodySelection === 'player') {
+    const clock = resolveCompositeBodyClock(bodySelection);
+    return { fps: clock.fps, frameCount: clock.frameCount, loop: clock.loop };
+  }
+  const a = anim();
+  return {
+    fps: a?.fps || 1,
+    frameCount: Math.max(1, a?.frames.length ?? 1),
+    loop: a?.loop !== false,
+  };
+}
+
+function previewFrameAt(t: number, timing: ReturnType<typeof currentPreviewTiming>): number {
+  const raw = Math.floor(t * timing.fps);
+  return timing.loop
+    ? ((raw % timing.frameCount) + timing.frameCount) % timing.frameCount
+    : Math.min(raw, timing.frameCount - 1);
+}
+
 function renderPreview(): void {
   maybeRebakeEditedEquipment();
   const hd = ($('hd') as HTMLInputElement).checked;
   const p = pal();
-  const t = performance.now() / 1000;
+  const a = anim();
+  // Editing is frame-oriented: the game-scale preview must show the frame
+  // selected in the grid unless the author explicitly asks to play the
+  // animation. Previously the preview always ran on wall-clock time, so its
+  // body, reference, and weapon anchors rarely matched the frame being edited.
+  const previewPlaying = ($('previewPlay') as HTMLInputElement).checked;
+  const timing = currentPreviewTiming();
+  const pausedFrame = previewStepping
+    ? ((previewStepFrame % timing.frameCount) + timing.frameCount) % timing.frameCount
+    : Math.min(frameIdx, timing.frameCount - 1);
+  const t = previewPlaying ? performance.now() / 1000 : pausedFrame / timing.fps;
+  const displayedFrame = previewPlaying ? previewFrameAt(t, timing) : pausedFrame;
+  $('previewFrame').textContent = `${displayedFrame + 1}/${timing.frameCount}`;
 
   const composite = renderComposite(t);
-  // Give the game-scale composite the panel width it needs; hand the
-  // space back the moment the weapon is deselected.
+  const context = $('previewContext');
+  if (composite) {
+    const weapon = ($('compWeapon') as HTMLSelectElement).value || 'no weapon';
+    const bodySelect = $('compBody') as HTMLSelectElement;
+    const body = bodySelect.selectedOptions[0]?.textContent?.replace(/^body:\s*/, '') ?? bodySelect.value;
+    const moveSelect = $('compMove') as HTMLSelectElement;
+    const move = moveSelect.value
+      ? moveSelect.selectedOptions[0]?.textContent?.replace(/^move:\s*/, '')
+      : undefined;
+    context.textContent = [animName, weapon, body, move].filter(Boolean).join(' · ');
+  } else {
+    context.textContent = `${animName} · sprite`;
+  }
+  // The preview is persistent across workspace tabs, so its composite
+  // determines the panel width regardless of which editor panel is open.
   $('side-right').classList.toggle('wide', composite);
   if (composite) {
     requestAnimationFrame(renderPreview);
     return;
   }
 
-  const a = anim();
   if (!a || !a.frames.length) {
     requestAnimationFrame(renderPreview);
     return;
   }
 
-  const idx = Math.floor(t * (a.fps || 1)) % a.frames.length;
+  const idx = displayedFrame;
   const rows = a.frames[idx] ?? [];
 
   const { w, h, hitbox } = geometryOf(file, rows);
@@ -2138,7 +2602,11 @@ function renderPreview(): void {
   if (refFile && showRef) {
     const refAnim = resolveAnim(refFile, animName in refFile.anims ? animName : Object.keys(refFile.anims)[0]);
     if (refAnim) {
-      const refIdx = refAnim.frames.length ? Math.floor(t * (refAnim.fps || 1)) % refAnim.frames.length : 0;
+      const refIdx = refAnim.frames.length
+        ? previewPlaying
+          ? Math.floor(t * (refAnim.fps || 1)) % refAnim.frames.length
+          : Math.min(displayedFrame, refAnim.frames.length - 1)
+        : 0;
       const refRows = refAnim.frames[refIdx] ?? [];
 
       const refGeometry = geometryOf(refFile, refRows);
@@ -2228,6 +2696,10 @@ $('selectSprite').onchange = async (e) => {
   const val = (e.target as HTMLSelectElement).value;
   if (!val) return;
   if (await openSharedSprite(val)) return;
+  // A connected bridge returning false refused the switch to protect dirty
+  // shared work. Do not then load a local copy anyway: that would make the
+  // picker, canvas, preview, and bridge each describe different sprites.
+  if (bridgeConnected) return;
   try {
     file = existingSprite(val);
     animName = Object.keys(file.anims)[0];
@@ -2318,6 +2790,16 @@ function updateToolUI(): void {
   } else if (!selectionHandleTransform) {
     grid.style.cursor = 'cell';
   }
+  const hasSize = currentTool === 'brush' || currentTool === 'blur';
+  $('brushSizeConfig').hidden = !hasSize;
+  $('toolConfigEmpty').hidden = hasSize;
+  $('toolConfigTitle').textContent = hasSize
+    ? `${currentTool === 'brush' ? 'soft brush' : 'blur'} settings`
+    : 'tool settings';
+  $('brushSizeLabel').textContent = currentTool === 'blur' ? 'blur size' : 'brush size';
+  $('toolConfigHint').textContent = currentTool === 'blur'
+    ? 'Averages neighboring colors at the center and feathers the effect toward the edge.'
+    : 'The solid center overwrites color; the soft edge blends into neighboring pixels.';
   updateBrushCursor();
 }
 
@@ -2338,6 +2820,8 @@ function updateBrushCursor(): void {
 
 function setTool(tool: EditorTool): void {
   currentTool = tool;
+  if (tool === 'brush' || tool === 'blur') activatePanel('left', 'left-tool');
+  if (tool === 'select') activatePanel('right', 'right-transform');
   updateToolUI();
   redraw();
 }
@@ -2644,6 +3128,7 @@ $('btnLoadRef').onclick = () => ($('refFileInput') as HTMLInputElement).click();
     try {
       refFile = normalize(JSON.parse(String(reader.result)));
       redraw();
+      schedulePreviewUpload();
       flash(`loaded reference: ${f.name}`);
       ($('selectRefSprite') as HTMLSelectElement).value = ''; // clear dropdown
     } catch (err) {
@@ -2659,18 +3144,23 @@ $('selectRefSprite').onchange = (e) => {
   if (!val) {
     refFile = null;
     redraw();
+    schedulePreviewUpload();
     return;
   }
   try {
     refFile = existingSprite(val);
     redraw();
+    schedulePreviewUpload();
     flash(`loaded reference: ${val}`);
   } catch (err) {
     flash(`reference load failed: ${(err as Error).message}`);
   }
 };
 
-($('showRef') as HTMLInputElement).onchange = () => redraw();
+($('showRef') as HTMLInputElement).onchange = () => {
+  redraw();
+  schedulePreviewUpload();
+};
 ($('onionSkin') as HTMLInputElement).onchange = () => redraw();
 
 $('btnNudgeLeft').onclick = () => nudge(-1, 0);
@@ -2785,6 +3275,11 @@ $('btnUndo').onclick = () => undo();
 $('btnRedo').onclick = () => redo();
 
 window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && editMenu.open) {
+    e.preventDefault();
+    editMenu.open = false;
+    return;
+  }
   if (e.key === 'Alt') {
     e.preventDefault();
     altPickerActive = true;
@@ -2865,6 +3360,7 @@ window.addEventListener('blur', () => {
 ($('hd') as HTMLInputElement).onchange = (e) => {
   file.hd = (e.target as HTMLInputElement).checked;
   syncIO();
+  schedulePreviewUpload();
 };
 
 // Physical size inputs → write to file.w / file.h
@@ -2979,14 +3475,19 @@ Object.defineProperty(window, '__editor', {
       updateUndoRedoButtons();
       void publishSharedSprite();
     },
-    save() { return saveSharedSprite(); },
+    save() { return saveWorkspaceSprites(); },
   },
 });
 
 // Composite weapon picker: every registered weapon except bare hands.
 {
   const sel = $('compWeapon') as HTMLSelectElement;
-  sel.onchange = () => rebuildMoveSelect(sel.value);
+  sel.onchange = () => {
+    previewStepping = false;
+    previewStepFrame = 0;
+    rebuildMoveSelect(sel.value);
+    schedulePreviewUpload();
+  };
   for (const id of weapons.ids()) {
     if (id === 'unarmed') continue;
     const o = document.createElement('option');
@@ -2996,8 +3497,53 @@ Object.defineProperty(window, '__editor', {
   }
 }
 
+function stepPreview(delta: number): void {
+  const play = $('previewPlay') as HTMLInputElement;
+  const timing = currentPreviewTiming();
+  const start = previewStepping
+    ? previewStepFrame
+    : play.checked
+      ? previewFrameAt(performance.now() / 1000, timing)
+      : Math.min(frameIdx, timing.frameCount - 1);
+  play.checked = false;
+  previewStepFrame = ((start + delta) % timing.frameCount + timing.frameCount) % timing.frameCount;
+  previewStepping = true;
+  schedulePreviewUpload();
+}
+
+$('previewPrev').onclick = () => stepPreview(-1);
+$('previewNext').onclick = () => stepPreview(1);
+($('previewPlay') as HTMLInputElement).addEventListener('change', () => {
+  if (($('previewPlay') as HTMLInputElement).checked) previewStepping = false;
+});
+for (const id of ['compMove', 'compBody']) {
+  $(id).addEventListener('change', () => {
+    previewStepping = false;
+    previewStepFrame = 0;
+  });
+}
+
+// These controls change only the rendered preview, not the sprite document.
+// Keep the bridge snapshot in lockstep so agents and other editor clients see
+// the same selected pose/composite as the author looking at this tab.
+for (const id of ['previewPlay', 'compMove', 'compBody', 'compTrail', 'compHitbox', 'compGear', 'showHitbox']) {
+  ($(id) as HTMLInputElement | HTMLSelectElement).addEventListener('change', schedulePreviewUpload);
+}
+
 rebuildMoveSelect(($('compWeapon') as HTMLSelectElement).value);
 renderPreview();
 updateBridgeStatus();
-void initializeBridge();
-window.setInterval(() => void publishSharedSprite(), 160);
+void initializeBridge().then(() => {
+  restoreEditorViewState();
+  editorViewReady = true;
+  persistEditorViewState();
+});
+window.setInterval(() => {
+  persistCurrentDraft();
+  if (editorViewReady) persistEditorViewState();
+  void publishSharedSprite();
+}, 160);
+window.addEventListener('beforeunload', () => {
+  persistCurrentDraft();
+  if (editorViewReady) persistEditorViewState();
+});

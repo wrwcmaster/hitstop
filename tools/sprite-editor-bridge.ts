@@ -5,6 +5,7 @@ import type { Plugin } from 'vite';
 
 const API = '/__sprite-editor';
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
+const MAX_WORKSPACE_JSON_BYTES = 16 * 1024 * 1024;
 const MAX_PREVIEW_BYTES = 4 * 1024 * 1024;
 
 interface ActiveSprite {
@@ -71,8 +72,11 @@ export function spriteEditorBridge(root: string): Plugin {
     return Buffer.concat(chunks);
   };
 
-  const jsonBody = async (req: IncomingMessage): Promise<Record<string, unknown>> => {
-    const body = await readBody(req, MAX_JSON_BYTES);
+  const jsonBody = async (
+    req: IncomingMessage,
+    limit = MAX_JSON_BYTES,
+  ): Promise<Record<string, unknown>> => {
+    const body = await readBody(req, limit);
     if (!body.length) return {};
     const parsed = JSON.parse(body.toString('utf8')) as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('JSON body must be an object');
@@ -134,6 +138,17 @@ export function spriteEditorBridge(root: string): Plugin {
           }
         }
       }
+    }
+  };
+
+  const matchesRepository = async (relative: string | null, candidate: unknown): Promise<boolean> => {
+    if (!relative) return false;
+    try {
+      const target = spritePath(relative);
+      const saved = JSON.parse(await fs.readFile(target.absolute, 'utf8')) as unknown;
+      return JSON.stringify(saved) === JSON.stringify(candidate);
+    } catch {
+      return false;
     }
   };
 
@@ -229,7 +244,12 @@ export function spriteEditorBridge(root: string): Plugin {
           if (req.method === 'POST' && url.pathname === `${API}/open`) {
             const body = await jsonBody(req);
             const target = spritePath(body.path);
-            if (active?.dirty && body.force !== true) {
+            // `dirty` is a description of repository state, not merely a
+            // record that some client sent PUT. An edit that was reverted to
+            // the saved pixels must not strand every editor tab on that file.
+            const hasUnsavedChanges = active?.dirty
+              && !(await matchesRepository(active.path, active.file));
+            if (hasUnsavedChanges && body.force !== true) {
               return send(res, 409, { error: 'the active sprite has unsaved shared changes', state: active });
             }
             const file = JSON.parse(await fs.readFile(target.absolute, 'utf8')) as unknown;
@@ -261,7 +281,18 @@ export function spriteEditorBridge(root: string): Plugin {
               return send(res, 409, { error: 'revision conflict', state: null });
             }
             const serialized = JSON.stringify(body.file);
+            const dirty = !(await matchesRepository(targetPath, body.file));
             if (active && active.path === targetPath && JSON.stringify(active.file) === serialized) {
+              if (active.dirty !== dirty) {
+                active = {
+                  ...active,
+                  revision: active.revision + 1,
+                  source: String(body.source ?? 'api'),
+                  updatedAt: Date.now(),
+                  dirty,
+                };
+                publish();
+              }
               return send(res, 200, active);
             }
             active = {
@@ -270,7 +301,7 @@ export function spriteEditorBridge(root: string): Plugin {
               revision: (active?.revision ?? 0) + 1,
               source: String(body.source ?? 'api'),
               updatedAt: Date.now(),
-              dirty: true,
+              dirty,
             };
             publish();
             return send(res, 200, active);
@@ -297,6 +328,70 @@ export function spriteEditorBridge(root: string): Plugin {
             };
             publish();
             return send(res, 200, active);
+          }
+
+          if (req.method === 'POST' && url.pathname === `${API}/save-all`) {
+            const body = await jsonBody(req, MAX_WORKSPACE_JSON_BYTES);
+            if (!Array.isArray(body.documents)) {
+              return send(res, 400, { error: 'documents must be an array' });
+            }
+            if (body.documents.length > 128) {
+              return send(res, 400, { error: 'too many sprite documents' });
+            }
+            // Resolve and validate the complete workspace before writing any
+            // file. A malformed inactive draft must not leave half of the
+            // user's other sprites saved and half still pending.
+            const seen = new Set<string>();
+            const documents = body.documents.map((entry) => {
+              if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+                throw new Error('each document needs a path and SpriteFile');
+              }
+              const document = entry as { path?: unknown; file?: unknown };
+              const target = spritePath(document.path);
+              if (seen.has(target.relative)) throw new Error(`duplicate sprite path "${target.relative}"`);
+              seen.add(target.relative);
+              validateSprite(document.file);
+              return { target, file: document.file };
+            });
+
+            const activeDocument = active
+              ? documents.find((document) => document.target.relative === active!.path)
+              : undefined;
+            // An unrelated active sprite can keep publishing preview/editor
+            // revisions while inactive drafts are saved. Only an active file
+            // included in this batch participates in revision conflict checks.
+            if (activeDocument
+              && active
+              && Number(body.baseRevision) !== active.revision
+              && String(body.source ?? 'api') !== active.source) {
+              return send(res, 409, { error: 'revision conflict', state: active });
+            }
+
+            for (const document of documents) {
+              const text = `${JSON.stringify(document.file, null, 2)}\n`;
+              const temporary = `${document.target.absolute}.tmp`;
+              await fs.writeFile(temporary, text, 'utf8');
+              await fs.rename(temporary, document.target.absolute);
+            }
+
+            if (active && activeDocument) {
+              // Saving acknowledges the exact browser document included in
+              // the batch. Keeping it active avoids the old open/save/open
+              // sequence that reset the editor to another sprite.
+              active = {
+                ...active,
+                file: activeDocument.file,
+                revision: active.revision + 1,
+                dirty: false,
+                updatedAt: Date.now(),
+                source: String(body.source ?? 'api'),
+              };
+              publish();
+            }
+            return send(res, 200, {
+              saved: documents.map((document) => document.target.relative),
+              state: active,
+            });
           }
 
           if (req.method === 'POST' && url.pathname === `${API}/preview`) {

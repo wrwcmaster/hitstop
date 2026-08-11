@@ -18,12 +18,31 @@
       display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
     }
     #toolbar .group { display: flex; align-items: center; gap: 4px; }
+    #toolbar .icon-tool {
+      width: 32px; height: 30px; padding: 5px;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    #toolbar .icon-tool svg {
+      width: 17px; height: 17px; fill: none; stroke: currentColor;
+      stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+    }
     #toolbar .separator { width: 1px; height: 24px; margin: 0 5px; background: #33447f; }
     #toolbar label { display: flex; align-items: center; gap: 3px; margin: 0; }
     #gridZoomPercent { width: 72px; text-align: right; }
     #brushSize { width: 58px; text-align: right; }
     main { flex: 1; display: flex; min-height: 0; }
     #side-left, #side-right { width: 260px; padding: 10px; background: #101430; overflow-y: auto; flex-shrink: 0; }
+    #side-right { width: 300px; }
+    #side-right {
+      padding: 0; overflow: hidden; display: flex; flex-direction: column;
+    }
+    #persistent-preview {
+      flex: 0 0 auto; max-height: 56%; overflow-y: auto; padding: 10px;
+      background: #101430; border-bottom: 1px solid #33447f;
+    }
+    #right-workspace-scroll {
+      flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px;
+    }
     /* The composite preview renders at the game's on-screen scale (8px
        per world pixel), which needs more room than a sheet thumbnail. */
     #side-right.wide { width: 452px; }
@@ -51,6 +70,48 @@
       transform: translate(-50%, -50%);
     }
     #selectionTransforms input { width: 48px; text-align: right; }
+    .command-menu { position: relative; }
+    .command-menu > summary {
+      list-style: none; cursor: pointer; user-select: none;
+      background: transparent; color: #94b0c2; border: 1px solid transparent;
+      border-radius: 4px; padding: 4px 8px;
+    }
+    .command-menu > summary::-webkit-details-marker { display: none; }
+    .command-menu > summary:hover,
+    .command-menu[open] > summary { color: #f4f4f4; background: #1f2a57; border-color: #33447f; }
+    .command-menu-panel {
+      position: absolute; top: calc(100% + 5px); left: 0; z-index: 20;
+      width: 220px; padding: 5px; background: #101430;
+      border: 1px solid #33447f; border-radius: 5px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    }
+    .command-menu-panel button {
+      width: 100%; display: flex; justify-content: space-between; gap: 12px;
+      color: #f4f4f4; background: transparent; border-color: transparent; text-align: left;
+    }
+    .command-menu-panel button:hover { background: #1f2a57; }
+    .command-menu-panel button:disabled { color: #566c86; cursor: default; }
+    .command-menu-panel kbd { color: #94b0c2; font: inherit; white-space: nowrap; }
+    .panel-tabs {
+      position: sticky; top: -10px; z-index: 5;
+      display: flex; gap: 3px; margin: -10px -10px 10px; padding: 8px 8px 6px;
+      background: #0b0e20; border-bottom: 1px solid #33447f;
+    }
+    .panel-tabs button {
+      flex: 1; min-width: 0; padding: 5px 4px; color: #94b0c2;
+      background: transparent; border-color: transparent;
+    }
+    .panel-tabs button.active {
+      color: #ffcd75; background: #1f2a57; border-color: #33447f;
+    }
+    .panel-page[hidden] { display: none; }
+    .panel-group { margin: 0 0 12px; }
+    .panel-row { display: flex; gap: 4px; align-items: center; margin-bottom: 6px; }
+    .panel-row > button { flex: 1; }
+    #right-rig input[type=number] { width: 64px !important; }
+    .transform-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+    .transform-grid label { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+    .transform-grid input { width: 72px; }
     h2 { font-size: 12px; color: #ffcd75; margin: 14px 0 6px; text-transform: uppercase; }
     h2:first-child { margin-top: 0; }
     button, select, input {
@@ -104,48 +165,46 @@
 <body>
   <header>
     <h1>hitstop sprite editor</h1>
+    <details id="editMenu" class="command-menu">
+      <summary aria-haspopup="menu">Menu</summary>
+      <div class="command-menu-panel" role="menu">
+        <button id="btnUndo" title="Undo (Ctrl+Z)" role="menuitem" disabled><span>undo</span><kbd>Ctrl+Z</kbd></button>
+        <button id="btnRedo" title="Redo (Ctrl+Y)" role="menuitem" disabled><span>redo</span><kbd>Ctrl+Y</kbd></button>
+        <button id="btnCut" title="Cut selected pixels (Ctrl+X)" role="menuitem" disabled><span>cut</span><kbd>Ctrl+X</kbd></button>
+        <button id="btnCopy" title="Copy selected pixels (Ctrl+C)" role="menuitem" disabled><span>copy</span><kbd>Ctrl+C</kbd></button>
+        <button id="btnPaste" title="Paste pixels at the selection (Ctrl+V)" role="menuitem"><span>paste</span><kbd>Ctrl+V</kbd></button>
+      </div>
+    </details>
     <select id="selectSprite" style="background:#1f2a57; color:#f4f4f4; border:1px solid #33447f; border-radius:4px; padding:4px;">
       <option value="">-- load existing sprite --</option>
     </select>
     <button id="btnLoad" title="Open a .json sprite file">load local file...</button>
-    <button id="btnSaveRepo" title="Write the shared document to src/game/content/sprites" disabled>save to repo</button>
+    <button id="btnSaveRepo" title="Save all modified sprites to the repository" disabled>save all</button>
     <button id="btnSave" title="Download the current sprite as .json">download</button>
-    <button id="btnUndo" title="Undo (Ctrl+Z)" disabled>undo</button>
-    <button id="btnRedo" title="Redo (Ctrl+Y)" disabled>redo</button>
-    <button id="btnExport" title="Copy JSON to clipboard">export</button>
-    <button id="btnImport" title="Import JSON from the textarea">import</button>
     <input type="file" id="fileInput" accept=".json,application/json" style="display:none">
     <span id="bridgeStatus" title="Live local agent bridge">bridge: connecting</span>
     <span id="status"></span>
   </header>
   <div id="toolbar" role="toolbar" aria-label="sprite editing tools">
     <div class="group" aria-label="paint tools">
-      <button id="btnToolDraw" class="active" title="Pencil (P)">pencil</button>
-      <button id="btnToolBrush" title="Soft brush (B)">brush</button>
-      <button id="btnToolBlur" title="Blur brush (U)">blur</button>
-      <button id="btnToolFill" title="Fill (G)">fill</button>
-      <button id="btnToolPicker" title="Pick a color from the canvas (hold Alt)">picker</button>
-      <button id="btnToolSelect" title="Select a rectangular pixel region (M)">select</button>
-    </div>
-    <div class="group" aria-label="brush size">
-      <button id="btnBrushSizeDown" title="Decrease brush size" aria-label="Decrease brush size">&minus;</button>
-      <label>size <input id="brushSize" type="number" min="1" max="32" step="1" value="5"> px</label>
-      <button id="btnBrushSizeUp" title="Increase brush size" aria-label="Increase brush size">+</button>
-    </div>
-    <span class="separator" aria-hidden="true"></span>
-    <div class="group" aria-label="selection clipboard">
-      <button id="btnCut" title="Cut selected pixels (Ctrl+X)" disabled>cut</button>
-      <button id="btnCopy" title="Copy selected pixels (Ctrl+C)" disabled>copy</button>
-      <button id="btnPaste" title="Paste pixels at the selection (Ctrl+V)">paste</button>
-    </div>
-    <div id="selectionTransforms" class="group" aria-label="selection transforms">
-      <button id="btnRotateSelectionLeft" title="Rotate selection 90 degrees counter-clockwise" disabled>↶ 90°</button>
-      <button id="btnRotateSelectionRight" title="Rotate selection 90 degrees clockwise" disabled>↷ 90°</button>
-      <label>rotate <input id="selectionAngle" type="number" min="-359" max="359" step="1" value="0" disabled>°</label>
-      <button id="btnRotateSelection" title="Rotate selection by any angle using nearest-neighbor inverse mapping" disabled>apply</button>
-      <label>w <input id="selectionW" type="number" min="1" max="160" value="1" disabled></label>
-      <label>h <input id="selectionH" type="number" min="1" max="160" value="1" disabled></label>
-      <button id="btnResizeSelection" title="Resize selection with nearest-neighbor sampling" disabled>resize</button>
+      <button id="btnToolDraw" class="active icon-tool" title="Pencil (P)" aria-label="Pencil (P)">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 17l1-4L14.5 2.5a1.8 1.8 0 012.5 0l.5.5a1.8 1.8 0 010 2.5L7 16z"/><path d="M12.5 4.5l3 3M4 13l3 3"/></svg>
+      </button>
+      <button id="btnToolBrush" class="icon-tool" title="Soft brush (B)" aria-label="Soft brush (B)">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 2.5l5 5-7 7-5-5z"/><path d="M7.5 12.5c-.8 3.4-2.2 4.7-5 5 1.1-1.5.6-3 .1-4.2 1.4.4 3 .2 4.9-.8z"/></svg>
+      </button>
+      <button id="btnToolBlur" class="icon-tool" title="Blur brush (U)" aria-label="Blur brush (U)">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5s-5 6-5 10a5 5 0 0010 0c0-4-5-10-5-10z"/><path d="M8 15c1 .8 2.4.7 3.3 0"/></svg>
+      </button>
+      <button id="btnToolFill" class="icon-tool" title="Fill (G)" aria-label="Fill (G)">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 9l7-7 7 7-7 7z"/><path d="M3 9h14M14.5 13.5s2.5 2.4 2.5 3.7a2.5 2.5 0 01-5 0c0-1.3 2.5-3.7 2.5-3.7z"/></svg>
+      </button>
+      <button id="btnToolPicker" class="icon-tool" title="Color picker (hold Alt)" aria-label="Color picker (hold Alt)">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12 3l5 5-8.5 8.5H4v-4.5z"/><path d="M10.5 4.5l5 5M4 16.5l-1.5 1"/></svg>
+      </button>
+      <button id="btnToolSelect" class="icon-tool" title="Rectangular selection (M)" aria-label="Rectangular selection (M)">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path stroke-dasharray="3 2" d="M3 3h14v14H3z"/><path d="M14 14l3.5 3.5M14 17.5h3.5V14"/></svg>
+      </button>
     </div>
     <span id="selectionStatus" class="hint">selection: none</span>
     <span class="separator" aria-hidden="true"></span>
@@ -158,52 +217,49 @@
   </div>
   <main>
     <div id="side-left">
-      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px">
-        <h2 style="margin:0">palette <span id="paletteStatus" class="hint"></span></h2>
-        <button id="btnCompactPalette" title="Merge duplicate colors and remove unused palette entries">compact</button>
+      <div class="panel-tabs" role="tablist" aria-label="asset panels">
+        <button class="active" data-panel-tab="left" data-panel-target="left-colors" role="tab" aria-selected="true">colors</button>
+        <button data-panel-tab="left" data-panel-target="left-tool" role="tab" aria-selected="false">tool</button>
+        <button data-panel-tab="left" data-panel-target="left-reference" role="tab" aria-selected="false">reference</button>
       </div>
-      <div id="palette"></div>
-      <div class="swatch">
-        <input type="color" id="newColor" value="#38b764">
-        <input type="text" id="newChar" maxlength="1" placeholder="ch" style="width:34px">
-        <button id="btnAddColor">add</button>
-      </div>
-      <h2>reference</h2>
-      <div style="display:flex; flex-direction:column; gap:4px">
-        <select id="selectRefSprite" style="background:#1f2a57; color:#f4f4f4; border:1px solid #33447f; border-radius:4px; padding:4px;">
-          <option value="">-- select reference --</option>
-        </select>
-        <button id="btnLoadRef">load local ref...</button>
-      </div>
-      <input type="file" id="refFileInput" accept=".json,application/json" style="display:none">
-      <label style="display:block; margin-top:6px">
-        <input type="checkbox" id="showRef" checked> show reference (30% opacity)
-      </label>
-      <h2>onion skin</h2>
-      <label style="display:block; margin-top:6px">
-        <input type="checkbox" id="onionSkin"> onion skin (previous frame)
-      </label>
-      <h2>composite</h2>
-      <div style="display:flex; flex-direction:column; gap:4px">
-        <select id="compWeapon">
-          <option value="">-- no weapon --</option>
-        </select>
-        <select id="compMove" title="which of the weapon's moves to pose — they share sheet frames but differ in trail, timing and body motion">
-          <option value="">move: auto</option>
-        </select>
-        <select id="compBody">
-          <option value="edited">body: edited sprite</option>
-          <option value="player">body: player (full)</option>
-          <option value="knight">body: knight sheet</option>
-        </select>
-        <label><input type="checkbox" id="compTrail" checked> attack trail</label>
-        <label><input type="checkbox" id="compHitbox" checked> attack hitbox</label>
-        <label><input type="checkbox" id="compGear"> gear (helmet + plate)</label>
-      </div>
-      <p class="hint" style="margin:6px 0 0">
-        previews the joint effect with the game's own renderers: body +
-        held weapon + slash. editing a weapon sheet re-bakes it live.
-      </p>
+      <section id="left-colors" class="panel-page" data-panel-page="left">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px">
+          <h2 style="margin:0">palette <span id="paletteStatus" class="hint"></span></h2>
+          <button id="btnCompactPalette" title="Merge duplicate colors and remove unused palette entries">compact</button>
+        </div>
+        <div id="palette"></div>
+        <div class="swatch">
+          <input type="color" id="newColor" value="#38b764">
+          <input type="text" id="newChar" maxlength="1" placeholder="ch" style="width:34px">
+          <button id="btnAddColor">add</button>
+        </div>
+      </section>
+      <section id="left-tool" class="panel-page" data-panel-page="left" hidden>
+        <h2 id="toolConfigTitle">tool settings</h2>
+        <div id="brushSizeConfig" hidden>
+          <label id="brushSizeLabel" style="margin-bottom:8px">brush size</label>
+          <div class="panel-row">
+            <button id="btnBrushSizeDown" title="Decrease brush size" aria-label="Decrease brush size">&minus;</button>
+            <label style="margin:0"><input id="brushSize" type="number" min="1" max="32" step="1" value="5"> px</label>
+            <button id="btnBrushSizeUp" title="Increase brush size" aria-label="Increase brush size">+</button>
+          </div>
+          <p id="toolConfigHint" class="hint">The solid center overwrites color; the soft edge blends into neighboring pixels.</p>
+        </div>
+        <p id="toolConfigEmpty" class="hint">The selected tool has no adjustable settings.</p>
+      </section>
+      <section id="left-reference" class="panel-page" data-panel-page="left" hidden>
+        <h2>reference sprite</h2>
+        <div style="display:flex; flex-direction:column; gap:4px">
+          <select id="selectRefSprite" style="background:#1f2a57; color:#f4f4f4; border:1px solid #33447f; border-radius:4px; padding:4px;">
+            <option value="">-- select reference --</option>
+          </select>
+          <button id="btnLoadRef">load local ref...</button>
+        </div>
+        <input type="file" id="refFileInput" accept=".json,application/json" style="display:none">
+        <label style="display:block; margin-top:6px">
+          <input type="checkbox" id="showRef" checked> show reference (30% opacity)
+        </label>
+      </section>
     </div>
 
     <div id="center">
@@ -212,9 +268,44 @@
     </div>
 
     <div id="side-right">
-      <h2>preview <label style="display:inline"><input type="checkbox" id="hd" checked> hd</label></h2>
-      <div style="display:flex; justify-content:center; margin-bottom:10px;">
-        <canvas id="preview" width="200" height="80"></canvas>
+      <section id="persistent-preview" aria-label="persistent preview">
+        <h2>preview
+          <button id="previewPrev" type="button" title="Previous preview frame" aria-label="Previous preview frame">◀</button>
+          <label style="display:inline"><input type="checkbox" id="previewPlay"> play</label>
+          <button id="previewNext" type="button" title="Next preview frame" aria-label="Next preview frame">▶</button>
+          <span id="previewFrame" class="hint">1/1</span>
+          <label style="display:inline"><input type="checkbox" id="hd" checked> hd</label>
+        </h2>
+        <div id="previewContext" class="hint" style="margin:-2px 0 6px">sprite preview</div>
+        <div style="display:flex; justify-content:center; margin-bottom:10px;">
+          <canvas id="preview" width="200" height="80"></canvas>
+        </div>
+      </section>
+
+      <div id="right-workspace-scroll">
+      <div class="panel-tabs" role="tablist" aria-label="sprite workspace">
+        <button class="active" data-panel-tab="right" data-panel-target="right-animate" role="tab" aria-selected="true">animate</button>
+        <button data-panel-tab="right" data-panel-target="right-transform" role="tab" aria-selected="false">transform</button>
+        <button data-panel-tab="right" data-panel-target="right-rig" role="tab" aria-selected="false">rig</button>
+        <button data-panel-tab="right" data-panel-target="right-data" role="tab" aria-selected="false">data</button>
+      </div>
+      <section id="right-animate" class="panel-page" data-panel-page="right">
+      <div class="panel-group">
+        <h2>composite</h2>
+        <div style="display:flex; flex-direction:column; gap:4px">
+          <select id="compWeapon"><option value="">-- no weapon --</option></select>
+          <select id="compMove" title="Choose the move whose weapon pose, trail, timing, and body motion should be previewed"><option value="">move: auto</option></select>
+          <select id="compBody">
+            <option value="edited">body: edited sprite</option>
+            <option value="player">body: player (full)</option>
+          </select>
+          <div class="panel-row">
+            <label><input type="checkbox" id="compTrail" checked> trail</label>
+            <label><input type="checkbox" id="compHitbox" checked> hitbox</label>
+            <label><input type="checkbox" id="compGear"> gear</label>
+          </div>
+        </div>
+        <p class="hint" style="margin:6px 0 0">Body, held weapon, and attack effects are rendered together with the game's own renderers.</p>
       </div>
 
       <h2>animations</h2>
@@ -224,25 +315,32 @@
         <button id="btnRenameAnim" style="flex:1">rename</button>
         <button id="btnDelAnim" style="flex:1">del</button>
       </div>
-      <label style="display:block; margin-bottom:10px">fps <input id="fps" type="number" min="1" max="30" value="8" style="width:70px"></label>
+      <div class="panel-row" style="margin-bottom:10px">
+        <label>fps <input id="fps" type="number" min="1" max="30" value="8" style="width:70px"></label>
+        <label><input type="checkbox" id="onionSkin"> onion skin</label>
+      </div>
 
       <h2>frames <span id="frameOf" class="hint"></span></h2>
       <div id="frames" style="margin-bottom:6px; display:flex; flex-wrap:wrap; gap:4px"></div>
       <div style="display:flex; gap:4px; margin-bottom:10px">
         <button id="btnAddFrame" style="flex:1">+ frame</button>
         <button id="btnDupFrame" style="flex:1">dup</button>
-        <button id="btnFrameFirst" style="flex:1" title="Rotate this animation so the selected frame becomes frame 1">make first</button>
+        <button id="btnFrameLeft" style="flex:1" title="Move selected frame left" aria-label="Move selected frame left">←</button>
+        <button id="btnFrameRight" style="flex:1" title="Move selected frame right" aria-label="Move selected frame right">→</button>
         <button id="btnDelFrame" style="flex:1">del</button>
       </div>
 
-      <h2>size</h2>
+      </section>
+      <section id="right-rig" class="panel-page" data-panel-page="right" hidden>
+
+      <h2>sprite size</h2>
       <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px">
         <label style="margin:0">w <input id="w" type="number" min="1" max="160" value="12" style="width:50px"></label>
         <label style="margin:0">h <input id="h" type="number" min="1" max="160" value="14" style="width:50px"></label>
         <button id="btnResize">resize</button>
       </div>
 
-      <h2>physical</h2>
+      <h2>physical size</h2>
       <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px">
         <label style="margin:0">w <input id="physW" type="number" min="0.25" max="64" step="0.25" style="width:50px"></label>
         <label style="margin:0">h <input id="physH" type="number" min="0.25" max="64" step="0.25" style="width:50px"></label>
@@ -272,22 +370,55 @@
       </div>
       <p class="hint" style="margin:0 0 8px">Shift+Alt-click the grid to place the selected anchor. For a right-facing knight, frontHand is the knight's right/weapon hand, on the left side of the image.</p>
 
-      <h2>transform</h2>
-      <div style="display:flex; gap:4px; margin-bottom:10px">
-        <button id="btnNudgeLeft" title="Nudge left" style="flex:1">◀</button>
-        <button id="btnNudgeUp" title="Nudge up" style="flex:1">▲</button>
-        <button id="btnNudgeDown" title="Nudge down" style="flex:1">▼</button>
-        <button id="btnNudgeRight" title="Nudge right" style="flex:1">▶</button>
-      </div>
+      </section>
+      <section id="right-transform" class="panel-page" data-panel-page="right" hidden>
+        <h2>selection</h2>
+        <p class="hint">Use Select (M), then drag a rectangle on the canvas. Transparent pixels are ignored while moving and transforming.</p>
+        <div id="selectionTransforms">
+          <div class="panel-group">
+            <h2>rotate</h2>
+            <div class="panel-row">
+              <button id="btnRotateSelectionLeft" title="Rotate selection 90 degrees counter-clockwise" disabled>&#8634; 90&deg;</button>
+              <button id="btnRotateSelectionRight" title="Rotate selection 90 degrees clockwise" disabled>&#8635; 90&deg;</button>
+            </div>
+            <div class="panel-row">
+              <label>angle <input id="selectionAngle" type="number" min="-359" max="359" step="1" value="0" disabled>&deg;</label>
+              <button id="btnRotateSelection" title="Rotate selection by any angle using nearest-neighbor inverse mapping" disabled>apply</button>
+            </div>
+          </div>
+          <div class="panel-group">
+            <h2>resize</h2>
+            <div class="panel-row">
+              <label>w <input id="selectionW" type="number" min="1" max="160" value="1" disabled></label>
+              <label>h <input id="selectionH" type="number" min="1" max="160" value="1" disabled></label>
+              <button id="btnResizeSelection" title="Resize selection with nearest-neighbor sampling" disabled>apply</button>
+            </div>
+          </div>
+        </div>
+        <div class="panel-group">
+          <h2>nudge</h2>
+          <div class="transform-grid">
+            <span></span><button id="btnNudgeUp" title="Nudge up">&uarr;</button><span></span>
+            <button id="btnNudgeLeft" title="Nudge left">&larr;</button><button id="btnNudgeDown" title="Nudge down">&darr;</button><button id="btnNudgeRight" title="Nudge right">&rarr;</button>
+          </div>
+        </div>
+      </section>
 
+      <section id="right-data" class="panel-page" data-panel-page="right" hidden>
       <h2>sprite json</h2>
-      <textarea id="io" spellcheck="false" style="height:100px; margin-bottom:6px;"></textarea>
+      <div class="panel-row">
+        <button id="btnExport" title="Copy JSON to clipboard">copy JSON</button>
+        <button id="btnImport" title="Import JSON from the textarea">apply JSON</button>
+      </div>
+      <textarea id="io" spellcheck="false" style="height:240px; margin-bottom:6px;"></textarea>
       <p class="hint" style="margin:0">
         paint: left-drag &middot; erase: right-drag &middot; picker: Alt<br>
         pencil P &middot; brush B &middot; blur U &middot; fill G &middot; select M<br>
         selection: drag inside to move &middot; drag square handles to resize &middot; drag green handle to rotate &middot; Shift snaps 15&deg;<br>
         export/import JSON (content/sprites/*.json)
       </p>
+      </section>
+      </div>
     </div>
   </main>
   <script type="module" src="/tools/src/sprite-editor.ts"></script>

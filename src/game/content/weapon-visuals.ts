@@ -1,6 +1,5 @@
 import {
   Registry,
-  frameAt,
   loadSprite,
   offscreen,
   whiteOf,
@@ -187,12 +186,14 @@ export function weaponIcon(id: string): HTMLCanvasElement {
 }
 
 export interface SpriteWeaponConfig {
-  /** Transparent weapon-only frames aligned to the knight's world origin. */
+  /** Transparent weapon-only frames. */
   anims: FacingAnimSet;
-  /** Player origin measured in logical pixels from the sheet's top-left. */
+  /** Legacy feet origin, used by animations that do not yet author a grip. */
   origin?: { x: number; y: number };
+  /** Resolve the weapon-side grip point from the right-facing source art. */
+  grip?: (anim: string, frame: number) => { x: number; y: number } | undefined;
   /** Optional body-frame offsets for final art alignment. */
-  anchors?: Record<string, { x: number; y: number; angle?: number }[]>;
+  offsets?: Record<string, { x: number; y: number; angle?: number }[]>;
   /** Set false when the authored frames already include an attack effect. */
   trail?: boolean;
 }
@@ -221,20 +222,44 @@ export function spriteWeapon(config: SpriteWeaponConfig): WeaponVisual {
       const anim = attackAnim ? attackName! : ctx.anim;
       const frame = attackAnim
         ? attackFrame(ctx.attack!, attackAnim.frames.length)
-        : ctx.frame;
-      const image = attackAnim ? attackAnim.frames[frame] : frameAt(set, anim, ctx.animT);
-      const anchor = config.anchors?.[anim]?.[frame] ?? { x: 0, y: 0, angle: 0 };
+        : bodyAlignedFrame(set[anim], ctx.frame);
+      const image = set[anim].frames[frame];
+      const offset = config.offsets?.[anim]?.[frame] ?? { x: 0, y: 0, angle: 0 };
       const drawW = image.width / TEXEL;
       const drawH = image.height / TEXEL;
       const origin = config.origin ?? { x: drawW / 2, y: drawH };
+      const grip = config.grip?.(anim, frame);
       g.save();
-      g.translate(anchor.x * ctx.facing, anchor.y);
-      if (anchor.angle) g.rotate(anchor.angle * ctx.facing);
-      g.drawImage(image, -origin.x, -origin.y, drawW, drawH);
+      g.translate(offset.x * ctx.facing, offset.y);
+      if (offset.angle) g.rotate(offset.angle * ctx.facing);
+      if (grip && ctx.frontHand) {
+        // Anchors are authored against the right-facing sheet. Left art is
+        // pre-mirrored, so mirror both the body-local hand and the point
+        // inside the weapon frame before pinning them together.
+        const gripX = ctx.facing === 1 ? grip.x : drawW - grip.x;
+        g.translate(ctx.frontHand.x * ctx.facing, ctx.frontHand.y);
+        g.drawImage(image, -gripX, -grip.y, drawW, drawH);
+      } else {
+        // Partial rigs remain playable while an artist adds grip points to
+        // the remaining rows; those rows retain their old feet alignment.
+        g.drawImage(image, -origin.x, -origin.y, drawW, drawH);
+      }
       g.restore();
     },
     drawTrail: config.trail === false ? undefined : drawSlashTrail,
   };
+}
+
+/**
+ * Neutral equipment is a layer of the body pose, not an independent clock.
+ * Matching the body's resolved frame keeps weapon art and grip anchors on the
+ * same numbered pose even when their authored fps values differ. A shorter
+ * looping layer repeats; a non-looping layer holds its final authored frame.
+ */
+function bodyAlignedFrame(anim: FacingAnimSet['right'][string], bodyFrame: number): number {
+  return anim.loop === false
+    ? Math.min(bodyFrame, anim.frames.length - 1)
+    : bodyFrame % anim.frames.length;
 }
 
 export interface ProceduralBladeConfig {
@@ -512,11 +537,22 @@ defineSlashVisual('crescent', {
  * editor re-bake a visual from an edited sheet and see it composited on
  * the knight immediately — the art swaps, the fit stays.
  */
-const spriteWeaponConfigs = new Map<string, Omit<SpriteWeaponConfig, 'anims'>>();
+type SpriteWeaponRegistrationConfig = Omit<SpriteWeaponConfig, 'anims' | 'grip'>;
 
-function defineSpriteWeapon(id: string, file: unknown, config: Omit<SpriteWeaponConfig, 'anims'>): void {
+const spriteWeaponConfigs = new Map<string, SpriteWeaponRegistrationConfig>();
+
+function weaponFromSprite(file: SpriteFile, config: SpriteWeaponRegistrationConfig): WeaponVisual {
+  const loaded = loadSprite(file, PAL);
+  return spriteWeapon({
+    ...config,
+    anims: withFacing(loaded.animSet()),
+    grip: (anim, frame) => loaded.anchor?.('grip', anim, frame),
+  });
+}
+
+function defineSpriteWeapon(id: string, file: unknown, config: SpriteWeaponRegistrationConfig): void {
   spriteWeaponConfigs.set(id, config);
-  defineWeaponVisual(id, spriteWeapon({ ...config, anims: withFacing(load(file).animSet()) }));
+  defineWeaponVisual(id, weaponFromSprite(file as SpriteFile, config));
 }
 
 /**
@@ -528,7 +564,7 @@ function defineSpriteWeapon(id: string, file: unknown, config: Omit<SpriteWeapon
 export function rebuildSpriteWeapon(id: string, file: SpriteFile): boolean {
   const config = spriteWeaponConfigs.get(id);
   if (!config) return false;
-  weaponVisuals.replace(id, spriteWeapon({ ...config, anims: withFacing(loadSprite(file, PAL).animSet()) }));
+  weaponVisuals.replace(id, weaponFromSprite(file, config));
   return true;
 }
 
