@@ -1,5 +1,4 @@
 import { Registry, isLayeredSpriteFile, type SpriteFile } from '@engine/index';
-import renderTagDependencyDefs from './render-tag-dependencies.json';
 import renderTagDefs from './render-tags.json';
 
 /**
@@ -15,12 +14,6 @@ export interface PlayerRenderTagDef extends PlayerRenderTag {
   id: string;
 }
 
-export interface PlayerRenderTagDependency {
-  tag: string;
-  consumer: string;
-  detail: string;
-}
-
 export const playerRenderTags = new Registry<PlayerRenderTag>('playerRenderTag');
 let playerRenderTagOrder: string[] = [];
 
@@ -28,36 +21,13 @@ export function definePlayerRenderTag(id: string, label: string): void {
   playerRenderTags.register(id, { label });
 }
 
-export const BODY_RENDER_TAG = 'body';
-export const HELD_OBJECT_RENDER_TAG = 'held-object';
-export const FOREGROUND_BODY_RENDER_TAG = 'foreground-body';
-
 for (const definition of renderTagDefs as PlayerRenderTagDef[]) {
   definePlayerRenderTag(definition.id, definition.label);
 }
 playerRenderTagOrder = (renderTagDefs as PlayerRenderTagDef[]).map((definition) => definition.id);
 
-const renderTagDependencies = renderTagDependencyDefs as PlayerRenderTagDependency[];
-
-// Validate declared consumers instead of blessing particular ids as required.
-// Removing a dependency from the renderer and this table makes its tag
-// deletable without changing the registry mechanism.
-for (const dependency of renderTagDependencies) {
-  if (!playerRenderTags.has(dependency.tag)) {
-    throw new Error(`player render tag "${dependency.tag}" is used by ${dependency.consumer}: ${dependency.detail}`);
-  }
-}
-
 export function orderedPlayerRenderTags(): string[] {
   return [...playerRenderTagOrder];
-}
-
-export function playerRenderTagDependencies(id: string): PlayerRenderTagDependency[] {
-  return renderTagDependencies.filter((dependency) => dependency.tag === id);
-}
-
-export function allPlayerRenderTagDependencies(): PlayerRenderTagDependency[] {
-  return [...renderTagDependencies];
 }
 
 /** Update the live content registry for authoring previews and hot reload. */
@@ -68,9 +38,15 @@ export function configurePlayerRenderTags(definitions: readonly PlayerRenderTagD
 
 /** Fail at content load instead of silently dropping a mistagged layer. */
 export function validatePlayerRenderTags(file: SpriteFile): void {
-  if (!isLayeredSpriteFile(file)) return;
+  const known = new Set(playerRenderTagOrder);
+  if (!isLayeredSpriteFile(file)) {
+    if (file.renderTag && !known.has(file.renderTag)) {
+      throw new Error(`flat sprite uses unknown player render tag "${file.renderTag}"`);
+    }
+    return;
+  }
   for (const layer of file.layers) {
-    if (!playerRenderTags.has(layer.tag)) {
+    if (!known.has(layer.tag)) {
       throw new Error(`sprite layer "${layer.id}" uses unknown player render tag "${layer.tag}"`);
     }
   }

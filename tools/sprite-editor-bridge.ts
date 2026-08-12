@@ -1,4 +1,4 @@
-import { promises as fs, readFileSync } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
@@ -40,12 +40,6 @@ interface ActiveSelection {
 export function spriteEditorBridge(root: string): Plugin {
   const spriteRoot = path.resolve(root, 'src/game/content/sprites');
   const renderTagsPath = path.resolve(root, 'src/game/content/render-tags.json');
-  const renderTagDependenciesPath = path.resolve(root, 'src/game/content/render-tag-dependencies.json');
-  const renderTagDependencies = JSON.parse(readFileSync(renderTagDependenciesPath, 'utf8')) as {
-    tag: string;
-    consumer: string;
-    detail: string;
-  }[];
   let active: ActiveSprite | null = null;
   let selection: ActiveSelection | null = null;
   let preview: Buffer | null = null;
@@ -97,6 +91,10 @@ export function spriteEditorBridge(root: string): Plugin {
     const anims = (candidate as { anims?: unknown }).anims;
     if (!anims || typeof anims !== 'object' || Array.isArray(anims) || !Object.keys(anims).length) {
       throw new Error('sprite needs at least one animation');
+    }
+    const renderTag = (candidate as { renderTag?: unknown }).renderTag;
+    if (renderTag !== undefined && (typeof renderTag !== 'string' || !renderTag.trim())) {
+      throw new Error('sprite renderTag must be non-empty');
     }
     const layers = (candidate as { layers?: unknown }).layers;
     const layered = Array.isArray(layers);
@@ -227,11 +225,6 @@ export function spriteEditorBridge(root: string): Plugin {
       }
       ids.add(tag.id);
     }
-    for (const dependency of renderTagDependencies) {
-      if (!ids.has(dependency.tag)) {
-        throw new Error(`render tag "${dependency.tag}" is used by ${dependency.consumer}: ${dependency.detail}`);
-      }
-    }
   };
 
   const matchesRepository = async (relative: string | null, candidate: unknown): Promise<boolean> => {
@@ -253,6 +246,37 @@ export function spriteEditorBridge(root: string): Plugin {
       else if (entry.isFile() && entry.name.endsWith('.json')) out.push(relative);
     }
     return out.sort();
+  };
+
+  const validateSpriteRenderTagReferences = async (
+    renderTags: { id: string; label: string }[],
+    pending: { target: { relative: string }; file: unknown }[],
+  ): Promise<void> => {
+    const known = new Set(renderTags.map((tag) => tag.id));
+    const overrides = new Map(pending.map((document) => [document.target.relative, document.file]));
+    const missing = new Map<string, string[]>();
+    for (const relative of await listSprites()) {
+      const sprite = (overrides.get(relative)
+        ?? JSON.parse(await fs.readFile(spritePath(relative).absolute, 'utf8'))) as {
+        renderTag?: unknown;
+        layers?: unknown;
+      };
+      const note = (tag: unknown, detail: string): void => {
+        if (typeof tag !== 'string' || known.has(tag)) return;
+        const references = missing.get(tag) ?? [];
+        references.push(`${relative} - ${detail}`);
+        missing.set(tag, references);
+      };
+      note(sprite.renderTag, 'flat sprite render tag');
+      if (Array.isArray(sprite.layers)) for (const rawLayer of sprite.layers) {
+        const layer = rawLayer as { id?: unknown; name?: unknown; tag?: unknown };
+        note(layer.tag, `layer "${String(layer.name ?? layer.id ?? 'unnamed')}"`);
+      }
+    }
+    if (missing.size) {
+      const details = [...missing].map(([tag, references]) => `"${tag}": ${references.join(', ')}`).join('; ');
+      throw new Error(`cannot remove render tags with sprite dependencies: ${details}`);
+    }
   };
 
   const headers = (res: ServerResponse, contentType = 'application/json'): void => {
@@ -460,7 +484,10 @@ export function spriteEditorBridge(root: string): Plugin {
               return { target, file: document.file };
             });
             const renderTags = body.renderTags;
-            if (renderTags !== undefined) validateRenderTags(renderTags);
+            if (renderTags !== undefined) {
+              validateRenderTags(renderTags);
+              await validateSpriteRenderTagReferences(renderTags, documents);
+            }
 
             const activeDocument = active
               ? documents.find((document) => document.target.relative === active!.path)

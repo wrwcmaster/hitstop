@@ -32,6 +32,8 @@ export interface SheetAnimData {
 }
 
 export interface SheetDescriptor extends SpriteGeometry {
+  /** Shared render band contributed by this flat sheet. */
+  renderTag?: string;
   /** Source image filename — tooling/metadata only; runtime takes the image directly. */
   image?: string;
   /** Uniform grid cell size (px). Ignored for frames covered by `rects`. */
@@ -98,6 +100,8 @@ export function loadSheet(image: CanvasImageSource, desc: SheetDescriptor): Load
     }
     return set;
   };
+  const renderTag = desc.renderTag ?? 'base';
+  if (!renderTag.trim()) throw new Error('sprite sheet: renderTag must be non-empty');
 
   return {
     ...geometry,
@@ -105,9 +109,9 @@ export function loadSheet(image: CanvasImageSource, desc: SheetDescriptor): Load
     frames: framesOf,
     names: () => Object.keys(desc.anims),
     animSet,
-    tags: () => ['base'],
-    tagFrames: (tag, name) => tag === 'base' ? framesOf(name) : [],
-    tagAnimSet: (tag) => tag === 'base' ? animSet() : {},
+    tags: () => [renderTag],
+    tagFrames: (tag, name) => tag === renderTag ? framesOf(name) : [],
+    tagAnimSet: (tag) => tag === renderTag ? animSet() : {},
   };
 }
 

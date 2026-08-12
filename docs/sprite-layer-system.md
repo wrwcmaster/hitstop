@@ -44,7 +44,7 @@ Calling both concepts “layers” is convenient in the UI, but the implementati
 
 ## Proposed source format
 
-Current flat sprite files remain valid and require no migration. A flat file is interpreted as one implicit layer named `Base`.
+Current flat sprite files remain valid. A flat file is interpreted as one implicit layer named `Base`; composites give that layer an explicit `renderTag` so its role comes from asset data rather than a player/weapon filename check.
 
 A new layered file uses the same geometry, palette, anchors, `hd`, and `anims` concepts, but centralizes timing in the animation timeline and stores pixels in layer tracks:
 
@@ -132,6 +132,8 @@ interface LayeredSpriteFile extends SpriteGeometry {
 }
 ```
 
+The shared base shape also accepts `renderTag?: string`. Ordinary standalone sprites may omit it and keep the engine's generic `base` tag. Any flat sprite participating in a tagged composite authors the tag explicitly.
+
 Stable `id` values are for files, undo history, local drafts, and agent instructions. Display `name` values may change freely.
 
 ### Format invariants
@@ -155,7 +157,7 @@ Requiring complete tracks is intentionally stricter than treating a missing trac
 
 `src/engine/gfx/spritefile.ts` remains the mechanism boundary.
 
-For a flat sprite, `loadSprite` behaves exactly as it does now and exposes one implicit `base` tag. For a layered sprite it will:
+For a flat sprite, `loadSprite` exposes the authored `renderTag`, falling back to the generic `base` tag when the asset does not participate in a tagged composite. For a layered sprite it will:
 
 1. Resolve the timeline animation and aliases.
 2. Validate every layer track against the resolved animation.
@@ -224,6 +226,8 @@ Attachment and ordering are separate mechanisms:
 - every body and attachment layer names a render tag;
 - the player render-tag registry supplies the only cross-asset order.
 
+The renderer never assigns semantic tags based on asset kind. Flat body and equipment files declare `renderTag`; layered files tag each layer; procedural visuals declare `renderTags` in their registered content definition. Hand choice (`front`, `rear`, or both while charging) and attachment slot are separate visual data, so a rear-hand item does not require a new renderer branch or a special tag.
+
 The initial ordered bands are `behind-body`, `body`, `held-object`,
 `foreground-body`, and `foreground-effects`. A body hand layer tagged
 `foreground-body` therefore covers a weapon blade tagged `held-object`.
@@ -287,9 +291,9 @@ The design is successful when:
 The first release follows the boundary above:
 
 - `SpriteFile` is a flat-or-layered union with strict validation, shared timing, stable layer ids, required render tags, and character-grid compositing in `spritefile.ts`.
-- `loadSprite` exposes both its compatible flattened canvas and lazily cached per-tag canvases. Sprite-sheet assets expose one implicit `base` tag.
-- The player render order comes from the `playerRenderTag` content registry. Body and sprite-backed weapon layers are merged through it after attachment anchors are resolved.
-- The Layers workspace owns the layer panel. It supports active-layer selection, tag assignment, create, duplicate, rename, delete, within-tag reorder, hide, solo, lock, merge down, and undoable flatten. Menu → Edit layer tags manages the shared tag labels and back-to-front order. Deletion is dependency-driven: the manager lists every renderer consumer, sprite layer, and editor default that uses a tag and only blocks deletion while that list is non-empty. `foreground-body` currently has no renderer dependency; when absent, procedural grip pixels use the frontmost remaining band.
+- `loadSprite` exposes both its compatible flattened canvas and lazily cached per-tag canvases. Flat text-grid and PNG-sheet assets expose their authored `renderTag`, or the generic `base` fallback outside tagged composites.
+- The player render order comes from the `playerRenderTag` content registry. Body sprites and weapon visuals contribute only the bands declared in their own sprite/visual data; attachment anchors and hand choice are resolved independently.
+- The Layers workspace owns the layer panel. It supports active-layer selection, tag assignment (including the implicit layer of a flat sprite), create, duplicate, rename, delete, within-tag reorder, hide, solo, lock, merge down, and undoable flatten. Menu → Edit layer tags manages the shared tag labels and back-to-front order. Deletion is dependency-driven: the manager lists every sprite layer, flat-sprite assignment, and registered visual that uses a tag and only blocks deletion while that list is non-empty. There are no renderer-reserved tag ids.
 - Paint, soft brush, blur, fill, magic selection, clipboard, move, resize, and rotation operate on the active layer. The grid, onion skin, picker, and persistent preview use the visible composite.
 - Frame add, duplicate, reorder, and delete update all layer tracks and anchor arrays as one history operation. Palette compaction scans and remaps every layer.
 - The collaboration selection payload includes `layerId`, and scripted pixel edits may target a stable `layerId` explicitly.

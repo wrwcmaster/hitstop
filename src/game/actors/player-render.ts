@@ -4,14 +4,11 @@ import { gearLayers, DEBUG_ANCHORS } from '../content/gear-visuals';
 import { COLORS } from '../content/palette';
 import { IMPACT_DROP_PLUNGE } from '../content/weapons';
 import {
-  drawHeldWeaponTag, drawWeaponTrail, drawNeutralTrail, heldWeaponAttachmentSlot, heldWeaponHands,
+  drawHeldWeaponTag, drawWeaponTrail, drawNeutralTrail, heldWeaponAttachmentSlot,
+  heldWeaponGripRenderTag, heldWeaponHands,
   type HeldWeaponCtx,
 } from '../content/weapon-visuals';
-import {
-  BODY_RENDER_TAG,
-  FOREGROUND_BODY_RENDER_TAG,
-  orderedPlayerRenderTags,
-} from '../content/render-tags';
+import { orderedPlayerRenderTags } from '../content/render-tags';
 import { PLAYER_TUNING } from './player-tuning';
 import type { Player } from './player';
 
@@ -153,20 +150,9 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
   
   const equippedGear = gearLayers(p.equipment);
   const drawBodyTag = (tag: string): void => {
-    const authoredTags = baseKnight.tags();
-    const authoredTag = authoredTags.includes(tag)
-      ? tag
-      : authoredTags.length === 1 && authoredTags[0] === 'base' && tag === BODY_RENDER_TAG
-        ? 'base'
-        : null;
-    if (!authoredTag) return;
-    let layerImg = authoredTag === 'base'
-      ? img
-      : frameAt(
-        p.facing === 1 ? KNIGHT_TAG_ANIMS.get(authoredTag)!.right : KNIGHT_TAG_ANIMS.get(authoredTag)!.left,
-        anim,
-        p.animT,
-      );
+    const tagged = KNIGHT_TAG_ANIMS.get(tag);
+    if (!tagged) return;
+    let layerImg = frameAt(p.facing === 1 ? tagged.right : tagged.left, anim, p.animT);
     if (p.flashT > 0) layerImg = whiteOf(layerImg);
     else if (isSwallowed) layerImg = tintOf(layerImg, COLORS.red, 0.55);
     g.drawImage(layerImg, -dw / 2, -dh, dw, dh);
@@ -238,12 +224,12 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
   // The registry is the only z-order; local layer order is merely the stable
   // tie-breaker within a tag. That lets a real authored hand cover a weapon.
   const renderTags = orderedPlayerRenderTags();
-  const gripRenderTag = renderTags.includes(FOREGROUND_BODY_RENDER_TAG)
-    ? FOREGROUND_BODY_RENDER_TAG
-    : renderTags.at(-1)!;
+  const bodyTags = new Set(baseKnight.tags());
+  const bodyOverlayTag = [...renderTags].reverse().find((tag) => bodyTags.has(tag));
+  const gripRenderTag = heldWeaponGripRenderTag(weapon.visual);
   for (const tag of renderTags) {
     drawBodyTag(tag);
-    if (tag === BODY_RENDER_TAG) {
+    if (tag === bodyOverlayTag) {
       drawGear();
       if (isSwallowed && p.swallowedBy) {
         p.swallowedBy.def.swallow?.drawPlayerOverlay?.(g, p.swallowedBy, p, dw, dh);

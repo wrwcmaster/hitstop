@@ -49,7 +49,7 @@ export function rebuildKnightSprite(file: SpriteFile): void {
 
 export async function loadKnightSheet(imageUrl: string, desc: SheetDescriptor): Promise<void> {
   const img = await loadImage(imageUrl);
-  applyKnight(loadSheet(img, desc));
+  applyKnight(loadSheet(img, { ...desc, renderTag: desc.renderTag ?? baseKnight.tags()[0] }));
 }
 
 /* ---------------- the Duelist (human boss) ---------------- */

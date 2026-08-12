@@ -9,11 +9,7 @@ import {
 } from '@engine/index';
 import { PAL } from '@game/content/palette';
 import {
-  allPlayerRenderTagDependencies,
-  BODY_RENDER_TAG,
   configurePlayerRenderTags,
-  HELD_OBJECT_RENDER_TAG,
-  playerRenderTagDependencies,
   type PlayerRenderTagDef,
 } from '@game/content/render-tags';
 import repositoryRenderTagDefs from '@game/content/render-tags.json';
@@ -144,8 +140,6 @@ interface BridgeState {
  * discover capabilities without hardcoding character file names. */
 interface SpriteEditorMetadata {
   canEquipWeapon?: boolean;
-  /** Tag assigned when this flat asset is first converted to layers. */
-  defaultRenderTag?: string;
 }
 
 type EditorSpriteFile = SpriteFile & {
@@ -179,11 +173,14 @@ function validRenderTagDefs(value: unknown): value is PlayerRenderTagDef[] {
       || typeof definition.label !== 'string' || !definition.label.trim() || ids.has(definition.id)) return false;
     ids.add(definition.id);
     return true;
-  }) && renderTagDependencyIds().every((id) => ids.has(id));
+  }) && visualRenderTagIds().every((id) => ids.has(id));
 }
 
-function renderTagDependencyIds(): string[] {
-  return [...new Set(allPlayerRenderTagDependencies().map((dependency) => dependency.tag))];
+function visualRenderTagIds(): string[] {
+  return [...new Set(weaponVisuals.entries().flatMap(([, visual]) => [
+    ...visual.renderTags,
+    ...(visual.gripRenderTag ? [visual.gripRenderTag] : []),
+  ]))];
 }
 
 function readRenderTagDraft(): PlayerRenderTagDef[] {
@@ -390,10 +387,11 @@ function uniqueLayerId(label: string): string {
 }
 
 function defaultLayerTag(spriteFile: SpriteFile = file): string {
-  const configured = (spriteFile as EditorSpriteFile).editor?.defaultRenderTag;
+  const configured = spriteFile.renderTag;
   if (configured && hasRenderTag(configured)) return configured;
-  const visualId = currentFileName.replace(/\.json$/, '');
-  return weaponVisuals.has(visualId) ? HELD_OBJECT_RENDER_TAG : BODY_RENDER_TAG;
+  const fallback = renderTagDefs[0]?.id;
+  if (!fallback) throw new Error('at least one render tag is required');
+  return fallback;
 }
 
 function ensureLayeredFile(): LayeredSpriteFile {
@@ -408,7 +406,7 @@ function ensureLayeredFile(): LayeredSpriteFile {
       anims[name] = { fps: entry.fps, frameCount: entry.frames.length, loop: entry.loop };
     }
   }
-  const { anims: _flatAnims, ...rest } = flat;
+  const { anims: _flatAnims, renderTag: _flatRenderTag, ...rest } = flat;
   file = {
     ...rest,
     anims,
@@ -962,6 +960,11 @@ async function openSharedSprite(path: string): Promise<boolean> {
     applyBridgeState(body as unknown as BridgeState, true);
     if (draft) {
       const restored = normalize(structuredClone(draft.file));
+      // Drafts may predate flat-sprite render tags. Inherit the repository's
+      // authored assignment instead of re-inferring a role from the filename.
+      if (!isLayeredSpriteFile(restored) && !restored.renderTag && file.renderTag) {
+        restored.renderTag = file.renderTag;
+      }
       if (JSON.stringify(restored) !== JSON.stringify(file)) {
         rememberForUndo();
         clearSelection(false);
@@ -1389,14 +1392,17 @@ $('btnDelAttachmentSlot').onclick = () => {
 /* ---------------- layers ---------------- */
 
 function tagDependencies(id: string): string[] {
-  const dependencies = playerRenderTagDependencies(id)
-    .map((dependency) => `${dependency.consumer} — ${dependency.detail}`);
+  const dependencies: string[] = [];
+  for (const [visualId, visual] of weaponVisuals.entries()) {
+    if (visual.renderTags.includes(id)) dependencies.push(`Weapon visual “${visualId}” — render band`);
+    if (visual.gripRenderTag === id) dependencies.push(`Weapon visual “${visualId}” — grip overlay band`);
+  }
   const documents = new Map<string, SpriteFile>(existingSprites);
   for (const draft of storedDrafts()) documents.set(draft.path, draft.file);
   documents.set(currentRepoPath ?? '(current unsaved sprite)', file);
   for (const [path, spriteFile] of documents) {
-    if ((spriteFile as EditorSpriteFile).editor?.defaultRenderTag === id) {
-      dependencies.push(`${path} — default render tag`);
+    if (spriteFile.renderTag === id) {
+      dependencies.push(`${path} — flat sprite render tag`);
     }
     if (!isLayeredSpriteFile(spriteFile)) continue;
     for (const layer of spriteFile.layers.filter((candidate) => candidate.tag === id)) {
@@ -1649,11 +1655,11 @@ function buildLayers(): void {
       tag.appendChild(option);
     }
     tag.value = layer.tag;
-    tag.disabled = !isLayeredSpriteFile(file);
     tag.onchange = () => {
-      if (!isLayeredSpriteFile(file) || layer.tag === tag.value) return;
+      if (layer.tag === tag.value) return;
       saveHistory();
-      layer.tag = tag.value;
+      if (isLayeredSpriteFile(file)) layer.tag = tag.value;
+      else file.renderTag = tag.value;
       buildLayers();
       redraw();
       syncIO();
@@ -1797,8 +1803,10 @@ $('btnFlattenLayers').onclick = () => {
       ),
     };
   }
+  const renderTag = [...renderTagIds()].reverse()
+    .find((tag) => layered.layers.some((layer) => layer.tag === tag));
   const { layers: _layers, anims: _layeredAnims, ...rest } = layered;
-  file = { ...rest, anims } as FlatSpriteFile & EditorSpriteFile;
+  file = { ...rest, renderTag, anims } as FlatSpriteFile & EditorSpriteFile;
   reconcileLayerState(true);
   clearSelection(false);
   refreshUI();

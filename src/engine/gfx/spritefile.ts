@@ -74,6 +74,8 @@ interface SpriteFileBase extends SpriteGeometry {
   anchors?: SpriteAnchors;
   /** Named sockets used by independently authored attached sprites. */
   attachmentSlots?: Record<string, SpriteAttachmentSlot>;
+  /** Shared render band for a flat sprite. Layered sprites tag each layer. */
+  renderTag?: string;
 }
 
 /** Original single-layer format. Existing content remains byte-compatible. */
@@ -169,7 +171,7 @@ export function validateLayeredSpriteFile(file: LayeredSpriteFile): void {
 
 /** Render tags contributed by a sprite, in first-occurrence layer order. */
 export function spriteLayerTags(file: SpriteFile): string[] {
-  if (!isLayeredSpriteFile(file)) return ['base'];
+  if (!isLayeredSpriteFile(file)) return [file.renderTag ?? 'base'];
   return [...new Set(file.layers.map((layer) => layer.tag))];
 }
 
@@ -235,7 +237,7 @@ export function compositeSpriteTagFrame(
   base: Palette = {},
 ): string[] | undefined {
   if (!isLayeredSpriteFile(file)) {
-    return tag === 'base' ? compositeSpriteFrame(file, name, frame, base) : undefined;
+    return tag === (file.renderTag ?? 'base') ? compositeSpriteFrame(file, name, frame, base) : undefined;
   }
   if (!file.layers.some((layer) => layer.tag === tag)) return undefined;
   return compositeSpriteFrame(file, name, frame, base, (layer) => layer.tag === tag);
@@ -308,7 +310,7 @@ export interface LoadedSprite {
   names(): string[];
   /** An AnimSet ready for `withFacing`/`frameAt`. */
   animSet(): AnimSet;
-  /** Render tags authored by this sprite (`base` for a flat sprite). */
+  /** Render tags authored by this sprite (`renderTag`, or `base` when absent). */
   tags(): string[];
   /** All baked frames for one render tag and animation. */
   tagFrames(tag: string, anim: string): HTMLCanvasElement[];
@@ -353,6 +355,9 @@ export function resolveSpriteGeometry(
 /** Bake a SpriteFile into lazily cached canvases. */
 export function loadSprite(file: SpriteFile, base: Palette = {}): LoadedSprite {
   const pal: Palette = { ...base, ...(file.palette ?? {}) };
+  if (file.renderTag !== undefined && !file.renderTag.trim()) {
+    throw new Error('sprite: renderTag must be non-empty');
+  }
   if (isLayeredSpriteFile(file)) validateLayeredSpriteFile(file);
   for (const [pointName, animations] of Object.entries(file.anchors ?? {})) {
     for (const [animName, points] of Object.entries(animations)) {
