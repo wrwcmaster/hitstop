@@ -1,6 +1,6 @@
 {
   "hd": false,
-  "renderTag": "held-object",
+  "renderTag": "front-hand-held-object",
   "palette": {
     "O": "#171625",
     "D": "#37434d",

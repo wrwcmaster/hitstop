@@ -341,7 +341,7 @@ export interface ProceduralBladeConfig {
 export function proceduralBlade(config: ProceduralBladeConfig): WeaponVisual {
   return {
     gripHands: 'front',
-    renderTags: ['held-object'],
+    renderTags: ['front-hand-held-object'],
     drawHeld(g, ctx) {
       const f = ctx.facing;
       let hx = ctx.frontHand?.x ?? 1.75;
@@ -744,7 +744,7 @@ export function drawBow(g: CanvasRenderingContext2D, pose: BowPose): void {
 // arc leans with the run cycle like the blades do.
 defineWeaponVisual('hunting-bow', {
   gripHands: 'bothWhenCharging',
-  renderTags: ['held-object'],
+  renderTags: ['front-hand-held-object'],
   // The icon IS the held bow: the same pixel stave + slack string at
   // 1:1 (the stave is authored 8 tall, exactly the icon frame) —
   // inventory, pickups, and the knight's hand can never drift apart.
@@ -781,7 +781,7 @@ defineWeaponVisual('hunting-bow', {
 // The flintlock: a stubby barrel + drooping grip at the hand.
 defineWeaponVisual('flintlock', {
   gripHands: 'front',
-  renderTags: ['held-object'],
+  renderTags: ['front-hand-held-object'],
   icon: bakedIcon((px) => {
     px(1, 3, 6, 1, COLORS.steel); px(6, 2, 1, 1, COLORS.white); // barrel + muzzle
     px(1, 4, 2, 1, WOOD); px(1, 5, 1, 2, WOOD_DARK); // stock + grip

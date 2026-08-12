@@ -228,10 +228,10 @@ Attachment and ordering are separate mechanisms:
 
 The renderer never assigns semantic tags based on asset kind. Flat body and equipment files declare `renderTag`; layered files tag each layer; procedural visuals declare `renderTags` in their registered content definition. Hand choice (`front`, `rear`, or both while charging) and attachment slot are separate visual data, so a rear-hand item does not require a new renderer branch or a special tag.
 
-The initial ordered bands are `behind-body`, `body`, `held-object`,
+The initial ordered bands are `behind-body`, `body`, `front-hand-held-object`,
 `foreground-body`, and `foreground-effects`. A body hand layer tagged
-`foreground-body` therefore covers a weapon blade tagged `held-object`.
-A weapon may also contribute its blade to `held-object` and its glow to
+`foreground-body` therefore covers a weapon blade tagged `front-hand-held-object`.
+A weapon may also contribute its blade to `front-hand-held-object` and its glow to
 `foreground-effects`; both layers use the same attachment transform.
 
 Tag ids and order live in one content registry. Adding a tag is a registry

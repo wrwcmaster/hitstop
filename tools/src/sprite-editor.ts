@@ -242,6 +242,29 @@ function readDraft(path: string): StoredSpriteDraft | null {
   }
 }
 
+/** Keep unsaved pixels when repository tag ids are renamed between sessions. */
+function reconcileDraftRenderTags(draftFile: SpriteFile, repositoryFile: SpriteFile): void {
+  const repositoryLayers = isLayeredSpriteFile(repositoryFile)
+    ? new Map(repositoryFile.layers.map((layer) => [layer.id, layer.tag]))
+    : new Map<string, string>();
+  const repositoryFallback = repositoryFile.renderTag
+    ?? (isLayeredSpriteFile(repositoryFile) ? repositoryFile.layers[0]?.tag : undefined);
+  const replacementFor = (layerId?: string): string | undefined => {
+    const matching = layerId ? repositoryLayers.get(layerId) : undefined;
+    if (matching && hasRenderTag(matching)) return matching;
+    if (repositoryFallback && hasRenderTag(repositoryFallback)) return repositoryFallback;
+    return renderTagDefs[0]?.id;
+  };
+
+  if (isLayeredSpriteFile(draftFile)) {
+    for (const layer of draftFile.layers) {
+      if (!hasRenderTag(layer.tag)) layer.tag = replacementFor(layer.id) ?? layer.tag;
+    }
+  } else if (!draftFile.renderTag || !hasRenderTag(draftFile.renderTag)) {
+    draftFile.renderTag = replacementFor();
+  }
+}
+
 function storedDrafts(): StoredSpriteDraft[] {
   const drafts: StoredSpriteDraft[] = [];
   for (let index = 0; index < localStorage.length; index++) {
@@ -959,7 +982,9 @@ async function openSharedSprite(path: string): Promise<boolean> {
     if (!response.ok) throw new Error(String(body.error ?? response.statusText));
     applyBridgeState(body as unknown as BridgeState, true);
     if (draft) {
-      const restored = normalize(structuredClone(draft.file));
+      const draftFile = structuredClone(draft.file);
+      reconcileDraftRenderTags(draftFile, file);
+      const restored = normalize(draftFile);
       // Drafts may predate flat-sprite render tags. Inherit the repository's
       // authored assignment instead of re-inferring a role from the filename.
       if (!isLayeredSpriteFile(restored) && !restored.renderTag && file.renderTag) {
