@@ -541,7 +541,8 @@ interface EditorViewState {
 }
 
 function activePanel(group: 'left' | 'right'): string | undefined {
-  return document.querySelector<HTMLButtonElement>(`[data-panel-tab="${group}"].active`)?.dataset.panelTarget;
+  return [...document.querySelectorAll<HTMLElement>(`[data-panel-page="${group}"]`)]
+    .find((panel) => !panel.hidden)?.id;
 }
 
 function captureEditorViewState(): EditorViewState {
@@ -660,9 +661,10 @@ function restoreEditorViewState(saved?: EditorViewState): void {
 }
 
 const editMenu = $('editMenu') as HTMLDetailsElement;
-for (const id of ['btnUndo', 'btnRedo', 'btnCut', 'btnCopy', 'btnPaste']) {
+for (const id of ['btnUndo', 'btnRedo', 'btnCut', 'btnCopy', 'btnPaste', 'btnOpenData']) {
   $(id).addEventListener('click', () => { editMenu.open = false; });
 }
+$('btnOpenData').addEventListener('click', () => activatePanel('right', 'right-data'));
 document.addEventListener('pointerdown', (event) => {
   if (editMenu.open && !editMenu.contains(event.target as Node)) editMenu.open = false;
 });

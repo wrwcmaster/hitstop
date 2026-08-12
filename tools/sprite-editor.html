@@ -93,6 +93,7 @@
     .command-menu-panel button:hover { background: #1f2a57; }
     .command-menu-panel button:disabled { color: #566c86; cursor: default; }
     .command-menu-panel kbd { color: #94b0c2; font: inherit; white-space: nowrap; }
+    .command-menu-separator { height: 1px; margin: 5px 3px; background: #33447f; }
     .panel-tabs {
       position: sticky; top: -10px; z-index: 5;
       display: flex; gap: 3px; margin: -10px -10px 10px; padding: 8px 8px 6px;
@@ -194,6 +195,8 @@
         <button id="btnCut" title="Cut selected pixels (Ctrl+X)" role="menuitem" disabled><span>cut</span><kbd>Ctrl+X</kbd></button>
         <button id="btnCopy" title="Copy selected pixels (Ctrl+C)" role="menuitem" disabled><span>copy</span><kbd>Ctrl+C</kbd></button>
         <button id="btnPaste" title="Paste pixels at the selection (Ctrl+V)" role="menuitem"><span>paste</span><kbd>Ctrl+V</kbd></button>
+        <div class="command-menu-separator" role="separator"></div>
+        <button id="btnOpenData" title="Open the sprite JSON workspace" role="menuitem"><span>sprite data</span></button>
       </div>
     </details>
     <select id="selectSprite" style="background:#1f2a57; color:#f4f4f4; border:1px solid #33447f; border-radius:4px; padding:4px;">
@@ -331,27 +334,11 @@
       <div id="right-workspace-scroll">
       <div class="panel-tabs" role="tablist" aria-label="sprite workspace">
         <button class="active" data-panel-tab="right" data-panel-target="right-animate" role="tab" aria-selected="true">animate</button>
+        <button data-panel-tab="right" data-panel-target="right-layers" role="tab" aria-selected="false">layers</button>
         <button data-panel-tab="right" data-panel-target="right-transform" role="tab" aria-selected="false">transform</button>
         <button data-panel-tab="right" data-panel-target="right-rig" role="tab" aria-selected="false">rig</button>
-        <button data-panel-tab="right" data-panel-target="right-data" role="tab" aria-selected="false">data</button>
       </div>
       <section id="right-animate" class="panel-page" data-panel-page="right">
-      <div class="panel-group">
-        <h2>layers <span id="layerStatus" class="hint">flat sprite</span></h2>
-        <div id="layers"></div>
-        <div class="panel-row">
-          <button id="btnAddLayer" title="Add a transparent layer">+ layer</button>
-          <button id="btnDupLayer" title="Duplicate active layer">dup</button>
-          <button id="btnLayerUp" title="Move active layer toward the front">&uarr;</button>
-          <button id="btnLayerDown" title="Move active layer toward the back">&darr;</button>
-        </div>
-        <div class="panel-row">
-          <button id="btnMergeLayer" title="Merge active layer into the layer below">merge down</button>
-          <button id="btnDelLayer" title="Delete active layer">delete</button>
-          <button id="btnFlattenLayers" title="Flatten all layers back to a single-layer sprite">flatten</button>
-        </div>
-        <p class="hint" style="margin:0">Render tags set cross-sprite order. Arrows only reorder layers within the same tag; eye, solo, and lock are editor-only.</p>
-      </div>
       <div class="panel-group">
         <h2>composite</h2>
         <div style="display:flex; flex-direction:column; gap:4px">
@@ -392,6 +379,24 @@
         <button id="btnDelFrame" style="flex:1">del</button>
       </div>
 
+      </section>
+      <section id="right-layers" class="panel-page" data-panel-page="right" hidden>
+        <div class="panel-group">
+          <h2>layers <span id="layerStatus" class="hint">flat sprite</span></h2>
+          <div id="layers"></div>
+          <div class="panel-row">
+            <button id="btnAddLayer" title="Add a transparent layer">+ layer</button>
+            <button id="btnDupLayer" title="Duplicate active layer">dup</button>
+            <button id="btnLayerUp" title="Move active layer toward the front">&uarr;</button>
+            <button id="btnLayerDown" title="Move active layer toward the back">&darr;</button>
+          </div>
+          <div class="panel-row">
+            <button id="btnMergeLayer" title="Merge active layer into the layer below">merge down</button>
+            <button id="btnDelLayer" title="Delete active layer">delete</button>
+            <button id="btnFlattenLayers" title="Flatten all layers back to a single-layer sprite">flatten</button>
+          </div>
+          <p class="hint" style="margin:0">Render tags set cross-sprite order. Arrows only reorder layers within the same tag; eye, solo, and lock are editor-only.</p>
+        </div>
       </section>
       <section id="right-rig" class="panel-page" data-panel-page="right" hidden>
 
