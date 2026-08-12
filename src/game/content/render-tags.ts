@@ -30,10 +30,10 @@ for (const definition of renderTagDefs as PlayerRenderTagDef[]) {
 }
 playerRenderTagOrder = (renderTagDefs as PlayerRenderTagDef[]).map((definition) => definition.id);
 
-// These semantic bands are referenced by gameplay defaults. Keep failures at
-// content load, where a damaged tag file is obvious, rather than later while
-// rendering an equipped player.
-for (const required of [BODY_RENDER_TAG, HELD_OBJECT_RENDER_TAG, FOREGROUND_BODY_RENDER_TAG]) {
+// These fallback bands are referenced by gameplay defaults. The foreground
+// body band is optional: authored hand layers may use it, while procedural
+// grips fall back to the frontmost configured band when it is absent.
+for (const required of [BODY_RENDER_TAG, HELD_OBJECT_RENDER_TAG]) {
   if (!playerRenderTags.has(required)) throw new Error(`player render tags need "${required}"`);
 }
 

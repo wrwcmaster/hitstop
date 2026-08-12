@@ -237,7 +237,11 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
   // Every body and attachment layer contributes to one shared render band.
   // The registry is the only z-order; local layer order is merely the stable
   // tie-breaker within a tag. That lets a real authored hand cover a weapon.
-  for (const tag of orderedPlayerRenderTags()) {
+  const renderTags = orderedPlayerRenderTags();
+  const gripRenderTag = renderTags.includes(FOREGROUND_BODY_RENDER_TAG)
+    ? FOREGROUND_BODY_RENDER_TAG
+    : renderTags.at(-1)!;
+  for (const tag of renderTags) {
     drawBodyTag(tag);
     if (tag === BODY_RENDER_TAG) {
       drawGear();
@@ -247,10 +251,10 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
       if (p.flashT <= 0 && p.equipment.get('charm')) renderCharm(g, dh);
     }
     if (p.flashT <= 0) drawHeldWeaponTag(g, weapon.visual, weaponCtx, tag);
-    if (p.flashT <= 0 && tag === FOREGROUND_BODY_RENDER_TAG) {
-    for (const hand of heldWeaponHands(weapon.visual, p.fsm.is('draw'))) {
-      drawGrip(hand === 'front' ? weaponCtx.frontHand : weaponCtx.rearHand);
-    }
+    if (p.flashT <= 0 && tag === gripRenderTag) {
+      for (const hand of heldWeaponHands(weapon.visual, p.fsm.is('draw'))) {
+        drawGrip(hand === 'front' ? weaponCtx.frontHand : weaponCtx.rearHand);
+      }
     }
   }
   g.restore();

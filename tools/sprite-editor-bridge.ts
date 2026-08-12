@@ -221,7 +221,7 @@ export function spriteEditorBridge(root: string): Plugin {
       }
       ids.add(tag.id);
     }
-    for (const required of ['body', 'held-object', 'foreground-body']) {
+    for (const required of ['body', 'held-object']) {
       if (!ids.has(required)) throw new Error(`render tags need "${required}"`);
     }
   };

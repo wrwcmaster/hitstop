@@ -11,7 +11,6 @@ import { PAL } from '@game/content/palette';
 import {
   BODY_RENDER_TAG,
   configurePlayerRenderTags,
-  FOREGROUND_BODY_RENDER_TAG,
   HELD_OBJECT_RENDER_TAG,
   type PlayerRenderTagDef,
 } from '@game/content/render-tags';
@@ -178,7 +177,7 @@ function validRenderTagDefs(value: unknown): value is PlayerRenderTagDef[] {
       || typeof definition.label !== 'string' || !definition.label.trim() || ids.has(definition.id)) return false;
     ids.add(definition.id);
     return true;
-  }) && [BODY_RENDER_TAG, HELD_OBJECT_RENDER_TAG, FOREGROUND_BODY_RENDER_TAG].every((id) => ids.has(id));
+  }) && [BODY_RENDER_TAG, HELD_OBJECT_RENDER_TAG].every((id) => ids.has(id));
 }
 
 function readRenderTagDraft(): PlayerRenderTagDef[] {
@@ -1411,7 +1410,7 @@ function moveRenderTag(index: number, delta: -1 | 1): void {
 function buildRenderTagEditor(): void {
   const host = $('renderTagsEditor');
   host.innerHTML = '';
-  const required = new Set([BODY_RENDER_TAG, HELD_OBJECT_RENDER_TAG, FOREGROUND_BODY_RENDER_TAG]);
+  const required = new Set([BODY_RENDER_TAG, HELD_OBJECT_RENDER_TAG]);
   renderTagDefs.forEach((definition, index) => {
     const row = document.createElement('div');
     row.className = 'render-tag-row';
