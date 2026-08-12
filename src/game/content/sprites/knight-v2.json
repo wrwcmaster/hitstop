@@ -1571,6 +1571,11 @@
     },
     "air": "idle"
   },
+  "attachmentSlots": {
+    "mainHand": {
+      "anchor": "frontHand"
+    }
+  },
   "anchors": {
     "frontHand": {
       "idle": [

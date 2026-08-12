@@ -30,6 +30,8 @@ export interface SpriteLayerData {
   id: string;
   /** Freely editable display label. */
   name: string;
+  /** Shared render band used when this sprite is composed with attachments. */
+  tag: string;
   /** Concrete animation name to one text-grid frame per timeline frame. */
   tracks: Record<string, string[][]>;
 }
@@ -58,6 +60,11 @@ export interface SpriteAnchor {
 /** Anchor name -> animation name -> one point per animation frame. */
 export type SpriteAnchors = Record<string, Record<string, SpriteAnchor[]>>;
 
+/** A semantic attachment socket resolved through a frame-aligned anchor. */
+export interface SpriteAttachmentSlot {
+  anchor: string;
+}
+
 interface SpriteFileBase extends SpriteGeometry {
   /** Character-to-color overrides layered on the base palette. */
   palette?: Palette;
@@ -65,6 +72,8 @@ interface SpriteFileBase extends SpriteGeometry {
   hd?: boolean;
   /** Frame-aligned attachment points (hands, head, muzzle, etc.). */
   anchors?: SpriteAnchors;
+  /** Named sockets used by independently authored attached sprites. */
+  attachmentSlots?: Record<string, SpriteAttachmentSlot>;
 }
 
 /** Original single-layer format. Existing content remains byte-compatible. */
@@ -118,6 +127,7 @@ export function validateLayeredSpriteFile(file: LayeredSpriteFile): void {
     if (ids.has(layer.id)) throw new Error(`sprite: duplicate layer id "${layer.id}"`);
     ids.add(layer.id);
     if (!layer.name?.trim()) throw new Error(`sprite: layer "${layer.id}" needs a name`);
+    if (!layer.tag?.trim()) throw new Error(`sprite: layer "${layer.id}" needs a render tag`);
     if (!layer.tracks || typeof layer.tracks !== 'object') {
       throw new Error(`sprite: layer "${layer.id}" needs tracks`);
     }
@@ -155,6 +165,12 @@ export function validateLayeredSpriteFile(file: LayeredSpriteFile): void {
   }
 
   for (const name of Object.keys(file.anims)) resolveAnimName(file, name);
+}
+
+/** Render tags contributed by a sprite, in first-occurrence layer order. */
+export function spriteLayerTags(file: SpriteFile): string[] {
+  if (!isLayeredSpriteFile(file)) return ['base'];
+  return [...new Set(file.layers.map((layer) => layer.tag))];
 }
 
 /** Shared animation timing regardless of whether pixels are flat or layered. */
@@ -210,6 +226,50 @@ export function compositeSpriteFrame(
   return out.map((row) => row.join(''));
 }
 
+/** Composite only the layers assigned to one shared render tag. */
+export function compositeSpriteTagFrame(
+  file: SpriteFile,
+  name: string,
+  frame: number,
+  tag: string,
+  base: Palette = {},
+): string[] | undefined {
+  if (!isLayeredSpriteFile(file)) {
+    return tag === 'base' ? compositeSpriteFrame(file, name, frame, base) : undefined;
+  }
+  if (!file.layers.some((layer) => layer.tag === tag)) return undefined;
+  return compositeSpriteFrame(file, name, frame, base, (layer) => layer.tag === tag);
+}
+
+/** Composite a sprite by shared render-band order rather than layer z-order. */
+export function compositeSpriteFrameByTags(
+  file: SpriteFile,
+  name: string,
+  frame: number,
+  tagOrder: readonly string[],
+  base: Palette = {},
+  include: (layer: SpriteLayerData) => boolean = () => true,
+): string[] | undefined {
+  if (!isLayeredSpriteFile(file)) return compositeSpriteFrame(file, name, frame, base);
+  const missing = spriteLayerTags(file).filter((tag) => !tagOrder.includes(tag));
+  if (missing.length) throw new Error(`sprite: render tag order is missing ${missing.map((tag) => `"${tag}"`).join(', ')}`);
+  const target = resolveAnimName(file, name);
+  const timeline = file.anims[target];
+  if (!timeline || typeof timeline === 'string' || frame < 0 || frame >= timeline.frameCount) return undefined;
+  const first = file.layers[0].tracks[target][frame];
+  const out = first.map((row) => '.'.repeat(row.length).split(''));
+  const palette = { ...base, ...(file.palette ?? {}) };
+  for (const tag of tagOrder) for (const layer of file.layers) {
+    if (layer.tag !== tag || !include(layer)) continue;
+    const rows = layer.tracks[target][frame];
+    for (let y = 0; y < rows.length; y++) for (let x = 0; x < rows[y].length; x++) {
+      const ch = rows[y][x];
+      if (ch !== '.' && palette[ch] !== null) out[y][x] = ch;
+    }
+  }
+  return out.map((row) => row.join(''));
+}
+
 /** Resolve an animation to flat frames for all existing consumers. */
 export function resolveAnim(file: SpriteFile, name: string, base: Palette = {}): SpriteAnimData | undefined {
   const timing = resolveAnimTiming(file, name);
@@ -238,6 +298,8 @@ export interface LoadedSprite {
   hitbox: Rect;
   /** Resolve a named point, following animation aliases like frame art. */
   anchor?(name: string, anim: string, frame?: number): SpriteAnchor | undefined;
+  /** Resolve a semantic attachment socket to its anchor name. */
+  slot?(name: string): SpriteAttachmentSlot | undefined;
   /** One baked frame canvas of an animation (default frame 0). */
   frame(anim: string, i?: number): HTMLCanvasElement;
   /** All baked frames of an animation. */
@@ -246,6 +308,12 @@ export interface LoadedSprite {
   names(): string[];
   /** An AnimSet ready for `withFacing`/`frameAt`. */
   animSet(): AnimSet;
+  /** Render tags authored by this sprite (`base` for a flat sprite). */
+  tags(): string[];
+  /** All baked frames for one render tag and animation. */
+  tagFrames(tag: string, anim: string): HTMLCanvasElement[];
+  /** An AnimSet containing only one render tag. */
+  tagAnimSet(tag: string): AnimSet;
 }
 
 /** Resolve optional sprite metadata against the frame's natural draw size. */
@@ -301,6 +369,12 @@ export function loadSprite(file: SpriteFile, base: Palette = {}): LoadedSprite {
       }
     }
   }
+  for (const [slotName, slot] of Object.entries(file.attachmentSlots ?? {})) {
+    if (!slotName.trim() || !slot?.anchor?.trim()) throw new Error('sprite attachment slots need names and anchors');
+    if (!file.anchors?.[slot.anchor]) {
+      throw new Error(`sprite attachment slot "${slotName}" uses unknown anchor "${slot.anchor}"`);
+    }
+  }
   const bake = (rows: string[]): HTMLCanvasElement =>
     file.hd === false ? sprite(rows, pal) : sprite(epx(epx(rows)), pal);
 
@@ -328,6 +402,28 @@ export function loadSprite(file: SpriteFile, base: Palette = {}): LoadedSprite {
     return baked;
   };
 
+  const tagCache = new Map<string, Map<string, HTMLCanvasElement[]>>();
+  const tagFramesOf = (tag: string, name: string): HTMLCanvasElement[] => {
+    const target = resolveAnimName(file, name);
+    let cacheForTag = tagCache.get(tag);
+    if (!cacheForTag) {
+      cacheForTag = new Map<string, HTMLCanvasElement[]>();
+      tagCache.set(tag, cacheForTag);
+    }
+    let baked = cacheForTag.get(target);
+    if (!baked) {
+      const timing = resolveAnimTiming(file, target);
+      baked = timing && spriteLayerTags(file).includes(tag)
+        ? Array.from(
+          { length: timing.frameCount },
+          (_, frame) => bake(compositeSpriteTagFrame(file, target, frame, tag, base)!),
+        )
+        : [];
+      cacheForTag.set(target, baked);
+    }
+    return baked;
+  };
+
   const anchorOf = (name: string, anim: string, frame = 0): SpriteAnchor | undefined => {
     const target = resolveAnimName(file, anim);
     const points = file.anchors?.[name]?.[anim] ?? file.anchors?.[name]?.[target];
@@ -338,6 +434,7 @@ export function loadSprite(file: SpriteFile, base: Palette = {}): LoadedSprite {
   return {
     ...geometry,
     anchor: anchorOf,
+    slot: (name) => file.attachmentSlots?.[name],
     frame: (name, i = 0) => framesOf(name)[i],
     frames: framesOf,
     names: () => Object.keys(file.anims),
@@ -347,6 +444,17 @@ export function loadSprite(file: SpriteFile, base: Palette = {}): LoadedSprite {
         const timing = resolveAnimTiming(file, name);
         if (!timing) continue;
         set[name] = { frames: framesOf(name), fps: timing.fps, loop: timing.loop };
+      }
+      return set;
+    },
+    tags: () => spriteLayerTags(file),
+    tagFrames: tagFramesOf,
+    tagAnimSet: (tag) => {
+      const set: AnimSet = {};
+      for (const name of Object.keys(file.anims)) {
+        const timing = resolveAnimTiming(file, name);
+        if (!timing) continue;
+        set[name] = { frames: tagFramesOf(tag, name), fps: timing.fps, loop: timing.loop };
       }
       return set;
     },

@@ -157,13 +157,14 @@
     #frames button { margin-right: 4px; }
     #layers { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
     .layer-row {
-      display: grid; grid-template-columns: 28px 28px minmax(0, 1fr) 28px;
+      display: grid; grid-template-columns: 28px 28px minmax(0, 1fr) minmax(82px, .8fr) 28px;
       align-items: center; gap: 3px; padding: 3px;
       border: 1px solid #263563; border-radius: 4px; background: #0b0e20;
     }
     .layer-row.active { border-color: #ffcd75; background: #1a2349; }
     .layer-row button { min-width: 0; padding: 3px; }
     .layer-row .layer-name { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .layer-row .layer-tag { min-width: 0; font-size: 10px; padding: 3px; }
     .layer-row .layer-toggle.off { color: #566c86; background: #11162b; }
     .layer-row .layer-toggle.on { color: #ffcd75; }
     #preview { border: 1px solid #33447f; background: #0a0c1c; max-width: 100%; height: auto; }
@@ -349,7 +350,7 @@
           <button id="btnDelLayer" title="Delete active layer">delete</button>
           <button id="btnFlattenLayers" title="Flatten all layers back to a single-layer sprite">flatten</button>
         </div>
-        <p class="hint" style="margin:0">Rows are shown front-to-back. Eye and solo are temporary editor views; lock prevents pixel edits.</p>
+        <p class="hint" style="margin:0">Render tags set cross-sprite order. Arrows only reorder layers within the same tag; eye, solo, and lock are editor-only.</p>
       </div>
       <div class="panel-group">
         <h2>composite</h2>
@@ -430,6 +431,17 @@
         <label style="margin:0">y <input id="anchorY" type="number" step="0.25" style="width:58px"></label>
       </div>
       <p class="hint" style="margin:0 0 8px">Shift+Alt-click the grid to place the selected anchor. For a right-facing knight, frontHand is the knight's right/weapon hand, on the left side of the image.</p>
+
+      <h2>attachment slots</h2>
+      <div style="display:flex; gap:4px; margin:5px 0">
+        <select id="attachmentSlotName" style="min-width:100px; flex:1"><option value="">-- none --</option></select>
+        <button id="btnAddAttachmentSlot" title="Add a semantic socket bound to an anchor">+</button>
+        <button id="btnDelAttachmentSlot" title="Delete the selected attachment slot">del</button>
+      </div>
+      <label style="margin:0 0 8px; display:flex; gap:6px; align-items:center">anchor
+        <select id="attachmentSlotAnchor" style="min-width:100px; flex:1"><option value="">-- anchor --</option></select>
+      </label>
+      <p class="hint" style="margin:0 0 8px">A slot gives gameplay a stable name such as mainHand; its anchor may move independently in every animation frame.</p>
 
       </section>
       <section id="right-transform" class="panel-page" data-panel-page="right" hidden>

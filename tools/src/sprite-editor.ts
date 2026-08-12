@@ -2,12 +2,18 @@
 
 import {
   resolveSpriteGeometry, resolveAnim, resolveAnimName, resolveAnimTiming,
-  compositeSpriteFrame, isLayeredSpriteFile, validateLayeredSpriteFile,
+  compositeSpriteFrame, compositeSpriteFrameByTags, isLayeredSpriteFile, validateLayeredSpriteFile,
   sprite, epx,
   type Palette, type SpriteFile, type FlatSpriteFile, type LayeredSpriteFile,
   type SpriteAnimData, type LayeredSpriteAnimData, type SpriteLayerData, type SpriteAnchor,
 } from '@engine/index';
 import { PAL } from '@game/content/palette';
+import {
+  BODY_RENDER_TAG,
+  HELD_OBJECT_RENDER_TAG,
+  playerRenderTags,
+  validatePlayerRenderTags,
+} from '@game/content/render-tags';
 // Composite preview: the editor borrows the GAME's renderers rather than
 // imitating them, so what you see here — held weapon anchored to the
 // body, slash trail sweeping on the attack clock — is exactly what the
@@ -112,6 +118,7 @@ let refFile: SpriteFile | null = null;
 let currentFileName = 'new sprite.json';
 let currentRepoPath: string | null = null;
 let selectedAnchorName = '';
+let selectedAttachmentSlotName = '';
 const FLAT_LAYER_ID = 'base';
 let activeLayerId = FLAT_LAYER_ID;
 let hiddenLayerIds = new Set<string>();
@@ -134,6 +141,8 @@ interface BridgeState {
  * discover capabilities without hardcoding character file names. */
 interface SpriteEditorMetadata {
   canEquipWeapon?: boolean;
+  /** Tag assigned when this flat asset is first converted to layers. */
+  defaultRenderTag?: string;
 }
 
 type EditorSpriteFile = SpriteFile & {
@@ -269,13 +278,14 @@ const concreteAnims = (): [string, SpriteAnimData][] =>
     frames: activeFrames(name),
   }]);
 const cur = () => anim().frames[frameIdx];
-const compositeCur = (index = frameIdx): string[] => compositeSpriteFrame(
-  file,
-  animName,
-  index,
-  PAL,
-  (layer) => (soloLayerId ? layer.id === soloLayerId : !hiddenLayerIds.has(layer.id)),
-) ?? cur();
+const compositeCur = (index = frameIdx): string[] => {
+  const include = (layer: SpriteLayerData) => (
+    soloLayerId ? layer.id === soloLayerId : !hiddenLayerIds.has(layer.id)
+  );
+  return (isLayeredSpriteFile(file)
+    ? compositeSpriteFrameByTags(file, animName, index, playerRenderTags.ids(), PAL, include)
+    : compositeSpriteFrame(file, animName, index, PAL, include)) ?? cur();
+};
 const visibleAnim = (): SpriteAnimData => {
   const timing = resolveAnimTiming(file, animName)!;
   return {
@@ -319,6 +329,13 @@ function uniqueLayerId(label: string): string {
   return id;
 }
 
+function defaultLayerTag(spriteFile: SpriteFile = file): string {
+  const configured = (spriteFile as EditorSpriteFile).editor?.defaultRenderTag;
+  if (configured && playerRenderTags.has(configured)) return configured;
+  const visualId = currentFileName.replace(/\.json$/, '');
+  return weaponVisuals.has(visualId) ? HELD_OBJECT_RENDER_TAG : BODY_RENDER_TAG;
+}
+
 function ensureLayeredFile(): LayeredSpriteFile {
   if (isLayeredSpriteFile(file)) return file;
   const flat = file as FlatSpriteFile & EditorSpriteFile;
@@ -335,7 +352,7 @@ function ensureLayeredFile(): LayeredSpriteFile {
   file = {
     ...rest,
     anims,
-    layers: [{ id: FLAT_LAYER_ID, name: 'Base', tracks }],
+    layers: [{ id: FLAT_LAYER_ID, name: 'Base', tag: defaultLayerTag(), tracks }],
   } as LayeredSpriteFile & EditorSpriteFile;
   activeLayerId = FLAT_LAYER_ID;
   reconcileLayerState();
@@ -1156,6 +1173,38 @@ function buildAnchors(): void {
   ($('btnDelAnchor') as HTMLButtonElement).disabled = !selectedAnchorName;
 }
 
+function buildAttachmentSlots(): void {
+  const slots = file.attachmentSlots ?? {};
+  const names = Object.keys(slots);
+  if (selectedAttachmentSlotName && !names.includes(selectedAttachmentSlotName)) {
+    selectedAttachmentSlotName = '';
+  }
+  if (!selectedAttachmentSlotName && names.length) selectedAttachmentSlotName = names[0];
+
+  const slotSelect = $('attachmentSlotName') as HTMLSelectElement;
+  slotSelect.innerHTML = '<option value="">-- none --</option>';
+  for (const name of names) {
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = name;
+    slotSelect.appendChild(option);
+  }
+  slotSelect.value = selectedAttachmentSlotName;
+
+  const anchorSelect = $('attachmentSlotAnchor') as HTMLSelectElement;
+  anchorSelect.innerHTML = '<option value="">-- anchor --</option>';
+  for (const name of Object.keys(file.anchors ?? {})) {
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = name;
+    anchorSelect.appendChild(option);
+  }
+  const selected = slots[selectedAttachmentSlotName];
+  anchorSelect.value = selected?.anchor ?? '';
+  anchorSelect.disabled = !selected;
+  ($('btnDelAttachmentSlot') as HTMLButtonElement).disabled = !selected;
+}
+
 ($('anchorName') as HTMLSelectElement).onchange = (event) => {
   selectedAnchorName = (event.target as HTMLSelectElement).value;
   buildAnchors();
@@ -1184,6 +1233,12 @@ $('btnAddAnchor').onclick = () => {
 
 $('btnDelAnchor').onclick = () => {
   if (!selectedAnchorName || !file.anchors) return;
+  const usedBy = Object.entries(file.attachmentSlots ?? {})
+    .find(([, slot]) => slot.anchor === selectedAnchorName)?.[0];
+  if (usedBy) {
+    flash(`anchor is used by slot ${usedBy}`);
+    return;
+  }
   saveHistory();
   delete file.anchors[selectedAnchorName];
   selectedAnchorName = '';
@@ -1205,11 +1260,56 @@ function onAnchorChange(): void {
 ($('anchorY') as HTMLInputElement).onchange = onAnchorChange;
 ($('showAnchors') as HTMLInputElement).onchange = () => redraw();
 
+($('attachmentSlotName') as HTMLSelectElement).onchange = (event) => {
+  selectedAttachmentSlotName = (event.target as HTMLSelectElement).value;
+  buildAttachmentSlots();
+};
+
+$('btnAddAttachmentSlot').onclick = () => {
+  const anchors = Object.keys(file.anchors ?? {});
+  if (!anchors.length) {
+    flash('add an anchor before creating a slot');
+    return;
+  }
+  const name = prompt('attachment slot name (e.g. mainHand, head, back):', '')?.trim();
+  if (!name) return;
+  if (file.attachmentSlots?.[name]) {
+    flash('attachment slot already exists');
+    return;
+  }
+  saveHistory();
+  (file.attachmentSlots ??= {})[name] = {
+    anchor: anchors.includes(selectedAnchorName) ? selectedAnchorName : anchors[0],
+  };
+  selectedAttachmentSlotName = name;
+  buildAttachmentSlots();
+  syncIO();
+};
+
+$('btnDelAttachmentSlot').onclick = () => {
+  if (!selectedAttachmentSlotName || !file.attachmentSlots) return;
+  saveHistory();
+  delete file.attachmentSlots[selectedAttachmentSlotName];
+  if (!Object.keys(file.attachmentSlots).length) delete file.attachmentSlots;
+  selectedAttachmentSlotName = '';
+  buildAttachmentSlots();
+  syncIO();
+};
+
+($('attachmentSlotAnchor') as HTMLSelectElement).onchange = (event) => {
+  const slot = file.attachmentSlots?.[selectedAttachmentSlotName];
+  const anchor = (event.target as HTMLSelectElement).value;
+  if (!slot || !file.anchors?.[anchor] || slot.anchor === anchor) return;
+  saveHistory();
+  slot.anchor = anchor;
+  syncIO();
+};
+
 /* ---------------- layers ---------------- */
 
 function eachLayerTrack(name: string, visit: (frames: string[][], layer: SpriteLayerData) => void): void {
   if (!isLayeredSpriteFile(file)) {
-    visit(activeFrames(name), { id: FLAT_LAYER_ID, name: 'Base', tracks: {} });
+    visit(activeFrames(name), { id: FLAT_LAYER_ID, name: 'Base', tag: defaultLayerTag(), tracks: {} });
     return;
   }
   const target = resolveAnimName(file, name);
@@ -1237,8 +1337,10 @@ function buildLayers(): void {
   const host = $('layers');
   host.innerHTML = '';
   const layers = isLayeredSpriteFile(file)
-    ? [...file.layers].reverse()
-    : [{ id: FLAT_LAYER_ID, name: 'Base', tracks: {} }];
+    ? playerRenderTags.ids().slice().reverse().flatMap((tag) => (
+      (file as LayeredSpriteFile).layers.filter((layer) => layer.tag === tag).reverse()
+    ))
+    : [{ id: FLAT_LAYER_ID, name: 'Base', tag: defaultLayerTag(), tracks: {} }];
   for (const layer of layers) {
     const row = document.createElement('div');
     row.className = `layer-row${layer.id === activeLayerId ? ' active' : ''}`;
@@ -1287,6 +1389,26 @@ function buildLayers(): void {
       syncIO();
     };
 
+    const tag = document.createElement('select');
+    tag.className = 'layer-tag';
+    tag.title = 'Shared render tag; tag order controls cross-sprite compositing';
+    for (const [id, definition] of playerRenderTags.entries()) {
+      const option = document.createElement('option');
+      option.value = id;
+      option.textContent = definition.label;
+      tag.appendChild(option);
+    }
+    tag.value = layer.tag;
+    tag.disabled = !isLayeredSpriteFile(file);
+    tag.onchange = () => {
+      if (!isLayeredSpriteFile(file) || layer.tag === tag.value) return;
+      saveHistory();
+      layer.tag = tag.value;
+      buildLayers();
+      redraw();
+      syncIO();
+    };
+
     const lock = document.createElement('button');
     lock.textContent = lockedLayerIds.has(layer.id) ? '◆' : '◇';
     lock.className = `layer-toggle ${lockedLayerIds.has(layer.id) ? 'on' : ''}`;
@@ -1298,18 +1420,22 @@ function buildLayers(): void {
       buildLayers();
     };
 
-    row.append(eye, solo, name, lock);
+    row.append(eye, solo, name, tag, lock);
     host.appendChild(row);
   }
 
   const layerFile = isLayeredSpriteFile(file) ? file : null;
   const layered = Boolean(layerFile);
   const index = layerFile ? layerFile.layers.findIndex((layer) => layer.id === activeLayerId) : 0;
+  const activeTag = layerFile?.layers[index]?.tag;
+  const canMoveUp = Boolean(layerFile && index < layerFile.layers.length - 1
+    && layerFile.layers[index + 1].tag === activeTag);
+  const canMoveDown = Boolean(layerFile && index > 0 && layerFile.layers[index - 1].tag === activeTag);
   $('layerStatus').textContent = layerFile ? `${layerFile.layers.length} layers` : 'flat sprite';
   ($('btnDupLayer') as HTMLButtonElement).disabled = !layered;
-  ($('btnLayerUp') as HTMLButtonElement).disabled = !layerFile || index === layerFile.layers.length - 1;
-  ($('btnLayerDown') as HTMLButtonElement).disabled = !layered || index <= 0;
-  ($('btnMergeLayer') as HTMLButtonElement).disabled = !layered || index <= 0;
+  ($('btnLayerUp') as HTMLButtonElement).disabled = !canMoveUp;
+  ($('btnLayerDown') as HTMLButtonElement).disabled = !canMoveDown;
+  ($('btnMergeLayer') as HTMLButtonElement).disabled = !canMoveDown;
   ($('btnDelLayer') as HTMLButtonElement).disabled = !layerFile || layerFile.layers.length <= 1;
   ($('btnFlattenLayers') as HTMLButtonElement).disabled = !layered;
 }
@@ -1318,7 +1444,12 @@ $('btnAddLayer').onclick = () => {
   saveHistory();
   const layered = ensureLayeredFile();
   const label = `Layer ${layered.layers.length + 1}`;
-  const layer: SpriteLayerData = { id: uniqueLayerId(label), name: label, tracks: makeTransparentTracks() };
+  const layer: SpriteLayerData = {
+    id: uniqueLayerId(label),
+    name: label,
+    tag: activeLayer()?.tag ?? defaultLayerTag(),
+    tracks: makeTransparentTracks(),
+  };
   layered.layers.push(layer);
   activeLayerId = layer.id;
   buildLayers();
@@ -1347,6 +1478,7 @@ function moveLayer(delta: -1 | 1): void {
   const index = file.layers.findIndex((layer) => layer.id === activeLayerId);
   const target = index + delta;
   if (index < 0 || target < 0 || target >= file.layers.length) return;
+  if (file.layers[index].tag !== file.layers[target].tag) return;
   saveHistory();
   [file.layers[index], file.layers[target]] = [file.layers[target], file.layers[index]];
   buildLayers();
@@ -1364,6 +1496,7 @@ $('btnMergeLayer').onclick = () => {
   saveHistory();
   const top = file.layers[index];
   const bottom = file.layers[index - 1];
+  if (top.tag !== bottom.tag) return;
   for (const name of concreteAnimNames()) {
     for (let frame = 0; frame < top.tracks[name].length; frame++) {
       const over = top.tracks[name][frame];
@@ -1408,7 +1541,10 @@ $('btnFlattenLayers').onclick = () => {
     else anims[name] = {
       fps: entry.fps,
       loop: entry.loop,
-      frames: Array.from({ length: entry.frameCount }, (_, frame) => compositeSpriteFrame(layered, name, frame, PAL)!),
+      frames: Array.from(
+        { length: entry.frameCount },
+        (_, frame) => compositeSpriteFrameByTags(layered, name, frame, playerRenderTags.ids(), PAL)!,
+      ),
     };
   }
   const { layers: _layers, anims: _layeredAnims, ...rest } = layered;
@@ -2466,6 +2602,7 @@ $('btnAddFrame').onclick = () => {
   frameIdx = anim().frames.length - 1;
   buildFrames();
   buildAnchors();
+  buildAttachmentSlots();
   redraw();
   syncIO();
 };
@@ -3364,7 +3501,13 @@ function normalize(raw: unknown): SpriteFile {
     const f = r as unknown as SpriteFile;
     if (!f.anims || !Object.keys(f.anims).length) throw new Error('no animations');
     const normalized = { ...f, hd: f.hd ?? true, palette: f.palette ?? { ...PAL } };
-    if (isLayeredSpriteFile(normalized)) validateLayeredSpriteFile(normalized);
+    if (isLayeredSpriteFile(normalized)) {
+      // Drafts created by the first layer-system release predate render tags.
+      // Give them the role default once, then every saved layer is explicit.
+      for (const layer of normalized.layers) layer.tag ||= defaultLayerTag(normalized);
+      validateLayeredSpriteFile(normalized);
+      validatePlayerRenderTags(normalized);
+    }
     geometryOf(normalized, resolveAnim(normalized, Object.keys(normalized.anims)[0])?.frames[0] ?? []);
     return normalized;
   }
@@ -4064,6 +4207,7 @@ function refreshUI(): void {
   buildAnims();
   buildFrames();
   buildAnchors();
+  buildAttachmentSlots();
   redraw();
   syncIO();
 

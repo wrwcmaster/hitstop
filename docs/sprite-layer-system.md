@@ -1,21 +1,21 @@
 # Sprite layer system
 
-Status: first release implemented. Flat sprites remain valid; layered sprites now round-trip through the editor and bridge and are baked by the engine into the existing runtime frame cache.
+Status: render-tag release implemented. Flat sprites remain valid; layered sprites round-trip through the editor and can interleave with attached sprites through shared render tags.
 
 ## Decision
 
 Layers will be a **first-class part of the generic sprite source format**, not an editor-only sidecar and not a set of live gameplay objects.
 
-The engine will validate and composite a layered `SpriteFile` when it lazily bakes an animation frame. The rest of the runtime will continue to receive the same single `HTMLCanvasElement` per frame from `LoadedSprite`. Actors will not know which authoring layers produced that canvas.
+The engine validates layered `SpriteFile` data and lazily bakes both its normal flattened frame and per-tag frame canvases. Ordinary actors still receive one `HTMLCanvasElement`; a composite renderer may request tagged canvases when it needs to insert attached art between authored layers.
 
 Gameplay-controlled visuals remain separate runtime composition passes:
 
 - A body sprite may internally contain authored layers such as body, hair, scarf, and touch-up.
 - A helmet, armor item, or weapon remains its own registered asset because gameplay decides whether it is equipped.
 - Trails, hit flashes, swallowed overlays, and other effects remain renderer behavior.
-- Any of those separate assets may itself use authored layers; `loadSprite` flattens them in the same way.
+- Any of those separate assets may itself use authored layers and contribute them to the same ordered tag bands.
 
-This is a hybrid boundary: **authoring layers are preserved in the file and flattened by the engine; semantic game layers are selected and drawn by game systems.**
+This is a hybrid boundary: **the engine exposes generic tagged canvases; game content defines tag order and decides which independently equipped assets participate.**
 
 ## Why this boundary
 
@@ -24,8 +24,8 @@ There are three plausible designs.
 | Design | Advantage | Cost | Decision |
 | --- | --- | --- | --- |
 | Editor-only layered project, exported to flat game JSON | No engine format change | Two sources of truth, lossy round trips, easy to save the project but forget the export, and ambiguous agent/browser collaboration | Reject |
-| Every authored layer is drawn separately during gameplay | Runtime can toggle any layer | More draw calls, layer names leak into actors, ordering becomes gameplay state, and editor concepts become runtime API | Reject |
-| Layered sprite source, flattened by `loadSprite` | One source of truth, full round trip, generic engine mechanism, unchanged actor API and nearly unchanged draw cost | Requires a format and loader extension | Adopt |
+| Every authored layer receives an independent z-index | Maximum local control | Cross-asset ordering becomes numeric coordination and every layer participates in runtime sorting | Reject |
+| Tagged layer bands shared by body and attachments | One centrally managed order, multi-layer weapons, hand-over-grip art, arbitrary future bands | Composite renderers make one draw call per occupied tag | Adopt |
 
 The existing player renderer already demonstrates why the distinction matters. It draws the body, equipped gear, held weapon, foreground grip, and effects in a meaningful runtime order. Those are not Photoshop layers: they come from registries and player state. Folding them into `knight-v2.json` would create a combinatorial costume sheet and bypass the equipment registries.
 
@@ -33,11 +33,12 @@ At the same time, forcing hair, scarf, face, and correction paint into one text 
 
 ## Terminology
 
-- **Authoring layer**: a named, ordered pixel track inside one sprite file. It is always flattened before an actor draws the sprite.
+- **Authoring layer**: a named pixel track inside one sprite file, assigned to exactly one render tag.
 - **Runtime visual layer**: a separately loaded asset or effect chosen by game state, such as equipped armor or a held weapon.
+- **Render tag**: a centrally registered, ordered band shared by every asset in a composite.
 - **Timeline**: animation names, frame counts, speed, looping, and aliases shared by every authoring layer.
 - **Track**: one authoring layer's pixel frames for one timeline animation.
-- **Composite**: the visible result of stacking authoring layers from bottom to top.
+- **Composite**: the visible result of merging every participating layer in render-tag order.
 
 Calling both concepts “layers” is convenient in the UI, but the implementation must keep the distinction explicit.
 
@@ -67,6 +68,7 @@ A new layered file uses the same geometry, palette, anchors, `hd`, and `anims` c
     {
       "id": "body",
       "name": "Body",
+      "tag": "body",
       "tracks": {
         "idle": [ ["...OO...", "..O..O.."], ["...OO...", "..O..O.."] ],
         "run":  [ ["...OO...", "..O..O.."] ]
@@ -75,6 +77,7 @@ A new layered file uses the same geometry, palette, anchors, `hd`, and `anims` c
     {
       "id": "hair",
       "name": "Hair",
+      "tag": "body",
       "tracks": {
         "idle": [ ["...HH...", "..H....."], ["..HHH...", "..H....."] ],
         "run":  [ ["...HH...", "..H....."] ]
@@ -83,6 +86,7 @@ A new layered file uses the same geometry, palette, anchors, `hd`, and `anims` c
     {
       "id": "scarf",
       "name": "Scarf",
+      "tag": "foreground-body",
       "tracks": {
         "idle": [ ["........", "...SS..."] ],
         "run":  [ ["........", "..SSS..."] ]
@@ -91,6 +95,9 @@ A new layered file uses the same geometry, palette, anchors, `hd`, and `anims` c
   ],
   "anchors": {
     "frontHand": { "idle": [{ "x": 8, "y": 14 }] }
+  },
+  "attachmentSlots": {
+    "mainHand": { "anchor": "frontHand" }
   }
 }
 ```
@@ -111,6 +118,7 @@ interface LayeredSpriteAnimData {
 interface SpriteLayerData {
   id: string;
   name: string;
+  tag: string;
   tracks: Record<string, string[][]>;
 }
 
@@ -118,6 +126,7 @@ interface LayeredSpriteFile extends SpriteGeometry {
   palette?: Palette;
   hd?: boolean;
   anchors?: SpriteAnchors;
+  attachmentSlots?: Record<string, { anchor: string }>;
   anims: Record<string, LayeredSpriteAnimData | string>;
   layers: SpriteLayerData[];
 }
@@ -134,10 +143,11 @@ The loader and editor enforce these rules rather than repairing malformed conten
 3. The timeline owns `fps`, `loop`, aliases, and frame count. A layer cannot create its own timing.
 4. Every non-aliased animation has a track on every layer with exactly the timeline's frame count. A newly created track is filled with transparent frames.
 5. Every frame uses the same grid dimensions. Layers do not change sprite geometry, collision, or feet origin.
-6. Palette entries resolving to `null` are transparent. For every cell, the topmost non-transparent character wins.
-7. Anchors remain sprite-global and frame-aligned. They do not belong to a paint layer.
-8. Layer array order is bottom to top.
-9. Initial support uses normal, fully opaque indexed-pixel compositing only.
+6. Every layer has one non-empty render tag registered by the composite's content domain.
+7. Palette entries resolving to `null` are transparent. Within one tag, the later non-transparent character wins.
+8. Anchors remain sprite-global and frame-aligned. They do not belong to a paint layer.
+9. Tag registry order determines cross-tag z-order. Layer array order is only a stable tie-breaker within one tag.
+10. Initial support uses normal, fully opaque indexed-pixel compositing only.
 
 Requiring complete tracks is intentionally stricter than treating a missing track as transparent. It makes frame duplication, reordering, undo, validation, and agent edits deterministic. The editor creates the transparent data automatically, so artists do not pay the bookkeeping cost.
 
@@ -145,17 +155,17 @@ Requiring complete tracks is intentionally stricter than treating a missing trac
 
 `src/engine/gfx/spritefile.ts` remains the mechanism boundary.
 
-For a flat sprite, `loadSprite` behaves exactly as it does now. For a layered sprite it will:
+For a flat sprite, `loadSprite` behaves exactly as it does now and exposes one implicit `base` tag. For a layered sprite it will:
 
 1. Resolve the timeline animation and aliases.
 2. Validate every layer track against the resolved animation.
-3. Composite palette characters into one text grid for the requested frame.
+3. Composite either the complete frame or one requested render tag on character grids.
 4. Apply EPX when requested.
-5. Bake and cache one canvas using the existing `sprite()` path.
+5. Lazily cache complete and per-tag canvases using the existing `sprite()` path.
 
-The composite should happen on character grids before rasterization. This preserves exact palette indices, keeps transparent pixels unambiguous, and avoids canvas alpha or color-rounding differences. The cache key remains the resolved animation and frame, so after the first request gameplay draws exactly one canvas just as it does today.
+The composite happens on character grids before rasterization. This preserves exact palette indices, keeps transparent pixels unambiguous, and avoids canvas alpha or color-rounding differences. Per-tag caches are keyed by tag, resolved animation, and frame.
 
-`LoadedSprite`, `AnimSet`, `frameAt`, facing flips, hit flashes, tints, anchors, and game renderers need no layer-aware API. That is the principal architecture test: adding an authored hair layer must not require a change to `Player`, `Monster`, or `Npc`.
+`LoadedSprite` retains its flat frame API and adds `tags`, `tagFrames`, and `tagAnimSet`. Only renderers that intentionally combine independent assets use those methods. Adding an authored hair layer to a normal monster or NPC still requires no actor change.
 
 ## Editor behavior
 
@@ -207,13 +217,27 @@ Conflicts remain file-revision conflicts in the first release. Per-layer collabo
 
 ## Relationship to equipment and weapons
 
-The current game order remains:
+Attachment and ordering are separate mechanisms:
 
-1. flattened body sprite;
-2. equipped gear assets ordered by the gear registry;
-3. held weapon asset attached through body and weapon anchors;
-4. foreground grip;
-5. action effects.
+- the character-side slot names a frame-aligned anchor;
+- the attached asset's grip anchor determines its local transform;
+- every body and attachment layer names a render tag;
+- the player render-tag registry supplies the only cross-asset order.
+
+The initial ordered bands are `behind-body`, `body`, `held-object`,
+`foreground-body`, and `foreground-effects`. A body hand layer tagged
+`foreground-body` therefore covers a weapon blade tagged `held-object`.
+A weapon may also contribute its blade to `held-object` and its glow to
+`foreground-effects`; both layers use the same attachment transform.
+
+Tag ids and order live in one content registry. Adding a tag is a registry
+change, never coordinated numeric z-index edits. Unknown tags fail during
+content load rather than disappearing silently.
+
+Attachment slots are validated at load time too. A slot is semantic and
+stable (`mainHand`, `head`, `back`); its anchor is spatial and may move per
+frame. A weapon chooses a slot and defaults to `mainHand`, so changing which
+hand owns that slot does not require changing every weapon definition.
 
 “Body / iron helmet / rusty sword” in the composite preview is not the same list as “Body / Hair / Scarf” in the layer panel. The former is a runtime composition controlled by registries; the latter is internal authoring structure of the currently selected asset.
 
@@ -254,7 +278,7 @@ The design is successful when:
 - changing a layer does not touch pixels in another layer;
 - frame operations cannot desynchronize layers or anchors;
 - the composite preview and game render are pixel-identical;
-- gameplay still draws one baked body canvas per frame;
+- ordinary sprites still draw one baked canvas, while tagged composites draw one canvas per occupied band;
 - equipment and weapon registries remain the only source of runtime loadout composition;
 - no actor imports or depends on sprite authoring layer ids.
 
@@ -262,9 +286,10 @@ The design is successful when:
 
 The first release follows the boundary above:
 
-- `SpriteFile` is a flat-or-layered union with strict layered validation, shared animation timing, stable layer ids, and character-grid compositing in `spritefile.ts`.
-- `loadSprite` still exposes one cached canvas per animation frame. Game actors and the player/equipment render order are unchanged.
-- The Animate workspace owns the layer panel. It supports active-layer selection, create, duplicate, rename, delete, front/back reorder, hide, solo, lock, merge down, and undoable flatten.
+- `SpriteFile` is a flat-or-layered union with strict validation, shared timing, stable layer ids, required render tags, and character-grid compositing in `spritefile.ts`.
+- `loadSprite` exposes both its compatible flattened canvas and lazily cached per-tag canvases. Sprite-sheet assets expose one implicit `base` tag.
+- The player render order comes from the `playerRenderTag` content registry. Body and sprite-backed weapon layers are merged through it after attachment anchors are resolved.
+- The Animate workspace owns the layer panel. It supports active-layer selection, tag assignment, create, duplicate, rename, delete, within-tag reorder, hide, solo, lock, merge down, and undoable flatten.
 - Paint, soft brush, blur, fill, magic selection, clipboard, move, resize, and rotation operate on the active layer. The grid, onion skin, picker, and persistent preview use the visible composite.
 - Frame add, duplicate, reorder, and delete update all layer tracks and anchor arrays as one history operation. Palette compaction scans and remaps every layer.
 - The collaboration selection payload includes `layerId`, and scripted pixel edits may target a stable `layerId` explicitly.

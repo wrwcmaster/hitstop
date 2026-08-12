@@ -126,9 +126,10 @@ export function spriteEditorBridge(root: string): Plugin {
       const ids = new Set<string>();
       for (const rawLayer of layers) {
         if (!rawLayer || typeof rawLayer !== 'object' || Array.isArray(rawLayer)) throw new Error('sprite layer must be an object');
-        const layer = rawLayer as { id?: unknown; name?: unknown; tracks?: unknown };
+        const layer = rawLayer as { id?: unknown; name?: unknown; tag?: unknown; tracks?: unknown };
         if (typeof layer.id !== 'string' || !layer.id.trim() || ids.has(layer.id)) throw new Error('sprite layers need unique ids');
         if (typeof layer.name !== 'string' || !layer.name.trim()) throw new Error(`layer "${layer.id}" needs a name`);
+        if (typeof layer.tag !== 'string' || !layer.tag.trim()) throw new Error(`layer "${layer.id}" needs a render tag`);
         if (!layer.tracks || typeof layer.tracks !== 'object' || Array.isArray(layer.tracks)) {
           throw new Error(`layer "${layer.id}" needs tracks`);
         }
@@ -186,6 +187,22 @@ export function spriteEditorBridge(root: string): Plugin {
               throw new Error(`anchor "${pointName}.${animName}" needs finite x/y/angle values`);
             }
           }
+        }
+      }
+    }
+    const slots = (candidate as { attachmentSlots?: unknown }).attachmentSlots;
+    if (slots !== undefined) {
+      if (!slots || typeof slots !== 'object' || Array.isArray(slots)) {
+        throw new Error('sprite attachmentSlots must be an object');
+      }
+      for (const [slotName, rawSlot] of Object.entries(slots)) {
+        const slot = rawSlot as { anchor?: unknown };
+        if (!slotName.trim() || !rawSlot || typeof rawSlot !== 'object' || Array.isArray(rawSlot)
+          || typeof slot.anchor !== 'string' || !slot.anchor.trim()) {
+          throw new Error('sprite attachment slots need names and anchors');
+        }
+        if (!anchors || typeof anchors !== 'object' || !(slot.anchor in anchors)) {
+          throw new Error(`attachment slot "${slotName}" uses unknown anchor "${slot.anchor}"`);
         }
       }
     }

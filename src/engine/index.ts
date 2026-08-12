@@ -38,6 +38,9 @@ export {
   resolveAnimName,
   resolveAnimTiming,
   compositeSpriteFrame,
+  compositeSpriteTagFrame,
+  compositeSpriteFrameByTags,
+  spriteLayerTags,
   isLayeredSpriteFile,
   validateLayeredSpriteFile,
   resolveSpriteGeometry,
@@ -50,6 +53,7 @@ export {
   type SpriteLayerData,
   type SpriteAnchor,
   type SpriteAnchors,
+  type SpriteAttachmentSlot,
   type LoadedSprite,
 } from './gfx/spritefile';
 export {

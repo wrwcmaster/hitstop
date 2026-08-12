@@ -91,19 +91,23 @@ export function loadSheet(image: CanvasImageSource, desc: SheetDescriptor): Load
   const geometry = resolveSpriteGeometry(desc, naturalRect.w / texel, naturalRect.h / texel);
 
   const framesOf = (name: string): HTMLCanvasElement[] => (desc.anims[name]?.frames ?? []).map(bake);
+  const animSet = (): AnimSet => {
+    const set: AnimSet = {};
+    for (const [name, a] of Object.entries(desc.anims)) {
+      set[name] = { frames: framesOf(name), fps: a.fps, loop: a.loop };
+    }
+    return set;
+  };
 
   return {
     ...geometry,
     frame: (name, i = 0) => framesOf(name)[i],
     frames: framesOf,
     names: () => Object.keys(desc.anims),
-    animSet: () => {
-      const set: AnimSet = {};
-      for (const [name, a] of Object.entries(desc.anims)) {
-        set[name] = { frames: framesOf(name), fps: a.fps, loop: a.loop };
-      }
-      return set;
-    },
+    animSet,
+    tags: () => ['base'],
+    tagFrames: (tag, name) => tag === 'base' ? framesOf(name) : [],
+    tagAnimSet: (tag) => tag === 'base' ? animSet() : {},
   };
 }
 

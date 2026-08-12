@@ -1,12 +1,17 @@
 import { drawText, frameAt, whiteOf, tintOf, clamp } from '@engine/index';
-import { baseKnight } from '../content/sprites';
+import { baseKnight, KNIGHT_TAG_ANIMS } from '../content/sprites';
 import { gearLayers, DEBUG_ANCHORS } from '../content/gear-visuals';
 import { COLORS } from '../content/palette';
 import { IMPACT_DROP_PLUNGE } from '../content/weapons';
 import {
-  drawHeldWeapon, drawWeaponTrail, drawNeutralTrail, heldWeaponHands,
+  drawHeldWeaponTag, drawWeaponTrail, drawNeutralTrail, heldWeaponAttachmentSlot, heldWeaponHands,
   type HeldWeaponCtx,
 } from '../content/weapon-visuals';
+import {
+  BODY_RENDER_TAG,
+  FOREGROUND_BODY_RENDER_TAG,
+  orderedPlayerRenderTags,
+} from '../content/render-tags';
 import { PLAYER_TUNING } from './player-tuning';
 import type { Player } from './player';
 
@@ -119,7 +124,6 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
   const sy = baseSy * pose.sy;
   g.save();
   
-  let finalImg = img;
   const isSwallowed = p.fsm.is('swallowed');
   if (isSwallowed) {
     g.globalAlpha = 0.9; // keep player highly visible
@@ -127,16 +131,12 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
     const shiverX = Math.sin(p.animT * 50) * 0.8;
     const shiverY = Math.cos(p.animT * 50) * 0.8;
     g.translate(q(cx + pose.ox + shiverX), q(by + pose.oy + shiverY));
-    // Tint the player red for acid pain/damage!
-    finalImg = tintOf(img, COLORS.red, 0.55);
   } else {
     g.translate(q(cx + pose.ox), q(by + pose.oy));
   }
   
   g.scale(sx, sy);
   if (pose.shear) g.transform(1, 0, pose.shear, 1, 0, 0);
-  g.drawImage(finalImg, -dw / 2, -dh, dw, dh);
-
   const animObj = p.animSet.right[anim];
   const frameIdx = animObj
     ? (animObj.loop === false
@@ -151,13 +151,30 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
     return { x: anchor.x - dw / 2, y: anchor.y - dh };
   };
   
-  // Visible gear draws as registered item layers over the body (armor
-  // under helmet, etc). The registry matches each exact equipped item to
-  // its declared slot, so adding another helmet needs no player changes.
   const equippedGear = gearLayers(p.equipment);
-  if (p.flashT <= 0 && !isSwallowed) {
-    const f = p.facing;
+  const drawBodyTag = (tag: string): void => {
+    const authoredTags = baseKnight.tags();
+    const authoredTag = authoredTags.includes(tag)
+      ? tag
+      : authoredTags.length === 1 && authoredTags[0] === 'base' && tag === BODY_RENDER_TAG
+        ? 'base'
+        : null;
+    if (!authoredTag) return;
+    let layerImg = authoredTag === 'base'
+      ? img
+      : frameAt(
+        p.facing === 1 ? KNIGHT_TAG_ANIMS.get(authoredTag)!.right : KNIGHT_TAG_ANIMS.get(authoredTag)!.left,
+        anim,
+        p.animT,
+      );
+    if (p.flashT > 0) layerImg = whiteOf(layerImg);
+    else if (isSwallowed) layerImg = tintOf(layerImg, COLORS.red, 0.55);
+    g.drawImage(layerImg, -dw / 2, -dh, dw, dh);
+  };
 
+  const drawGear = (): void => {
+    if (p.flashT > 0 || isSwallowed) return;
+    const f = p.facing;
     for (const [, visual] of equippedGear) {
       const layerSet = f === 1 ? visual.anims.right : visual.anims.left;
       const layerImg = frameAt(layerSet, anim, p.animT);
@@ -173,24 +190,18 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
       }
       g.restore();
     }
-  }
-  
-  if (isSwallowed && p.swallowedBy) {
-    p.swallowedBy.def.swallow?.drawPlayerOverlay?.(g, p.swallowedBy, p, dw, dh);
-  }
-  
-  // Equipment visuals ride the same body transform as the knight.
-  if (p.flashT <= 0) {
-    if (p.equipment.get('charm')) renderCharm(g, dh);
-    const weapon = p.weapon;
-    const weaponCtx: HeldWeaponCtx = {
+  };
+
+  const weapon = p.weapon;
+  const weaponSlot = baseKnight.slot?.(heldWeaponAttachmentSlot(weapon.visual));
+  const weaponCtx: HeldWeaponCtx = {
       facing: p.facing,
       anim,
       frame: frameIdx,
       animT: p.animT,
       bodyW: dw,
       bodyH: dh,
-      frontHand: bodyAnchor('frontHand'),
+      frontHand: bodyAnchor(weaponSlot?.anchor ?? 'frontHand'),
       rearHand: bodyAnchor('rearHand'),
       attack: p.fsm.is('attack')
         ? {
@@ -207,28 +218,39 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
         : p.fsm.is('attack') && p.attackDef?.aim === 'down'
           ? 'plunge'
           : undefined,
-    };
-    drawHeldWeapon(g, weapon.visual, weaponCtx);
+  };
 
-    // The weapon is between the palm and the foreground knuckles. This
-    // tiny final layer is what makes every weapon look held instead of
-    // pasted over the character, while armor supplies its own gauntlet
-    // colors through the gear registry.
-    const grip = equippedGear.flatMap(([, visual]) => visual.grip ? [visual.grip] : []).at(-1)
-      ?? { outline: '#171625', fill: '#684037', highlight: '#9a5b45' };
-    const drawGrip = (anchor: { x: number; y: number } | undefined): void => {
-      if (!anchor) return;
-      const x = anchor.x * p.facing;
-      const y = anchor.y;
-      g.fillStyle = grip.outline;
-      g.fillRect(x - 0.75, y - 0.65, 1.5, 1.3);
-      g.fillStyle = grip.fill;
-      g.fillRect(x - 0.5, y - 0.4, 1, 0.85);
-      g.fillStyle = grip.highlight;
-      g.fillRect(x + (p.facing > 0 ? 0.1 : -0.35), y - 0.35, 0.3, 0.3);
-    };
+  const grip = equippedGear.flatMap(([, visual]) => visual.grip ? [visual.grip] : []).at(-1)
+    ?? { outline: '#171625', fill: '#684037', highlight: '#9a5b45' };
+  const drawGrip = (anchor: { x: number; y: number } | undefined): void => {
+    if (!anchor) return;
+    const x = anchor.x * p.facing;
+    const y = anchor.y;
+    g.fillStyle = grip.outline;
+    g.fillRect(x - 0.75, y - 0.65, 1.5, 1.3);
+    g.fillStyle = grip.fill;
+    g.fillRect(x - 0.5, y - 0.4, 1, 0.85);
+    g.fillStyle = grip.highlight;
+    g.fillRect(x + (p.facing > 0 ? 0.1 : -0.35), y - 0.35, 0.3, 0.3);
+  };
+
+  // Every body and attachment layer contributes to one shared render band.
+  // The registry is the only z-order; local layer order is merely the stable
+  // tie-breaker within a tag. That lets a real authored hand cover a weapon.
+  for (const tag of orderedPlayerRenderTags()) {
+    drawBodyTag(tag);
+    if (tag === BODY_RENDER_TAG) {
+      drawGear();
+      if (isSwallowed && p.swallowedBy) {
+        p.swallowedBy.def.swallow?.drawPlayerOverlay?.(g, p.swallowedBy, p, dw, dh);
+      }
+      if (p.flashT <= 0 && p.equipment.get('charm')) renderCharm(g, dh);
+    }
+    if (p.flashT <= 0) drawHeldWeaponTag(g, weapon.visual, weaponCtx, tag);
+    if (p.flashT <= 0 && tag === FOREGROUND_BODY_RENDER_TAG) {
     for (const hand of heldWeaponHands(weapon.visual, p.fsm.is('draw'))) {
       drawGrip(hand === 'front' ? weaponCtx.frontHand : weaponCtx.rearHand);
+    }
     }
   }
   g.restore();
