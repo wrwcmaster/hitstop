@@ -50,6 +50,7 @@
     canvas { image-rendering: pixelated; }
     #grid { cursor: crosshair; border: 1px solid #33447f; }
     #grid.selecting { cursor: cell; }
+    #grid.magic-selecting { cursor: pointer; }
     #grid.selecting.selection-movable { cursor: move; }
     #grid.picking { cursor: copy; }
     #grid.soft-tool { cursor: none; }
@@ -155,7 +156,15 @@
     .hint { color: #566c86; font-size: 11px; }
     #frames button { margin-right: 4px; }
     #preview { border: 1px solid #33447f; background: #0a0c1c; max-width: 100%; height: auto; }
-    #status { color: #38b764; margin-left: auto; }
+    #status {
+      position: fixed; top: 12px; right: 12px; z-index: 200;
+      max-width: min(420px, calc(100vw - 24px)); padding: 7px 10px;
+      color: #38b764; background: rgba(7, 7, 13, 0.94);
+      border: 1px solid #38b764; border-radius: 5px;
+      box-shadow: 0 7px 22px rgba(0, 0, 0, 0.48);
+      pointer-events: none;
+    }
+    #status:empty { display: none; }
     #bridgeStatus { color: #566c86; }
     #bridgeStatus.connected { color: #38b764; }
     #bridgeStatus.dirty { color: #ffcd75; }
@@ -205,6 +214,9 @@
       <button id="btnToolSelect" class="icon-tool" title="Rectangular selection (M)" aria-label="Rectangular selection (M)">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path stroke-dasharray="3 2" d="M3 3h14v14H3z"/><path d="M14 14l3.5 3.5M14 17.5h3.5V14"/></svg>
       </button>
+      <button id="btnToolMagic" class="icon-tool" title="Magic selection (W)" aria-label="Magic selection (W)">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 17L15.5 6.5M12.5 3.5l4 4M4 3v3M2.5 4.5h3M15.5 13v3M14 14.5h3M7.5 8l1.5 1.5"/></svg>
+      </button>
     </div>
     <span id="selectionStatus" class="hint">selection: none</span>
     <span class="separator" aria-hidden="true"></span>
@@ -244,6 +256,28 @@
             <button id="btnBrushSizeUp" title="Increase brush size" aria-label="Increase brush size">+</button>
           </div>
           <p id="toolConfigHint" class="hint">The solid center overwrites color; the soft edge blends into neighboring pixels.</p>
+        </div>
+        <div id="magicConfig" hidden>
+          <label>combine
+            <select id="magicMode">
+              <option value="replace">replace selection</option>
+              <option value="add">add to selection</option>
+              <option value="subtract">subtract from selection</option>
+              <option value="intersect">intersect selection</option>
+            </select>
+          </label>
+          <label>color tolerance <input id="magicTolerance" type="number" min="0" max="255" step="1" value="24"></label>
+          <label><input id="magicContiguous" type="checkbox" checked> contiguous pixels only</label>
+          <p class="hint">Click a color region. Shift adds, Alt subtracts, and Shift+Alt intersects. Increase tolerance to include nearby shades.</p>
+        </div>
+        <div id="fillConfig" hidden>
+          <label>fill mode
+            <select id="fillMode">
+              <option value="replace">replace connected color</option>
+              <option value="match">match selected color drift</option>
+            </select>
+          </label>
+          <p class="hint">Color drift mode maps the clicked source pixel to the active palette color, then applies the same RGB shift to every opaque pixel in the selection so highlights and shadows move together.</p>
         </div>
         <p id="toolConfigEmpty" class="hint">The selected tool has no adjustable settings.</p>
       </section>
@@ -373,7 +407,7 @@
       </section>
       <section id="right-transform" class="panel-page" data-panel-page="right" hidden>
         <h2>selection</h2>
-        <p class="hint">Use Select (M), then drag a rectangle on the canvas. Transparent pixels are ignored while moving and transforming.</p>
+        <p class="hint">Use Select (M) for a rectangle or Magic (W) for a color-shaped mask. Transparent and unselected pixels are ignored while moving and transforming.</p>
         <div id="selectionTransforms">
           <div class="panel-group">
             <h2>rotate</h2>
@@ -413,7 +447,7 @@
       <textarea id="io" spellcheck="false" style="height:240px; margin-bottom:6px;"></textarea>
       <p class="hint" style="margin:0">
         paint: left-drag &middot; erase: right-drag &middot; picker: Alt<br>
-        pencil P &middot; brush B &middot; blur U &middot; fill G &middot; select M<br>
+        pencil P &middot; brush B &middot; blur U &middot; fill G &middot; select M &middot; magic W<br>
         selection: drag inside to move &middot; drag square handles to resize &middot; drag green handle to rotate &middot; Shift snaps 15&deg;<br>
         export/import JSON (content/sprites/*.json)
       </p>

@@ -60,7 +60,7 @@ let previewStepping = false;
 let currentChar = firstPaintChar();
 let painting = false;
 let erasing = false;
-type EditorTool = 'draw' | 'brush' | 'blur' | 'fill' | 'picker' | 'select';
+type EditorTool = 'draw' | 'brush' | 'blur' | 'fill' | 'picker' | 'select' | 'magic';
 let currentTool: EditorTool = 'draw';
 let altPickerActive = false;
 let picking = false;
@@ -68,10 +68,11 @@ let lastPaintCell: { x: number; y: number } | null = null;
 let hoverPointer: { x: number; y: number } | null = null;
 let strokePaletteChanged = false;
 interface PixelRect { x: number; y: number; w: number; h: number }
-interface PixelClipboard { w: number; h: number; rows: string[] }
+interface PixelSelection extends PixelRect { mask?: string[] }
+interface PixelClipboard { w: number; h: number; rows: string[]; mask?: string[] }
 interface SelectionMove {
   start: { x: number; y: number };
-  original: PixelRect;
+  original: PixelSelection;
   source: PixelClipboard;
   baseFrame: string[];
   last: { x: number; y: number };
@@ -81,7 +82,7 @@ type SelectionResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 type SelectionHandle = SelectionResizeHandle | 'rotate';
 interface SelectionHandleTransform {
   handle: SelectionHandle;
-  original: PixelRect;
+  original: PixelSelection;
   source: PixelClipboard;
   baseFrame: string[];
   startPointer: { x: number; y: number };
@@ -94,10 +95,11 @@ interface SharedSelection extends PixelRect {
   anim: string;
   frame: number;
   rows: string[];
+  mask?: string[];
   source: string;
   updatedAt: number;
 }
-let selection: PixelRect | null = null;
+let selection: PixelSelection | null = null;
 let selectionStart: { x: number; y: number } | null = null;
 let selectionMove: SelectionMove | null = null;
 let selectionHandleTransform: SelectionHandleTransform | null = null;
@@ -384,7 +386,7 @@ interface EditorViewState {
   tool: EditorTool;
   zoom: number;
   anchor: string;
-  selection: PixelRect | null;
+  selection: PixelSelection | null;
   leftPanel?: string;
   rightPanel?: string;
   preview: { playing: boolean; stepping: boolean; frame: number };
@@ -419,7 +421,7 @@ function captureEditorViewState(): EditorViewState {
     tool: currentTool,
     zoom: cellSize,
     anchor: selectedAnchorName,
-    selection: selection ? { ...selection } : null,
+    selection: selection ? cloneSelection(selection) : null,
     leftPanel: activePanel('left'),
     rightPanel: activePanel('right'),
     preview: {
@@ -461,7 +463,7 @@ function restoreEditorViewState(saved?: EditorViewState): void {
     if (file.anims[state.anim]) animName = state.anim;
     frameIdx = Math.max(0, Math.min(state.frame, anim().frames.length - 1));
     if (state.paintChar in (file.palette ?? {})) currentChar = state.paintChar;
-    if ((['draw', 'brush', 'blur', 'fill', 'picker', 'select'] as EditorTool[]).includes(state.tool)) {
+    if ((['draw', 'brush', 'blur', 'fill', 'picker', 'select', 'magic'] as EditorTool[]).includes(state.tool)) {
       currentTool = state.tool;
     }
     selectedAnchorName = state.anchor;
@@ -555,12 +557,12 @@ function updateBridgeStatus(): void {
     : 'Save all modified sprites to the repository';
 }
 
-function historySnapshot(spriteFile: SpriteFile = file, selected: PixelRect | null = selection): string {
+function historySnapshot(spriteFile: SpriteFile = file, selected: PixelSelection | null = selection): string {
   return JSON.stringify({ v: 1, file: spriteFile, selection: selected });
 }
 
-function parseHistorySnapshot(snapshot: string): { file: SpriteFile; selection: PixelRect | null } {
-  const parsed = JSON.parse(snapshot) as { v?: unknown; file?: unknown; selection?: PixelRect | null };
+function parseHistorySnapshot(snapshot: string): { file: SpriteFile; selection: PixelSelection | null } {
+  const parsed = JSON.parse(snapshot) as { v?: unknown; file?: unknown; selection?: PixelSelection | null };
   if (parsed?.v === 1 && parsed.file) {
     return { file: parsed.file as SpriteFile, selection: parsed.selection ?? null };
   }
@@ -659,13 +661,14 @@ async function bridgeJson(path: string, init?: RequestInit): Promise<{ response:
 
 function selectionSnapshot(): SharedSelection | null {
   if (!selection) return null;
+  const clip = pixelsInSelection(selection);
   return {
     ...selection,
     path: currentRepoPath,
     anim: concreteAnimName(),
     frame: frameIdx,
-    rows: cur().slice(selection.y, selection.y + selection.h)
-      .map((row) => row.slice(selection!.x, selection!.x + selection!.w)),
+    rows: clip.rows,
+    mask: clip.mask,
     source: bridgeClientId,
     updatedAt: Date.now(),
   };
@@ -1412,7 +1415,7 @@ function floodFill(startX: number, startY: number, fillChar: string): void {
 
 grid.addEventListener('contextmenu', (e) => e.preventDefault());
 grid.addEventListener('mousedown', (e) => {
-  if (e.altKey && e.shiftKey && selectedAnchorName) {
+  if (currentTool !== 'magic' && e.altKey && e.shiftKey && selectedAnchorName) {
     e.preventDefault();
     const bounds = grid.getBoundingClientRect();
     const sourceX = Math.floor((e.clientX - bounds.left) / cellSize);
@@ -1422,6 +1425,16 @@ grid.addEventListener('mousedown', (e) => {
     buildAnchors();
     redraw();
     syncIO();
+    return;
+  }
+  if (currentTool === 'magic') {
+    e.preventDefault();
+    if (e.button === 2) {
+      clearSelection();
+      return;
+    }
+    if (e.button !== 0) return;
+    applyMagicSelection(e);
     return;
   }
   if (e.altKey || currentTool === 'picker') {
@@ -1445,7 +1458,7 @@ grid.addEventListener('mousedown', (e) => {
       return;
     }
     const point = gridCell(e);
-    if (selection && pointInRect(point, selection)) {
+    if (selection && selectionContains(selection, point.x, point.y)) {
       beginSelectionMove(point);
       return;
     }
@@ -1550,9 +1563,157 @@ function pickColor(e: MouseEvent, announce = true): void {
   }
 }
 
+type MagicSelectionMode = 'replace' | 'add' | 'subtract' | 'intersect';
+
+function magicTolerance(): number {
+  return Math.max(0, Math.min(255, Math.round(($('magicTolerance') as HTMLInputElement).valueAsNumber || 0)));
+}
+
+function magicSelectionMode(e: MouseEvent): MagicSelectionMode {
+  if (e.shiftKey && e.altKey) return 'intersect';
+  if (e.shiftKey) return 'add';
+  if (e.altKey) return 'subtract';
+  return ($('magicMode') as HTMLSelectElement).value as MagicSelectionMode;
+}
+
+function magicMatchCells(startX: number, startY: number): Set<string> {
+  const rows = cur();
+  const seedChar = rows[startY]?.[startX];
+  const result = new Set<string>();
+  if (seedChar === undefined) return result;
+  const seed = parseRgb(pal()[seedChar]);
+  const threshold = magicTolerance() ** 2;
+  const matches = (x: number, y: number): boolean => {
+    const candidateChar = rows[y]?.[x];
+    if (candidateChar === undefined) return false;
+    if (!seed) return !parseRgb(pal()[candidateChar]);
+    const candidate = parseRgb(pal()[candidateChar]);
+    return Boolean(candidate && colorDistance(seed, candidate) <= threshold);
+  };
+
+  if (!(($('magicContiguous') as HTMLInputElement).checked)) {
+    for (let y = 0; y < H(); y++) for (let x = 0; x < W(); x++) {
+      if (matches(x, y)) result.add(`${x},${y}`);
+    }
+    return result;
+  }
+
+  const queue: [number, number][] = [[startX, startY]];
+  const visited = new Set<string>();
+  for (let index = 0; index < queue.length; index++) {
+    const [x, y] = queue[index];
+    const key = `${x},${y}`;
+    if (visited.has(key)) continue;
+    visited.add(key);
+    if (!matches(x, y)) continue;
+    result.add(key);
+    if (x > 0) queue.push([x - 1, y]);
+    if (x + 1 < W()) queue.push([x + 1, y]);
+    if (y > 0) queue.push([x, y - 1]);
+    if (y + 1 < H()) queue.push([x, y + 1]);
+  }
+  return result;
+}
+
+function applyMagicSelection(e: MouseEvent): void {
+  const point = gridCell(e);
+  const matched = magicMatchCells(point.x, point.y);
+  const mode = magicSelectionMode(e);
+  const existing = selectionCells(selection);
+  let next: Set<string>;
+  if (mode === 'add') next = new Set([...existing, ...matched]);
+  else if (mode === 'subtract') next = new Set([...existing].filter((key) => !matched.has(key)));
+  else if (mode === 'intersect') next = new Set([...existing].filter((key) => matched.has(key)));
+  else next = matched;
+  setSelection(selectionFromCells(next));
+  void publishSelection();
+  const count = selection ? selectionPixelCount(selection) : 0;
+  flash(count ? `selected ${count} pixels (${mode})` : 'selection cleared');
+}
+
+function shiftSelectionColors(startX: number, startY: number): void {
+  if (!selection || !selectionContains(selection, startX, startY)) {
+    flash('select an area, then click a source color inside it');
+    return;
+  }
+  const sourceChar = cur()[startY]?.[startX];
+  const source = parseRgb(pal()[sourceChar]);
+  const target = parseRgb(pal()[currentChar]);
+  if (!source || !target || currentChar === '.') {
+    flash('color match needs an opaque source and paint color');
+    return;
+  }
+  const delta = { r: target.r - source.r, g: target.g - source.g, b: target.b - source.b };
+  let changed = 0;
+  for (let y = selection.y; y < selection.y + selection.h; y++) {
+    for (let x = selection.x; x < selection.x + selection.w; x++) {
+      if (!selectionContains(selection, x, y)) continue;
+      const original = parseRgb(pal()[cur()[y][x]]);
+      if (!original) continue;
+      const next = x === startX && y === startY
+        ? currentChar
+        : paletteCharFor({ r: original.r + delta.r, g: original.g + delta.g, b: original.b + delta.b });
+      if (cur()[y][x] !== next) {
+        setPixel(x, y, next);
+        changed++;
+      }
+    }
+  }
+  flash(changed
+    ? `matched ${changed} selected pixels from ${pal()[sourceChar]} to ${pal()[currentChar]}`
+    : 'selected colors already match');
+}
+
 function pointInRect(point: { x: number; y: number }, rect: PixelRect): boolean {
   return point.x >= rect.x && point.y >= rect.y
     && point.x < rect.x + rect.w && point.y < rect.y + rect.h;
+}
+
+function cloneSelection(value: PixelSelection): PixelSelection {
+  return { ...value, mask: value.mask?.slice() };
+}
+
+function selectionContains(value: PixelSelection, x: number, y: number): boolean {
+  if (!pointInRect({ x, y }, value)) return false;
+  return !value.mask || value.mask[y - value.y]?.[x - value.x] === '1';
+}
+
+function selectionPixelCount(value: PixelSelection): number {
+  if (!value.mask) return value.w * value.h;
+  let count = 0;
+  for (const row of value.mask) for (const bit of row) if (bit === '1') count++;
+  return count;
+}
+
+function selectionCells(value: PixelSelection | null): Set<string> {
+  const cells = new Set<string>();
+  if (!value) return cells;
+  for (let y = value.y; y < value.y + value.h; y++) {
+    for (let x = value.x; x < value.x + value.w; x++) {
+      if (selectionContains(value, x, y)) cells.add(`${x},${y}`);
+    }
+  }
+  return cells;
+}
+
+function selectionFromCells(cells: Set<string>): PixelSelection | null {
+  if (!cells.size) return null;
+  const points = [...cells].map((key) => key.split(',').map(Number) as [number, number]);
+  const minX = Math.min(...points.map(([x]) => x));
+  const maxX = Math.max(...points.map(([x]) => x));
+  const minY = Math.min(...points.map(([, y]) => y));
+  const maxY = Math.max(...points.map(([, y]) => y));
+  const w = maxX - minX + 1;
+  const h = maxY - minY + 1;
+  return {
+    x: minX,
+    y: minY,
+    w,
+    h,
+    mask: Array.from({ length: h }, (_, dy) =>
+      Array.from({ length: w }, (_, dx) => cells.has(`${minX + dx},${minY + dy}`) ? '1' : '.').join(''),
+    ),
+  };
 }
 
 function pixelsInRect(rect: PixelRect, rows = cur()): PixelClipboard {
@@ -1565,9 +1726,35 @@ function pixelsInRect(rect: PixelRect, rows = cur()): PixelClipboard {
   };
 }
 
+function pixelsInSelection(value: PixelSelection, rows = cur()): PixelClipboard {
+  const clip = pixelsInRect(value, rows);
+  if (!value.mask) return clip;
+  return {
+    ...clip,
+    rows: clip.rows.map((row, y) => [...row]
+      .map((pixel, x) => value.mask![y][x] === '1' ? pixel : '.')
+      .join('')),
+    mask: value.mask.slice(),
+  };
+}
+
 function clearRect(rows: string[], rect: PixelRect): void {
   for (let y = rect.y; y < rect.y + rect.h; y++) {
     rows[y] = rows[y].slice(0, rect.x) + '.'.repeat(rect.w) + rows[y].slice(rect.x + rect.w);
+  }
+}
+
+function clearSelectionPixels(rows: string[], value: PixelSelection): void {
+  if (!value.mask) {
+    clearRect(rows, value);
+    return;
+  }
+  for (let dy = 0; dy < value.h; dy++) {
+    const destination = [...rows[value.y + dy]];
+    for (let dx = 0; dx < value.w; dx++) {
+      if (value.mask[dy][dx] === '1') destination[value.x + dx] = '.';
+    }
+    rows[value.y + dy] = destination.join('');
   }
 }
 
@@ -1589,6 +1776,7 @@ function pastePixels(
     }
     const destination = [...rows[y + dy]];
     for (let dx = 0; dx < pastedW; dx++) {
+      if (clip.mask && clip.mask[dy]?.[dx] !== '1') continue;
       const pixel = clip.rows[dy][dx];
       if (pixel !== '.') destination[x + dx] = pixel;
     }
@@ -1598,10 +1786,10 @@ function pastePixels(
 
 function beginSelectionMove(point: { x: number; y: number }): void {
   if (!selection) return;
-  const original = { ...selection };
+  const original = cloneSelection(selection);
   const baseFrame = cur().slice();
-  const source = pixelsInRect(original, baseFrame);
-  clearRect(baseFrame, original);
+  const source = pixelsInSelection(original, baseFrame);
+  clearSelectionPixels(baseFrame, original);
   selectionMove = {
     start: point,
     original,
@@ -1626,7 +1814,7 @@ function moveSelectionDrag(point: { x: number; y: number }): void {
   pastePixels(rows, selectionMove.source, x, y, true);
   anim().frames[frameIdx] = rows;
   editVersion++;
-  setSelection({ x, y, w: selectionMove.original.w, h: selectionMove.original.h });
+  setSelection({ x, y, w: selectionMove.original.w, h: selectionMove.original.h, mask: selectionMove.source.mask?.slice() });
 }
 
 function gridPointer(e: MouseEvent): { x: number; y: number } {
@@ -1703,7 +1891,8 @@ function updateSelectionCursor(e?: MouseEvent): void {
     grid.style.cursor = cursors[handle] ?? 'default';
     return;
   }
-  if (pointInRect(gridCell(e), selection)) {
+  const point = gridCell(e);
+  if (selectionContains(selection, point.x, point.y)) {
     grid.classList.add('selection-movable');
     grid.style.cursor = 'move';
   } else {
@@ -1713,17 +1902,17 @@ function updateSelectionCursor(e?: MouseEvent): void {
 
 function beginSelectionHandleTransform(handle: SelectionHandle, e: MouseEvent): void {
   if (!selection) return;
-  const original = { ...selection };
+  const original = cloneSelection(selection);
   const sourceFrame = cur().slice();
   const baseFrame = sourceFrame.slice();
-  clearRect(baseFrame, original);
+  clearSelectionPixels(baseFrame, original);
   const pointer = gridPointer(e);
   const centerX = original.x + original.w / 2;
   const centerY = original.y + original.h / 2;
   selectionHandleTransform = {
     handle,
     original,
-    source: pixelsInRect(original, sourceFrame),
+    source: pixelsInSelection(original, sourceFrame),
     baseFrame,
     startPointer: pointer,
     startAngle: Math.atan2(pointer.y - centerY, pointer.x - centerX),
@@ -1748,7 +1937,7 @@ function applyLiveSelectionTransform(
   pastePixels(rows, clip, x, y, true);
   anim().frames[frameIdx] = rows;
   editVersion++;
-  setSelection({ x, y, w: clip.w, h: clip.h });
+  setSelection({ x, y, w: clip.w, h: clip.h, mask: clip.mask?.slice() });
 }
 
 function updateSelectionHandleTransform(e: MouseEvent): void {
@@ -1790,7 +1979,7 @@ function updateSelectionHandleTransform(e: MouseEvent): void {
   applyLiveSelectionTransform(transform, scaled, left, top, `resize:${left},${top},${width},${height}`);
 }
 
-function setSelection(next: PixelRect | null): void {
+function setSelection(next: PixelSelection | null): void {
   selection = next;
   ($('btnCut') as HTMLButtonElement).disabled = !selection;
   ($('btnCopy') as HTMLButtonElement).disabled = !selection;
@@ -1808,7 +1997,7 @@ function setSelection(next: PixelRect | null): void {
     selectionH.value = String(selection.h);
   }
   $('selectionStatus').textContent = selection
-    ? `selection: ${selection.w}x${selection.h} at ${selection.x},${selection.y} · shared with agent`
+    ? `selection: ${selectionPixelCount(selection)} px in ${selection.w}x${selection.h} at ${selection.x},${selection.y} · shared with agent`
     : 'selection: none';
   redraw();
 }
@@ -1823,12 +2012,22 @@ function clearSelection(publish = true): void {
   if (publish) void publishSelection();
 }
 
+// Treat the empty canvas workspace like an art application's pasteboard:
+// clicking it dismisses the current pixel selection. Checking the direct
+// target keeps canvas gestures and every surrounding panel/control intact.
+$('center').addEventListener('pointerdown', (event) => {
+  if (event.button !== 0 || event.target !== event.currentTarget || !selection) return;
+  clearSelection();
+});
+
 function paint(e: MouseEvent): void {
   const r = grid.getBoundingClientRect();
   const x = Math.floor((e.clientX - r.left) / cellSize);
   const y = Math.floor((e.clientY - r.top) / cellSize);
   if (currentTool === 'fill') {
-    floodFill(x, y, erasing ? '.' : currentChar);
+    const mode = ($('fillMode') as HTMLSelectElement).value;
+    if (mode === 'match' && !erasing) shiftSelectionColors(x, y);
+    else floodFill(x, y, erasing ? '.' : currentChar);
   } else if (currentTool === 'draw') {
     setPixel(x, y, erasing ? '.' : currentChar);
   } else if (currentTool === 'brush' || currentTool === 'blur') {
@@ -2052,11 +2251,35 @@ function redraw(): void {
     const h = selection.h * cellSize;
     gctx.save();
     gctx.fillStyle = 'rgba(255,205,117,0.12)';
-    gctx.fillRect(x, y, w, h);
+    if (selection.mask) {
+      for (let dy = 0; dy < selection.h; dy++) for (let dx = 0; dx < selection.w; dx++) {
+        if (selection.mask[dy][dx] === '1') gctx.fillRect(x + dx * cellSize, y + dy * cellSize, cellSize, cellSize);
+      }
+    } else {
+      gctx.fillRect(x, y, w, h);
+    }
     gctx.strokeStyle = '#ffcd75';
     gctx.lineWidth = 2;
     gctx.setLineDash([Math.max(3, cellSize / 3), Math.max(2, cellSize / 5)]);
-    gctx.strokeRect(x + 1, y + 1, Math.max(0, w - 2), Math.max(0, h - 2));
+    if (selection.mask) {
+      const mask = selection.mask;
+      gctx.setLineDash([]);
+      gctx.lineWidth = Math.max(1, Math.min(2, cellSize / 6));
+      for (let dy = 0; dy < selection.h; dy++) for (let dx = 0; dx < selection.w; dx++) {
+        if (mask[dy][dx] !== '1') continue;
+        const px = x + dx * cellSize;
+        const py = y + dy * cellSize;
+        const selectedAt = (mx: number, my: number) => mask[my]?.[mx] === '1';
+        gctx.beginPath();
+        if (!selectedAt(dx, dy - 1)) { gctx.moveTo(px, py); gctx.lineTo(px + cellSize, py); }
+        if (!selectedAt(dx + 1, dy)) { gctx.moveTo(px + cellSize, py); gctx.lineTo(px + cellSize, py + cellSize); }
+        if (!selectedAt(dx, dy + 1)) { gctx.moveTo(px + cellSize, py + cellSize); gctx.lineTo(px, py + cellSize); }
+        if (!selectedAt(dx - 1, dy)) { gctx.moveTo(px, py + cellSize); gctx.lineTo(px, py); }
+        gctx.stroke();
+      }
+    } else {
+      gctx.strokeRect(x + 1, y + 1, Math.max(0, w - 2), Math.max(0, h - 2));
+    }
     gctx.restore();
 
     const handles = selectionHandlePositions(selection);
@@ -2785,7 +3008,9 @@ function updateToolUI(): void {
   $('btnToolFill').classList.toggle('active', visibleTool === 'fill');
   $('btnToolPicker').classList.toggle('active', visibleTool === 'picker');
   $('btnToolSelect').classList.toggle('active', visibleTool === 'select');
+  $('btnToolMagic').classList.toggle('active', visibleTool === 'magic');
   grid.classList.toggle('selecting', visibleTool === 'select');
+  grid.classList.toggle('magic-selecting', visibleTool === 'magic');
   grid.classList.toggle('picking', visibleTool === 'picker');
   grid.classList.toggle('soft-tool', visibleTool === 'brush' || visibleTool === 'blur');
   if (visibleTool !== 'select') {
@@ -2795,11 +3020,16 @@ function updateToolUI(): void {
     grid.style.cursor = 'cell';
   }
   const hasSize = currentTool === 'brush' || currentTool === 'blur';
+  const hasMagic = currentTool === 'magic';
+  const hasFill = currentTool === 'fill';
   $('brushSizeConfig').hidden = !hasSize;
-  $('toolConfigEmpty').hidden = hasSize;
+  $('magicConfig').hidden = !hasMagic;
+  $('fillConfig').hidden = !hasFill;
+  $('toolConfigEmpty').hidden = hasSize || hasMagic || hasFill;
   $('toolConfigTitle').textContent = hasSize
     ? `${currentTool === 'brush' ? 'soft brush' : 'blur'} settings`
-    : 'tool settings';
+    : hasMagic ? 'magic selection settings'
+      : hasFill ? 'fill settings' : 'tool settings';
   $('brushSizeLabel').textContent = currentTool === 'blur' ? 'blur size' : 'brush size';
   $('toolConfigHint').textContent = currentTool === 'blur'
     ? 'Averages neighboring colors at the center and feathers the effect toward the edge.'
@@ -2824,8 +3054,8 @@ function updateBrushCursor(): void {
 
 function setTool(tool: EditorTool): void {
   currentTool = tool;
-  if (tool === 'brush' || tool === 'blur') activatePanel('left', 'left-tool');
-  if (tool === 'select') activatePanel('right', 'right-transform');
+  if (tool === 'brush' || tool === 'blur' || tool === 'magic' || tool === 'fill') activatePanel('left', 'left-tool');
+  if (tool === 'select' || tool === 'magic') activatePanel('right', 'right-transform');
   updateToolUI();
   redraw();
 }
@@ -2836,6 +3066,7 @@ $('btnToolBlur').onclick = () => setTool('blur');
 $('btnToolFill').onclick = () => setTool('fill');
 $('btnToolPicker').onclick = () => setTool('picker');
 $('btnToolSelect').onclick = () => setTool('select');
+$('btnToolMagic').onclick = () => setTool('magic');
 
 $('btnCompactPalette').onclick = () => {
   const before = JSON.stringify(file);
@@ -2867,7 +3098,7 @@ $('btnBrushSizeUp').onclick = () => setBrushSize(brushSize() + 1);
 function copySelection(): PixelClipboard | null {
   const snapshot = selectionSnapshot();
   if (!snapshot) return null;
-  pixelClipboard = { w: snapshot.w, h: snapshot.h, rows: snapshot.rows };
+  pixelClipboard = { w: snapshot.w, h: snapshot.h, rows: snapshot.rows, mask: snapshot.mask?.slice() };
   const envelope = JSON.stringify({ kind: 'hitstop-sprite-selection', v: 1, ...snapshot });
   void navigator.clipboard?.writeText(envelope).catch(() => {});
   flash(`copied ${snapshot.w}x${snapshot.h} pixels`);
@@ -2877,10 +3108,7 @@ function copySelection(): PixelClipboard | null {
 function cutSelection(): void {
   if (!selection || !copySelection()) return;
   saveHistory();
-  for (let y = selection.y; y < selection.y + selection.h; y++) {
-    const row = cur()[y];
-    cur()[y] = row.slice(0, selection.x) + '.'.repeat(selection.w) + row.slice(selection.x + selection.w);
-  }
+  clearSelectionPixels(cur(), selection);
   redraw();
   syncIO();
   void publishSelection();
@@ -2889,13 +3117,16 @@ function cutSelection(): void {
 
 function parsePixelClipboard(text: string): PixelClipboard | null {
   try {
-    const value = JSON.parse(text) as { kind?: unknown; w?: unknown; h?: unknown; rows?: unknown };
+    const value = JSON.parse(text) as { kind?: unknown; w?: unknown; h?: unknown; rows?: unknown; mask?: unknown };
     if (value.kind !== 'hitstop-sprite-selection' || !Number.isInteger(value.w) || !Number.isInteger(value.h)
       || !Array.isArray(value.rows) || !value.rows.every((row) => typeof row === 'string')) return null;
     const w = Number(value.w);
     const h = Number(value.h);
     if (w < 1 || h < 1 || value.rows.length !== h || value.rows.some((row) => row.length !== w)) return null;
-    return { w, h, rows: value.rows as string[] };
+    const mask = value.mask;
+    if (mask !== undefined && (!Array.isArray(mask) || mask.length !== h
+      || !mask.every((row) => typeof row === 'string' && row.length === w && /^[1.]+$/.test(row)))) return null;
+    return { w, h, rows: value.rows as string[], mask: mask as string[] | undefined };
   } catch {
     return null;
   }
@@ -2922,7 +3153,8 @@ async function pasteSelection(): Promise<void> {
   pastePixels(rows, clip, x, y, true);
   anim().frames[frameIdx] = rows;
   editVersion++;
-  setSelection({ x, y, w: pastedW, h: pastedH });
+  const clippedMask = clip.mask?.slice(0, pastedH).map((row) => row.slice(0, pastedW));
+  setSelection({ x, y, w: pastedW, h: pastedH, mask: clippedMask });
   syncIO();
   void publishSelection();
   flash(`pasted ${pastedW}x${pastedH} pixels`);
@@ -2937,11 +3169,11 @@ function commitSelectionPixels(
   if (!selection) return;
   saveHistory();
   const rows = cur().slice();
-  clearRect(rows, selection);
+  clearSelectionPixels(rows, selection);
   pastePixels(rows, clip, x, y, true);
   anim().frames[frameIdx] = rows;
   editVersion++;
-  setSelection({ x, y, w: clip.w, h: clip.h });
+  setSelection({ x, y, w: clip.w, h: clip.h, mask: clip.mask?.slice() });
   syncIO();
   void publishSelection();
   flash(message);
@@ -2952,7 +3184,7 @@ function moveSelectionBy(dx: number, dy: number): void {
   const x = Math.max(0, Math.min(W() - selection.w, selection.x + dx));
   const y = Math.max(0, Math.min(H() - selection.h, selection.y + dy));
   if (x === selection.x && y === selection.y) return;
-  commitSelectionPixels(pixelsInRect(selection), x, y, `moved selection to ${x},${y}`);
+  commitSelectionPixels(pixelsInSelection(selection), x, y, `moved selection to ${x},${y}`);
 }
 
 function scaleSelectionRows(source: PixelClipboard, w: number, h: number): PixelClipboard {
@@ -2964,6 +3196,13 @@ function scaleSelectionRows(source: PixelClipboard, w: number, h: number): Pixel
       return Array.from({ length: w }, (_, x) => {
         const sourceX = Math.min(source.w - 1, Math.floor(x * source.w / w));
         return source.rows[sourceY][sourceX];
+      }).join('');
+    }),
+    mask: source.mask && Array.from({ length: h }, (_, y) => {
+      const sourceY = Math.min(source.h - 1, Math.floor(y * source.h / h));
+      return Array.from({ length: w }, (_, x) => {
+        const sourceX = Math.min(source.w - 1, Math.floor(x * source.w / w));
+        return source.mask![sourceY][sourceX];
       }).join('');
     }),
   };
@@ -2982,7 +3221,7 @@ function resizeSelection(): void {
     flash('selection already has that size');
     return;
   }
-  const source = pixelsInRect(selection);
+  const source = pixelsInSelection(selection);
   const scaled = scaleSelectionRows(source, requestedW, requestedH);
   const x = Math.max(0, Math.min(W() - requestedW,
     Math.round(selection.x + (selection.w - requestedW) / 2)));
@@ -2999,6 +3238,12 @@ function rotateSelectionQuarter(source: PixelClipboard, clockwise: boolean): Pix
       Array.from({ length: source.h }, (_, x) => clockwise
         ? source.rows[source.h - 1 - x][y]
         : source.rows[x][source.w - 1 - y],
+      ).join(''),
+    ),
+    mask: source.mask && Array.from({ length: source.w }, (_, y) =>
+      Array.from({ length: source.h }, (_, x) => clockwise
+        ? source.mask![source.h - 1 - x][y]
+        : source.mask![x][source.w - 1 - y],
       ).join(''),
     ),
   };
@@ -3045,6 +3290,19 @@ function rotateSelectionRows(source: PixelClipboard, degrees: number): PixelClip
           : '.';
       }).join(''),
     ),
+    mask: source.mask && Array.from({ length: height }, (_, y) =>
+      Array.from({ length: width }, (_, x) => {
+        const destinationX = x + 0.5 - width / 2;
+        const destinationY = y + 0.5 - height / 2;
+        const sourceX = cosine * destinationX + sine * destinationY + source.w / 2;
+        const sourceY = -sine * destinationX + cosine * destinationY + source.h / 2;
+        const sampleX = Math.floor(sourceX);
+        const sampleY = Math.floor(sourceY);
+        return sampleX >= 0 && sampleX < source.w && sampleY >= 0 && sampleY < source.h
+          ? source.mask![sampleY][sampleX]
+          : '.';
+      }).join(''),
+    ),
   };
 }
 
@@ -3054,7 +3312,7 @@ function rotateSelectionBy(degrees: number, message?: string): void {
     flash('enter a non-zero rotation');
     return;
   }
-  const source = pixelsInRect(selection);
+  const source = pixelsInSelection(selection);
   const rotated = rotateSelectionRows(source, degrees);
   if (rotated.w > W() || rotated.h > H()) {
     flash(`rotated selection does not fit ${W()}x${H()} canvas`);
@@ -3284,7 +3542,7 @@ window.addEventListener('keydown', (e) => {
     editMenu.open = false;
     return;
   }
-  if (e.key === 'Alt') {
+  if (e.key === 'Alt' && currentTool !== 'magic') {
     e.preventDefault();
     altPickerActive = true;
     updateToolUI();
@@ -3327,6 +3585,7 @@ window.addEventListener('keydown', (e) => {
       b: 'brush',
       u: 'blur',
       g: 'fill',
+      w: 'magic',
     };
     const tool = shortcut[key];
     if (tool) {

@@ -26,6 +26,7 @@ interface ActiveSelection {
   w: number;
   h: number;
   rows: string[];
+  mask?: string[];
   source: string;
   updatedAt: number;
 }
@@ -219,12 +220,17 @@ export function spriteEditorBridge(root: string): Plugin {
             }
             const value = body.selection as Record<string, unknown>;
             const rows = value.rows;
+            const mask = value.mask;
             const numbers = ['frame', 'x', 'y', 'w', 'h'] as const;
             if (numbers.some((key) => !Number.isInteger(value[key]))
               || Number(value.x) < 0 || Number(value.y) < 0 || Number(value.w) < 1 || Number(value.h) < 1
               || typeof value.anim !== 'string' || !Array.isArray(rows) || !rows.every((row) => typeof row === 'string')
               || rows.length !== Number(value.h) || rows.some((row) => row.length !== Number(value.w))) {
               return send(res, 400, { error: 'selection needs integer bounds and matching pixel rows' });
+            }
+            if (mask !== undefined && (!Array.isArray(mask) || mask.length !== Number(value.h)
+              || !mask.every((row) => typeof row === 'string' && row.length === Number(value.w) && /^[1.]+$/.test(row)))) {
+              return send(res, 400, { error: 'selection mask must match the selection bounds' });
             }
             selection = {
               path: value.path == null ? null : String(value.path),
@@ -235,6 +241,7 @@ export function spriteEditorBridge(root: string): Plugin {
               w: Number(value.w),
               h: Number(value.h),
               rows: rows as string[],
+              mask: mask as string[] | undefined,
               source: String(value.source ?? 'browser'),
               updatedAt: Number(value.updatedAt) || Date.now(),
             };
