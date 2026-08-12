@@ -1,8 +1,11 @@
 /// <reference types="vite/client" />
 
 import {
-  resolveSpriteGeometry, resolveAnim, sprite, epx,
-  type Palette, type SpriteFile, type SpriteAnimData, type SpriteAnchor,
+  resolveSpriteGeometry, resolveAnim, resolveAnimName, resolveAnimTiming,
+  compositeSpriteFrame, isLayeredSpriteFile, validateLayeredSpriteFile,
+  sprite, epx,
+  type Palette, type SpriteFile, type FlatSpriteFile, type LayeredSpriteFile,
+  type SpriteAnimData, type LayeredSpriteAnimData, type SpriteLayerData, type SpriteAnchor,
 } from '@engine/index';
 import { PAL } from '@game/content/palette';
 // Composite preview: the editor borrows the GAME's renderers rather than
@@ -94,6 +97,7 @@ interface SharedSelection extends PixelRect {
   path: string | null;
   anim: string;
   frame: number;
+  layerId?: string;
   rows: string[];
   mask?: string[];
   source: string;
@@ -108,6 +112,11 @@ let refFile: SpriteFile | null = null;
 let currentFileName = 'new sprite.json';
 let currentRepoPath: string | null = null;
 let selectedAnchorName = '';
+const FLAT_LAYER_ID = 'base';
+let activeLayerId = FLAT_LAYER_ID;
+let hiddenLayerIds = new Set<string>();
+let lockedLayerIds = new Set<string>();
+let soloLayerId: string | null = null;
 const undoStack: string[] = [];
 const redoStack: string[] = [];
 const MAX_HISTORY = 100;
@@ -228,12 +237,53 @@ const pal = (): Palette => file.palette ?? {};
  * belt-and-braces. Mutations through it therefore edit the target's
  * frames, which is the only thing an alias could mean in an editor.
  */
-const anim = (): SpriteAnimData => resolveAnim(file, animName)!;
+const activeLayer = (): SpriteLayerData | null => isLayeredSpriteFile(file)
+  ? file.layers.find((layer) => layer.id === activeLayerId) ?? file.layers.at(-1) ?? null
+  : null;
+
+function activeFrames(name = animName): string[][] {
+  const target = resolveAnimName(file, name);
+  if (isLayeredSpriteFile(file)) {
+    const layer = activeLayer();
+    if (!layer) throw new Error('layered sprite has no active layer');
+    return layer.tracks[target];
+  }
+  const entry = file.anims[target];
+  if (!entry || typeof entry === 'string') throw new Error(`animation ${target} has no frames`);
+  return entry.frames;
+}
+
+const anim = (): SpriteAnimData => {
+  const timing = resolveAnimTiming(file, animName);
+  if (!timing) throw new Error(`unknown animation ${animName}`);
+  return { fps: timing.fps, loop: timing.loop, frames: activeFrames() };
+};
 /** Concrete (non-alias) animations — the only ones with frames to edit,
  * resize, or export as art. */
+const concreteAnimNames = (): string[] =>
+  Object.entries(file.anims).filter(([, entry]) => typeof entry !== 'string').map(([name]) => name);
 const concreteAnims = (): [string, SpriteAnimData][] =>
-  Object.entries(file.anims).filter((e): e is [string, SpriteAnimData] => typeof e[1] !== 'string');
+  concreteAnimNames().map((name) => [name, {
+    fps: resolveAnimTiming(file, name)!.fps,
+    loop: resolveAnimTiming(file, name)!.loop,
+    frames: activeFrames(name),
+  }]);
 const cur = () => anim().frames[frameIdx];
+const compositeCur = (index = frameIdx): string[] => compositeSpriteFrame(
+  file,
+  animName,
+  index,
+  PAL,
+  (layer) => (soloLayerId ? layer.id === soloLayerId : !hiddenLayerIds.has(layer.id)),
+) ?? cur();
+const visibleAnim = (): SpriteAnimData => {
+  const timing = resolveAnimTiming(file, animName)!;
+  return {
+    fps: timing.fps,
+    loop: timing.loop,
+    frames: Array.from({ length: timing.frameCount }, (_, index) => compositeCur(index)),
+  };
+};
 const W = () => cur()[0].length;
 const H = () => cur().length;
 const density = () => file.hd === false ? 4 : 1;
@@ -243,13 +293,59 @@ function concreteAnimName(name = animName): string {
 }
 
 function concreteAnimNameOf(spriteFile: SpriteFile, name: string): string {
-  const seen = new Set<string>();
-  let current = name;
-  while (typeof spriteFile.anims[current] === 'string' && !seen.has(current)) {
-    seen.add(current);
-    current = spriteFile.anims[current] as string;
+  return resolveAnimName(spriteFile, name);
+}
+
+function reconcileLayerState(reset = false): void {
+  if (!isLayeredSpriteFile(file)) {
+    activeLayerId = FLAT_LAYER_ID;
+    hiddenLayerIds.clear();
+    lockedLayerIds.clear();
+    soloLayerId = null;
+    return;
   }
-  return current;
+  const ids = new Set(file.layers.map((layer) => layer.id));
+  if (reset || !ids.has(activeLayerId)) activeLayerId = file.layers.at(-1)?.id ?? FLAT_LAYER_ID;
+  hiddenLayerIds = new Set([...hiddenLayerIds].filter((id) => ids.has(id)));
+  lockedLayerIds = new Set([...lockedLayerIds].filter((id) => ids.has(id)));
+  if (soloLayerId && !ids.has(soloLayerId)) soloLayerId = null;
+}
+
+function uniqueLayerId(label: string): string {
+  const stem = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'layer';
+  const ids = new Set(isLayeredSpriteFile(file) ? file.layers.map((layer) => layer.id) : []);
+  let id = stem;
+  for (let suffix = 2; ids.has(id); suffix++) id = `${stem}-${suffix}`;
+  return id;
+}
+
+function ensureLayeredFile(): LayeredSpriteFile {
+  if (isLayeredSpriteFile(file)) return file;
+  const flat = file as FlatSpriteFile & EditorSpriteFile;
+  const tracks: Record<string, string[][]> = {};
+  const anims: Record<string, LayeredSpriteAnimData | string> = {};
+  for (const [name, entry] of Object.entries(flat.anims)) {
+    if (typeof entry === 'string') anims[name] = entry;
+    else {
+      tracks[name] = entry.frames;
+      anims[name] = { fps: entry.fps, frameCount: entry.frames.length, loop: entry.loop };
+    }
+  }
+  const { anims: _flatAnims, ...rest } = flat;
+  file = {
+    ...rest,
+    anims,
+    layers: [{ id: FLAT_LAYER_ID, name: 'Base', tracks }],
+  } as LayeredSpriteFile & EditorSpriteFile;
+  activeLayerId = FLAT_LAYER_ID;
+  reconcileLayerState();
+  return file as LayeredSpriteFile;
+}
+
+function requireEditableLayer(): boolean {
+  if (!isLayeredSpriteFile(file) || !lockedLayerIds.has(activeLayerId)) return true;
+  flash(`layer “${activeLayer()?.name ?? activeLayerId}” is locked`);
+  return false;
 }
 
 function currentAnchor(): SpriteAnchor | undefined {
@@ -291,6 +387,25 @@ const gctx = grid.getContext('2d')!;
 const brushCursor = $('brushCursor');
 const preview = $('preview') as HTMLCanvasElement;
 const pctx = preview.getContext('2d')!;
+const TRANSPARENCY_CHECKER_SIZE = 12;
+
+/** Photoshop-style transparency is a view-space aid, not sprite pixels. */
+function drawTransparencyChecker(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  size = TRANSPARENCY_CHECKER_SIZE,
+): void {
+  context.fillStyle = '#f0f0f0';
+  context.fillRect(0, 0, width, height);
+  context.fillStyle = '#b8b8b8';
+  for (let y = 0; y < height; y += size) {
+    for (let x = 0; x < width; x += size) {
+      if (((x / size) + (y / size)) % 2 === 0) continue;
+      context.fillRect(x, y, Math.min(size, width - x), Math.min(size, height - y));
+    }
+  }
+}
 
 const SPRITE_ROOT = '/src/game/content/sprites/';
 const spriteModules = import.meta.glob('/src/game/content/sprites/**/*.json', {
@@ -387,6 +502,7 @@ interface EditorViewState {
   zoom: number;
   anchor: string;
   selection: PixelSelection | null;
+  layer?: { active: string; hidden: string[]; locked: string[]; solo: string | null };
   leftPanel?: string;
   rightPanel?: string;
   preview: { playing: boolean; stepping: boolean; frame: number };
@@ -422,6 +538,12 @@ function captureEditorViewState(): EditorViewState {
     zoom: cellSize,
     anchor: selectedAnchorName,
     selection: selection ? cloneSelection(selection) : null,
+    layer: {
+      active: activeLayerId,
+      hidden: [...hiddenLayerIds],
+      locked: [...lockedLayerIds],
+      solo: soloLayerId,
+    },
     leftPanel: activePanel('left'),
     rightPanel: activePanel('right'),
     preview: {
@@ -467,6 +589,13 @@ function restoreEditorViewState(saved?: EditorViewState): void {
       currentTool = state.tool;
     }
     selectedAnchorName = state.anchor;
+    if (state.layer) {
+      activeLayerId = state.layer.active;
+      hiddenLayerIds = new Set(state.layer.hidden);
+      lockedLayerIds = new Set(state.layer.locked);
+      soloLayerId = state.layer.solo;
+      reconcileLayerState();
+    }
     previewStepping = state.preview.stepping;
     previewStepFrame = state.preview.frame;
 
@@ -667,6 +796,7 @@ function selectionSnapshot(): SharedSelection | null {
     path: currentRepoPath,
     anim: concreteAnimName(),
     frame: frameIdx,
+    layerId: isLayeredSpriteFile(file) ? activeLayerId : undefined,
     rows: clip.rows,
     mask: clip.mask,
     source: bridgeClientId,
@@ -1075,6 +1205,219 @@ function onAnchorChange(): void {
 ($('anchorY') as HTMLInputElement).onchange = onAnchorChange;
 ($('showAnchors') as HTMLInputElement).onchange = () => redraw();
 
+/* ---------------- layers ---------------- */
+
+function eachLayerTrack(name: string, visit: (frames: string[][], layer: SpriteLayerData) => void): void {
+  if (!isLayeredSpriteFile(file)) {
+    visit(activeFrames(name), { id: FLAT_LAYER_ID, name: 'Base', tracks: {} });
+    return;
+  }
+  const target = resolveAnimName(file, name);
+  for (const layer of file.layers) visit(layer.tracks[target], layer);
+}
+
+function setTimelineFrameCount(name: string, count: number): void {
+  if (!isLayeredSpriteFile(file)) return;
+  const target = resolveAnimName(file, name);
+  const entry = file.anims[target];
+  if (entry && typeof entry !== 'string') entry.frameCount = count;
+}
+
+function makeTransparentTracks(): Record<string, string[][]> {
+  const tracks: Record<string, string[][]> = {};
+  for (const name of concreteAnimNames()) {
+    const timing = resolveAnimTiming(file, name)!;
+    tracks[name] = Array.from({ length: timing.frameCount }, () => emptyFrame(W(), H()));
+  }
+  return tracks;
+}
+
+function buildLayers(): void {
+  reconcileLayerState();
+  const host = $('layers');
+  host.innerHTML = '';
+  const layers = isLayeredSpriteFile(file)
+    ? [...file.layers].reverse()
+    : [{ id: FLAT_LAYER_ID, name: 'Base', tracks: {} }];
+  for (const layer of layers) {
+    const row = document.createElement('div');
+    row.className = `layer-row${layer.id === activeLayerId ? ' active' : ''}`;
+
+    const eye = document.createElement('button');
+    eye.textContent = hiddenLayerIds.has(layer.id) ? '○' : '●';
+    eye.className = `layer-toggle ${hiddenLayerIds.has(layer.id) ? 'off' : 'on'}`;
+    eye.title = hiddenLayerIds.has(layer.id) ? 'Show layer' : 'Hide layer';
+    eye.disabled = !isLayeredSpriteFile(file);
+    eye.onclick = () => {
+      if (hiddenLayerIds.has(layer.id)) hiddenLayerIds.delete(layer.id);
+      else hiddenLayerIds.add(layer.id);
+      buildLayers();
+      redraw();
+    };
+
+    const solo = document.createElement('button');
+    solo.textContent = 'S';
+    solo.className = `layer-toggle ${soloLayerId === layer.id ? 'on' : ''}`;
+    solo.title = soloLayerId === layer.id ? 'Show all layers' : 'Solo this layer';
+    solo.disabled = !isLayeredSpriteFile(file);
+    solo.onclick = () => {
+      soloLayerId = soloLayerId === layer.id ? null : layer.id;
+      buildLayers();
+      redraw();
+    };
+
+    const name = document.createElement('button');
+    name.className = 'layer-name';
+    name.textContent = layer.name;
+    name.title = 'Select layer; double-click to rename';
+    name.onclick = () => {
+      activeLayerId = layer.id;
+      clearSelection(false);
+      buildLayers();
+      redraw();
+      void publishSelection();
+    };
+    name.ondblclick = () => {
+      if (!isLayeredSpriteFile(file)) return;
+      const label = prompt('layer name:', layer.name)?.trim();
+      if (!label || label === layer.name) return;
+      saveHistory();
+      layer.name = label;
+      buildLayers();
+      syncIO();
+    };
+
+    const lock = document.createElement('button');
+    lock.textContent = lockedLayerIds.has(layer.id) ? '◆' : '◇';
+    lock.className = `layer-toggle ${lockedLayerIds.has(layer.id) ? 'on' : ''}`;
+    lock.title = lockedLayerIds.has(layer.id) ? 'Unlock layer' : 'Lock layer';
+    lock.disabled = !isLayeredSpriteFile(file);
+    lock.onclick = () => {
+      if (lockedLayerIds.has(layer.id)) lockedLayerIds.delete(layer.id);
+      else lockedLayerIds.add(layer.id);
+      buildLayers();
+    };
+
+    row.append(eye, solo, name, lock);
+    host.appendChild(row);
+  }
+
+  const layerFile = isLayeredSpriteFile(file) ? file : null;
+  const layered = Boolean(layerFile);
+  const index = layerFile ? layerFile.layers.findIndex((layer) => layer.id === activeLayerId) : 0;
+  $('layerStatus').textContent = layerFile ? `${layerFile.layers.length} layers` : 'flat sprite';
+  ($('btnDupLayer') as HTMLButtonElement).disabled = !layered;
+  ($('btnLayerUp') as HTMLButtonElement).disabled = !layerFile || index === layerFile.layers.length - 1;
+  ($('btnLayerDown') as HTMLButtonElement).disabled = !layered || index <= 0;
+  ($('btnMergeLayer') as HTMLButtonElement).disabled = !layered || index <= 0;
+  ($('btnDelLayer') as HTMLButtonElement).disabled = !layerFile || layerFile.layers.length <= 1;
+  ($('btnFlattenLayers') as HTMLButtonElement).disabled = !layered;
+}
+
+$('btnAddLayer').onclick = () => {
+  saveHistory();
+  const layered = ensureLayeredFile();
+  const label = `Layer ${layered.layers.length + 1}`;
+  const layer: SpriteLayerData = { id: uniqueLayerId(label), name: label, tracks: makeTransparentTracks() };
+  layered.layers.push(layer);
+  activeLayerId = layer.id;
+  buildLayers();
+  redraw();
+  syncIO();
+};
+
+$('btnDupLayer').onclick = () => {
+  if (!isLayeredSpriteFile(file)) return;
+  const source = activeLayer();
+  if (!source) return;
+  saveHistory();
+  const index = file.layers.indexOf(source);
+  const copy = structuredClone(source);
+  copy.id = uniqueLayerId(`${source.id}-copy`);
+  copy.name = `${source.name} copy`;
+  file.layers.splice(index + 1, 0, copy);
+  activeLayerId = copy.id;
+  buildLayers();
+  redraw();
+  syncIO();
+};
+
+function moveLayer(delta: -1 | 1): void {
+  if (!isLayeredSpriteFile(file)) return;
+  const index = file.layers.findIndex((layer) => layer.id === activeLayerId);
+  const target = index + delta;
+  if (index < 0 || target < 0 || target >= file.layers.length) return;
+  saveHistory();
+  [file.layers[index], file.layers[target]] = [file.layers[target], file.layers[index]];
+  buildLayers();
+  redraw();
+  syncIO();
+}
+
+$('btnLayerUp').onclick = () => moveLayer(1);
+$('btnLayerDown').onclick = () => moveLayer(-1);
+
+$('btnMergeLayer').onclick = () => {
+  if (!isLayeredSpriteFile(file)) return;
+  const index = file.layers.findIndex((layer) => layer.id === activeLayerId);
+  if (index <= 0) return;
+  saveHistory();
+  const top = file.layers[index];
+  const bottom = file.layers[index - 1];
+  for (const name of concreteAnimNames()) {
+    for (let frame = 0; frame < top.tracks[name].length; frame++) {
+      const over = top.tracks[name][frame];
+      const under = [...bottom.tracks[name][frame]];
+      for (let y = 0; y < over.length; y++) for (let x = 0; x < over[y].length; x++) {
+        const ch = over[y][x];
+        if (ch === '.' || pal()[ch] === null) continue;
+        under[y] = under[y].slice(0, x) + ch + under[y].slice(x + 1);
+      }
+      bottom.tracks[name][frame] = under;
+    }
+  }
+  file.layers.splice(index, 1);
+  activeLayerId = bottom.id;
+  reconcileLayerState();
+  buildLayers();
+  redraw();
+  syncIO();
+};
+
+$('btnDelLayer').onclick = () => {
+  if (!isLayeredSpriteFile(file) || file.layers.length <= 1) return;
+  const index = file.layers.findIndex((layer) => layer.id === activeLayerId);
+  if (index < 0 || !confirm(`Delete layer “${file.layers[index].name}”?`)) return;
+  saveHistory();
+  file.layers.splice(index, 1);
+  activeLayerId = file.layers[Math.min(index, file.layers.length - 1)].id;
+  reconcileLayerState();
+  clearSelection(false);
+  buildLayers();
+  redraw();
+  syncIO();
+};
+
+$('btnFlattenLayers').onclick = () => {
+  if (!isLayeredSpriteFile(file) || !confirm('Flatten all layers? This can be undone.')) return;
+  saveHistory();
+  const layered = file as LayeredSpriteFile & EditorSpriteFile;
+  const anims: Record<string, SpriteAnimData | string> = {};
+  for (const [name, entry] of Object.entries(layered.anims)) {
+    if (typeof entry === 'string') anims[name] = entry;
+    else anims[name] = {
+      fps: entry.fps,
+      loop: entry.loop,
+      frames: Array.from({ length: entry.frameCount }, (_, frame) => compositeSpriteFrame(layered, name, frame, PAL)!),
+    };
+  }
+  const { layers: _layers, anims: _layeredAnims, ...rest } = layered;
+  file = { ...rest, anims } as FlatSpriteFile & EditorSpriteFile;
+  reconcileLayerState(true);
+  clearSelection(false);
+  refreshUI();
+};
+
 /* ---------------- animations ui ---------------- */
 
 function buildAnims(): void {
@@ -1114,7 +1457,12 @@ $('btnAddAnim').onclick = () => {
     return;
   }
   saveHistory();
-  file.anims[name] = { fps: 8, frames: [emptyFrame(W(), H())] };
+  if (isLayeredSpriteFile(file)) {
+    file.anims[name] = { fps: 8, frameCount: 1 };
+    for (const layer of file.layers) layer.tracks[name] = [emptyFrame(W(), H())];
+  } else {
+    file.anims[name] = { fps: 8, frames: [emptyFrame(W(), H())] };
+  }
   for (const anchors of Object.values(file.anchors ?? {})) {
     anchors[name] = [{ x: W() / density() / 2, y: H() / density() / 2 }];
   }
@@ -1131,9 +1479,25 @@ $('btnRenameAnim').onclick = () => {
   }
   saveHistory();
   // Rebuild in order, swapping the key so button order is stable.
-  const next: SpriteFile['anims'] = {};
-  for (const [k, v] of Object.entries(file.anims)) next[k === animName ? name : k] = v;
-  file.anims = next;
+  if (isLayeredSpriteFile(file)) {
+    const next: LayeredSpriteFile['anims'] = {};
+    for (const [key, value] of Object.entries(file.anims)) {
+      next[key === animName ? name : key] = value === animName ? name : value;
+    }
+    file.anims = next;
+    for (const layer of file.layers) {
+      if (layer.tracks[animName]) {
+        layer.tracks[name] = layer.tracks[animName];
+        delete layer.tracks[animName];
+      }
+    }
+  } else {
+    const next: FlatSpriteFile['anims'] = {};
+    for (const [key, value] of Object.entries(file.anims)) {
+      next[key === animName ? name : key] = value === animName ? name : value;
+    }
+    file.anims = next;
+  }
   for (const anchors of Object.values(file.anchors ?? {})) {
     if (anchors[animName]) {
       anchors[name] = anchors[animName];
@@ -1150,14 +1514,23 @@ $('btnDelAnim').onclick = () => {
     return;
   }
   saveHistory();
+  const deleted = animName;
   delete file.anims[animName];
+  if (isLayeredSpriteFile(file)) {
+    for (const layer of file.layers) delete layer.tracks[deleted];
+  }
+  for (const [name, entry] of Object.entries(file.anims)) {
+    if (entry === deleted) delete file.anims[name];
+  }
   for (const anchors of Object.values(file.anchors ?? {})) delete anchors[animName];
   animName = Object.keys(file.anims)[0];
   frameIdx = 0;
   refreshUI();
 };
 ($('fps') as HTMLInputElement).onchange = (e) => {
-  anim().fps = Number((e.target as HTMLInputElement).value) || 1;
+  const name = concreteAnimName();
+  const entry = file.anims[name];
+  if (entry && typeof entry !== 'string') entry.fps = Number((e.target as HTMLInputElement).value) || 1;
   syncIO();
 };
 
@@ -1207,12 +1580,14 @@ function colorDistance(a: Rgb, b: Rgb): number {
 
 function paletteUsage(): Map<string, number> {
   const usage = new Map<string, number>();
-  for (const [, target] of concreteAnims()) {
-    for (const frame of target.frames) {
-      for (const row of frame) {
-        for (const ch of row) usage.set(ch, (usage.get(ch) ?? 0) + 1);
+  for (const name of concreteAnimNames()) {
+    eachLayerTrack(name, (frames) => {
+      for (const frame of frames) {
+        for (const row of frame) {
+          for (const ch of row) usage.set(ch, (usage.get(ch) ?? 0) + 1);
+        }
       }
-    }
+    });
   }
   return usage;
 }
@@ -1242,10 +1617,12 @@ function compactPalette(removeUnused = true): PaletteCompaction {
   }
 
   if (remap.size) {
-    for (const [, target] of concreteAnims()) {
-      target.frames = target.frames.map((frame) => frame.map((row) =>
-        [...row].map((ch) => remap.get(ch) ?? ch).join(''),
-      ));
+    for (const name of concreteAnimNames()) {
+      eachLayerTrack(name, (frames) => {
+        for (let index = 0; index < frames.length; index++) {
+          frames[index] = frames[index].map((row) => [...row].map((ch) => remap.get(ch) ?? ch).join(''));
+        }
+      });
     }
     currentChar = remap.get(currentChar) ?? currentChar;
     for (const ch of remap.keys()) delete (file.palette ?? {})[ch];
@@ -1467,6 +1844,7 @@ grid.addEventListener('mousedown', (e) => {
     setSelection({ x: point.x, y: point.y, w: 1, h: 1 });
     return;
   }
+  if (!requireEditableLayer()) return;
   saveHistory();
   erasing = e.button === 2;
   painting = true;
@@ -1555,7 +1933,10 @@ function gridCell(e: MouseEvent): { x: number; y: number } {
 
 function pickColor(e: MouseEvent, announce = true): void {
   const { x, y } = gridCell(e);
-  currentChar = cur()[y][x];
+  // Sampling follows what the artist sees, while painting still targets only
+  // the active layer. This makes it possible to borrow a base-layer shade for
+  // a correction layer without temporarily merging the artwork.
+  currentChar = compositeCur()[y][x];
   buildPalette();
   if (announce) {
     const color = pal()[currentChar];
@@ -1785,6 +2166,7 @@ function pastePixels(
 }
 
 function beginSelectionMove(point: { x: number; y: number }): void {
+  if (!requireEditableLayer()) return;
   if (!selection) return;
   const original = cloneSelection(selection);
   const baseFrame = cur().slice();
@@ -1901,6 +2283,7 @@ function updateSelectionCursor(e?: MouseEvent): void {
 }
 
 function beginSelectionHandleTransform(handle: SelectionHandle, e: MouseEvent): void {
+  if (!requireEditableLayer()) return;
   if (!selection) return;
   const original = cloneSelection(selection);
   const sourceFrame = cur().slice();
@@ -2074,7 +2457,8 @@ function buildFrames(): void {
 
 $('btnAddFrame').onclick = () => {
   saveHistory();
-  anim().frames.push(emptyFrame(W(), H()));
+  eachLayerTrack(animName, (frames) => frames.push(emptyFrame(W(), H())));
+  setTimelineFrameCount(animName, anim().frames.length);
   for (const anchors of Object.values(file.anchors ?? {})) {
     const points = anchors[concreteAnimName()];
     if (points) points.push({ ...(points.at(-1) ?? { x: W() / density() / 2, y: H() / density() / 2 }) });
@@ -2087,7 +2471,8 @@ $('btnAddFrame').onclick = () => {
 };
 $('btnDupFrame').onclick = () => {
   saveHistory();
-  anim().frames.splice(frameIdx + 1, 0, [...cur()]);
+  eachLayerTrack(animName, (frames) => frames.splice(frameIdx + 1, 0, [...frames[frameIdx]]));
+  setTimelineFrameCount(animName, anim().frames.length);
   for (const anchors of Object.values(file.anchors ?? {})) {
     const points = anchors[concreteAnimName()];
     if (points) points.splice(frameIdx + 1, 0, { ...(points[frameIdx] ?? { x: W() / density() / 2, y: H() / density() / 2 }) });
@@ -2103,7 +2488,9 @@ function moveSelectedFrame(delta: -1 | 1): void {
   const target = frameIdx + delta;
   if (target < 0 || target >= frames.length) return;
   saveHistory();
-  [frames[frameIdx], frames[target]] = [frames[target], frames[frameIdx]];
+  eachLayerTrack(animName, (track) => {
+    [track[frameIdx], track[target]] = [track[target], track[frameIdx]];
+  });
   for (const anchors of Object.values(file.anchors ?? {})) {
     const points = anchors[concreteAnimName()];
     if (points?.length === frames.length) {
@@ -2125,7 +2512,8 @@ $('btnFrameRight').onclick = () => moveSelectedFrame(1);
 $('btnDelFrame').onclick = () => {
   if (anim().frames.length <= 1) return;
   saveHistory();
-  anim().frames.splice(frameIdx, 1);
+  eachLayerTrack(animName, (frames) => frames.splice(frameIdx, 1));
+  setTimelineFrameCount(animName, anim().frames.length);
   for (const anchors of Object.values(file.anchors ?? {})) anchors[concreteAnimName()]?.splice(frameIdx, 1);
   frameIdx = Math.min(frameIdx, anim().frames.length - 1);
   buildFrames();
@@ -2140,11 +2528,13 @@ $('btnResize').onclick = () => {
   if (!(w >= 1 && h >= 1 && w <= MAX_GRID_SIZE && h <= MAX_GRID_SIZE)) return;
   saveHistory();
   // Resize every frame of every animation so the sprite stays uniform.
-  for (const [, a] of concreteAnims()) {
-    a.frames = a.frames.map((f: string[]) => {
-      const next: string[] = [];
-      for (let y = 0; y < h; y++) next.push((f[y] ?? '').slice(0, w).padEnd(w, '.'));
-      return next;
+  for (const name of concreteAnimNames()) {
+    eachLayerTrack(name, (frames) => {
+      for (let index = 0; index < frames.length; index++) {
+        const next: string[] = [];
+        for (let y = 0; y < h; y++) next.push((frames[index][y] ?? '').slice(0, w).padEnd(w, '.'));
+        frames[index] = next;
+      }
     });
   }
   redraw();
@@ -2156,21 +2546,9 @@ function redraw(): void {
   grid.height = H() * cellSize;
   gctx.imageSmoothingEnabled = false;
 
-  // 1. Draw base background (gaps/borders)
-  gctx.fillStyle = '#080a18';
-  gctx.fillRect(0, 0, grid.width, grid.height);
-
-  // 2. Draw inset checkerboard for all cells
-  const inset = Math.max(1, Math.min(3, Math.floor(cellSize / 8)));
-  for (let y = 0; y < H(); y++) {
-    for (let x = 0; x < W(); x++) {
-      gctx.fillStyle = (x + y) % 2 ? '#141830' : '#0f1226';
-      gctx.fillRect(x * cellSize + inset, y * cellSize + inset, cellSize - inset * 2, cellSize - inset * 2);
-      
-      gctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
-      gctx.strokeRect(x * cellSize + inset + 0.5, y * cellSize + inset + 0.5, cellSize - inset * 2 - 1, cellSize - inset * 2 - 1);
-    }
-  }
+  // 1. Transparency is a fixed view-space checker. It deliberately ignores
+  // cellSize, so zooming the sprite never turns checker tiles into pixels.
+  drawTransparencyChecker(gctx, grid.width, grid.height);
 
   // 3. Draw reference sprite if enabled
   const showRef = ($('showRef') as HTMLInputElement)?.checked ?? true;
@@ -2201,13 +2579,13 @@ function redraw(): void {
   // 4. Draw onion skin if enabled
   const onion = ($('onionSkin') as HTMLInputElement)?.checked ?? false;
   if (onion && frameIdx > 0) {
-    const prevFrame = anim().frames[frameIdx - 1];
+    const prevFrame = compositeCur(frameIdx - 1);
     if (prevFrame) {
       gctx.save();
       gctx.globalAlpha = 0.2;
       for (let y = 0; y < H(); y++) {
         for (let x = 0; x < W(); x++) {
-          const color = pal()[prevFrame[y]?.[x]];
+          const color = pal()[prevFrame[y]?.[x]] ?? PAL[prevFrame[y]?.[x]];
           if (color) {
             gctx.fillStyle = color;
             gctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
@@ -2219,9 +2597,10 @@ function redraw(): void {
   }
 
   // 5. Draw current frame solid pixels
+  const visibleFrame = compositeCur();
   for (let y = 0; y < H(); y++) {
     for (let x = 0; x < W(); x++) {
-      const color = pal()[cur()[y][x]];
+      const color = pal()[visibleFrame[y][x]] ?? PAL[visibleFrame[y][x]];
       if (color) {
         gctx.fillStyle = color;
         gctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
@@ -2230,7 +2609,7 @@ function redraw(): void {
   }
 
   // 6. Grid lines
-  gctx.strokeStyle = 'rgba(148,176,194,0.1)';
+  gctx.strokeStyle = 'rgba(35, 40, 48, 0.18)';
   for (let x = 0; x <= W(); x++) {
     gctx.beginPath();
     gctx.moveTo(x * cellSize + 0.5, 0);
@@ -2603,8 +2982,7 @@ function renderComposite(t: number): boolean {
   preview.width = VW * SCALE;
   preview.height = VH * SCALE;
   pctx.imageSmoothingEnabled = false;
-  pctx.fillStyle = '#0a0c1c';
-  pctx.fillRect(0, 0, preview.width, preview.height);
+  drawTransparencyChecker(pctx, preview.width, preview.height);
   pctx.save();
   pctx.scale(SCALE, SCALE);
   // Ground line, so the feet anchor reads.
@@ -2756,7 +3134,7 @@ function renderPreview(): void {
   maybeRebakeEditedEquipment();
   const hd = ($('hd') as HTMLInputElement).checked;
   const p = pal();
-  const a = anim();
+  const a = visibleAnim();
   // Editing is frame-oriented: the game-scale preview must show the frame
   // selected in the grid unless the author explicitly asks to play the
   // animation. Previously the preview always ran on wall-clock time, so its
@@ -2809,10 +3187,11 @@ function renderPreview(): void {
   preview.height = displayH + 24;
 
   pctx.imageSmoothingEnabled = false;
-  pctx.fillStyle = '#0a0c1c';
-  pctx.fillRect(0, 0, preview.width, preview.height);
+  drawTransparencyChecker(pctx, preview.width, preview.height);
 
   // Draw active animation text label
+  pctx.fillStyle = 'rgba(7, 7, 13, 0.78)';
+  pctx.fillRect(0, 0, preview.width, 20);
   pctx.fillStyle = '#ffcd75';
   pctx.font = '11px monospace';
   pctx.fillText(`${animName}  ${a.fps}fps`, 8, 16);
@@ -2985,6 +3364,7 @@ function normalize(raw: unknown): SpriteFile {
     const f = r as unknown as SpriteFile;
     if (!f.anims || !Object.keys(f.anims).length) throw new Error('no animations');
     const normalized = { ...f, hd: f.hd ?? true, palette: f.palette ?? { ...PAL } };
+    if (isLayeredSpriteFile(normalized)) validateLayeredSpriteFile(normalized);
     geometryOf(normalized, resolveAnim(normalized, Object.keys(normalized.anims)[0])?.frames[0] ?? []);
     return normalized;
   }
@@ -3106,6 +3486,7 @@ function copySelection(): PixelClipboard | null {
 }
 
 function cutSelection(): void {
+  if (!requireEditableLayer()) return;
   if (!selection || !copySelection()) return;
   saveHistory();
   clearSelectionPixels(cur(), selection);
@@ -3133,6 +3514,7 @@ function parsePixelClipboard(text: string): PixelClipboard | null {
 }
 
 async function pasteSelection(): Promise<void> {
+  if (!requireEditableLayer()) return;
   let clip = pixelClipboard;
   if (!clip) {
     try { clip = parsePixelClipboard(await navigator.clipboard.readText()); } catch { /* permission denied */ }
@@ -3180,6 +3562,7 @@ function commitSelectionPixels(
 }
 
 function moveSelectionBy(dx: number, dy: number): void {
+  if (!requireEditableLayer()) return;
   if (!selection) return;
   const x = Math.max(0, Math.min(W() - selection.w, selection.x + dx));
   const y = Math.max(0, Math.min(H() - selection.h, selection.y + dy));
@@ -3209,6 +3592,7 @@ function scaleSelectionRows(source: PixelClipboard, w: number, h: number): Pixel
 }
 
 function resizeSelection(): void {
+  if (!requireEditableLayer()) return;
   if (!selection) return;
   const requestedW = Math.round(($('selectionW') as HTMLInputElement).valueAsNumber);
   const requestedH = Math.round(($('selectionH') as HTMLInputElement).valueAsNumber);
@@ -3307,6 +3691,7 @@ function rotateSelectionRows(source: PixelClipboard, degrees: number): PixelClip
 }
 
 function rotateSelectionBy(degrees: number, message?: string): void {
+  if (!requireEditableLayer()) return;
   if (!selection || !Number.isFinite(degrees)) return;
   if (Math.abs(degrees % 360) < 0.0001) {
     flash('enter a non-zero rotation');
@@ -3326,6 +3711,7 @@ function rotateSelectionBy(degrees: number, message?: string): void {
 }
 
 function rotateSelection(clockwise: boolean): void {
+  if (!requireEditableLayer()) return;
   rotateSelectionBy(clockwise ? 90 : -90, `rotated selection ${clockwise ? 'right' : 'left'} 90°`);
 }
 
@@ -3672,7 +4058,9 @@ function onHitboxChange(): void {
 /* ---------------- boot ---------------- */
 
 function refreshUI(): void {
+  reconcileLayerState();
   buildPalette();
+  buildLayers();
   buildAnims();
   buildFrames();
   buildAnchors();
@@ -3720,12 +4108,21 @@ Object.defineProperty(window, '__editor', {
       updateUndoRedoButtons();
       void publishSharedSprite();
     },
-    setPixels(changes: { anim?: string; frame?: number; pixels: { x: number; y: number; char: string }[] }) {
+    setPixels(changes: { anim?: string; frame?: number; layerId?: string; pixels: { x: number; y: number; char: string }[] }) {
       const targetName = changes.anim ?? animName;
-      const targetAnim = resolveAnim(file, targetName);
-      if (!targetAnim) throw new Error(`unknown animation "${targetName}"`);
+      const concrete = resolveAnimName(file, targetName);
+      let frames: string[][];
+      if (isLayeredSpriteFile(file)) {
+        const layer = file.layers.find((candidate) => candidate.id === (changes.layerId ?? activeLayerId));
+        if (!layer) throw new Error(`unknown layer "${changes.layerId ?? activeLayerId}"`);
+        frames = layer.tracks[concrete];
+      } else {
+        const targetAnim = file.anims[concrete];
+        if (!targetAnim || typeof targetAnim === 'string') throw new Error(`unknown animation "${targetName}"`);
+        frames = targetAnim.frames;
+      }
       const targetFrame = changes.frame ?? frameIdx;
-      const rows = targetAnim.frames[targetFrame];
+      const rows = frames[targetFrame];
       if (!rows) throw new Error(`unknown frame ${targetFrame} in "${targetName}"`);
       rememberForUndo();
       for (const pixel of changes.pixels) {

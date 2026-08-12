@@ -139,7 +139,7 @@
     }
     .palette-cell:hover { transform: scale(1.08); position: relative; z-index: 1; }
     .palette-cell.none {
-      background: repeating-conic-gradient(#39405a 0 25%, #11162b 0 50%) 0 0 / 10px 10px;
+      background: repeating-conic-gradient(#f0f0f0 0 25%, #b8b8b8 0 50%) 0 0 / 12px 12px;
     }
     #palette .palette-cell.active {
       border-color: #f4f4f4;
@@ -148,13 +148,24 @@
     .swatch { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
     .swatch button { flex: 1; text-align: left; }
     .chip { width: 14px; height: 14px; border: 1px solid #566c86; display: inline-block; flex-shrink: 0; }
-    .chip.none { background: repeating-conic-gradient(#333 0 25%, #111 0 50%) 0 0 / 8px 8px; }
+    .chip.none { background: repeating-conic-gradient(#f0f0f0 0 25%, #b8b8b8 0 50%) 0 0 / 12px 12px; }
     label { display: block; margin: 4px 0; }
     input[type=number] { width: 56px; }
     input[type=color] { padding: 0; width: 32px; height: 22px; }
     textarea { width: 100%; height: 140px; background: #07070d; color: #94b0c2; border: 1px solid #33447f; font: 11px monospace; }
     .hint { color: #566c86; font-size: 11px; }
     #frames button { margin-right: 4px; }
+    #layers { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+    .layer-row {
+      display: grid; grid-template-columns: 28px 28px minmax(0, 1fr) 28px;
+      align-items: center; gap: 3px; padding: 3px;
+      border: 1px solid #263563; border-radius: 4px; background: #0b0e20;
+    }
+    .layer-row.active { border-color: #ffcd75; background: #1a2349; }
+    .layer-row button { min-width: 0; padding: 3px; }
+    .layer-row .layer-name { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .layer-row .layer-toggle.off { color: #566c86; background: #11162b; }
+    .layer-row .layer-toggle.on { color: #ffcd75; }
     #preview { border: 1px solid #33447f; background: #0a0c1c; max-width: 100%; height: auto; }
     #status {
       position: fixed; top: 12px; right: 12px; z-index: 200;
@@ -324,6 +335,22 @@
         <button data-panel-tab="right" data-panel-target="right-data" role="tab" aria-selected="false">data</button>
       </div>
       <section id="right-animate" class="panel-page" data-panel-page="right">
+      <div class="panel-group">
+        <h2>layers <span id="layerStatus" class="hint">flat sprite</span></h2>
+        <div id="layers"></div>
+        <div class="panel-row">
+          <button id="btnAddLayer" title="Add a transparent layer">+ layer</button>
+          <button id="btnDupLayer" title="Duplicate active layer">dup</button>
+          <button id="btnLayerUp" title="Move active layer toward the front">&uarr;</button>
+          <button id="btnLayerDown" title="Move active layer toward the back">&darr;</button>
+        </div>
+        <div class="panel-row">
+          <button id="btnMergeLayer" title="Merge active layer into the layer below">merge down</button>
+          <button id="btnDelLayer" title="Delete active layer">delete</button>
+          <button id="btnFlattenLayers" title="Flatten all layers back to a single-layer sprite">flatten</button>
+        </div>
+        <p class="hint" style="margin:0">Rows are shown front-to-back. Eye and solo are temporary editor views; lock prevents pixel edits.</p>
+      </div>
       <div class="panel-group">
         <h2>composite</h2>
         <div style="display:flex; flex-direction:column; gap:4px">

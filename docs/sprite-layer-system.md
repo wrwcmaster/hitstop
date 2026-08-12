@@ -1,6 +1,6 @@
 # Sprite layer system
 
-Status: proposed design. This document decides where layers belong before we build the UI or change the sprite format.
+Status: first release implemented. Flat sprites remain valid; layered sprites now round-trip through the editor and bridge and are baked by the engine into the existing runtime frame cache.
 
 ## Decision
 
@@ -257,3 +257,16 @@ The design is successful when:
 - gameplay still draws one baked body canvas per frame;
 - equipment and weapon registries remain the only source of runtime loadout composition;
 - no actor imports or depends on sprite authoring layer ids.
+
+## First-release implementation
+
+The first release follows the boundary above:
+
+- `SpriteFile` is a flat-or-layered union with strict layered validation, shared animation timing, stable layer ids, and character-grid compositing in `spritefile.ts`.
+- `loadSprite` still exposes one cached canvas per animation frame. Game actors and the player/equipment render order are unchanged.
+- The Animate workspace owns the layer panel. It supports active-layer selection, create, duplicate, rename, delete, front/back reorder, hide, solo, lock, merge down, and undoable flatten.
+- Paint, soft brush, blur, fill, magic selection, clipboard, move, resize, and rotation operate on the active layer. The grid, onion skin, picker, and persistent preview use the visible composite.
+- Frame add, duplicate, reorder, and delete update all layer tracks and anchor arrays as one history operation. Palette compaction scans and remaps every layer.
+- The collaboration selection payload includes `layerId`, and scripted pixel edits may target a stable `layerId` explicitly.
+
+The migration step remains deliberately separate: existing production sprites have not been split automatically. An artist can add the first layer to convert a flat document losslessly, then save the layered source when the split is intentional.

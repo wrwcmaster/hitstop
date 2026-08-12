@@ -21,6 +21,7 @@ interface ActiveSelection {
   path: string | null;
   anim: string;
   frame: number;
+  layerId?: string;
   x: number;
   y: number;
   w: number;
@@ -90,13 +91,26 @@ export function spriteEditorBridge(root: string): Plugin {
     if (!anims || typeof anims !== 'object' || Array.isArray(anims) || !Object.keys(anims).length) {
       throw new Error('sprite needs at least one animation');
     }
+    const layers = (candidate as { layers?: unknown }).layers;
+    const layered = Array.isArray(layers);
+    const concreteCounts = new Map<string, number>();
     for (const [name, value] of Object.entries(anims)) {
       if (typeof value === 'string') continue;
-      if (!value || typeof value !== 'object' || !Array.isArray((value as { frames?: unknown }).frames)) {
+      if (!value || typeof value !== 'object') throw new Error(`animation "${name}" needs timing data or an alias`);
+      if (layered) {
+        const count = (value as { frameCount?: unknown }).frameCount;
+        if (!Number.isInteger(count) || Number(count) < 1) {
+          throw new Error(`layered animation "${name}" needs a positive frameCount`);
+        }
+        concreteCounts.set(name, Number(count));
+        continue;
+      }
+      if (!Array.isArray((value as { frames?: unknown }).frames)) {
         throw new Error(`animation "${name}" needs frames or an alias`);
       }
       const frames = (value as { frames: unknown[] }).frames;
       if (!frames.length) throw new Error(`animation "${name}" has no frames`);
+      concreteCounts.set(name, frames.length);
       for (const frame of frames) {
         if (!Array.isArray(frame) || !frame.length || !frame.every((row) => typeof row === 'string')) {
           throw new Error(`animation "${name}" has an invalid frame`);
@@ -104,6 +118,36 @@ export function spriteEditorBridge(root: string): Plugin {
         const width = (frame[0] as string).length;
         if (!width || !frame.every((row) => (row as string).length === width)) {
           throw new Error(`animation "${name}" frames must be rectangular`);
+        }
+      }
+    }
+    if (layered) {
+      if (!layers.length) throw new Error('layered sprite needs at least one layer');
+      const ids = new Set<string>();
+      for (const rawLayer of layers) {
+        if (!rawLayer || typeof rawLayer !== 'object' || Array.isArray(rawLayer)) throw new Error('sprite layer must be an object');
+        const layer = rawLayer as { id?: unknown; name?: unknown; tracks?: unknown };
+        if (typeof layer.id !== 'string' || !layer.id.trim() || ids.has(layer.id)) throw new Error('sprite layers need unique ids');
+        if (typeof layer.name !== 'string' || !layer.name.trim()) throw new Error(`layer "${layer.id}" needs a name`);
+        if (!layer.tracks || typeof layer.tracks !== 'object' || Array.isArray(layer.tracks)) {
+          throw new Error(`layer "${layer.id}" needs tracks`);
+        }
+        ids.add(layer.id);
+        const tracks = layer.tracks as Record<string, unknown>;
+        for (const [name, count] of concreteCounts) {
+          const frames = tracks[name];
+          if (!Array.isArray(frames) || frames.length !== count) {
+            throw new Error(`layer "${layer.id}.${name}" needs ${count} frames`);
+          }
+          for (const frame of frames) {
+            if (!Array.isArray(frame) || !frame.length || !frame.every((row) => typeof row === 'string')) {
+              throw new Error(`layer "${layer.id}.${name}" has an invalid frame`);
+            }
+            const width = (frame[0] as string).length;
+            if (!width || !frame.every((row) => (row as string).length === width)) {
+              throw new Error(`layer "${layer.id}.${name}" frames must be rectangular`);
+            }
+          }
         }
       }
     }
@@ -123,10 +167,15 @@ export function spriteEditorBridge(root: string): Plugin {
             resolvedName = resolved;
             resolved = (anims as Record<string, unknown>)[resolvedName];
           }
-          if (!resolved || typeof resolved !== 'object' || !Array.isArray((resolved as { frames?: unknown }).frames)) {
+          if (!resolved || typeof resolved !== 'object') {
             throw new Error(`anchor "${pointName}.${animName}" refers to an unknown animation`);
           }
-          const frameCount = (resolved as { frames: unknown[] }).frames.length;
+          const frameCount = layered
+            ? Number((resolved as { frameCount?: unknown }).frameCount)
+            : Array.isArray((resolved as { frames?: unknown }).frames)
+              ? (resolved as { frames: unknown[] }).frames.length
+              : 0;
+          if (!frameCount) throw new Error(`anchor "${pointName}.${animName}" refers to an invalid animation`);
           if (points.length !== frameCount) {
             throw new Error(`anchor "${pointName}.${animName}" needs ${frameCount} points, got ${points.length}`);
           }
@@ -236,6 +285,7 @@ export function spriteEditorBridge(root: string): Plugin {
               path: value.path == null ? null : String(value.path),
               anim: value.anim,
               frame: Number(value.frame),
+              layerId: value.layerId == null ? undefined : String(value.layerId),
               x: Number(value.x),
               y: Number(value.y),
               w: Number(value.w),
