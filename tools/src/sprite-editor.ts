@@ -725,6 +725,7 @@ for (const id of ['btnUndo', 'btnRedo', 'btnCut', 'btnCopy', 'btnPaste', 'btnOpe
   $(id).addEventListener('click', () => { editMenu.open = false; });
 }
 $('btnOpenLayerTags').addEventListener('click', () => {
+  closeRenderTagCreate();
   buildRenderTagEditor();
   ($('renderTagsDialog') as HTMLDialogElement).showModal();
 });
@@ -1475,10 +1476,7 @@ function buildRenderTagEditor(): void {
     remove.type = 'button';
     remove.textContent = '×';
     const dependencies = tagDependencies(definition.id);
-    remove.disabled = dependencies.length > 0;
-    remove.title = dependencies.length
-      ? `Cannot delete; used by:\n${dependencies.join('\n')}`
-      : 'Delete this unused tag';
+    remove.title = 'Delete this unused tag';
     remove.setAttribute('aria-label', `Delete ${definition.label}`);
     remove.onclick = () => {
       if (!confirm(`Delete unused layer tag “${definition.label}”?`)) return;
@@ -1486,7 +1484,8 @@ function buildRenderTagEditor(): void {
       renderTagsChanged();
     };
 
-    row.append(up, down, id, label, remove);
+    row.append(up, down, id, label);
+    if (dependencies.length === 0) row.appendChild(remove);
     entry.appendChild(row);
     if (dependencies.length) {
       const dependencyList = document.createElement('ul');
@@ -1503,25 +1502,59 @@ function buildRenderTagEditor(): void {
   });
 }
 
+const renderTagCreate = $('renderTagCreate');
+const renderTagNewId = $('renderTagNewId') as HTMLInputElement;
+const renderTagNewLabel = $('renderTagNewLabel') as HTMLInputElement;
+
+function closeRenderTagCreate(): void {
+  renderTagCreate.hidden = true;
+  renderTagNewId.value = '';
+  renderTagNewLabel.value = '';
+}
+
 $('btnAddRenderTag').onclick = () => {
-  const rawId = prompt('new layer tag id (lowercase letters, numbers, and hyphens):', '')?.trim();
-  if (!rawId) return;
+  renderTagCreate.hidden = false;
+  renderTagNewId.focus();
+};
+
+$('btnCancelRenderTag').onclick = closeRenderTagCreate;
+
+function addRenderTag(): void {
+  const rawId = renderTagNewId.value.trim();
+  const label = renderTagNewLabel.value.trim();
+  if (!rawId || !label) {
+    flash('tag id and label are required');
+    (!rawId ? renderTagNewId : renderTagNewLabel).focus();
+    return;
+  }
   if (!/^[a-z][a-z0-9-]*$/.test(rawId)) {
     flash('tag id must use lowercase letters, numbers, and hyphens');
+    renderTagNewId.focus();
     return;
   }
   if (hasRenderTag(rawId)) {
     flash('layer tag already exists');
+    renderTagNewId.focus();
     return;
   }
-  const label = prompt('display label:', rawId.replaceAll('-', ' '))?.trim();
-  if (!label) return;
   renderTagDefs.push({ id: rawId, label });
+  closeRenderTagCreate();
   renderTagsChanged();
-};
+}
+
+$('btnConfirmRenderTag').onclick = addRenderTag;
+for (const input of [renderTagNewId, renderTagNewLabel]) {
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') addRenderTag();
+    else if (event.key === 'Escape') closeRenderTagCreate();
+  });
+}
 
 for (const id of ['btnCloseRenderTags', 'btnDoneRenderTags']) {
-  $(id).onclick = () => ($('renderTagsDialog') as HTMLDialogElement).close();
+  $(id).onclick = () => {
+    closeRenderTagCreate();
+    ($('renderTagsDialog') as HTMLDialogElement).close();
+  };
 }
 
 function eachLayerTrack(name: string, visit: (frames: string[][], layer: SpriteLayerData) => void): void {
