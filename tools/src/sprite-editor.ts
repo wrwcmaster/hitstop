@@ -9,9 +9,11 @@ import {
 } from '@engine/index';
 import { PAL } from '@game/content/palette';
 import {
+  allPlayerRenderTagDependencies,
   BODY_RENDER_TAG,
   configurePlayerRenderTags,
   HELD_OBJECT_RENDER_TAG,
+  playerRenderTagDependencies,
   type PlayerRenderTagDef,
 } from '@game/content/render-tags';
 import repositoryRenderTagDefs from '@game/content/render-tags.json';
@@ -177,7 +179,11 @@ function validRenderTagDefs(value: unknown): value is PlayerRenderTagDef[] {
       || typeof definition.label !== 'string' || !definition.label.trim() || ids.has(definition.id)) return false;
     ids.add(definition.id);
     return true;
-  }) && [BODY_RENDER_TAG, HELD_OBJECT_RENDER_TAG].every((id) => ids.has(id));
+  }) && renderTagDependencyIds().every((id) => ids.has(id));
+}
+
+function renderTagDependencyIds(): string[] {
+  return [...new Set(allPlayerRenderTagDependencies().map((dependency) => dependency.tag))];
 }
 
 function readRenderTagDraft(): PlayerRenderTagDef[] {
@@ -1381,14 +1387,23 @@ $('btnDelAttachmentSlot').onclick = () => {
 
 /* ---------------- layers ---------------- */
 
-function tagUsage(id: string): string[] {
+function tagDependencies(id: string): string[] {
+  const dependencies = playerRenderTagDependencies(id)
+    .map((dependency) => `${dependency.consumer} — ${dependency.detail}`);
   const documents = new Map<string, SpriteFile>(existingSprites);
   for (const draft of storedDrafts()) documents.set(draft.path, draft.file);
-  if (currentRepoPath) documents.set(currentRepoPath, file);
-  return [...documents]
-    .filter(([, spriteFile]) => isLayeredSpriteFile(spriteFile)
-      && spriteFile.layers.some((layer) => layer.tag === id))
-    .map(([path]) => path);
+  documents.set(currentRepoPath ?? '(current unsaved sprite)', file);
+  for (const [path, spriteFile] of documents) {
+    if ((spriteFile as EditorSpriteFile).editor?.defaultRenderTag === id) {
+      dependencies.push(`${path} — default render tag`);
+    }
+    if (!isLayeredSpriteFile(spriteFile)) continue;
+    for (const layer of spriteFile.layers.filter((candidate) => candidate.tag === id)) {
+      dependencies.push(`${path} — layer “${layer.name}” (${layer.id})`);
+    }
+  }
+  if (renderTagDefs.length === 1) dependencies.push('Layer tag registry — at least one tag must remain');
+  return [...new Set(dependencies)];
 }
 
 function renderTagsChanged(rebuildEditor = true): void {
@@ -1410,8 +1425,9 @@ function moveRenderTag(index: number, delta: -1 | 1): void {
 function buildRenderTagEditor(): void {
   const host = $('renderTagsEditor');
   host.innerHTML = '';
-  const required = new Set([BODY_RENDER_TAG, HELD_OBJECT_RENDER_TAG]);
   renderTagDefs.forEach((definition, index) => {
+    const entry = document.createElement('div');
+    entry.className = 'render-tag-entry';
     const row = document.createElement('div');
     row.className = 'render-tag-row';
 
@@ -1458,13 +1474,11 @@ function buildRenderTagEditor(): void {
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.textContent = '×';
-    const usage = tagUsage(definition.id);
-    remove.disabled = required.has(definition.id) || usage.length > 0;
-    remove.title = required.has(definition.id)
-      ? 'This gameplay tag is required'
-      : usage.length
-        ? `Used by ${usage.join(', ')}`
-        : 'Delete this unused tag';
+    const dependencies = tagDependencies(definition.id);
+    remove.disabled = dependencies.length > 0;
+    remove.title = dependencies.length
+      ? `Cannot delete; used by:\n${dependencies.join('\n')}`
+      : 'Delete this unused tag';
     remove.setAttribute('aria-label', `Delete ${definition.label}`);
     remove.onclick = () => {
       if (!confirm(`Delete unused layer tag “${definition.label}”?`)) return;
@@ -1473,7 +1487,19 @@ function buildRenderTagEditor(): void {
     };
 
     row.append(up, down, id, label, remove);
-    host.appendChild(row);
+    entry.appendChild(row);
+    if (dependencies.length) {
+      const dependencyList = document.createElement('ul');
+      dependencyList.className = 'render-tag-dependencies';
+      dependencyList.setAttribute('aria-label', `Dependencies for ${definition.label}`);
+      for (const dependency of dependencies) {
+        const item = document.createElement('li');
+        item.textContent = dependency;
+        dependencyList.appendChild(item);
+      }
+      entry.appendChild(dependencyList);
+    }
+    host.appendChild(entry);
   });
 }
 

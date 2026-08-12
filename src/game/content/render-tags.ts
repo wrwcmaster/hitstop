@@ -1,4 +1,5 @@
 import { Registry, isLayeredSpriteFile, type SpriteFile } from '@engine/index';
+import renderTagDependencyDefs from './render-tag-dependencies.json';
 import renderTagDefs from './render-tags.json';
 
 /**
@@ -12,6 +13,12 @@ export interface PlayerRenderTag {
 
 export interface PlayerRenderTagDef extends PlayerRenderTag {
   id: string;
+}
+
+export interface PlayerRenderTagDependency {
+  tag: string;
+  consumer: string;
+  detail: string;
 }
 
 export const playerRenderTags = new Registry<PlayerRenderTag>('playerRenderTag');
@@ -30,15 +37,27 @@ for (const definition of renderTagDefs as PlayerRenderTagDef[]) {
 }
 playerRenderTagOrder = (renderTagDefs as PlayerRenderTagDef[]).map((definition) => definition.id);
 
-// These fallback bands are referenced by gameplay defaults. The foreground
-// body band is optional: authored hand layers may use it, while procedural
-// grips fall back to the frontmost configured band when it is absent.
-for (const required of [BODY_RENDER_TAG, HELD_OBJECT_RENDER_TAG]) {
-  if (!playerRenderTags.has(required)) throw new Error(`player render tags need "${required}"`);
+const renderTagDependencies = renderTagDependencyDefs as PlayerRenderTagDependency[];
+
+// Validate declared consumers instead of blessing particular ids as required.
+// Removing a dependency from the renderer and this table makes its tag
+// deletable without changing the registry mechanism.
+for (const dependency of renderTagDependencies) {
+  if (!playerRenderTags.has(dependency.tag)) {
+    throw new Error(`player render tag "${dependency.tag}" is used by ${dependency.consumer}: ${dependency.detail}`);
+  }
 }
 
 export function orderedPlayerRenderTags(): string[] {
   return [...playerRenderTagOrder];
+}
+
+export function playerRenderTagDependencies(id: string): PlayerRenderTagDependency[] {
+  return renderTagDependencies.filter((dependency) => dependency.tag === id);
+}
+
+export function allPlayerRenderTagDependencies(): PlayerRenderTagDependency[] {
+  return [...renderTagDependencies];
 }
 
 /** Update the live content registry for authoring previews and hot reload. */

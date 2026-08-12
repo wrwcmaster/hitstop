@@ -1,0 +1,12 @@
+[
+  {
+    "tag": "body",
+    "consumer": "Player renderer",
+    "detail": "Flat character sprites plus gear, charm, and swallow overlays"
+  },
+  {
+    "tag": "held-object",
+    "consumer": "Weapon renderer",
+    "detail": "Procedural weapons and flat weapon sprite sheets"
+  }
+]

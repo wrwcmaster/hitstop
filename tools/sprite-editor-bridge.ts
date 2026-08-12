@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs';
+import { promises as fs, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
@@ -40,6 +40,12 @@ interface ActiveSelection {
 export function spriteEditorBridge(root: string): Plugin {
   const spriteRoot = path.resolve(root, 'src/game/content/sprites');
   const renderTagsPath = path.resolve(root, 'src/game/content/render-tags.json');
+  const renderTagDependenciesPath = path.resolve(root, 'src/game/content/render-tag-dependencies.json');
+  const renderTagDependencies = JSON.parse(readFileSync(renderTagDependenciesPath, 'utf8')) as {
+    tag: string;
+    consumer: string;
+    detail: string;
+  }[];
   let active: ActiveSprite | null = null;
   let selection: ActiveSelection | null = null;
   let preview: Buffer | null = null;
@@ -221,8 +227,10 @@ export function spriteEditorBridge(root: string): Plugin {
       }
       ids.add(tag.id);
     }
-    for (const required of ['body', 'held-object']) {
-      if (!ids.has(required)) throw new Error(`render tags need "${required}"`);
+    for (const dependency of renderTagDependencies) {
+      if (!ids.has(dependency.tag)) {
+        throw new Error(`render tag "${dependency.tag}" is used by ${dependency.consumer}: ${dependency.detail}`);
+      }
     }
   };
 

@@ -103,12 +103,16 @@
     .dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .dialog-heading h2 { margin: 0; }
     #renderTagsEditor { display: flex; flex-direction: column; gap: 5px; margin: 12px 0; }
+    .render-tag-entry { padding: 5px; border: 1px solid #252f5e; border-radius: 4px; }
     .render-tag-row {
       display: grid; grid-template-columns: 28px 28px minmax(110px, .8fr) minmax(140px, 1fr) 30px;
       align-items: center; gap: 4px;
     }
     .render-tag-row input { min-width: 0; width: 100%; }
     .render-tag-row button { min-width: 0; padding: 4px; }
+    .render-tag-dependencies {
+      margin: 5px 0 0 64px; padding-left: 18px; color: #d88962; font-size: 11px;
+    }
     .panel-tabs {
       position: sticky; top: -10px; z-index: 5;
       display: flex; gap: 3px; margin: -10px -10px 10px; padding: 8px 8px 6px;
@@ -520,7 +524,7 @@
       <h2 id="renderTagsTitle">layer tags</h2>
       <button id="btnCloseRenderTags" type="button" title="Close layer tag editor" aria-label="Close layer tag editor">&times;</button>
     </div>
-    <p class="hint">Tags are shared by character and equipment layers. Their top-to-bottom order here is their back-to-front render order. Tag ids stay stable after creation; labels may change freely.</p>
+    <p class="hint">Tags are shared by character and equipment layers. Their top-to-bottom order here is their back-to-front render order. A tag can be deleted when it has no dependencies; blocked tags list every consumer below.</p>
     <div id="renderTagsEditor"></div>
     <div class="panel-row" style="margin:0">
       <button id="btnAddRenderTag" type="button">+ tag</button>
