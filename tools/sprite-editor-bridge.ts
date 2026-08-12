@@ -39,6 +39,7 @@ interface ActiveSelection {
  */
 export function spriteEditorBridge(root: string): Plugin {
   const spriteRoot = path.resolve(root, 'src/game/content/sprites');
+  const renderTagsPath = path.resolve(root, 'src/game/content/render-tags.json');
   let active: ActiveSprite | null = null;
   let selection: ActiveSelection | null = null;
   let preview: Buffer | null = null;
@@ -208,6 +209,23 @@ export function spriteEditorBridge(root: string): Plugin {
     }
   };
 
+  const validateRenderTags = (candidate: unknown): asserts candidate is { id: string; label: string }[] => {
+    if (!Array.isArray(candidate) || !candidate.length) throw new Error('render tags need a non-empty array');
+    const ids = new Set<string>();
+    for (const raw of candidate) {
+      const tag = raw as { id?: unknown; label?: unknown };
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)
+        || typeof tag.id !== 'string' || !/^[a-z][a-z0-9-]*$/.test(tag.id)
+        || typeof tag.label !== 'string' || !tag.label.trim() || ids.has(tag.id)) {
+        throw new Error('render tags need unique lowercase ids and non-empty labels');
+      }
+      ids.add(tag.id);
+    }
+    for (const required of ['body', 'held-object', 'foreground-body']) {
+      if (!ids.has(required)) throw new Error(`render tags need "${required}"`);
+    }
+  };
+
   const matchesRepository = async (relative: string | null, candidate: unknown): Promise<boolean> => {
     if (!relative) return false;
     try {
@@ -268,6 +286,12 @@ export function spriteEditorBridge(root: string): Plugin {
         try {
           if (req.method === 'GET' && url.pathname === `${API}/sprites`) {
             return send(res, 200, { sprites: await listSprites() });
+          }
+
+          if (req.method === 'GET' && url.pathname === `${API}/render-tags`) {
+            const renderTags = JSON.parse(await fs.readFile(renderTagsPath, 'utf8')) as unknown;
+            validateRenderTags(renderTags);
+            return send(res, 200, { renderTags });
           }
 
           if (req.method === 'GET' && url.pathname === `${API}/state`) {
@@ -427,6 +451,8 @@ export function spriteEditorBridge(root: string): Plugin {
               validateSprite(document.file);
               return { target, file: document.file };
             });
+            const renderTags = body.renderTags;
+            if (renderTags !== undefined) validateRenderTags(renderTags);
 
             const activeDocument = active
               ? documents.find((document) => document.target.relative === active!.path)
@@ -447,6 +473,11 @@ export function spriteEditorBridge(root: string): Plugin {
               await fs.writeFile(temporary, text, 'utf8');
               await fs.rename(temporary, document.target.absolute);
             }
+            if (renderTags !== undefined) {
+              const temporary = `${renderTagsPath}.tmp`;
+              await fs.writeFile(temporary, `${JSON.stringify(renderTags, null, 2)}\n`, 'utf8');
+              await fs.rename(temporary, renderTagsPath);
+            }
 
             if (active && activeDocument) {
               // Saving acknowledges the exact browser document included in
@@ -464,6 +495,7 @@ export function spriteEditorBridge(root: string): Plugin {
             }
             return send(res, 200, {
               saved: documents.map((document) => document.target.relative),
+              renderTagsSaved: renderTags !== undefined,
               state: active,
             });
           }

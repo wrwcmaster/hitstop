@@ -1,0 +1,7 @@
+[
+  { "id": "behind-body", "label": "Behind body" },
+  { "id": "body", "label": "Body" },
+  { "id": "held-object", "label": "Held object" },
+  { "id": "foreground-body", "label": "Foreground body" },
+  { "id": "foreground-effects", "label": "Foreground effects" }
+]

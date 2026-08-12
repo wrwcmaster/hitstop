@@ -1,4 +1,5 @@
 import { Registry, isLayeredSpriteFile, type SpriteFile } from '@engine/index';
+import renderTagDefs from './render-tags.json';
 
 /**
  * Shared render bands for a player composite. Tags are content, not engine
@@ -9,7 +10,12 @@ export interface PlayerRenderTag {
   label: string;
 }
 
+export interface PlayerRenderTagDef extends PlayerRenderTag {
+  id: string;
+}
+
 export const playerRenderTags = new Registry<PlayerRenderTag>('playerRenderTag');
+let playerRenderTagOrder: string[] = [];
 
 export function definePlayerRenderTag(id: string, label: string): void {
   playerRenderTags.register(id, { label });
@@ -19,14 +25,26 @@ export const BODY_RENDER_TAG = 'body';
 export const HELD_OBJECT_RENDER_TAG = 'held-object';
 export const FOREGROUND_BODY_RENDER_TAG = 'foreground-body';
 
-definePlayerRenderTag('behind-body', 'Behind body');
-definePlayerRenderTag(BODY_RENDER_TAG, 'Body');
-definePlayerRenderTag(HELD_OBJECT_RENDER_TAG, 'Held object');
-definePlayerRenderTag(FOREGROUND_BODY_RENDER_TAG, 'Foreground body');
-definePlayerRenderTag('foreground-effects', 'Foreground effects');
+for (const definition of renderTagDefs as PlayerRenderTagDef[]) {
+  definePlayerRenderTag(definition.id, definition.label);
+}
+playerRenderTagOrder = (renderTagDefs as PlayerRenderTagDef[]).map((definition) => definition.id);
+
+// These semantic bands are referenced by gameplay defaults. Keep failures at
+// content load, where a damaged tag file is obvious, rather than later while
+// rendering an equipped player.
+for (const required of [BODY_RENDER_TAG, HELD_OBJECT_RENDER_TAG, FOREGROUND_BODY_RENDER_TAG]) {
+  if (!playerRenderTags.has(required)) throw new Error(`player render tags need "${required}"`);
+}
 
 export function orderedPlayerRenderTags(): string[] {
-  return playerRenderTags.ids();
+  return [...playerRenderTagOrder];
+}
+
+/** Update the live content registry for authoring previews and hot reload. */
+export function configurePlayerRenderTags(definitions: readonly PlayerRenderTagDef[]): void {
+  for (const definition of definitions) playerRenderTags.replace(definition.id, { label: definition.label });
+  playerRenderTagOrder = definitions.map((definition) => definition.id);
 }
 
 /** Fail at content load instead of silently dropping a mistagged layer. */

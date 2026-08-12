@@ -10,10 +10,12 @@ import {
 import { PAL } from '@game/content/palette';
 import {
   BODY_RENDER_TAG,
+  configurePlayerRenderTags,
+  FOREGROUND_BODY_RENDER_TAG,
   HELD_OBJECT_RENDER_TAG,
-  playerRenderTags,
-  validatePlayerRenderTags,
+  type PlayerRenderTagDef,
 } from '@game/content/render-tags';
+import repositoryRenderTagDefs from '@game/content/render-tags.json';
 // Composite preview: the editor borrows the GAME's renderers rather than
 // imitating them, so what you see here — held weapon anchored to the
 // body, slash trail sweeping on the attack clock — is exactly what the
@@ -160,8 +162,61 @@ let lastSharedFile = '';
 let lastRepositoryFile = '';
 let previewTimer = 0;
 const DRAFT_PREFIX = 'hitstop.sprite-editor.draft:';
+const RENDER_TAG_DRAFT_KEY = 'hitstop.sprite-editor.render-tags.draft';
 let lastDraftSignature = '';
 let editorViewReady = false;
+let savedRenderTagSignature = JSON.stringify(repositoryRenderTagDefs);
+let renderTagDefs: PlayerRenderTagDef[] = readRenderTagDraft();
+
+function validRenderTagDefs(value: unknown): value is PlayerRenderTagDef[] {
+  if (!Array.isArray(value) || value.length === 0) return false;
+  const ids = new Set<string>();
+  return value.every((entry) => {
+    if (!entry || typeof entry !== 'object') return false;
+    const definition = entry as Partial<PlayerRenderTagDef>;
+    if (typeof definition.id !== 'string' || !/^[a-z][a-z0-9-]*$/.test(definition.id)
+      || typeof definition.label !== 'string' || !definition.label.trim() || ids.has(definition.id)) return false;
+    ids.add(definition.id);
+    return true;
+  }) && [BODY_RENDER_TAG, HELD_OBJECT_RENDER_TAG, FOREGROUND_BODY_RENDER_TAG].every((id) => ids.has(id));
+}
+
+function readRenderTagDraft(): PlayerRenderTagDef[] {
+  try {
+    const stored = JSON.parse(localStorage.getItem(RENDER_TAG_DRAFT_KEY) ?? 'null') as unknown;
+    if (validRenderTagDefs(stored)) return structuredClone(stored);
+  } catch {
+    // Ignore a malformed convenience draft and fall back to repository data.
+  }
+  return structuredClone(repositoryRenderTagDefs) as PlayerRenderTagDef[];
+}
+
+function renderTagIds(): string[] {
+  return renderTagDefs.map((definition) => definition.id);
+}
+
+function renderTagEntries(): [string, PlayerRenderTagDef][] {
+  return renderTagDefs.map((definition) => [definition.id, definition]);
+}
+
+function hasRenderTag(id: string): boolean {
+  return renderTagDefs.some((definition) => definition.id === id);
+}
+
+function renderTagsDirty(): boolean {
+  return JSON.stringify(renderTagDefs) !== savedRenderTagSignature;
+}
+
+function persistRenderTagDraft(): void {
+  try {
+    if (renderTagsDirty()) localStorage.setItem(RENDER_TAG_DRAFT_KEY, JSON.stringify(renderTagDefs));
+    else localStorage.removeItem(RENDER_TAG_DRAFT_KEY);
+  } catch {
+    // Sprite editing remains usable when storage is unavailable.
+  }
+}
+
+configurePlayerRenderTags(renderTagDefs);
 
 interface StoredSpriteDraft {
   v: 1;
@@ -283,7 +338,7 @@ const compositeCur = (index = frameIdx): string[] => {
     soloLayerId ? layer.id === soloLayerId : !hiddenLayerIds.has(layer.id)
   );
   return (isLayeredSpriteFile(file)
-    ? compositeSpriteFrameByTags(file, animName, index, playerRenderTags.ids(), PAL, include)
+    ? compositeSpriteFrameByTags(file, animName, index, renderTagIds(), PAL, include)
     : compositeSpriteFrame(file, animName, index, PAL, include)) ?? cur();
 };
 const visibleAnim = (): SpriteAnimData => {
@@ -331,7 +386,7 @@ function uniqueLayerId(label: string): string {
 
 function defaultLayerTag(spriteFile: SpriteFile = file): string {
   const configured = (spriteFile as EditorSpriteFile).editor?.defaultRenderTag;
-  if (configured && playerRenderTags.has(configured)) return configured;
+  if (configured && hasRenderTag(configured)) return configured;
   const visualId = currentFileName.replace(/\.json$/, '');
   return weaponVisuals.has(visualId) ? HELD_OBJECT_RENDER_TAG : BODY_RENDER_TAG;
 }
@@ -661,9 +716,13 @@ function restoreEditorViewState(saved?: EditorViewState): void {
 }
 
 const editMenu = $('editMenu') as HTMLDetailsElement;
-for (const id of ['btnUndo', 'btnRedo', 'btnCut', 'btnCopy', 'btnPaste', 'btnOpenData']) {
+for (const id of ['btnUndo', 'btnRedo', 'btnCut', 'btnCopy', 'btnPaste', 'btnOpenLayerTags', 'btnOpenData']) {
   $(id).addEventListener('click', () => { editMenu.open = false; });
 }
+$('btnOpenLayerTags').addEventListener('click', () => {
+  buildRenderTagEditor();
+  ($('renderTagsDialog') as HTMLDialogElement).showModal();
+});
 $('btnOpenData').addEventListener('click', () => activatePanel('right', 'right-data'));
 document.addEventListener('pointerdown', (event) => {
   if (editMenu.open && !editMenu.contains(event.target as Node)) editMenu.open = false;
@@ -699,10 +758,15 @@ function updateBridgeStatus(): void {
   }
   const save = $('btnSaveRepo') as HTMLButtonElement;
   const draftCount = storedDrafts().length;
-  save.disabled = !bridgeConnected || bridgeConflict || (!bridgeDirty && draftCount === 0);
-  save.title = draftCount
-    ? `Save ${draftCount} modified sprite${draftCount === 1 ? '' : 's'} to the repository`
-    : 'Save all modified sprites to the repository';
+  const tagDirty = renderTagsDirty();
+  const pending = [
+    draftCount ? `${draftCount} modified sprite${draftCount === 1 ? '' : 's'}` : '',
+    tagDirty ? 'layer tags' : '',
+  ].filter(Boolean);
+  save.disabled = !bridgeConnected || bridgeConflict || (!bridgeDirty && draftCount === 0 && !tagDirty);
+  save.title = pending.length
+    ? `Save ${pending.join(' and ')} to the repository`
+    : 'Save all modified sprites and layer tags to the repository';
 }
 
 function historySnapshot(spriteFile: SpriteFile = file, selected: PixelSelection | null = selection): string {
@@ -958,6 +1022,7 @@ async function publishSharedSprite(): Promise<void> {
 async function saveWorkspaceSprites(): Promise<void> {
   if (bridgeConflict) return;
   persistCurrentDraft();
+  persistRenderTagDraft();
   const documents = new Map<string, SpriteFile>();
   for (const draft of storedDrafts()) documents.set(draft.path, draft.file);
   // The in-memory document is newer than both the bridge and localStorage
@@ -965,7 +1030,8 @@ async function saveWorkspaceSprites(): Promise<void> {
   if (currentRepoPath && (bridgeDirty || JSON.stringify(file) !== lastRepositoryFile)) {
     documents.set(currentRepoPath, file);
   }
-  if (!documents.size) {
+  const saveRenderTags = renderTagsDirty();
+  if (!documents.size && !saveRenderTags) {
     flash('all sprites are already saved');
     updateBridgeStatus();
     return;
@@ -981,6 +1047,7 @@ async function saveWorkspaceSprites(): Promise<void> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         documents: [...documents].map(([path, spriteFile]) => ({ path, file: spriteFile })),
+        renderTags: saveRenderTags ? renderTagDefs : undefined,
         baseRevision: bridgeRevision,
         source: bridgeClientId,
       }),
@@ -994,11 +1061,17 @@ async function saveWorkspaceSprites(): Promise<void> {
     if (!response.ok) throw new Error(String(body.error ?? response.statusText));
     const saved = Array.isArray(body.saved) ? body.saved.map(String) : [];
     for (const path of saved) clearDraft(path);
+    const tagsSaved = body.renderTagsSaved === true;
+    if (tagsSaved) {
+      savedRenderTagSignature = JSON.stringify(renderTagDefs);
+      localStorage.removeItem(RENDER_TAG_DRAFT_KEY);
+    }
     const state = body.state as BridgeState | null;
     if (state) applyBridgeState(state, true);
     restoreEditorViewState(viewState);
     updateBridgeStatus();
-    flash(`saved ${saved.length} sprite${saved.length === 1 ? '' : 's'}`);
+    const parts = [saved.length ? `${saved.length} sprite${saved.length === 1 ? '' : 's'}` : '', tagsSaved ? 'layer tags' : ''].filter(Boolean);
+    flash(`saved ${parts.join(' and ')}`);
   } catch (error) {
     flash(`repo save failed: ${(error as Error).message}`);
   }
@@ -1309,6 +1382,123 @@ $('btnDelAttachmentSlot').onclick = () => {
 
 /* ---------------- layers ---------------- */
 
+function tagUsage(id: string): string[] {
+  const documents = new Map<string, SpriteFile>(existingSprites);
+  for (const draft of storedDrafts()) documents.set(draft.path, draft.file);
+  if (currentRepoPath) documents.set(currentRepoPath, file);
+  return [...documents]
+    .filter(([, spriteFile]) => isLayeredSpriteFile(spriteFile)
+      && spriteFile.layers.some((layer) => layer.tag === id))
+    .map(([path]) => path);
+}
+
+function renderTagsChanged(rebuildEditor = true): void {
+  configurePlayerRenderTags(renderTagDefs);
+  persistRenderTagDraft();
+  if (rebuildEditor) buildRenderTagEditor();
+  buildLayers();
+  redraw();
+  updateBridgeStatus();
+}
+
+function moveRenderTag(index: number, delta: -1 | 1): void {
+  const target = index + delta;
+  if (target < 0 || target >= renderTagDefs.length) return;
+  [renderTagDefs[index], renderTagDefs[target]] = [renderTagDefs[target], renderTagDefs[index]];
+  renderTagsChanged();
+}
+
+function buildRenderTagEditor(): void {
+  const host = $('renderTagsEditor');
+  host.innerHTML = '';
+  const required = new Set([BODY_RENDER_TAG, HELD_OBJECT_RENDER_TAG, FOREGROUND_BODY_RENDER_TAG]);
+  renderTagDefs.forEach((definition, index) => {
+    const row = document.createElement('div');
+    row.className = 'render-tag-row';
+
+    const up = document.createElement('button');
+    up.type = 'button';
+    up.textContent = '↑';
+    up.title = 'Render this tag one band farther back';
+    up.disabled = index === 0;
+    up.onclick = () => moveRenderTag(index, -1);
+
+    const down = document.createElement('button');
+    down.type = 'button';
+    down.textContent = '↓';
+    down.title = 'Render this tag one band farther forward';
+    down.disabled = index === renderTagDefs.length - 1;
+    down.onclick = () => moveRenderTag(index, 1);
+
+    const id = document.createElement('input');
+    id.value = definition.id;
+    id.readOnly = true;
+    id.title = 'Stable tag id';
+    id.setAttribute('aria-label', `Tag id ${definition.id}`);
+
+    const label = document.createElement('input');
+    label.value = definition.label;
+    label.setAttribute('aria-label', `Label for ${definition.id}`);
+    label.oninput = () => {
+      if (!label.value.trim()) return;
+      definition.label = label.value;
+      renderTagsChanged(false);
+    };
+    label.onblur = () => {
+      const next = label.value.trim();
+      if (!next) {
+        label.value = definition.label;
+        flash('tag label cannot be empty');
+      } else if (next !== definition.label) {
+        definition.label = next;
+        label.value = next;
+        renderTagsChanged(false);
+      }
+    };
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = '×';
+    const usage = tagUsage(definition.id);
+    remove.disabled = required.has(definition.id) || usage.length > 0;
+    remove.title = required.has(definition.id)
+      ? 'This gameplay tag is required'
+      : usage.length
+        ? `Used by ${usage.join(', ')}`
+        : 'Delete this unused tag';
+    remove.setAttribute('aria-label', `Delete ${definition.label}`);
+    remove.onclick = () => {
+      if (!confirm(`Delete unused layer tag “${definition.label}”?`)) return;
+      renderTagDefs.splice(index, 1);
+      renderTagsChanged();
+    };
+
+    row.append(up, down, id, label, remove);
+    host.appendChild(row);
+  });
+}
+
+$('btnAddRenderTag').onclick = () => {
+  const rawId = prompt('new layer tag id (lowercase letters, numbers, and hyphens):', '')?.trim();
+  if (!rawId) return;
+  if (!/^[a-z][a-z0-9-]*$/.test(rawId)) {
+    flash('tag id must use lowercase letters, numbers, and hyphens');
+    return;
+  }
+  if (hasRenderTag(rawId)) {
+    flash('layer tag already exists');
+    return;
+  }
+  const label = prompt('display label:', rawId.replaceAll('-', ' '))?.trim();
+  if (!label) return;
+  renderTagDefs.push({ id: rawId, label });
+  renderTagsChanged();
+};
+
+for (const id of ['btnCloseRenderTags', 'btnDoneRenderTags']) {
+  $(id).onclick = () => ($('renderTagsDialog') as HTMLDialogElement).close();
+}
+
 function eachLayerTrack(name: string, visit: (frames: string[][], layer: SpriteLayerData) => void): void {
   if (!isLayeredSpriteFile(file)) {
     visit(activeFrames(name), { id: FLAT_LAYER_ID, name: 'Base', tag: defaultLayerTag(), tracks: {} });
@@ -1339,7 +1529,7 @@ function buildLayers(): void {
   const host = $('layers');
   host.innerHTML = '';
   const layers = isLayeredSpriteFile(file)
-    ? playerRenderTags.ids().slice().reverse().flatMap((tag) => (
+    ? renderTagIds().slice().reverse().flatMap((tag) => (
       (file as LayeredSpriteFile).layers.filter((layer) => layer.tag === tag).reverse()
     ))
     : [{ id: FLAT_LAYER_ID, name: 'Base', tag: defaultLayerTag(), tracks: {} }];
@@ -1394,7 +1584,7 @@ function buildLayers(): void {
     const tag = document.createElement('select');
     tag.className = 'layer-tag';
     tag.title = 'Shared render tag; tag order controls cross-sprite compositing';
-    for (const [id, definition] of playerRenderTags.entries()) {
+    for (const [id, definition] of renderTagEntries()) {
       const option = document.createElement('option');
       option.value = id;
       option.textContent = definition.label;
@@ -1545,7 +1735,7 @@ $('btnFlattenLayers').onclick = () => {
       loop: entry.loop,
       frames: Array.from(
         { length: entry.frameCount },
-        (_, frame) => compositeSpriteFrameByTags(layered, name, frame, playerRenderTags.ids(), PAL)!,
+        (_, frame) => compositeSpriteFrameByTags(layered, name, frame, renderTagIds(), PAL)!,
       ),
     };
   }
@@ -3508,7 +3698,9 @@ function normalize(raw: unknown): SpriteFile {
       // Give them the role default once, then every saved layer is explicit.
       for (const layer of normalized.layers) layer.tag ||= defaultLayerTag(normalized);
       validateLayeredSpriteFile(normalized);
-      validatePlayerRenderTags(normalized);
+      for (const layer of normalized.layers) {
+        if (!hasRenderTag(layer.tag)) throw new Error(`sprite layer "${layer.id}" uses unknown player render tag "${layer.tag}"`);
+      }
     }
     geometryOf(normalized, resolveAnim(normalized, Object.keys(normalized.anims)[0])?.frames[0] ?? []);
     return normalized;

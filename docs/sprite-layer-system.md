@@ -169,7 +169,7 @@ The composite happens on character grids before rasterization. This preserves ex
 
 ## Editor behavior
 
-The layer panel belongs beside the animation/frame workspace because all three select the current editing target:
+The layer panel has its own Layers workspace beside the animation/frame workspace because all three select the current editing target:
 
 > sprite → animation → frame → layer
 
@@ -289,7 +289,7 @@ The first release follows the boundary above:
 - `SpriteFile` is a flat-or-layered union with strict validation, shared timing, stable layer ids, required render tags, and character-grid compositing in `spritefile.ts`.
 - `loadSprite` exposes both its compatible flattened canvas and lazily cached per-tag canvases. Sprite-sheet assets expose one implicit `base` tag.
 - The player render order comes from the `playerRenderTag` content registry. Body and sprite-backed weapon layers are merged through it after attachment anchors are resolved.
-- The Animate workspace owns the layer panel. It supports active-layer selection, tag assignment, create, duplicate, rename, delete, within-tag reorder, hide, solo, lock, merge down, and undoable flatten.
+- The Layers workspace owns the layer panel. It supports active-layer selection, tag assignment, create, duplicate, rename, delete, within-tag reorder, hide, solo, lock, merge down, and undoable flatten. Menu → Edit layer tags manages the shared tag labels and back-to-front order; new tags may be created there, while required or currently used tags cannot be deleted.
 - Paint, soft brush, blur, fill, magic selection, clipboard, move, resize, and rotation operate on the active layer. The grid, onion skin, picker, and persistent preview use the visible composite.
 - Frame add, duplicate, reorder, and delete update all layer tracks and anchor arrays as one history operation. Palette compaction scans and remaps every layer.
 - The collaboration selection payload includes `layerId`, and scripted pixel edits may target a stable `layerId` explicitly.

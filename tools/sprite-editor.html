@@ -94,6 +94,21 @@
     .command-menu-panel button:disabled { color: #566c86; cursor: default; }
     .command-menu-panel kbd { color: #94b0c2; font: inherit; white-space: nowrap; }
     .command-menu-separator { height: 1px; margin: 5px 3px; background: #33447f; }
+    dialog {
+      width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto;
+      color: #94b0c2; background: #101430; border: 1px solid #33447f; border-radius: 6px;
+      box-shadow: 0 14px 42px rgba(0, 0, 0, .65);
+    }
+    dialog::backdrop { background: rgba(7, 7, 13, .72); }
+    .dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .dialog-heading h2 { margin: 0; }
+    #renderTagsEditor { display: flex; flex-direction: column; gap: 5px; margin: 12px 0; }
+    .render-tag-row {
+      display: grid; grid-template-columns: 28px 28px minmax(110px, .8fr) minmax(140px, 1fr) 30px;
+      align-items: center; gap: 4px;
+    }
+    .render-tag-row input { min-width: 0; width: 100%; }
+    .render-tag-row button { min-width: 0; padding: 4px; }
     .panel-tabs {
       position: sticky; top: -10px; z-index: 5;
       display: flex; gap: 3px; margin: -10px -10px 10px; padding: 8px 8px 6px;
@@ -196,6 +211,7 @@
         <button id="btnCopy" title="Copy selected pixels (Ctrl+C)" role="menuitem" disabled><span>copy</span><kbd>Ctrl+C</kbd></button>
         <button id="btnPaste" title="Paste pixels at the selection (Ctrl+V)" role="menuitem"><span>paste</span><kbd>Ctrl+V</kbd></button>
         <div class="command-menu-separator" role="separator"></div>
+        <button id="btnOpenLayerTags" title="Manage shared layer tags and their render order" role="menuitem"><span>edit layer tags</span></button>
         <button id="btnOpenData" title="Open the sprite JSON workspace" role="menuitem"><span>sprite data</span></button>
       </div>
     </details>
@@ -499,6 +515,18 @@
       </div>
     </div>
   </main>
+  <dialog id="renderTagsDialog" aria-labelledby="renderTagsTitle">
+    <div class="dialog-heading">
+      <h2 id="renderTagsTitle">layer tags</h2>
+      <button id="btnCloseRenderTags" type="button" title="Close layer tag editor" aria-label="Close layer tag editor">&times;</button>
+    </div>
+    <p class="hint">Tags are shared by character and equipment layers. Their top-to-bottom order here is their back-to-front render order. Tag ids stay stable after creation; labels may change freely.</p>
+    <div id="renderTagsEditor"></div>
+    <div class="panel-row" style="margin:0">
+      <button id="btnAddRenderTag" type="button">+ tag</button>
+      <button id="btnDoneRenderTags" type="button">done</button>
+    </div>
+  </dialog>
   <script type="module" src="/tools/src/sprite-editor.ts"></script>
 </body>
 </html>
