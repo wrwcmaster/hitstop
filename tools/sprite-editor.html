@@ -298,17 +298,9 @@
           <p id="toolConfigHint" class="hint">The solid center overwrites color; the soft edge blends into neighboring pixels.</p>
         </div>
         <div id="magicConfig" hidden>
-          <label>combine
-            <select id="magicMode">
-              <option value="replace">replace selection</option>
-              <option value="add">add to selection</option>
-              <option value="subtract">subtract from selection</option>
-              <option value="intersect">intersect selection</option>
-            </select>
-          </label>
           <label>color tolerance <input id="magicTolerance" type="number" min="0" max="255" step="1" value="24"></label>
           <label><input id="magicContiguous" type="checkbox" checked> contiguous pixels only</label>
-          <p class="hint">Click a color region. Shift adds, Alt subtracts, and Shift+Alt intersects. Increase tolerance to include nearby shades.</p>
+          <p class="hint">Click a color region. Shift adds a region, Alt removes one pixel, and Shift+Alt intersects. Increase tolerance to include nearby shades.</p>
         </div>
         <div id="fillConfig" hidden>
           <label>fill mode
@@ -517,7 +509,7 @@
       <p class="hint" style="margin:0">
         paint: left-drag &middot; erase: right-drag &middot; picker: Alt<br>
         pencil P &middot; brush B &middot; blur U &middot; fill G &middot; select M &middot; magic W<br>
-        selection: drag inside to move &middot; drag square handles to resize &middot; drag green handle to rotate &middot; Shift snaps 15&deg;<br>
+        selection: Shift adds &middot; Alt removes &middot; Shift+Alt intersects &middot; drag inside to move &middot; drag square handles to resize &middot; drag green handle to rotate &middot; Shift snaps 15&deg;<br>
         export/import JSON (content/sprites/*.json)
       </p>
       </section>

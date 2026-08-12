@@ -109,7 +109,14 @@ interface SharedSelection extends PixelRect {
   updatedAt: number;
 }
 let selection: PixelSelection | null = null;
-let selectionStart: { x: number; y: number } | null = null;
+type SelectionCombineMode = 'replace' | 'add' | 'subtract' | 'intersect';
+interface SelectionDrag {
+  x: number;
+  y: number;
+  mode: SelectionCombineMode;
+  base: Set<string>;
+}
+let selectionStart: SelectionDrag | null = null;
 let selectionMove: SelectionMove | null = null;
 let selectionHandleTransform: SelectionHandleTransform | null = null;
 let pixelClipboard: PixelClipboard | null = null;
@@ -2233,7 +2240,7 @@ grid.addEventListener('mousedown', (e) => {
     applyMagicSelection(e);
     return;
   }
-  if (e.altKey || currentTool === 'picker') {
+  if ((e.altKey && currentTool !== 'select') || currentTool === 'picker') {
     e.preventDefault();
     if (e.button !== 0) return;
     picking = true;
@@ -2248,19 +2255,20 @@ grid.addEventListener('mousedown', (e) => {
       return;
     }
     if (e.button !== 0) return;
+    const mode = selectionCombineMode(e);
     const handle = selectionHandleAt(e);
-    if (selection && handle) {
+    if (mode === 'replace' && selection && handle) {
       beginSelectionHandleTransform(handle, e);
       return;
     }
     const point = gridCell(e);
-    if (selection && selectionContains(selection, point.x, point.y)) {
+    if (mode === 'replace' && selection && selectionContains(selection, point.x, point.y)) {
       beginSelectionMove(point);
       return;
     }
-    selectionStart = point;
+    selectionStart = { ...point, mode, base: selectionCells(selection) };
     ($('selectionAngle') as HTMLInputElement).value = '0';
-    setSelection({ x: point.x, y: point.y, w: 1, h: 1 });
+    applyRectangularSelection(point);
     return;
   }
   if (!requireEditableLayer()) return;
@@ -2282,10 +2290,7 @@ grid.addEventListener('mousemove', (e) => {
     return;
   }
   if (selectionStart) {
-    const point = gridCell(e);
-    const x = Math.min(selectionStart.x, point.x);
-    const y = Math.min(selectionStart.y, point.y);
-    setSelection({ x, y, w: Math.abs(point.x - selectionStart.x) + 1, h: Math.abs(point.y - selectionStart.y) + 1 });
+    applyRectangularSelection(gridCell(e));
     return;
   }
   if (selectionMove) {
@@ -2304,8 +2309,11 @@ grid.addEventListener('mouseleave', () => {
 window.addEventListener('mouseup', () => {
   picking = false;
   if (selectionStart) {
+    const mode = selectionStart.mode;
     selectionStart = null;
     void publishSelection();
+    const count = selection ? selectionPixelCount(selection) : 0;
+    flash(count ? `selected ${count} pixels (${mode})` : 'selection cleared');
   }
   if (selectionMove) {
     const moved = selectionMove.moved;
@@ -2363,17 +2371,39 @@ function pickColor(e: MouseEvent, announce = true): void {
   }
 }
 
-type MagicSelectionMode = 'replace' | 'add' | 'subtract' | 'intersect';
-
 function magicTolerance(): number {
   return Math.max(0, Math.min(255, Math.round(($('magicTolerance') as HTMLInputElement).valueAsNumber || 0)));
 }
 
-function magicSelectionMode(e: MouseEvent): MagicSelectionMode {
+function selectionCombineMode(e: MouseEvent): SelectionCombineMode {
   if (e.shiftKey && e.altKey) return 'intersect';
   if (e.shiftKey) return 'add';
   if (e.altKey) return 'subtract';
-  return ($('magicMode') as HTMLSelectElement).value as MagicSelectionMode;
+  return 'replace';
+}
+
+function combineSelectionCells(
+  existing: Set<string>,
+  incoming: Set<string>,
+  mode: SelectionCombineMode,
+): Set<string> {
+  if (mode === 'add') return new Set([...existing, ...incoming]);
+  if (mode === 'subtract') return new Set([...existing].filter((key) => !incoming.has(key)));
+  if (mode === 'intersect') return new Set([...existing].filter((key) => incoming.has(key)));
+  return incoming;
+}
+
+function applyRectangularSelection(point: { x: number; y: number }): void {
+  if (!selectionStart) return;
+  const minX = Math.min(selectionStart.x, point.x);
+  const maxX = Math.max(selectionStart.x, point.x);
+  const minY = Math.min(selectionStart.y, point.y);
+  const maxY = Math.max(selectionStart.y, point.y);
+  const rectangle = new Set<string>();
+  for (let y = minY; y <= maxY; y++) for (let x = minX; x <= maxX; x++) {
+    rectangle.add(`${x},${y}`);
+  }
+  setSelection(selectionFromCells(combineSelectionCells(selectionStart.base, rectangle, selectionStart.mode)));
 }
 
 function magicMatchCells(startX: number, startY: number): Set<string> {
@@ -2417,14 +2447,14 @@ function magicMatchCells(startX: number, startY: number): Set<string> {
 
 function applyMagicSelection(e: MouseEvent): void {
   const point = gridCell(e);
-  const matched = magicMatchCells(point.x, point.y);
-  const mode = magicSelectionMode(e);
+  const mode = selectionCombineMode(e);
+  // Subtraction is intentionally pencil-like. A region-aware subtraction is
+  // too destructive when an artist is cleaning a few accidental wand pixels.
+  const matched = mode === 'subtract'
+    ? new Set([`${point.x},${point.y}`])
+    : magicMatchCells(point.x, point.y);
   const existing = selectionCells(selection);
-  let next: Set<string>;
-  if (mode === 'add') next = new Set([...existing, ...matched]);
-  else if (mode === 'subtract') next = new Set([...existing].filter((key) => !matched.has(key)));
-  else if (mode === 'intersect') next = new Set([...existing].filter((key) => matched.has(key)));
-  else next = matched;
+  const next = combineSelectionCells(existing, matched, mode);
   setSelection(selectionFromCells(next));
   void publishSelection();
   const count = selection ? selectionPixelCount(selection) : 0;
@@ -4356,7 +4386,7 @@ window.addEventListener('keydown', (e) => {
     editMenu.open = false;
     return;
   }
-  if (e.key === 'Alt' && currentTool !== 'magic') {
+  if (e.key === 'Alt' && currentTool !== 'magic' && currentTool !== 'select') {
     e.preventDefault();
     altPickerActive = true;
     updateToolUI();
