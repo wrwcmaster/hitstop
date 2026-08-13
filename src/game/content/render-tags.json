@@ -1,7 +1,14 @@
 [
-  { "id": "behind-body", "label": "Behind body" },
-  { "id": "body", "label": "Body" },
-  { "id": "front-hand-held-object", "label": "Front hand held object" },
-  { "id": "foreground-body", "label": "Foreground body" },
-  { "id": "foreground-effects", "label": "Foreground effects" }
+  {
+    "id": "body",
+    "label": "Body"
+  },
+  {
+    "id": "front-hand-held-object",
+    "label": "Front hand held object"
+  },
+  {
+    "id": "front-hand",
+    "label": "Front hand"
+  }
 ]
