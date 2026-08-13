@@ -68,7 +68,7 @@ let previewStepping = false;
 let currentChar = firstPaintChar();
 let painting = false;
 let erasing = false;
-type EditorTool = 'draw' | 'brush' | 'blur' | 'fill' | 'picker' | 'select' | 'magic';
+type EditorTool = 'draw' | 'brush' | 'blur' | 'fill' | 'picker' | 'select' | 'magic' | 'move';
 let currentTool: EditorTool = 'draw';
 let altPickerActive = false;
 let picking = false;
@@ -692,7 +692,7 @@ function restoreEditorViewState(saved?: EditorViewState): void {
     if (file.anims[state.anim]) animName = state.anim;
     frameIdx = Math.max(0, Math.min(state.frame, anim().frames.length - 1));
     if (state.paintChar in (file.palette ?? {})) currentChar = state.paintChar;
-    if ((['draw', 'brush', 'blur', 'fill', 'picker', 'select', 'magic'] as EditorTool[]).includes(state.tool)) {
+    if ((['draw', 'brush', 'blur', 'fill', 'picker', 'select', 'magic', 'move'] as EditorTool[]).includes(state.tool)) {
       currentTool = state.tool;
     }
     selectedAnchorName = state.anchor;
@@ -2247,7 +2247,8 @@ function floodFill(startX: number, startY: number, fillChar: string): void {
 
 grid.addEventListener('contextmenu', (e) => e.preventDefault());
 grid.addEventListener('mousedown', (e) => {
-  if (currentTool !== 'magic' && e.altKey && e.shiftKey && selectedAnchorName) {
+  if (currentTool !== 'magic' && currentTool !== 'select' && currentTool !== 'move'
+    && e.altKey && e.shiftKey && selectedAnchorName) {
     e.preventDefault();
     const bounds = grid.getBoundingClientRect();
     const sourceX = Math.floor((e.clientX - bounds.left) / cellSize);
@@ -2269,11 +2270,34 @@ grid.addEventListener('mousedown', (e) => {
     applyMagicSelection(e);
     return;
   }
-  if ((e.altKey && currentTool !== 'select') || currentTool === 'picker') {
+  if ((e.altKey && currentTool !== 'select' && currentTool !== 'move') || currentTool === 'picker') {
     e.preventDefault();
     if (e.button !== 0) return;
     picking = true;
     pickColor(e);
+    return;
+  }
+  if (currentTool === 'move') {
+    e.preventDefault();
+    if (e.button === 2) {
+      setSelection(null);
+      void publishSelection();
+      return;
+    }
+    if (e.button !== 0) return;
+    if (!selection) {
+      flash('make a selection before using Move');
+      return;
+    }
+    const handle = selectionHandleAt(e);
+    if (handle) {
+      beginSelectionHandleTransform(handle, e);
+      return;
+    }
+    const point = gridCell(e);
+    if (selectionContains(selection, point.x, point.y)) {
+      beginSelectionMove(point);
+    }
     return;
   }
   if (currentTool === 'select') {
@@ -2285,16 +2309,7 @@ grid.addEventListener('mousedown', (e) => {
     }
     if (e.button !== 0) return;
     const mode = selectionCombineMode(e);
-    const handle = selectionHandleAt(e);
-    if (mode === 'replace' && selection && handle) {
-      beginSelectionHandleTransform(handle, e);
-      return;
-    }
     const point = gridCell(e);
-    if (mode === 'replace' && selection && selectionContains(selection, point.x, point.y)) {
-      beginSelectionMove(point);
-      return;
-    }
     selectionStart = { ...point, mode, base: selectionCells(selection) };
     ($('selectionAngle') as HTMLInputElement).value = '0';
     applyRectangularSelection(point);
@@ -2363,7 +2378,7 @@ window.addEventListener('mouseup', () => {
       flash(handle === 'rotate' ? 'rotated selection' : 'resized selection');
     }
     ($('selectionAngle') as HTMLInputElement).value = '0';
-    grid.style.cursor = currentTool === 'select' ? 'cell' : '';
+    grid.style.cursor = currentTool === 'move' ? 'default' : currentTool === 'select' ? 'cell' : '';
   }
   if (painting) {
     painting = false;
@@ -2725,7 +2740,7 @@ function selectionHandlePositions(rect: PixelRect): Array<{
 }
 
 function selectionHandleAt(e: MouseEvent): SelectionHandle | null {
-  if (currentTool !== 'select' || !selection) return null;
+  if (currentTool !== 'move' || !selection) return null;
   const pointer = gridPointer(e);
   const handles = selectionHandlePositions(selection);
   // Rotation wins where a very small selection makes handles overlap.
@@ -2746,7 +2761,7 @@ function updateSelectionCursor(e?: MouseEvent): void {
     grid.style.cursor = '';
     return;
   }
-  if (currentTool !== 'select' || !selection || !e) {
+  if (currentTool !== 'move' || !selection || !e) {
     grid.style.cursor = '';
     return;
   }
@@ -2765,7 +2780,7 @@ function updateSelectionCursor(e?: MouseEvent): void {
     grid.classList.add('selection-movable');
     grid.style.cursor = 'move';
   } else {
-    grid.style.cursor = 'cell';
+    grid.style.cursor = 'default';
   }
 }
 
@@ -2853,15 +2868,9 @@ function setSelection(next: PixelSelection | null): void {
   selection = next;
   ($('btnCut') as HTMLButtonElement).disabled = !selection;
   ($('btnCopy') as HTMLButtonElement).disabled = !selection;
-  for (const id of ['btnRotateSelectionLeft', 'btnRotateSelectionRight', 'btnRotateSelection', 'btnResizeSelection']) {
-    ($(id) as HTMLButtonElement).disabled = !selection;
-  }
+  updateSelectionTransformControls();
   const selectionW = $('selectionW') as HTMLInputElement;
   const selectionH = $('selectionH') as HTMLInputElement;
-  const selectionAngle = $('selectionAngle') as HTMLInputElement;
-  selectionW.disabled = !selection;
-  selectionH.disabled = !selection;
-  selectionAngle.disabled = !selection;
   if (selection) {
     selectionW.value = String(selection.w);
     selectionH.value = String(selection.h);
@@ -3149,36 +3158,38 @@ function redraw(): void {
     }
     gctx.restore();
 
-    const handles = selectionHandlePositions(selection);
-    const rotation = handles.find((handle) => handle.handle === 'rotate');
-    gctx.save();
-    gctx.setLineDash([]);
-    gctx.lineWidth = 2;
-    if (rotation?.stemX !== undefined && rotation.stemY !== undefined) {
-      gctx.strokeStyle = '#ffcd75';
-      gctx.beginPath();
-      gctx.moveTo(rotation.stemX * cellSize, rotation.stemY * cellSize);
-      gctx.lineTo(rotation.x * cellSize, rotation.y * cellSize);
-      gctx.stroke();
-    }
-    for (const handle of handles) {
-      const handleX = handle.x * cellSize;
-      const handleY = handle.y * cellSize;
-      if (handle.handle === 'rotate') {
-        gctx.fillStyle = '#38b764';
-        gctx.strokeStyle = '#07070d';
+    if (currentTool === 'move') {
+      const handles = selectionHandlePositions(selection);
+      const rotation = handles.find((handle) => handle.handle === 'rotate');
+      gctx.save();
+      gctx.setLineDash([]);
+      gctx.lineWidth = 2;
+      if (rotation?.stemX !== undefined && rotation.stemY !== undefined) {
+        gctx.strokeStyle = '#ffcd75';
         gctx.beginPath();
-        gctx.arc(handleX, handleY, 6, 0, Math.PI * 2);
-        gctx.fill();
+        gctx.moveTo(rotation.stemX * cellSize, rotation.stemY * cellSize);
+        gctx.lineTo(rotation.x * cellSize, rotation.y * cellSize);
         gctx.stroke();
-      } else {
-        gctx.fillStyle = '#f4f4f4';
-        gctx.strokeStyle = '#33447f';
-        gctx.fillRect(handleX - 4, handleY - 4, 8, 8);
-        gctx.strokeRect(handleX - 4, handleY - 4, 8, 8);
       }
+      for (const handle of handles) {
+        const handleX = handle.x * cellSize;
+        const handleY = handle.y * cellSize;
+        if (handle.handle === 'rotate') {
+          gctx.fillStyle = '#38b764';
+          gctx.strokeStyle = '#07070d';
+          gctx.beginPath();
+          gctx.arc(handleX, handleY, 6, 0, Math.PI * 2);
+          gctx.fill();
+          gctx.stroke();
+        } else {
+          gctx.fillStyle = '#f4f4f4';
+          gctx.strokeStyle = '#33447f';
+          gctx.fillRect(handleX - 4, handleY - 4, 8, 8);
+          gctx.strokeRect(handleX - 4, handleY - 4, 8, 8);
+        }
+      }
+      gctx.restore();
     }
-    gctx.restore();
   }
 
   if (($('showAnchors') as HTMLInputElement)?.checked) {
@@ -3912,15 +3923,17 @@ function updateToolUI(): void {
   $('btnToolPicker').classList.toggle('active', visibleTool === 'picker');
   $('btnToolSelect').classList.toggle('active', visibleTool === 'select');
   $('btnToolMagic').classList.toggle('active', visibleTool === 'magic');
+  $('btnToolMove').classList.toggle('active', visibleTool === 'move');
   grid.classList.toggle('selecting', visibleTool === 'select');
   grid.classList.toggle('magic-selecting', visibleTool === 'magic');
+  grid.classList.toggle('selection-transforming', visibleTool === 'move');
   grid.classList.toggle('picking', visibleTool === 'picker');
   grid.classList.toggle('soft-tool', visibleTool === 'brush' || visibleTool === 'blur');
-  if (visibleTool !== 'select') {
+  if (visibleTool !== 'move') {
     grid.classList.remove('selection-movable');
     grid.style.cursor = '';
   } else if (!selectionHandleTransform) {
-    grid.style.cursor = 'cell';
+    grid.style.cursor = 'default';
   }
   updateSelectionModifierCursor();
   const hasSize = currentTool === 'brush' || currentTool === 'blur';
@@ -3938,7 +3951,21 @@ function updateToolUI(): void {
   $('toolConfigHint').textContent = currentTool === 'blur'
     ? 'Averages neighboring colors at the center and feathers the effect toward the edge.'
     : 'The solid center overwrites color; the soft edge blends into neighboring pixels.';
+  updateSelectionTransformControls();
   updateBrushCursor();
+}
+
+function updateSelectionTransformControls(): void {
+  const enabled = Boolean(selection) && currentTool === 'move';
+  for (const id of [
+    'btnRotateSelectionLeft', 'btnRotateSelectionRight', 'btnRotateSelection', 'btnResizeSelection',
+    'btnNudgeLeft', 'btnNudgeRight', 'btnNudgeUp', 'btnNudgeDown',
+  ]) {
+    ($(id) as HTMLButtonElement).disabled = !enabled;
+  }
+  ($('selectionW') as HTMLInputElement).disabled = !enabled;
+  ($('selectionH') as HTMLInputElement).disabled = !enabled;
+  ($('selectionAngle') as HTMLInputElement).disabled = !enabled;
 }
 
 function updateSelectionModifierCursor(keys?: { shiftKey: boolean; altKey: boolean }): void {
@@ -3975,7 +4002,7 @@ function updateBrushCursor(): void {
 function setTool(tool: EditorTool): void {
   currentTool = tool;
   if (tool === 'brush' || tool === 'blur' || tool === 'magic' || tool === 'fill') activatePanel('left', 'left-tool');
-  if (tool === 'select' || tool === 'magic') activatePanel('right', 'right-transform');
+  if (tool === 'move') activatePanel('right', 'right-transform');
   updateToolUI();
   redraw();
 }
@@ -3987,6 +4014,7 @@ $('btnToolFill').onclick = () => setTool('fill');
 $('btnToolPicker').onclick = () => setTool('picker');
 $('btnToolSelect').onclick = () => setTool('select');
 $('btnToolMagic').onclick = () => setTool('magic');
+$('btnToolMove').onclick = () => setTool('move');
 
 $('btnCompactPalette').onclick = () => {
   const before = JSON.stringify(file);
@@ -4102,6 +4130,7 @@ function commitSelectionPixels(
 }
 
 function moveSelectionBy(dx: number, dy: number): void {
+  if (currentTool !== 'move') return;
   if (!requireEditableLayer()) return;
   if (!selection) return;
   const x = Math.max(0, Math.min(W() - selection.w, selection.x + dx));
@@ -4132,6 +4161,7 @@ function scaleSelectionRows(source: PixelClipboard, w: number, h: number): Pixel
 }
 
 function resizeSelection(): void {
+  if (currentTool !== 'move') return;
   if (!requireEditableLayer()) return;
   if (!selection) return;
   const requestedW = Math.round(($('selectionW') as HTMLInputElement).valueAsNumber);
@@ -4231,6 +4261,7 @@ function rotateSelectionRows(source: PixelClipboard, degrees: number): PixelClip
 }
 
 function rotateSelectionBy(degrees: number, message?: string): void {
+  if (currentTool !== 'move') return;
   if (!requireEditableLayer()) return;
   if (!selection || !Number.isFinite(degrees)) return;
   if (Math.abs(degrees % 360) < 0.0001) {
@@ -4351,44 +4382,10 @@ $('selectRefSprite').onchange = (e) => {
 };
 ($('onionSkin') as HTMLInputElement).onchange = () => redraw();
 
-$('btnNudgeLeft').onclick = () => nudge(-1, 0);
-$('btnNudgeRight').onclick = () => nudge(1, 0);
-$('btnNudgeUp').onclick = () => nudge(0, -1);
-$('btnNudgeDown').onclick = () => nudge(0, 1);
-
-function nudge(dx: number, dy: number): void {
-  saveHistory();
-  const w = W();
-  const h = H();
-  const f = cur();
-  const next: string[] = [];
-  
-  for (let y = 0; y < h; y++) {
-    const srcY = (y - dy + h) % h;
-    let row = '';
-    for (let x = 0; x < w; x++) {
-      const srcX = (x - dx + w) % w;
-      row += f[srcY][srcX];
-    }
-    next.push(row);
-  }
-  
-  anim().frames[frameIdx] = next;
-  const logicalW = w / density();
-  const logicalH = h / density();
-  const concrete = concreteAnimName();
-  let movedAnchor = false;
-  for (const groups of Object.values(file.anchors ?? {})) {
-    const point = groups[concrete]?.[frameIdx];
-    if (!point) continue;
-    point.x = (point.x + dx / density() + logicalW) % logicalW;
-    point.y = (point.y + dy / density() + logicalH) % logicalH;
-    movedAnchor = true;
-  }
-  if (movedAnchor) buildAnchors();
-  redraw();
-  syncIO();
-}
+$('btnNudgeLeft').onclick = () => moveSelectionBy(-1, 0);
+$('btnNudgeRight').onclick = () => moveSelectionBy(1, 0);
+$('btnNudgeUp').onclick = () => moveSelectionBy(0, -1);
+$('btnNudgeDown').onclick = () => moveSelectionBy(0, 1);
 
 /* ---------------- history (undo / redo) ---------------- */
 
@@ -4469,7 +4466,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   updateSelectionModifierCursor(e);
-  if (e.key === 'Alt' && currentTool !== 'magic' && currentTool !== 'select') {
+  if (e.key === 'Alt' && currentTool !== 'magic' && currentTool !== 'select' && currentTool !== 'move') {
     e.preventDefault();
     altPickerActive = true;
     updateToolUI();
@@ -4498,7 +4495,7 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     setTool('select');
   }
-  if (!typing && selection && currentTool === 'select' && key.startsWith('arrow')) {
+  if (!typing && selection && currentTool === 'move' && key.startsWith('arrow')) {
     e.preventDefault();
     const distance = e.shiftKey ? 4 : 1;
     if (key === 'arrowleft') moveSelectionBy(-distance, 0);
@@ -4513,6 +4510,7 @@ window.addEventListener('keydown', (e) => {
       u: 'blur',
       g: 'fill',
       w: 'magic',
+      v: 'move',
     };
     const tool = shortcut[key];
     if (tool) {
