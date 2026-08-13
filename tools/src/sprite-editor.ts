@@ -2418,7 +2418,11 @@ function magicMatchCells(startX: number, startY: number): Set<string> {
     if (candidateChar === undefined) return false;
     if (!seed) return !parseRgb(pal()[candidateChar]);
     const candidate = parseRgb(pal()[candidateChar]);
-    return Boolean(candidate && colorDistance(seed, candidate) <= threshold);
+    // RGB has three independent 0-255 channels. Average their squared
+    // differences so the UI tolerance keeps its advertised 0-255 range:
+    // 255 includes even black versus white, while palette quantization can
+    // continue using the unnormalized distance metric above.
+    return Boolean(candidate && colorDistance(seed, candidate) / 3 <= threshold);
   };
 
   if (!(($('magicContiguous') as HTMLInputElement).checked)) {
