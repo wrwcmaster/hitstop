@@ -117,7 +117,13 @@ interface SelectionDrag {
   mode: SelectionCombineMode;
   base: Set<string>;
 }
+interface MagicSelectionDrag {
+  initialMode: SelectionCombineMode;
+  mode: SelectionCombineMode;
+  last: { x: number; y: number };
+}
 let selectionStart: SelectionDrag | null = null;
+let magicSelectionDrag: MagicSelectionDrag | null = null;
 let selectionMove: SelectionMove | null = null;
 let selectionHandleTransform: SelectionHandleTransform | null = null;
 let pixelClipboard: PixelClipboard | null = null;
@@ -2267,7 +2273,7 @@ grid.addEventListener('mousedown', (e) => {
       return;
     }
     if (e.button !== 0) return;
-    applyMagicSelection(e);
+    beginMagicSelection(e);
     return;
   }
   if ((e.altKey && currentTool !== 'select' && currentTool !== 'move') || currentTool === 'picker') {
@@ -2330,6 +2336,10 @@ grid.addEventListener('mousemove', (e) => {
     pickColor(e, false);
     return;
   }
+  if (magicSelectionDrag) {
+    updateMagicSelectionDrag(gridCell(e));
+    return;
+  }
   if (selectionHandleTransform) {
     updateSelectionHandleTransform(e);
     return;
@@ -2353,6 +2363,13 @@ grid.addEventListener('mouseleave', () => {
 });
 window.addEventListener('mouseup', () => {
   picking = false;
+  if (magicSelectionDrag) {
+    const mode = magicSelectionDrag.initialMode;
+    magicSelectionDrag = null;
+    void publishSelection();
+    const count = selection ? selectionPixelCount(selection) : 0;
+    flash(count ? `selected ${count} pixels (${mode})` : 'selection cleared');
+  }
   if (selectionStart) {
     const mode = selectionStart.mode;
     selectionStart = null;
@@ -2494,20 +2511,70 @@ function magicMatchCells(startX: number, startY: number): Set<string> {
   return result;
 }
 
-function applyMagicSelection(e: MouseEvent): void {
-  const point = gridCell(e);
-  const mode = selectionCombineMode(e);
+function applyMagicSelectionAt(
+  existing: Set<string>,
+  point: { x: number; y: number },
+  mode: SelectionCombineMode,
+): Set<string> {
   // Subtraction is intentionally pencil-like. A region-aware subtraction is
   // too destructive when an artist is cleaning a few accidental wand pixels.
   const matched = mode === 'subtract'
     ? new Set([`${point.x},${point.y}`])
     : magicMatchCells(point.x, point.y);
-  const existing = selectionCells(selection);
-  const next = combineSelectionCells(existing, matched, mode);
+  return combineSelectionCells(existing, matched, mode);
+}
+
+function beginMagicSelection(e: MouseEvent): void {
+  const point = gridCell(e);
+  const initialMode = selectionCombineMode(e);
+  const next = applyMagicSelectionAt(selectionCells(selection), point, initialMode);
   setSelection(selectionFromCells(next));
-  void publishSelection();
-  const count = selection ? selectionPixelCount(selection) : 0;
-  flash(count ? `selected ${count} pixels (${mode})` : 'selection cleared');
+  magicSelectionDrag = {
+    initialMode,
+    // A normal click establishes the new selection. Continuing the same
+    // gesture expands it, matching how artists paint a wand selection.
+    mode: initialMode === 'replace' ? 'add' : initialMode,
+    last: point,
+  };
+}
+
+function pointsOnGridLine(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): Array<{ x: number; y: number }> {
+  const steps = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y));
+  if (!steps) return [to];
+  const points: Array<{ x: number; y: number }> = [];
+  let previous = '';
+  for (let step = 1; step <= steps; step++) {
+    const point = {
+      x: Math.round(from.x + (to.x - from.x) * step / steps),
+      y: Math.round(from.y + (to.y - from.y) * step / steps),
+    };
+    const key = `${point.x},${point.y}`;
+    if (key !== previous) points.push(point);
+    previous = key;
+  }
+  return points;
+}
+
+function updateMagicSelectionDrag(point: { x: number; y: number }): void {
+  const drag = magicSelectionDrag;
+  if (!drag || (point.x === drag.last.x && point.y === drag.last.y)) return;
+  let cells = selectionCells(selection);
+  let changed = false;
+  for (const nextPoint of pointsOnGridLine(drag.last, point)) {
+    const key = `${nextPoint.x},${nextPoint.y}`;
+    // Add-mode wand drags only need work when the pointer leaves the current
+    // selection. Subtract-mode keeps erasing individual pixels along the path.
+    if (drag.mode === 'add' && cells.has(key)) continue;
+    if (drag.mode === 'subtract' && !cells.has(key)) continue;
+    const next = applyMagicSelectionAt(cells, nextPoint, drag.mode);
+    if (next.size !== cells.size || [...next].some((cell) => !cells.has(cell))) changed = true;
+    cells = next;
+  }
+  drag.last = point;
+  if (changed) setSelection(selectionFromCells(cells));
 }
 
 function shiftSelectionColors(startX: number, startY: number): void {
@@ -2883,6 +2950,7 @@ function setSelection(next: PixelSelection | null): void {
 
 function clearSelection(publish = true): void {
   selectionStart = null;
+  magicSelectionDrag = null;
   selectionMove = null;
   selectionHandleTransform = null;
   grid.classList.remove('selection-movable');
@@ -4542,6 +4610,7 @@ window.addEventListener('keyup', (e) => {
 
 window.addEventListener('blur', () => {
   selectionModifierKeys = { shiftKey: false, altKey: false };
+  magicSelectionDrag = null;
   altPickerActive = false;
   picking = false;
   updateToolUI();
