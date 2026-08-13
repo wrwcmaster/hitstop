@@ -431,6 +431,22 @@
           </div>
           <p class="hint" style="margin:0">Render tags set cross-sprite order. Arrows only reorder layers within the same tag; eye, solo, and lock are editor-only.</p>
         </div>
+        <div class="panel-group">
+          <h2>extract through frames</h2>
+          <div class="panel-row">
+            <label style="flex:1">to layer
+              <select id="layerExtractTarget" style="width:100%"></select>
+            </label>
+            <label style="flex:1">follow anchor
+              <select id="layerExtractAnchor" style="width:100%"></select>
+            </label>
+          </div>
+          <div class="panel-row">
+            <button id="btnExtractSelection" style="flex:1">move selection</button>
+            <button id="btnExtractNext" style="flex:1">move + next</button>
+          </div>
+          <p id="layerExtractStatus" class="hint" style="margin:0">Select pixels on the active source layer. Move + next advances one frame and carries the selection by the chosen anchor.</p>
+        </div>
       </section>
       <section id="right-rig" class="panel-page" data-panel-page="right" hidden>
 

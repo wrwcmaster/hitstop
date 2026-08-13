@@ -137,6 +137,9 @@ let activeLayerId = FLAT_LAYER_ID;
 let hiddenLayerIds = new Set<string>();
 let lockedLayerIds = new Set<string>();
 let soloLayerId: string | null = null;
+let layerExtractTargetId = '';
+let layerExtractAnchorName = 'frontHand';
+let layerExtractAnchorManuallySet = false;
 const undoStack: string[] = [];
 const redoStack: string[] = [];
 const MAX_HISTORY = 100;
@@ -1761,7 +1764,133 @@ function buildLayers(): void {
   ($('btnMergeLayer') as HTMLButtonElement).disabled = !canMoveDown;
   ($('btnDelLayer') as HTMLButtonElement).disabled = !layerFile || layerFile.layers.length <= 1;
   ($('btnFlattenLayers') as HTMLButtonElement).disabled = !layered;
+  buildLayerExtractionControls();
 }
+
+function buildLayerExtractionControls(): void {
+  const target = $('layerExtractTarget') as HTMLSelectElement;
+  const anchor = $('layerExtractAnchor') as HTMLSelectElement;
+  const layered = isLayeredSpriteFile(file) ? file : null;
+  const targets = layered?.layers.filter((layer) => layer.id !== activeLayerId) ?? [];
+
+  target.innerHTML = targets.length ? '' : '<option value="">-- add another layer --</option>';
+  for (const layer of targets) {
+    const option = document.createElement('option');
+    option.value = layer.id;
+    option.textContent = layer.name;
+    target.appendChild(option);
+  }
+  if (!targets.some((layer) => layer.id === layerExtractTargetId)) {
+    layerExtractTargetId = targets.find((layer) => /front.?hand/i.test(`${layer.name} ${layer.tag}`))?.id
+      ?? targets[0]?.id
+      ?? '';
+  }
+  target.value = layerExtractTargetId;
+
+  anchor.innerHTML = '<option value="">fixed position</option>';
+  const anchorNames = Object.keys(file.anchors ?? {});
+  for (const name of anchorNames) {
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = name;
+    anchor.appendChild(option);
+  }
+  if (!layerExtractAnchorManuallySet && anchorNames.includes('frontHand')) {
+    layerExtractAnchorName = 'frontHand';
+  } else if (layerExtractAnchorName && !anchorNames.includes(layerExtractAnchorName)) {
+    layerExtractAnchorName = anchorNames.includes(selectedAnchorName) ? selectedAnchorName : '';
+  }
+  anchor.value = layerExtractAnchorName;
+
+  const source = activeLayer();
+  const targetLayer = layered?.layers.find((layer) => layer.id === layerExtractTargetId);
+  const ready = Boolean(layered && source && targetLayer && selection && !lockedLayerIds.has(source.id));
+  ($('btnExtractSelection') as HTMLButtonElement).disabled = !ready;
+  ($('btnExtractNext') as HTMLButtonElement).disabled = !ready;
+  $('layerExtractStatus').textContent = layered && source && targetLayer
+    ? `Source: ${source.name}. Select the part to move into ${targetLayer.name}.`
+    : 'Select pixels on an active source layer after adding a destination layer.';
+}
+
+($('layerExtractTarget') as HTMLSelectElement).onchange = (event) => {
+  layerExtractTargetId = (event.target as HTMLSelectElement).value;
+  buildLayerExtractionControls();
+};
+
+($('layerExtractAnchor') as HTMLSelectElement).onchange = (event) => {
+  layerExtractAnchorManuallySet = true;
+  layerExtractAnchorName = (event.target as HTMLSelectElement).value;
+};
+
+function selectionForNextFrame(value: PixelSelection, fromFrame: number, toFrame: number): PixelSelection | null {
+  let dx = 0;
+  let dy = 0;
+  if (layerExtractAnchorName) {
+    const anchors = file.anchors?.[layerExtractAnchorName]?.[concreteAnimName()];
+    const from = anchors?.[fromFrame];
+    const to = anchors?.[toFrame];
+    if (from && to) {
+      dx = Math.round((to.x - from.x) * density());
+      dy = Math.round((to.y - from.y) * density());
+    }
+  }
+  const shifted = new Set<string>();
+  for (const key of selectionCells(value)) {
+    const [x, y] = key.split(',').map(Number);
+    const nextX = x + dx;
+    const nextY = y + dy;
+    if (nextX >= 0 && nextY >= 0 && nextX < W() && nextY < H()) {
+      shifted.add(`${nextX},${nextY}`);
+    }
+  }
+  return selectionFromCells(shifted);
+}
+
+function extractSelectionToLayer(advance: boolean): void {
+  if (!isLayeredSpriteFile(file) || !selection || !requireEditableLayer()) return;
+  const source = activeLayer();
+  const target = file.layers.find((layer) => layer.id === layerExtractTargetId);
+  if (!source || !target || source.id === target.id) return;
+  const animation = concreteAnimName();
+  const sourceRows = source.tracks[animation]?.[frameIdx];
+  const targetRows = target.tracks[animation]?.[frameIdx];
+  if (!sourceRows || !targetRows) {
+    flash('source and target layers do not share this frame');
+    return;
+  }
+  const clip = pixelsInSelection(selection, sourceRows);
+  const movedPixels = clip.rows.reduce((count, row) => count + [...row]
+    .filter((pixel) => pixel !== '.' && pal()[pixel] !== null).length, 0);
+  if (!movedPixels) {
+    flash('the selection contains no pixels on the source layer');
+    return;
+  }
+
+  saveHistory();
+  clearSelectionPixels(sourceRows, selection);
+  pastePixels(targetRows, clip, selection.x, selection.y, true);
+  editVersion++;
+
+  const previousFrame = frameIdx;
+  const canAdvance = advance && frameIdx < anim().frames.length - 1;
+  if (canAdvance) {
+    frameIdx++;
+    previewStepping = false;
+    setSelection(selectionForNextFrame(selection, previousFrame, frameIdx));
+    buildFrames();
+    buildAnchors();
+  }
+  redraw();
+  syncIO();
+  schedulePreviewUpload();
+  void publishSelection();
+  flash(canAdvance
+    ? `moved ${movedPixels} pixels to ${target.name}; frame ${frameIdx + 1} is ready`
+    : `moved ${movedPixels} pixels to ${target.name}${advance ? '; last frame reached' : ''}`);
+}
+
+$('btnExtractSelection').onclick = () => extractSelectionToLayer(false);
+$('btnExtractNext').onclick = () => extractSelectionToLayer(true);
 
 $('btnAddLayer').onclick = () => {
   saveHistory();
@@ -2945,6 +3074,7 @@ function setSelection(next: PixelSelection | null): void {
   $('selectionStatus').textContent = selection
     ? `selection: ${selectionPixelCount(selection)} px in ${selection.w}x${selection.h} at ${selection.x},${selection.y} · shared with agent`
     : 'selection: none';
+  buildLayerExtractionControls();
   redraw();
 }
 
