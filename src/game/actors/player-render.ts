@@ -71,9 +71,13 @@ function bodyPose(p: Player): { shear: number; ox: number; oy: number; sx: numbe
 
   // move / air: lean into horizontal motion; stretch on a fast rise,
   // pinch slightly on the fall — a subtle jump arc.
+  // The authored run cycle owns grounded locomotion now. Do not shear its
+  // carefully aligned frames based on velocity; procedural posing remains
+  // useful in the air, where the sprite set has less motion information.
+  if (p.onGround) return { shear: 0, ox: 0, oy: 0, sx: 1, sy: 1 };
+
   const shear = -clamp(p.vx / 900, -0.18, 0.18);
-  let sy = 1;
-  if (!p.onGround) sy = 1 + clamp(-p.vy / 1600, -0.06, 0.1);
+  const sy = 1 + clamp(-p.vy / 1600, -0.06, 0.1);
   return { shear, ox: 0, oy: 0, sx: 2 - sy, sy };
 }
 

@@ -22,7 +22,10 @@ const { page } = await openSession(browser, 7);
 const world = await page.evaluate(async () => {
   const eng = await import('/src/engine/index.ts');
   const { ROOMS } = await import('/src/game/content/rooms/index.ts');
+  const { baseKnight } = await import('/src/game/content/sprites.ts');
   const { openEdgeDoorways, edgeDoorSide } = await import('/src/game/scenes/play/doorways.ts');
+  const bodyW = baseKnight.hitbox.w;
+  const bodyH = baseKnight.hitbox.h;
   const out = [];
   for (const [id, room] of Object.entries(ROOMS)) {
     if (id === 'test_room') continue;
@@ -36,14 +39,16 @@ const world = await page.evaluate(async () => {
     const solidAt = (x, y) => !!tileDef(x, y)?.solid;
     // One-way ledges are floors too — the mountain summit stands on one.
     const standableAt = (x, y) => { const d = tileDef(x, y); return !!(d && (d.solid || d.oneWay)); };
-    // A standable placement: 14x18 body fully in open space, solid under
-    // at least one foot. Scans down from yFrom at x.
+    // A standable placement for the active player body, fully in open space
+    // with solid under at least one foot. Scans down from yFrom at x.
     const standAt = (x, yFrom) => {
-      outer: for (let y = Math.max(0, yFrom); y < map.worldH - 18; y += 2) {
-        for (let by = y; by < y + 18; by += 6) {
-          if (solidAt(x + 3, by) || solidAt(x + 11, by)) continue outer;
+      const inset = Math.min(3, bodyW / 4);
+      outer: for (let y = Math.max(0, yFrom); y < map.worldH - bodyH; y += 2) {
+        for (let by = y; by < y + bodyH; by += Math.max(4, bodyH / 3)) {
+          if (solidAt(x + inset, by) || solidAt(x + bodyW - inset, by)) continue outer;
         }
-        if (standableAt(x + 3, y + 19) || standableAt(x + 11, y + 19)) return y;
+        if (standableAt(x + inset, y + bodyH + 1)
+          || standableAt(x + bodyW - inset, y + bodyH + 1)) return y;
       }
       return null;
     };
@@ -58,19 +63,20 @@ const world = await page.evaluate(async () => {
         // the first whose floor is level with the door band.
         let best = null;
         for (let d = 2; d <= 50 && !best; d += 4) {
-          const x = side === -1 ? tr.x + tr.w + d : tr.x - 14 - d;
+          const x = side === -1 ? tr.x + tr.w + d : tr.x - bodyW - d;
           const y = standAt(x, Math.max(0, tr.y - 12));
-          if (y !== null && y + 18 <= tr.y + tr.h + 26) best = { x, y };
+          if (y !== null && y + bodyH <= tr.y + tr.h + 26) best = { x, y };
         }
         out.push({ room: id, to, kind, locked, ...(best ?? { x: -1, y: -1 }), wDir: side === -1 ? 'left' : 'right' });
       } else if (kind === 'fallIn') {
-        out.push({ room: id, to, kind, locked, x: tr.x + tr.w / 2 - 7, y: Math.max(0, tr.y - 26) });
+        out.push({ room: id, to, kind, locked, x: tr.x + tr.w / 2 - bodyW / 2, y: Math.max(0, tr.y - bodyH - 8) });
       } else if (kind === 'leapUp') {
         // Launch injected from just inside the band's lower half.
-        out.push({ room: id, to, kind, locked, x: tr.x + tr.w / 2 - 7, y: tr.y + Math.max(2, tr.h - 12) });
+        out.push({ room: id, to, kind, locked, x: tr.x + tr.w / 2 - bodyW / 2, y: tr.y + Math.max(2, tr.h - bodyH / 2) });
       } else {
-        const y = standAt(tr.x + tr.w / 2 - 7, tr.y);
-        out.push({ room: id, to, kind, locked, x: tr.x + tr.w / 2 - 7, y: y ?? tr.y + tr.h - 18 });
+        const x = tr.x + tr.w / 2 - bodyW / 2;
+        const y = standAt(x, tr.y);
+        out.push({ room: id, to, kind, locked, x, y: y ?? tr.y + tr.h - bodyH });
       }
     }
   }
