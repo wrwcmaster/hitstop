@@ -51,6 +51,15 @@
     #grid { cursor: crosshair; border: 1px solid #33447f; }
     #grid.selecting { cursor: cell; }
     #grid.magic-selecting { cursor: pointer; }
+    #grid.selection-add {
+      cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Cpath d='M12 2v20M2 12h20' stroke='%23fff' stroke-width='3'/%3E%3Cpath d='M12 2v20M2 12h20' stroke='%23000'/%3E%3Ccircle cx='23' cy='23' r='7' fill='%23070b16' stroke='%23fff'/%3E%3Cpath d='M23 19v8M19 23h8' stroke='%2338b764' stroke-width='2'/%3E%3C/svg%3E") 12 12, crosshair !important;
+    }
+    #grid.selection-subtract {
+      cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Cpath d='M12 2v20M2 12h20' stroke='%23fff' stroke-width='3'/%3E%3Cpath d='M12 2v20M2 12h20' stroke='%23000'/%3E%3Ccircle cx='23' cy='23' r='7' fill='%23070b16' stroke='%23fff'/%3E%3Cpath d='M19 23h8' stroke='%23b13e53' stroke-width='2'/%3E%3C/svg%3E") 12 12, crosshair !important;
+    }
+    #grid.selection-intersect {
+      cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Cpath d='M12 2v20M2 12h20' stroke='%23fff' stroke-width='3'/%3E%3Cpath d='M12 2v20M2 12h20' stroke='%23000'/%3E%3Ccircle cx='23' cy='23' r='7' fill='%23070b16' stroke='%23fff'/%3E%3Cpath d='m20 20 6 6m0-6-6 6' stroke='%23ffcd75' stroke-width='2'/%3E%3C/svg%3E") 12 12, crosshair !important;
+    }
     #grid.selecting.selection-movable { cursor: move; }
     #grid.picking { cursor: copy; }
     #grid.soft-tool { cursor: none; }

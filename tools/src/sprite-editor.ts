@@ -110,6 +110,7 @@ interface SharedSelection extends PixelRect {
 }
 let selection: PixelSelection | null = null;
 type SelectionCombineMode = 'replace' | 'add' | 'subtract' | 'intersect';
+let selectionModifierKeys = { shiftKey: false, altKey: false };
 interface SelectionDrag {
   x: number;
   y: number;
@@ -2309,6 +2310,7 @@ grid.addEventListener('mousedown', (e) => {
 grid.addEventListener('mousemove', (e) => {
   hoverPointer = { x: e.clientX, y: e.clientY };
   updateBrushCursor();
+  updateSelectionModifierCursor(e);
   if (picking) {
     pickColor(e, false);
     return;
@@ -2403,7 +2405,7 @@ function magicTolerance(): number {
   return Math.max(0, Math.min(255, Math.round(($('magicTolerance') as HTMLInputElement).valueAsNumber || 0)));
 }
 
-function selectionCombineMode(e: MouseEvent): SelectionCombineMode {
+function selectionCombineMode(e: { shiftKey: boolean; altKey: boolean }): SelectionCombineMode {
   if (e.shiftKey && e.altKey) return 'intersect';
   if (e.shiftKey) return 'add';
   if (e.altKey) return 'subtract';
@@ -2740,6 +2742,10 @@ function selectionHandleAt(e: MouseEvent): SelectionHandle | null {
 
 function updateSelectionCursor(e?: MouseEvent): void {
   grid.classList.remove('selection-movable');
+  if (selectionCombineMode(selectionModifierKeys) !== 'replace') {
+    grid.style.cursor = '';
+    return;
+  }
   if (currentTool !== 'select' || !selection || !e) {
     grid.style.cursor = '';
     return;
@@ -3916,6 +3922,7 @@ function updateToolUI(): void {
   } else if (!selectionHandleTransform) {
     grid.style.cursor = 'cell';
   }
+  updateSelectionModifierCursor();
   const hasSize = currentTool === 'brush' || currentTool === 'blur';
   const hasMagic = currentTool === 'magic';
   const hasFill = currentTool === 'fill';
@@ -3932,6 +3939,22 @@ function updateToolUI(): void {
     ? 'Averages neighboring colors at the center and feathers the effect toward the edge.'
     : 'The solid center overwrites color; the soft edge blends into neighboring pixels.';
   updateBrushCursor();
+}
+
+function updateSelectionModifierCursor(keys?: { shiftKey: boolean; altKey: boolean }): void {
+  if (keys) selectionModifierKeys = { shiftKey: keys.shiftKey, altKey: keys.altKey };
+  const selectionTool = currentTool === 'select' || currentTool === 'magic';
+  const mode = selectionTool ? selectionCombineMode(selectionModifierKeys) : 'replace';
+  grid.classList.toggle('selection-add', mode === 'add');
+  grid.classList.toggle('selection-subtract', mode === 'subtract');
+  grid.classList.toggle('selection-intersect', mode === 'intersect');
+  if (mode !== 'replace') {
+    grid.classList.remove('selection-movable');
+    grid.style.cursor = '';
+  } else if (currentTool === 'select' && !selectionHandleTransform) {
+    // Pointer movement will refine this to move/resize when appropriate.
+    grid.style.cursor = 'cell';
+  }
 }
 
 function updateBrushCursor(): void {
@@ -4445,6 +4468,7 @@ window.addEventListener('keydown', (e) => {
     editMenu.open = false;
     return;
   }
+  updateSelectionModifierCursor(e);
   if (e.key === 'Alt' && currentTool !== 'magic' && currentTool !== 'select') {
     e.preventDefault();
     altPickerActive = true;
@@ -4511,6 +4535,7 @@ window.addEventListener('keydown', (e) => {
 });
 
 window.addEventListener('keyup', (e) => {
+  updateSelectionModifierCursor(e);
   if (e.key !== 'Alt') return;
   e.preventDefault();
   altPickerActive = false;
@@ -4518,6 +4543,7 @@ window.addEventListener('keyup', (e) => {
 });
 
 window.addEventListener('blur', () => {
+  selectionModifierKeys = { shiftKey: false, altKey: false };
   altPickerActive = false;
   picking = false;
   updateToolUI();
