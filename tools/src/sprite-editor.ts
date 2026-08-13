@@ -305,6 +305,7 @@ function clearDraft(path: string): void {
 
 function persistCurrentDraft(): void {
   if (!currentRepoPath) return;
+  rememberWorkingSprite(currentRepoPath, file);
   const serialized = JSON.stringify(file);
   if (lastRepositoryFile && serialized === lastRepositoryFile) {
     clearDraft(currentRepoPath);
@@ -533,6 +534,28 @@ const existingSprites = new Map(
     .sort(([a], [b]) => a.localeCompare(b)),
 );
 
+// `existingSprites` is the repository snapshot Vite imported when this page
+// loaded. Keep a separate workspace view for documents the author has opened
+// or left as browser-local drafts. Composite previews often render a second
+// sprite (for example the knight while a sword is being edited), and that
+// second sprite must come from the same live workspace as the canvas rather
+// than the stale module snapshot.
+const workingSprites = new Map<string, EditorSpriteFile>();
+
+function rememberWorkingSprite(path: string, spriteFile: SpriteFile): void {
+  workingSprites.set(path, normalize(structuredClone(spriteFile)) as EditorSpriteFile);
+}
+
+function latestWorkingSprite(path: string): SpriteFile | null {
+  if (currentRepoPath === path) return file;
+  return workingSprites.get(path) ?? existingSprites.get(path) ?? null;
+}
+
+// Restore the whole browser-local workspace up front. This also makes a
+// direct link to an equipment sheet use an unsaved knight draft without first
+// requiring the author to open the knight in this tab.
+for (const draft of storedDrafts()) rememberWorkingSprite(draft.path, draft.file);
+
 function populateSpriteSelect(id: string): void {
   const select = $(id) as HTMLSelectElement;
   for (const path of existingSprites.keys()) {
@@ -589,12 +612,17 @@ populateSpriteSelect('selectSprite');
 populateSpriteSelect('selectRefSprite');
 
 function activatePanel(group: 'left' | 'right', target: string): void {
+  const panels = [...document.querySelectorAll<HTMLElement>(`[data-panel-page="${group}"]`)];
+  // Saved view state from an older editor can name a panel that has since
+  // become persistent (the palette used to be the `left-colors` tab). Keep
+  // the current valid panel instead of hiding the whole workspace.
+  if (!panels.some((panel) => panel.id === target)) return;
   document.querySelectorAll<HTMLButtonElement>(`[data-panel-tab="${group}"]`).forEach((button) => {
     const active = button.dataset.panelTarget === target;
     button.classList.toggle('active', active);
     button.setAttribute('aria-selected', String(active));
   });
-  document.querySelectorAll<HTMLElement>(`[data-panel-page="${group}"]`).forEach((panel) => {
+  panels.forEach((panel) => {
     panel.hidden = panel.id !== target;
   });
 }
@@ -966,7 +994,7 @@ function populateCompositeBodySelect(): void {
 
 function selectedWeaponBody(bodySelection: string): SpriteFile | null {
   if (!bodySelection.startsWith(WEAPON_BODY_PREFIX)) return null;
-  return existingSprites.get(bodySelection.slice(WEAPON_BODY_PREFIX.length)) ?? null;
+  return latestWorkingSprite(bodySelection.slice(WEAPON_BODY_PREFIX.length));
 }
 
 populateCompositeBodySelect();
@@ -3423,16 +3451,27 @@ function redraw(): void {
  */
 let editVersion = 0;
 let rebuiltVersion = -1;
+let rebuiltKnightSignature = '';
 
 function maybeRebakeEditedEquipment(): void {
   if (rebuiltVersion === editVersion) return;
   rebuiltVersion = editVersion;
-  if (currentRepoPath === PLAYER_BODY_SPRITE_PATH) {
-    rebuildKnightSprite(file);
-    // Player copied the old anim set during construction; rebuild the
-    // render-only mannequin so the shared draft appears immediately.
-    posePlayer = null;
-    posePlayerError = '';
+
+  // Player.render reads the registered knight sprite, while the raw-sheet
+  // preview reads the editor document directly. Rebuild the registered body
+  // from the latest workspace document so those two preview routes cannot
+  // disagree about pixels, layers, or hand anchors after unsaved edits.
+  const knightFile = latestWorkingSprite(PLAYER_BODY_SPRITE_PATH);
+  if (knightFile) {
+    const knightSignature = JSON.stringify(knightFile);
+    if (knightSignature !== rebuiltKnightSignature) {
+      rebuildKnightSprite(knightFile);
+      rebuiltKnightSignature = knightSignature;
+      // Player copied the old anim set during construction; rebuild the
+      // render-only mannequin so the shared draft appears immediately.
+      posePlayer = null;
+      posePlayerError = '';
+    }
   }
   // "rusty-sword.json" -> visual id "rusty-sword"; a no-op for sheets
   // that aren't a registered sprite weapon.
@@ -3570,6 +3609,41 @@ function ensureEquipped(p: Player, slot: string, id: string | null): void {
   p.syncStats();
 }
 
+/**
+ * Player.render derives its locomotion animation from physics state instead
+ * of accepting an animation name. The editor does not simulate physics, so
+ * explicitly pose the mannequin to the state represented by the selected
+ * animation. Without this, a newly constructed mannequin remains airborne:
+ * an `idle` preview then draws the body's `air` anchors while the raw-sheet
+ * preview correctly draws `idle`.
+ */
+function posePlayerLocomotion(p: Player, animation: string): void {
+  p.vx = 0;
+  p.vy = 0;
+  switch (animation) {
+    case 'run':
+      p.onGround = true;
+      p.vx = 120;
+      break;
+    case 'rise':
+      p.onGround = false;
+      p.vy = -120;
+      break;
+    case 'fall':
+      p.onGround = false;
+      p.vy = 120;
+      break;
+    case 'air':
+      p.onGround = false;
+      break;
+    default:
+      // Attack sheets and equipment-only animations use the neutral grounded
+      // body unless the selected move below explicitly poses an attack.
+      p.onGround = true;
+      break;
+  }
+}
+
 /** The body is the authority for a neutral composite's frame clock. */
 function resolveCompositeBodyClock(bodySelection: string) {
   const selectedBody = selectedWeaponBody(bodySelection);
@@ -3696,6 +3770,7 @@ function renderComposite(t: number): boolean {
       ensureEquipped(p, 'helmet', gearOn ? 'iron-helmet' : null);
       ensureEquipped(p, 'armor', gearOn ? 'steel-armor' : null);
       p.facing = 1;
+      posePlayerLocomotion(p, animName);
       p.animT = tIn;
       p.renderTrail = ($('compTrail') as HTMLInputElement).checked;
       p.poseAttack(pose ? pose.def : null, pose ? pose.progress : 0);

@@ -31,7 +31,17 @@
     #gridZoomPercent { width: 72px; text-align: right; }
     #brushSize { width: 58px; text-align: right; }
     main { flex: 1; display: flex; min-height: 0; }
-    #side-left, #side-right { width: 260px; padding: 10px; background: #101430; overflow-y: auto; flex-shrink: 0; }
+    #side-left, #side-right { width: 260px; background: #101430; flex-shrink: 0; }
+    #side-left {
+      padding: 0; overflow: hidden; display: flex; flex-direction: column;
+    }
+    #persistent-palette {
+      flex: 0 1 auto; max-height: 56%; overflow-y: auto; padding: 10px;
+      background: #101430; border-bottom: 1px solid #33447f;
+    }
+    #left-workspace-scroll {
+      flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px;
+    }
     #side-right { width: 300px; }
     #side-right {
       padding: 0; overflow: hidden; display: flex; flex-direction: column;
@@ -286,12 +296,7 @@
   </div>
   <main>
     <div id="side-left">
-      <div class="panel-tabs" role="tablist" aria-label="asset panels">
-        <button class="active" data-panel-tab="left" data-panel-target="left-colors" role="tab" aria-selected="true">colors</button>
-        <button data-panel-tab="left" data-panel-target="left-tool" role="tab" aria-selected="false">tool</button>
-        <button data-panel-tab="left" data-panel-target="left-reference" role="tab" aria-selected="false">reference</button>
-      </div>
-      <section id="left-colors" class="panel-page" data-panel-page="left">
+      <section id="persistent-palette" aria-label="persistent color palette">
         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px">
           <h2 style="margin:0">palette <span id="paletteStatus" class="hint"></span></h2>
           <button id="btnCompactPalette" title="Merge duplicate colors and remove unused palette entries">compact</button>
@@ -303,7 +308,12 @@
           <button id="btnAddColor">add</button>
         </div>
       </section>
-      <section id="left-tool" class="panel-page" data-panel-page="left" hidden>
+      <div id="left-workspace-scroll">
+      <div class="panel-tabs" role="tablist" aria-label="asset panels">
+        <button class="active" data-panel-tab="left" data-panel-target="left-tool" role="tab" aria-selected="true">tool</button>
+        <button data-panel-tab="left" data-panel-target="left-reference" role="tab" aria-selected="false">compose</button>
+      </div>
+      <section id="left-tool" class="panel-page" data-panel-page="left">
         <h2 id="toolConfigTitle">tool settings</h2>
         <div id="brushSizeConfig" hidden>
           <label id="brushSizeLabel" style="margin-bottom:8px">brush size</label>
@@ -331,7 +341,26 @@
         <p id="toolConfigEmpty" class="hint">The selected tool has no adjustable settings.</p>
       </section>
       <section id="left-reference" class="panel-page" data-panel-page="left" hidden>
-        <h2>reference sprite</h2>
+        <div class="panel-group">
+        <h2>composite preview</h2>
+        <div style="display:flex; flex-direction:column; gap:4px">
+          <select id="compWeapon"><option value="">-- no weapon --</option></select>
+          <select id="compMove" title="Choose the move whose weapon pose, trail, timing, and body motion should be previewed"><option value="">move: auto</option></select>
+          <select id="compBody">
+            <option value="edited">body: edited sprite</option>
+            <option value="player">body: player (full)</option>
+          </select>
+          <div class="panel-row">
+            <label><input type="checkbox" id="compTrail" checked> trail</label>
+            <label><input type="checkbox" id="compHitbox" checked> hitbox</label>
+            <label><input type="checkbox" id="compGear"> gear</label>
+          </div>
+        </div>
+        <p class="hint" style="margin:6px 0 0">Body, held weapon, and attack effects use the game's own renderers.</p>
+        </div>
+
+        <div class="panel-group">
+        <h2>reference overlay</h2>
         <div style="display:flex; flex-direction:column; gap:4px">
           <select id="selectRefSprite" style="background:#1f2a57; color:#f4f4f4; border:1px solid #33447f; border-radius:4px; padding:4px;">
             <option value="">-- select reference --</option>
@@ -342,7 +371,9 @@
         <label style="display:block; margin-top:6px">
           <input type="checkbox" id="showRef" checked> show reference (30% opacity)
         </label>
+        </div>
       </section>
+      </div>
     </div>
 
     <div id="center">
@@ -373,24 +404,6 @@
         <button data-panel-tab="right" data-panel-target="right-rig" role="tab" aria-selected="false">rig</button>
       </div>
       <section id="right-animate" class="panel-page" data-panel-page="right">
-      <div class="panel-group">
-        <h2>composite</h2>
-        <div style="display:flex; flex-direction:column; gap:4px">
-          <select id="compWeapon"><option value="">-- no weapon --</option></select>
-          <select id="compMove" title="Choose the move whose weapon pose, trail, timing, and body motion should be previewed"><option value="">move: auto</option></select>
-          <select id="compBody">
-            <option value="edited">body: edited sprite</option>
-            <option value="player">body: player (full)</option>
-          </select>
-          <div class="panel-row">
-            <label><input type="checkbox" id="compTrail" checked> trail</label>
-            <label><input type="checkbox" id="compHitbox" checked> hitbox</label>
-            <label><input type="checkbox" id="compGear"> gear</label>
-          </div>
-        </div>
-        <p class="hint" style="margin:6px 0 0">Body, held weapon, and attack effects are rendered together with the game's own renderers.</p>
-      </div>
-
       <h2>animations</h2>
       <div id="anims" style="margin-bottom:6px"></div>
       <div style="display:flex; gap:4px; margin-bottom:6px">

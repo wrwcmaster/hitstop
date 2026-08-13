@@ -287,7 +287,16 @@ export function spriteWeapon(config: SpriteWeaponConfig): WeaponVisual {
         attackName = 'attack';
         attackAnim = set.attack;
       }
-      const anim = attackAnim ? attackName! : ctx.anim;
+      // Equipment may omit locomotion-specific art. In that case keep the
+      // weapon attached with its neutral pose instead of requiring redundant
+      // one-frame `air`, `rise`, and `fall` tracks on every weapon sheet.
+      const neutralAnim = set[ctx.anim]
+        ? ctx.anim
+        : set.idle
+          ? 'idle'
+          : Object.keys(set)[0];
+      const anim = attackAnim ? attackName! : neutralAnim;
+      if (!anim || !set[anim]) return;
       const frame = attackAnim
         ? attackFrame(ctx.attack!, attackAnim.frames.length)
         : bodyAlignedFrame(set[anim], ctx.frame);
