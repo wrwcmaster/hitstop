@@ -1661,20 +1661,48 @@ function buildLayers(): void {
     name.textContent = layer.name;
     name.title = 'Select layer; double-click to rename';
     name.onclick = () => {
+      if (activeLayerId === layer.id) return;
       activeLayerId = layer.id;
       clearSelection(false);
-      buildLayers();
+      host.querySelector('.layer-row.active')?.classList.remove('active');
+      row.classList.add('active');
       redraw();
       void publishSelection();
     };
-    name.ondblclick = () => {
+    name.ondblclick = (event) => {
       if (!isLayeredSpriteFile(file)) return;
-      const label = prompt('layer name:', layer.name)?.trim();
-      if (!label || label === layer.name) return;
-      saveHistory();
-      layer.name = label;
-      buildLayers();
-      syncIO();
+      event.preventDefault();
+      event.stopPropagation();
+
+      const editor = document.createElement('input');
+      editor.className = 'layer-name layer-name-editor';
+      editor.value = layer.name;
+      editor.title = 'Enter to rename; Escape to cancel';
+      let finished = false;
+      const finish = (commit: boolean): void => {
+        if (finished) return;
+        finished = true;
+        const label = editor.value.trim();
+        if (commit && label && label !== layer.name) {
+          saveHistory();
+          layer.name = label;
+          syncIO();
+        }
+        buildLayers();
+      };
+      editor.onkeydown = (keyEvent) => {
+        if (keyEvent.key === 'Enter') {
+          keyEvent.preventDefault();
+          finish(true);
+        } else if (keyEvent.key === 'Escape') {
+          keyEvent.preventDefault();
+          finish(false);
+        }
+      };
+      editor.onblur = () => finish(true);
+      name.replaceWith(editor);
+      editor.focus();
+      editor.select();
     };
 
     const tag = document.createElement('select');
