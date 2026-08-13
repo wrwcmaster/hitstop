@@ -1,0 +1,14 @@
+[
+  {
+    "id": "body",
+    "label": "Body"
+  },
+  {
+    "id": "front-hand-held-object",
+    "label": "Front hand held object"
+  },
+  {
+    "id": "front-hand",
+    "label": "Front hand"
+  }
+]

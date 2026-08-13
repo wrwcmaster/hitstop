@@ -1,17 +1,25 @@
 /// <reference types="vite/client" />
 
 import {
-  resolveSpriteGeometry, resolveAnim, sprite, epx,
-  type Palette, type SpriteFile, type SpriteAnimData, type SpriteAnchor,
+  resolveSpriteGeometry, resolveAnim, resolveAnimName, resolveAnimTiming,
+  compositeSpriteFrame, compositeSpriteFrameByTags, isLayeredSpriteFile, validateLayeredSpriteFile,
+  sprite, epx,
+  type Palette, type SpriteFile, type FlatSpriteFile, type LayeredSpriteFile,
+  type SpriteAnimData, type LayeredSpriteAnimData, type SpriteLayerData, type SpriteAnchor,
 } from '@engine/index';
 import { PAL } from '@game/content/palette';
+import {
+  configurePlayerRenderTags,
+  type PlayerRenderTagDef,
+} from '@game/content/render-tags';
+import repositoryRenderTagDefs from '@game/content/render-tags.json';
 // Composite preview: the editor borrows the GAME's renderers rather than
 // imitating them, so what you see here — held weapon anchored to the
 // body, slash trail sweeping on the attack clock — is exactly what the
 // game draws. The weapon anchors and the trail are code, not sprites;
 // no sprite-only overlay could show this truthfully.
 import {
-  drawHeldWeapon,
+  drawHeldWeaponTag,
   drawWeaponTrail,
   weaponVisuals,
   rebuildSpriteWeapon,
@@ -60,7 +68,7 @@ let previewStepping = false;
 let currentChar = firstPaintChar();
 let painting = false;
 let erasing = false;
-type EditorTool = 'draw' | 'brush' | 'blur' | 'fill' | 'picker' | 'select';
+type EditorTool = 'draw' | 'brush' | 'blur' | 'fill' | 'picker' | 'select' | 'magic' | 'move';
 let currentTool: EditorTool = 'draw';
 let altPickerActive = false;
 let picking = false;
@@ -68,10 +76,11 @@ let lastPaintCell: { x: number; y: number } | null = null;
 let hoverPointer: { x: number; y: number } | null = null;
 let strokePaletteChanged = false;
 interface PixelRect { x: number; y: number; w: number; h: number }
-interface PixelClipboard { w: number; h: number; rows: string[] }
+interface PixelSelection extends PixelRect { mask?: string[] }
+interface PixelClipboard { w: number; h: number; rows: string[]; mask?: string[] }
 interface SelectionMove {
   start: { x: number; y: number };
-  original: PixelRect;
+  original: PixelSelection;
   source: PixelClipboard;
   baseFrame: string[];
   last: { x: number; y: number };
@@ -81,7 +90,7 @@ type SelectionResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 type SelectionHandle = SelectionResizeHandle | 'rotate';
 interface SelectionHandleTransform {
   handle: SelectionHandle;
-  original: PixelRect;
+  original: PixelSelection;
   source: PixelClipboard;
   baseFrame: string[];
   startPointer: { x: number; y: number };
@@ -93,12 +102,28 @@ interface SharedSelection extends PixelRect {
   path: string | null;
   anim: string;
   frame: number;
+  layerId?: string;
   rows: string[];
+  mask?: string[];
   source: string;
   updatedAt: number;
 }
-let selection: PixelRect | null = null;
-let selectionStart: { x: number; y: number } | null = null;
+let selection: PixelSelection | null = null;
+type SelectionCombineMode = 'replace' | 'add' | 'subtract' | 'intersect';
+let selectionModifierKeys = { shiftKey: false, altKey: false };
+interface SelectionDrag {
+  x: number;
+  y: number;
+  mode: SelectionCombineMode;
+  base: Set<string>;
+}
+interface MagicSelectionDrag {
+  initialMode: SelectionCombineMode;
+  mode: SelectionCombineMode;
+  last: { x: number; y: number };
+}
+let selectionStart: SelectionDrag | null = null;
+let magicSelectionDrag: MagicSelectionDrag | null = null;
 let selectionMove: SelectionMove | null = null;
 let selectionHandleTransform: SelectionHandleTransform | null = null;
 let pixelClipboard: PixelClipboard | null = null;
@@ -106,6 +131,12 @@ let refFile: SpriteFile | null = null;
 let currentFileName = 'new sprite.json';
 let currentRepoPath: string | null = null;
 let selectedAnchorName = '';
+let selectedAttachmentSlotName = '';
+const FLAT_LAYER_ID = 'base';
+let activeLayerId = FLAT_LAYER_ID;
+let hiddenLayerIds = new Set<string>();
+let lockedLayerIds = new Set<string>();
+let soloLayerId: string | null = null;
 const undoStack: string[] = [];
 const redoStack: string[] = [];
 const MAX_HISTORY = 100;
@@ -140,8 +171,68 @@ let lastSharedFile = '';
 let lastRepositoryFile = '';
 let previewTimer = 0;
 const DRAFT_PREFIX = 'hitstop.sprite-editor.draft:';
+const RENDER_TAG_DRAFT_KEY = 'hitstop.sprite-editor.render-tags.draft';
 let lastDraftSignature = '';
 let editorViewReady = false;
+let savedRenderTagSignature = JSON.stringify(repositoryRenderTagDefs);
+let renderTagDefs: PlayerRenderTagDef[] = readRenderTagDraft();
+
+function validRenderTagDefs(value: unknown): value is PlayerRenderTagDef[] {
+  if (!Array.isArray(value) || value.length === 0) return false;
+  const ids = new Set<string>();
+  return value.every((entry) => {
+    if (!entry || typeof entry !== 'object') return false;
+    const definition = entry as Partial<PlayerRenderTagDef>;
+    if (typeof definition.id !== 'string' || !/^[a-z][a-z0-9-]*$/.test(definition.id)
+      || typeof definition.label !== 'string' || !definition.label.trim() || ids.has(definition.id)) return false;
+    ids.add(definition.id);
+    return true;
+  }) && visualRenderTagIds().every((id) => ids.has(id));
+}
+
+function visualRenderTagIds(): string[] {
+  return [...new Set(weaponVisuals.entries().flatMap(([, visual]) => [
+    ...visual.renderTags,
+    ...(visual.gripRenderTag ? [visual.gripRenderTag] : []),
+  ]))];
+}
+
+function readRenderTagDraft(): PlayerRenderTagDef[] {
+  try {
+    const stored = JSON.parse(localStorage.getItem(RENDER_TAG_DRAFT_KEY) ?? 'null') as unknown;
+    if (validRenderTagDefs(stored)) return structuredClone(stored);
+  } catch {
+    // Ignore a malformed convenience draft and fall back to repository data.
+  }
+  return structuredClone(repositoryRenderTagDefs) as PlayerRenderTagDef[];
+}
+
+function renderTagIds(): string[] {
+  return renderTagDefs.map((definition) => definition.id);
+}
+
+function renderTagEntries(): [string, PlayerRenderTagDef][] {
+  return renderTagDefs.map((definition) => [definition.id, definition]);
+}
+
+function hasRenderTag(id: string): boolean {
+  return renderTagDefs.some((definition) => definition.id === id);
+}
+
+function renderTagsDirty(): boolean {
+  return JSON.stringify(renderTagDefs) !== savedRenderTagSignature;
+}
+
+function persistRenderTagDraft(): void {
+  try {
+    if (renderTagsDirty()) localStorage.setItem(RENDER_TAG_DRAFT_KEY, JSON.stringify(renderTagDefs));
+    else localStorage.removeItem(RENDER_TAG_DRAFT_KEY);
+  } catch {
+    // Sprite editing remains usable when storage is unavailable.
+  }
+}
+
+configurePlayerRenderTags(renderTagDefs);
 
 interface StoredSpriteDraft {
   v: 1;
@@ -162,6 +253,29 @@ function readDraft(path: string): StoredSpriteDraft | null {
     return parsed;
   } catch {
     return null;
+  }
+}
+
+/** Keep unsaved pixels when repository tag ids are renamed between sessions. */
+function reconcileDraftRenderTags(draftFile: SpriteFile, repositoryFile: SpriteFile): void {
+  const repositoryLayers = isLayeredSpriteFile(repositoryFile)
+    ? new Map(repositoryFile.layers.map((layer) => [layer.id, layer.tag]))
+    : new Map<string, string>();
+  const repositoryFallback = repositoryFile.renderTag
+    ?? (isLayeredSpriteFile(repositoryFile) ? repositoryFile.layers[0]?.tag : undefined);
+  const replacementFor = (layerId?: string): string | undefined => {
+    const matching = layerId ? repositoryLayers.get(layerId) : undefined;
+    if (matching && hasRenderTag(matching)) return matching;
+    if (repositoryFallback && hasRenderTag(repositoryFallback)) return repositoryFallback;
+    return renderTagDefs[0]?.id;
+  };
+
+  if (isLayeredSpriteFile(draftFile)) {
+    for (const layer of draftFile.layers) {
+      if (!hasRenderTag(layer.tag)) layer.tag = replacementFor(layer.id) ?? layer.tag;
+    }
+  } else if (!draftFile.renderTag || !hasRenderTag(draftFile.renderTag)) {
+    draftFile.renderTag = replacementFor();
   }
 }
 
@@ -226,12 +340,54 @@ const pal = (): Palette => file.palette ?? {};
  * belt-and-braces. Mutations through it therefore edit the target's
  * frames, which is the only thing an alias could mean in an editor.
  */
-const anim = (): SpriteAnimData => resolveAnim(file, animName)!;
+const activeLayer = (): SpriteLayerData | null => isLayeredSpriteFile(file)
+  ? file.layers.find((layer) => layer.id === activeLayerId) ?? file.layers.at(-1) ?? null
+  : null;
+
+function activeFrames(name = animName): string[][] {
+  const target = resolveAnimName(file, name);
+  if (isLayeredSpriteFile(file)) {
+    const layer = activeLayer();
+    if (!layer) throw new Error('layered sprite has no active layer');
+    return layer.tracks[target];
+  }
+  const entry = file.anims[target];
+  if (!entry || typeof entry === 'string') throw new Error(`animation ${target} has no frames`);
+  return entry.frames;
+}
+
+const anim = (): SpriteAnimData => {
+  const timing = resolveAnimTiming(file, animName);
+  if (!timing) throw new Error(`unknown animation ${animName}`);
+  return { fps: timing.fps, loop: timing.loop, frames: activeFrames() };
+};
 /** Concrete (non-alias) animations — the only ones with frames to edit,
  * resize, or export as art. */
+const concreteAnimNames = (): string[] =>
+  Object.entries(file.anims).filter(([, entry]) => typeof entry !== 'string').map(([name]) => name);
 const concreteAnims = (): [string, SpriteAnimData][] =>
-  Object.entries(file.anims).filter((e): e is [string, SpriteAnimData] => typeof e[1] !== 'string');
+  concreteAnimNames().map((name) => [name, {
+    fps: resolveAnimTiming(file, name)!.fps,
+    loop: resolveAnimTiming(file, name)!.loop,
+    frames: activeFrames(name),
+  }]);
 const cur = () => anim().frames[frameIdx];
+const compositeCur = (index = frameIdx): string[] => {
+  const include = (layer: SpriteLayerData) => (
+    soloLayerId ? layer.id === soloLayerId : !hiddenLayerIds.has(layer.id)
+  );
+  return (isLayeredSpriteFile(file)
+    ? compositeSpriteFrameByTags(file, animName, index, renderTagIds(), PAL, include)
+    : compositeSpriteFrame(file, animName, index, PAL, include)) ?? cur();
+};
+const visibleAnim = (): SpriteAnimData => {
+  const timing = resolveAnimTiming(file, animName)!;
+  return {
+    fps: timing.fps,
+    loop: timing.loop,
+    frames: Array.from({ length: timing.frameCount }, (_, index) => compositeCur(index)),
+  };
+};
 const W = () => cur()[0].length;
 const H = () => cur().length;
 const density = () => file.hd === false ? 4 : 1;
@@ -241,13 +397,67 @@ function concreteAnimName(name = animName): string {
 }
 
 function concreteAnimNameOf(spriteFile: SpriteFile, name: string): string {
-  const seen = new Set<string>();
-  let current = name;
-  while (typeof spriteFile.anims[current] === 'string' && !seen.has(current)) {
-    seen.add(current);
-    current = spriteFile.anims[current] as string;
+  return resolveAnimName(spriteFile, name);
+}
+
+function reconcileLayerState(reset = false): void {
+  if (!isLayeredSpriteFile(file)) {
+    activeLayerId = FLAT_LAYER_ID;
+    hiddenLayerIds.clear();
+    lockedLayerIds.clear();
+    soloLayerId = null;
+    return;
   }
-  return current;
+  const ids = new Set(file.layers.map((layer) => layer.id));
+  if (reset || !ids.has(activeLayerId)) activeLayerId = file.layers.at(-1)?.id ?? FLAT_LAYER_ID;
+  hiddenLayerIds = new Set([...hiddenLayerIds].filter((id) => ids.has(id)));
+  lockedLayerIds = new Set([...lockedLayerIds].filter((id) => ids.has(id)));
+  if (soloLayerId && !ids.has(soloLayerId)) soloLayerId = null;
+}
+
+function uniqueLayerId(label: string): string {
+  const stem = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'layer';
+  const ids = new Set(isLayeredSpriteFile(file) ? file.layers.map((layer) => layer.id) : []);
+  let id = stem;
+  for (let suffix = 2; ids.has(id); suffix++) id = `${stem}-${suffix}`;
+  return id;
+}
+
+function defaultLayerTag(spriteFile: SpriteFile = file): string {
+  const configured = spriteFile.renderTag;
+  if (configured && hasRenderTag(configured)) return configured;
+  const fallback = renderTagDefs[0]?.id;
+  if (!fallback) throw new Error('at least one render tag is required');
+  return fallback;
+}
+
+function ensureLayeredFile(): LayeredSpriteFile {
+  if (isLayeredSpriteFile(file)) return file;
+  const flat = file as FlatSpriteFile & EditorSpriteFile;
+  const tracks: Record<string, string[][]> = {};
+  const anims: Record<string, LayeredSpriteAnimData | string> = {};
+  for (const [name, entry] of Object.entries(flat.anims)) {
+    if (typeof entry === 'string') anims[name] = entry;
+    else {
+      tracks[name] = entry.frames;
+      anims[name] = { fps: entry.fps, frameCount: entry.frames.length, loop: entry.loop };
+    }
+  }
+  const { anims: _flatAnims, renderTag: _flatRenderTag, ...rest } = flat;
+  file = {
+    ...rest,
+    anims,
+    layers: [{ id: FLAT_LAYER_ID, name: 'Base', tag: defaultLayerTag(), tracks }],
+  } as LayeredSpriteFile & EditorSpriteFile;
+  activeLayerId = FLAT_LAYER_ID;
+  reconcileLayerState();
+  return file as LayeredSpriteFile;
+}
+
+function requireEditableLayer(): boolean {
+  if (!isLayeredSpriteFile(file) || !lockedLayerIds.has(activeLayerId)) return true;
+  flash(`layer “${activeLayer()?.name ?? activeLayerId}” is locked`);
+  return false;
 }
 
 function currentAnchor(): SpriteAnchor | undefined {
@@ -289,6 +499,25 @@ const gctx = grid.getContext('2d')!;
 const brushCursor = $('brushCursor');
 const preview = $('preview') as HTMLCanvasElement;
 const pctx = preview.getContext('2d')!;
+const TRANSPARENCY_CHECKER_SIZE = 12;
+
+/** Photoshop-style transparency is a view-space aid, not sprite pixels. */
+function drawTransparencyChecker(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  size = TRANSPARENCY_CHECKER_SIZE,
+): void {
+  context.fillStyle = '#f0f0f0';
+  context.fillRect(0, 0, width, height);
+  context.fillStyle = '#b8b8b8';
+  for (let y = 0; y < height; y += size) {
+    for (let x = 0; x < width; x += size) {
+      if (((x / size) + (y / size)) % 2 === 0) continue;
+      context.fillRect(x, y, Math.min(size, width - x), Math.min(size, height - y));
+    }
+  }
+}
 
 const SPRITE_ROOT = '/src/game/content/sprites/';
 const spriteModules = import.meta.glob('/src/game/content/sprites/**/*.json', {
@@ -384,7 +613,8 @@ interface EditorViewState {
   tool: EditorTool;
   zoom: number;
   anchor: string;
-  selection: PixelRect | null;
+  selection: PixelSelection | null;
+  layer?: { active: string; hidden: string[]; locked: string[]; solo: string | null };
   leftPanel?: string;
   rightPanel?: string;
   preview: { playing: boolean; stepping: boolean; frame: number };
@@ -406,7 +636,8 @@ interface EditorViewState {
 }
 
 function activePanel(group: 'left' | 'right'): string | undefined {
-  return document.querySelector<HTMLButtonElement>(`[data-panel-tab="${group}"].active`)?.dataset.panelTarget;
+  return [...document.querySelectorAll<HTMLElement>(`[data-panel-page="${group}"]`)]
+    .find((panel) => !panel.hidden)?.id;
 }
 
 function captureEditorViewState(): EditorViewState {
@@ -419,7 +650,13 @@ function captureEditorViewState(): EditorViewState {
     tool: currentTool,
     zoom: cellSize,
     anchor: selectedAnchorName,
-    selection: selection ? { ...selection } : null,
+    selection: selection ? cloneSelection(selection) : null,
+    layer: {
+      active: activeLayerId,
+      hidden: [...hiddenLayerIds],
+      locked: [...lockedLayerIds],
+      solo: soloLayerId,
+    },
     leftPanel: activePanel('left'),
     rightPanel: activePanel('right'),
     preview: {
@@ -461,10 +698,17 @@ function restoreEditorViewState(saved?: EditorViewState): void {
     if (file.anims[state.anim]) animName = state.anim;
     frameIdx = Math.max(0, Math.min(state.frame, anim().frames.length - 1));
     if (state.paintChar in (file.palette ?? {})) currentChar = state.paintChar;
-    if ((['draw', 'brush', 'blur', 'fill', 'picker', 'select'] as EditorTool[]).includes(state.tool)) {
+    if ((['draw', 'brush', 'blur', 'fill', 'picker', 'select', 'magic', 'move'] as EditorTool[]).includes(state.tool)) {
       currentTool = state.tool;
     }
     selectedAnchorName = state.anchor;
+    if (state.layer) {
+      activeLayerId = state.layer.active;
+      hiddenLayerIds = new Set(state.layer.hidden);
+      lockedLayerIds = new Set(state.layer.locked);
+      soloLayerId = state.layer.solo;
+      reconcileLayerState();
+    }
     previewStepping = state.preview.stepping;
     previewStepFrame = state.preview.frame;
 
@@ -512,9 +756,15 @@ function restoreEditorViewState(saved?: EditorViewState): void {
 }
 
 const editMenu = $('editMenu') as HTMLDetailsElement;
-for (const id of ['btnUndo', 'btnRedo', 'btnCut', 'btnCopy', 'btnPaste']) {
+for (const id of ['btnUndo', 'btnRedo', 'btnCut', 'btnCopy', 'btnPaste', 'btnOpenLayerTags', 'btnOpenData']) {
   $(id).addEventListener('click', () => { editMenu.open = false; });
 }
+$('btnOpenLayerTags').addEventListener('click', () => {
+  closeRenderTagCreate();
+  buildRenderTagEditor();
+  ($('renderTagsDialog') as HTMLDialogElement).showModal();
+});
+$('btnOpenData').addEventListener('click', () => activatePanel('right', 'right-data'));
 document.addEventListener('pointerdown', (event) => {
   if (editMenu.open && !editMenu.contains(event.target as Node)) editMenu.open = false;
 });
@@ -549,18 +799,23 @@ function updateBridgeStatus(): void {
   }
   const save = $('btnSaveRepo') as HTMLButtonElement;
   const draftCount = storedDrafts().length;
-  save.disabled = !bridgeConnected || bridgeConflict || (!bridgeDirty && draftCount === 0);
-  save.title = draftCount
-    ? `Save ${draftCount} modified sprite${draftCount === 1 ? '' : 's'} to the repository`
-    : 'Save all modified sprites to the repository';
+  const tagDirty = renderTagsDirty();
+  const pending = [
+    draftCount ? `${draftCount} modified sprite${draftCount === 1 ? '' : 's'}` : '',
+    tagDirty ? 'layer tags' : '',
+  ].filter(Boolean);
+  save.disabled = !bridgeConnected || bridgeConflict || (!bridgeDirty && draftCount === 0 && !tagDirty);
+  save.title = pending.length
+    ? `Save ${pending.join(' and ')} to the repository`
+    : 'Save all modified sprites and layer tags to the repository';
 }
 
-function historySnapshot(spriteFile: SpriteFile = file, selected: PixelRect | null = selection): string {
+function historySnapshot(spriteFile: SpriteFile = file, selected: PixelSelection | null = selection): string {
   return JSON.stringify({ v: 1, file: spriteFile, selection: selected });
 }
 
-function parseHistorySnapshot(snapshot: string): { file: SpriteFile; selection: PixelRect | null } {
-  const parsed = JSON.parse(snapshot) as { v?: unknown; file?: unknown; selection?: PixelRect | null };
+function parseHistorySnapshot(snapshot: string): { file: SpriteFile; selection: PixelSelection | null } {
+  const parsed = JSON.parse(snapshot) as { v?: unknown; file?: unknown; selection?: PixelSelection | null };
   if (parsed?.v === 1 && parsed.file) {
     return { file: parsed.file as SpriteFile, selection: parsed.selection ?? null };
   }
@@ -659,13 +914,15 @@ async function bridgeJson(path: string, init?: RequestInit): Promise<{ response:
 
 function selectionSnapshot(): SharedSelection | null {
   if (!selection) return null;
+  const clip = pixelsInSelection(selection);
   return {
     ...selection,
     path: currentRepoPath,
     anim: concreteAnimName(),
     frame: frameIdx,
-    rows: cur().slice(selection.y, selection.y + selection.h)
-      .map((row) => row.slice(selection!.x, selection!.x + selection!.w)),
+    layerId: isLayeredSpriteFile(file) ? activeLayerId : undefined,
+    rows: clip.rows,
+    mask: clip.mask,
     source: bridgeClientId,
     updatedAt: Date.now(),
   };
@@ -739,7 +996,14 @@ async function openSharedSprite(path: string): Promise<boolean> {
     if (!response.ok) throw new Error(String(body.error ?? response.statusText));
     applyBridgeState(body as unknown as BridgeState, true);
     if (draft) {
-      const restored = normalize(structuredClone(draft.file));
+      const draftFile = structuredClone(draft.file);
+      reconcileDraftRenderTags(draftFile, file);
+      const restored = normalize(draftFile);
+      // Drafts may predate flat-sprite render tags. Inherit the repository's
+      // authored assignment instead of re-inferring a role from the filename.
+      if (!isLayeredSpriteFile(restored) && !restored.renderTag && file.renderTag) {
+        restored.renderTag = file.renderTag;
+      }
       if (JSON.stringify(restored) !== JSON.stringify(file)) {
         rememberForUndo();
         clearSelection(false);
@@ -806,6 +1070,7 @@ async function publishSharedSprite(): Promise<void> {
 async function saveWorkspaceSprites(): Promise<void> {
   if (bridgeConflict) return;
   persistCurrentDraft();
+  persistRenderTagDraft();
   const documents = new Map<string, SpriteFile>();
   for (const draft of storedDrafts()) documents.set(draft.path, draft.file);
   // The in-memory document is newer than both the bridge and localStorage
@@ -813,7 +1078,8 @@ async function saveWorkspaceSprites(): Promise<void> {
   if (currentRepoPath && (bridgeDirty || JSON.stringify(file) !== lastRepositoryFile)) {
     documents.set(currentRepoPath, file);
   }
-  if (!documents.size) {
+  const saveRenderTags = renderTagsDirty();
+  if (!documents.size && !saveRenderTags) {
     flash('all sprites are already saved');
     updateBridgeStatus();
     return;
@@ -829,6 +1095,7 @@ async function saveWorkspaceSprites(): Promise<void> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         documents: [...documents].map(([path, spriteFile]) => ({ path, file: spriteFile })),
+        renderTags: saveRenderTags ? renderTagDefs : undefined,
         baseRevision: bridgeRevision,
         source: bridgeClientId,
       }),
@@ -842,11 +1109,17 @@ async function saveWorkspaceSprites(): Promise<void> {
     if (!response.ok) throw new Error(String(body.error ?? response.statusText));
     const saved = Array.isArray(body.saved) ? body.saved.map(String) : [];
     for (const path of saved) clearDraft(path);
+    const tagsSaved = body.renderTagsSaved === true;
+    if (tagsSaved) {
+      savedRenderTagSignature = JSON.stringify(renderTagDefs);
+      localStorage.removeItem(RENDER_TAG_DRAFT_KEY);
+    }
     const state = body.state as BridgeState | null;
     if (state) applyBridgeState(state, true);
     restoreEditorViewState(viewState);
     updateBridgeStatus();
-    flash(`saved ${saved.length} sprite${saved.length === 1 ? '' : 's'}`);
+    const parts = [saved.length ? `${saved.length} sprite${saved.length === 1 ? '' : 's'}` : '', tagsSaved ? 'layer tags' : ''].filter(Boolean);
+    flash(`saved ${parts.join(' and ')}`);
   } catch (error) {
     flash(`repo save failed: ${(error as Error).message}`);
   }
@@ -1023,6 +1296,38 @@ function buildAnchors(): void {
   ($('btnDelAnchor') as HTMLButtonElement).disabled = !selectedAnchorName;
 }
 
+function buildAttachmentSlots(): void {
+  const slots = file.attachmentSlots ?? {};
+  const names = Object.keys(slots);
+  if (selectedAttachmentSlotName && !names.includes(selectedAttachmentSlotName)) {
+    selectedAttachmentSlotName = '';
+  }
+  if (!selectedAttachmentSlotName && names.length) selectedAttachmentSlotName = names[0];
+
+  const slotSelect = $('attachmentSlotName') as HTMLSelectElement;
+  slotSelect.innerHTML = '<option value="">-- none --</option>';
+  for (const name of names) {
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = name;
+    slotSelect.appendChild(option);
+  }
+  slotSelect.value = selectedAttachmentSlotName;
+
+  const anchorSelect = $('attachmentSlotAnchor') as HTMLSelectElement;
+  anchorSelect.innerHTML = '<option value="">-- anchor --</option>';
+  for (const name of Object.keys(file.anchors ?? {})) {
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = name;
+    anchorSelect.appendChild(option);
+  }
+  const selected = slots[selectedAttachmentSlotName];
+  anchorSelect.value = selected?.anchor ?? '';
+  anchorSelect.disabled = !selected;
+  ($('btnDelAttachmentSlot') as HTMLButtonElement).disabled = !selected;
+}
+
 ($('anchorName') as HTMLSelectElement).onchange = (event) => {
   selectedAnchorName = (event.target as HTMLSelectElement).value;
   buildAnchors();
@@ -1051,6 +1356,12 @@ $('btnAddAnchor').onclick = () => {
 
 $('btnDelAnchor').onclick = () => {
   if (!selectedAnchorName || !file.anchors) return;
+  const usedBy = Object.entries(file.attachmentSlots ?? {})
+    .find(([, slot]) => slot.anchor === selectedAnchorName)?.[0];
+  if (usedBy) {
+    flash(`anchor is used by slot ${usedBy}`);
+    return;
+  }
   saveHistory();
   delete file.anchors[selectedAnchorName];
   selectedAnchorName = '';
@@ -1071,6 +1382,502 @@ function onAnchorChange(): void {
 ($('anchorX') as HTMLInputElement).onchange = onAnchorChange;
 ($('anchorY') as HTMLInputElement).onchange = onAnchorChange;
 ($('showAnchors') as HTMLInputElement).onchange = () => redraw();
+
+($('attachmentSlotName') as HTMLSelectElement).onchange = (event) => {
+  selectedAttachmentSlotName = (event.target as HTMLSelectElement).value;
+  buildAttachmentSlots();
+};
+
+$('btnAddAttachmentSlot').onclick = () => {
+  const anchors = Object.keys(file.anchors ?? {});
+  if (!anchors.length) {
+    flash('add an anchor before creating a slot');
+    return;
+  }
+  const name = prompt('attachment slot name (e.g. mainHand, head, back):', '')?.trim();
+  if (!name) return;
+  if (file.attachmentSlots?.[name]) {
+    flash('attachment slot already exists');
+    return;
+  }
+  saveHistory();
+  (file.attachmentSlots ??= {})[name] = {
+    anchor: anchors.includes(selectedAnchorName) ? selectedAnchorName : anchors[0],
+  };
+  selectedAttachmentSlotName = name;
+  buildAttachmentSlots();
+  syncIO();
+};
+
+$('btnDelAttachmentSlot').onclick = () => {
+  if (!selectedAttachmentSlotName || !file.attachmentSlots) return;
+  saveHistory();
+  delete file.attachmentSlots[selectedAttachmentSlotName];
+  if (!Object.keys(file.attachmentSlots).length) delete file.attachmentSlots;
+  selectedAttachmentSlotName = '';
+  buildAttachmentSlots();
+  syncIO();
+};
+
+($('attachmentSlotAnchor') as HTMLSelectElement).onchange = (event) => {
+  const slot = file.attachmentSlots?.[selectedAttachmentSlotName];
+  const anchor = (event.target as HTMLSelectElement).value;
+  if (!slot || !file.anchors?.[anchor] || slot.anchor === anchor) return;
+  saveHistory();
+  slot.anchor = anchor;
+  syncIO();
+};
+
+/* ---------------- layers ---------------- */
+
+function tagDependencies(id: string): string[] {
+  const dependencies: string[] = [];
+  for (const [visualId, visual] of weaponVisuals.entries()) {
+    if (visual.renderTags.includes(id)) dependencies.push(`Weapon visual “${visualId}” — render band`);
+    if (visual.gripRenderTag === id) dependencies.push(`Weapon visual “${visualId}” — grip overlay band`);
+  }
+  const documents = new Map<string, SpriteFile>(existingSprites);
+  for (const draft of storedDrafts()) documents.set(draft.path, draft.file);
+  documents.set(currentRepoPath ?? '(current unsaved sprite)', file);
+  for (const [path, spriteFile] of documents) {
+    if (spriteFile.renderTag === id) {
+      dependencies.push(`${path} — flat sprite render tag`);
+    }
+    if (!isLayeredSpriteFile(spriteFile)) continue;
+    for (const layer of spriteFile.layers.filter((candidate) => candidate.tag === id)) {
+      dependencies.push(`${path} — layer “${layer.name}” (${layer.id})`);
+    }
+  }
+  if (renderTagDefs.length === 1) dependencies.push('Layer tag registry — at least one tag must remain');
+  return [...new Set(dependencies)];
+}
+
+function renderTagsChanged(rebuildEditor = true): void {
+  configurePlayerRenderTags(renderTagDefs);
+  persistRenderTagDraft();
+  if (rebuildEditor) buildRenderTagEditor();
+  buildLayers();
+  redraw();
+  updateBridgeStatus();
+}
+
+function moveRenderTag(index: number, delta: -1 | 1): void {
+  const target = index + delta;
+  if (target < 0 || target >= renderTagDefs.length) return;
+  [renderTagDefs[index], renderTagDefs[target]] = [renderTagDefs[target], renderTagDefs[index]];
+  renderTagsChanged();
+}
+
+function buildRenderTagEditor(): void {
+  const host = $('renderTagsEditor');
+  host.innerHTML = '';
+  renderTagDefs.forEach((definition, index) => {
+    const entry = document.createElement('div');
+    entry.className = 'render-tag-entry';
+    const row = document.createElement('div');
+    row.className = 'render-tag-row';
+
+    const up = document.createElement('button');
+    up.type = 'button';
+    up.textContent = '↑';
+    up.title = 'Render this tag one band farther back';
+    up.disabled = index === 0;
+    up.onclick = () => moveRenderTag(index, -1);
+
+    const down = document.createElement('button');
+    down.type = 'button';
+    down.textContent = '↓';
+    down.title = 'Render this tag one band farther forward';
+    down.disabled = index === renderTagDefs.length - 1;
+    down.onclick = () => moveRenderTag(index, 1);
+
+    const id = document.createElement('input');
+    id.value = definition.id;
+    id.readOnly = true;
+    id.title = 'Stable tag id';
+    id.setAttribute('aria-label', `Tag id ${definition.id}`);
+
+    const label = document.createElement('input');
+    label.value = definition.label;
+    label.setAttribute('aria-label', `Label for ${definition.id}`);
+    label.oninput = () => {
+      if (!label.value.trim()) return;
+      definition.label = label.value;
+      renderTagsChanged(false);
+    };
+    label.onblur = () => {
+      const next = label.value.trim();
+      if (!next) {
+        label.value = definition.label;
+        flash('tag label cannot be empty');
+      } else if (next !== definition.label) {
+        definition.label = next;
+        label.value = next;
+        renderTagsChanged(false);
+      }
+    };
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = '×';
+    const dependencies = tagDependencies(definition.id);
+    remove.title = 'Delete this unused tag';
+    remove.setAttribute('aria-label', `Delete ${definition.label}`);
+    remove.onclick = () => {
+      if (!confirm(`Delete unused layer tag “${definition.label}”?`)) return;
+      renderTagDefs.splice(index, 1);
+      renderTagsChanged();
+    };
+
+    row.append(up, down, id, label);
+    if (dependencies.length === 0) row.appendChild(remove);
+    entry.appendChild(row);
+    if (dependencies.length) {
+      const dependencyList = document.createElement('ul');
+      dependencyList.className = 'render-tag-dependencies';
+      dependencyList.setAttribute('aria-label', `Dependencies for ${definition.label}`);
+      for (const dependency of dependencies) {
+        const item = document.createElement('li');
+        item.textContent = dependency;
+        dependencyList.appendChild(item);
+      }
+      entry.appendChild(dependencyList);
+    }
+    host.appendChild(entry);
+  });
+}
+
+const renderTagCreate = $('renderTagCreate');
+const renderTagNewId = $('renderTagNewId') as HTMLInputElement;
+const renderTagNewLabel = $('renderTagNewLabel') as HTMLInputElement;
+
+function closeRenderTagCreate(): void {
+  renderTagCreate.hidden = true;
+  renderTagNewId.value = '';
+  renderTagNewLabel.value = '';
+}
+
+$('btnAddRenderTag').onclick = () => {
+  renderTagCreate.hidden = false;
+  renderTagNewId.focus();
+};
+
+$('btnCancelRenderTag').onclick = closeRenderTagCreate;
+
+function addRenderTag(): void {
+  const rawId = renderTagNewId.value.trim();
+  const label = renderTagNewLabel.value.trim();
+  if (!rawId || !label) {
+    flash('tag id and label are required');
+    (!rawId ? renderTagNewId : renderTagNewLabel).focus();
+    return;
+  }
+  if (!/^[a-z][a-z0-9-]*$/.test(rawId)) {
+    flash('tag id must use lowercase letters, numbers, and hyphens');
+    renderTagNewId.focus();
+    return;
+  }
+  if (hasRenderTag(rawId)) {
+    flash('layer tag already exists');
+    renderTagNewId.focus();
+    return;
+  }
+  renderTagDefs.push({ id: rawId, label });
+  closeRenderTagCreate();
+  renderTagsChanged();
+}
+
+$('btnConfirmRenderTag').onclick = addRenderTag;
+for (const input of [renderTagNewId, renderTagNewLabel]) {
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') addRenderTag();
+    else if (event.key === 'Escape') closeRenderTagCreate();
+  });
+}
+
+for (const id of ['btnCloseRenderTags', 'btnDoneRenderTags']) {
+  $(id).onclick = () => {
+    closeRenderTagCreate();
+    ($('renderTagsDialog') as HTMLDialogElement).close();
+  };
+}
+
+function eachLayerTrack(name: string, visit: (frames: string[][], layer: SpriteLayerData) => void): void {
+  if (!isLayeredSpriteFile(file)) {
+    visit(activeFrames(name), { id: FLAT_LAYER_ID, name: 'Base', tag: defaultLayerTag(), tracks: {} });
+    return;
+  }
+  const target = resolveAnimName(file, name);
+  for (const layer of file.layers) visit(layer.tracks[target], layer);
+}
+
+function setTimelineFrameCount(name: string, count: number): void {
+  if (!isLayeredSpriteFile(file)) return;
+  const target = resolveAnimName(file, name);
+  const entry = file.anims[target];
+  if (entry && typeof entry !== 'string') entry.frameCount = count;
+}
+
+function makeTransparentTracks(): Record<string, string[][]> {
+  const tracks: Record<string, string[][]> = {};
+  for (const name of concreteAnimNames()) {
+    const timing = resolveAnimTiming(file, name)!;
+    tracks[name] = Array.from({ length: timing.frameCount }, () => emptyFrame(W(), H()));
+  }
+  return tracks;
+}
+
+function buildLayers(): void {
+  reconcileLayerState();
+  const host = $('layers');
+  host.innerHTML = '';
+  const layers = isLayeredSpriteFile(file)
+    ? renderTagIds().slice().reverse().flatMap((tag) => (
+      (file as LayeredSpriteFile).layers.filter((layer) => layer.tag === tag).reverse()
+    ))
+    : [{ id: FLAT_LAYER_ID, name: 'Base', tag: defaultLayerTag(), tracks: {} }];
+  for (const layer of layers) {
+    const row = document.createElement('div');
+    row.className = `layer-row${layer.id === activeLayerId ? ' active' : ''}`;
+
+    const eye = document.createElement('button');
+    eye.textContent = hiddenLayerIds.has(layer.id) ? '○' : '●';
+    eye.className = `layer-toggle ${hiddenLayerIds.has(layer.id) ? 'off' : 'on'}`;
+    eye.title = hiddenLayerIds.has(layer.id) ? 'Show layer' : 'Hide layer';
+    eye.disabled = !isLayeredSpriteFile(file);
+    eye.onclick = () => {
+      if (hiddenLayerIds.has(layer.id)) hiddenLayerIds.delete(layer.id);
+      else hiddenLayerIds.add(layer.id);
+      buildLayers();
+      redraw();
+    };
+
+    const solo = document.createElement('button');
+    solo.textContent = 'S';
+    solo.className = `layer-toggle ${soloLayerId === layer.id ? 'on' : ''}`;
+    solo.title = soloLayerId === layer.id ? 'Show all layers' : 'Solo this layer';
+    solo.disabled = !isLayeredSpriteFile(file);
+    solo.onclick = () => {
+      soloLayerId = soloLayerId === layer.id ? null : layer.id;
+      buildLayers();
+      redraw();
+    };
+
+    const name = document.createElement('button');
+    name.className = 'layer-name';
+    name.textContent = layer.name;
+    name.title = 'Select layer; double-click to rename';
+    name.onclick = () => {
+      if (activeLayerId === layer.id) return;
+      activeLayerId = layer.id;
+      clearSelection(false);
+      host.querySelector('.layer-row.active')?.classList.remove('active');
+      row.classList.add('active');
+      redraw();
+      void publishSelection();
+    };
+    name.ondblclick = (event) => {
+      if (!isLayeredSpriteFile(file)) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      const editor = document.createElement('input');
+      editor.className = 'layer-name layer-name-editor';
+      editor.value = layer.name;
+      editor.title = 'Enter to rename; Escape to cancel';
+      let finished = false;
+      const finish = (commit: boolean): void => {
+        if (finished) return;
+        finished = true;
+        const label = editor.value.trim();
+        if (commit && label && label !== layer.name) {
+          saveHistory();
+          layer.name = label;
+          syncIO();
+        }
+        buildLayers();
+      };
+      editor.onkeydown = (keyEvent) => {
+        if (keyEvent.key === 'Enter') {
+          keyEvent.preventDefault();
+          finish(true);
+        } else if (keyEvent.key === 'Escape') {
+          keyEvent.preventDefault();
+          finish(false);
+        }
+      };
+      editor.onblur = () => finish(true);
+      name.replaceWith(editor);
+      editor.focus();
+      editor.select();
+    };
+
+    const tag = document.createElement('select');
+    tag.className = 'layer-tag';
+    tag.title = 'Shared render tag; tag order controls cross-sprite compositing';
+    for (const [id, definition] of renderTagEntries()) {
+      const option = document.createElement('option');
+      option.value = id;
+      option.textContent = definition.label;
+      tag.appendChild(option);
+    }
+    tag.value = layer.tag;
+    tag.onchange = () => {
+      if (layer.tag === tag.value) return;
+      saveHistory();
+      if (isLayeredSpriteFile(file)) layer.tag = tag.value;
+      else file.renderTag = tag.value;
+      buildLayers();
+      redraw();
+      syncIO();
+    };
+
+    const lock = document.createElement('button');
+    lock.textContent = lockedLayerIds.has(layer.id) ? '◆' : '◇';
+    lock.className = `layer-toggle ${lockedLayerIds.has(layer.id) ? 'on' : ''}`;
+    lock.title = lockedLayerIds.has(layer.id) ? 'Unlock layer' : 'Lock layer';
+    lock.disabled = !isLayeredSpriteFile(file);
+    lock.onclick = () => {
+      if (lockedLayerIds.has(layer.id)) lockedLayerIds.delete(layer.id);
+      else lockedLayerIds.add(layer.id);
+      buildLayers();
+    };
+
+    row.append(eye, solo, name, tag, lock);
+    host.appendChild(row);
+  }
+
+  const layerFile = isLayeredSpriteFile(file) ? file : null;
+  const layered = Boolean(layerFile);
+  const index = layerFile ? layerFile.layers.findIndex((layer) => layer.id === activeLayerId) : 0;
+  const activeTag = layerFile?.layers[index]?.tag;
+  const canMoveUp = Boolean(layerFile && index < layerFile.layers.length - 1
+    && layerFile.layers[index + 1].tag === activeTag);
+  const canMoveDown = Boolean(layerFile && index > 0 && layerFile.layers[index - 1].tag === activeTag);
+  $('layerStatus').textContent = layerFile ? `${layerFile.layers.length} layers` : 'flat sprite';
+  ($('btnDupLayer') as HTMLButtonElement).disabled = !layered;
+  ($('btnLayerUp') as HTMLButtonElement).disabled = !canMoveUp;
+  ($('btnLayerDown') as HTMLButtonElement).disabled = !canMoveDown;
+  ($('btnMergeLayer') as HTMLButtonElement).disabled = !canMoveDown;
+  ($('btnDelLayer') as HTMLButtonElement).disabled = !layerFile || layerFile.layers.length <= 1;
+  ($('btnFlattenLayers') as HTMLButtonElement).disabled = !layered;
+}
+
+$('btnAddLayer').onclick = () => {
+  saveHistory();
+  const layered = ensureLayeredFile();
+  const label = `Layer ${layered.layers.length + 1}`;
+  const layer: SpriteLayerData = {
+    id: uniqueLayerId(label),
+    name: label,
+    tag: activeLayer()?.tag ?? defaultLayerTag(),
+    tracks: makeTransparentTracks(),
+  };
+  layered.layers.push(layer);
+  activeLayerId = layer.id;
+  buildLayers();
+  redraw();
+  syncIO();
+};
+
+$('btnDupLayer').onclick = () => {
+  if (!isLayeredSpriteFile(file)) return;
+  const source = activeLayer();
+  if (!source) return;
+  saveHistory();
+  const index = file.layers.indexOf(source);
+  const copy = structuredClone(source);
+  copy.id = uniqueLayerId(`${source.id}-copy`);
+  copy.name = `${source.name} copy`;
+  file.layers.splice(index + 1, 0, copy);
+  activeLayerId = copy.id;
+  buildLayers();
+  redraw();
+  syncIO();
+};
+
+function moveLayer(delta: -1 | 1): void {
+  if (!isLayeredSpriteFile(file)) return;
+  const index = file.layers.findIndex((layer) => layer.id === activeLayerId);
+  const target = index + delta;
+  if (index < 0 || target < 0 || target >= file.layers.length) return;
+  if (file.layers[index].tag !== file.layers[target].tag) return;
+  saveHistory();
+  [file.layers[index], file.layers[target]] = [file.layers[target], file.layers[index]];
+  buildLayers();
+  redraw();
+  syncIO();
+}
+
+$('btnLayerUp').onclick = () => moveLayer(1);
+$('btnLayerDown').onclick = () => moveLayer(-1);
+
+$('btnMergeLayer').onclick = () => {
+  if (!isLayeredSpriteFile(file)) return;
+  const index = file.layers.findIndex((layer) => layer.id === activeLayerId);
+  if (index <= 0) return;
+  saveHistory();
+  const top = file.layers[index];
+  const bottom = file.layers[index - 1];
+  if (top.tag !== bottom.tag) return;
+  for (const name of concreteAnimNames()) {
+    for (let frame = 0; frame < top.tracks[name].length; frame++) {
+      const over = top.tracks[name][frame];
+      const under = [...bottom.tracks[name][frame]];
+      for (let y = 0; y < over.length; y++) for (let x = 0; x < over[y].length; x++) {
+        const ch = over[y][x];
+        if (ch === '.' || pal()[ch] === null) continue;
+        under[y] = under[y].slice(0, x) + ch + under[y].slice(x + 1);
+      }
+      bottom.tracks[name][frame] = under;
+    }
+  }
+  file.layers.splice(index, 1);
+  activeLayerId = bottom.id;
+  reconcileLayerState();
+  buildLayers();
+  redraw();
+  syncIO();
+};
+
+$('btnDelLayer').onclick = () => {
+  if (!isLayeredSpriteFile(file) || file.layers.length <= 1) return;
+  const index = file.layers.findIndex((layer) => layer.id === activeLayerId);
+  if (index < 0 || !confirm(`Delete layer “${file.layers[index].name}”?`)) return;
+  saveHistory();
+  file.layers.splice(index, 1);
+  activeLayerId = file.layers[Math.min(index, file.layers.length - 1)].id;
+  reconcileLayerState();
+  clearSelection(false);
+  buildLayers();
+  redraw();
+  syncIO();
+};
+
+$('btnFlattenLayers').onclick = () => {
+  if (!isLayeredSpriteFile(file) || !confirm('Flatten all layers? This can be undone.')) return;
+  saveHistory();
+  const layered = file as LayeredSpriteFile & EditorSpriteFile;
+  const anims: Record<string, SpriteAnimData | string> = {};
+  for (const [name, entry] of Object.entries(layered.anims)) {
+    if (typeof entry === 'string') anims[name] = entry;
+    else anims[name] = {
+      fps: entry.fps,
+      loop: entry.loop,
+      frames: Array.from(
+        { length: entry.frameCount },
+        (_, frame) => compositeSpriteFrameByTags(layered, name, frame, renderTagIds(), PAL)!,
+      ),
+    };
+  }
+  const renderTag = [...renderTagIds()].reverse()
+    .find((tag) => layered.layers.some((layer) => layer.tag === tag));
+  const { layers: _layers, anims: _layeredAnims, ...rest } = layered;
+  file = { ...rest, renderTag, anims } as FlatSpriteFile & EditorSpriteFile;
+  reconcileLayerState(true);
+  clearSelection(false);
+  refreshUI();
+};
 
 /* ---------------- animations ui ---------------- */
 
@@ -1111,7 +1918,12 @@ $('btnAddAnim').onclick = () => {
     return;
   }
   saveHistory();
-  file.anims[name] = { fps: 8, frames: [emptyFrame(W(), H())] };
+  if (isLayeredSpriteFile(file)) {
+    file.anims[name] = { fps: 8, frameCount: 1 };
+    for (const layer of file.layers) layer.tracks[name] = [emptyFrame(W(), H())];
+  } else {
+    file.anims[name] = { fps: 8, frames: [emptyFrame(W(), H())] };
+  }
   for (const anchors of Object.values(file.anchors ?? {})) {
     anchors[name] = [{ x: W() / density() / 2, y: H() / density() / 2 }];
   }
@@ -1128,9 +1940,25 @@ $('btnRenameAnim').onclick = () => {
   }
   saveHistory();
   // Rebuild in order, swapping the key so button order is stable.
-  const next: SpriteFile['anims'] = {};
-  for (const [k, v] of Object.entries(file.anims)) next[k === animName ? name : k] = v;
-  file.anims = next;
+  if (isLayeredSpriteFile(file)) {
+    const next: LayeredSpriteFile['anims'] = {};
+    for (const [key, value] of Object.entries(file.anims)) {
+      next[key === animName ? name : key] = value === animName ? name : value;
+    }
+    file.anims = next;
+    for (const layer of file.layers) {
+      if (layer.tracks[animName]) {
+        layer.tracks[name] = layer.tracks[animName];
+        delete layer.tracks[animName];
+      }
+    }
+  } else {
+    const next: FlatSpriteFile['anims'] = {};
+    for (const [key, value] of Object.entries(file.anims)) {
+      next[key === animName ? name : key] = value === animName ? name : value;
+    }
+    file.anims = next;
+  }
   for (const anchors of Object.values(file.anchors ?? {})) {
     if (anchors[animName]) {
       anchors[name] = anchors[animName];
@@ -1147,14 +1975,23 @@ $('btnDelAnim').onclick = () => {
     return;
   }
   saveHistory();
+  const deleted = animName;
   delete file.anims[animName];
+  if (isLayeredSpriteFile(file)) {
+    for (const layer of file.layers) delete layer.tracks[deleted];
+  }
+  for (const [name, entry] of Object.entries(file.anims)) {
+    if (entry === deleted) delete file.anims[name];
+  }
   for (const anchors of Object.values(file.anchors ?? {})) delete anchors[animName];
   animName = Object.keys(file.anims)[0];
   frameIdx = 0;
   refreshUI();
 };
 ($('fps') as HTMLInputElement).onchange = (e) => {
-  anim().fps = Number((e.target as HTMLInputElement).value) || 1;
+  const name = concreteAnimName();
+  const entry = file.anims[name];
+  if (entry && typeof entry !== 'string') entry.fps = Number((e.target as HTMLInputElement).value) || 1;
   syncIO();
 };
 
@@ -1204,12 +2041,14 @@ function colorDistance(a: Rgb, b: Rgb): number {
 
 function paletteUsage(): Map<string, number> {
   const usage = new Map<string, number>();
-  for (const [, target] of concreteAnims()) {
-    for (const frame of target.frames) {
-      for (const row of frame) {
-        for (const ch of row) usage.set(ch, (usage.get(ch) ?? 0) + 1);
+  for (const name of concreteAnimNames()) {
+    eachLayerTrack(name, (frames) => {
+      for (const frame of frames) {
+        for (const row of frame) {
+          for (const ch of row) usage.set(ch, (usage.get(ch) ?? 0) + 1);
+        }
       }
-    }
+    });
   }
   return usage;
 }
@@ -1239,10 +2078,12 @@ function compactPalette(removeUnused = true): PaletteCompaction {
   }
 
   if (remap.size) {
-    for (const [, target] of concreteAnims()) {
-      target.frames = target.frames.map((frame) => frame.map((row) =>
-        [...row].map((ch) => remap.get(ch) ?? ch).join(''),
-      ));
+    for (const name of concreteAnimNames()) {
+      eachLayerTrack(name, (frames) => {
+        for (let index = 0; index < frames.length; index++) {
+          frames[index] = frames[index].map((row) => [...row].map((ch) => remap.get(ch) ?? ch).join(''));
+        }
+      });
     }
     currentChar = remap.get(currentChar) ?? currentChar;
     for (const ch of remap.keys()) delete (file.palette ?? {})[ch];
@@ -1412,7 +2253,8 @@ function floodFill(startX: number, startY: number, fillChar: string): void {
 
 grid.addEventListener('contextmenu', (e) => e.preventDefault());
 grid.addEventListener('mousedown', (e) => {
-  if (e.altKey && e.shiftKey && selectedAnchorName) {
+  if (currentTool !== 'magic' && currentTool !== 'select' && currentTool !== 'move'
+    && e.altKey && e.shiftKey && selectedAnchorName) {
     e.preventDefault();
     const bounds = grid.getBoundingClientRect();
     const sourceX = Math.floor((e.clientX - bounds.left) / cellSize);
@@ -1424,11 +2266,44 @@ grid.addEventListener('mousedown', (e) => {
     syncIO();
     return;
   }
-  if (e.altKey || currentTool === 'picker') {
+  if (currentTool === 'magic') {
+    e.preventDefault();
+    if (e.button === 2) {
+      clearSelection();
+      return;
+    }
+    if (e.button !== 0) return;
+    beginMagicSelection(e);
+    return;
+  }
+  if ((e.altKey && currentTool !== 'select' && currentTool !== 'move') || currentTool === 'picker') {
     e.preventDefault();
     if (e.button !== 0) return;
     picking = true;
     pickColor(e);
+    return;
+  }
+  if (currentTool === 'move') {
+    e.preventDefault();
+    if (e.button === 2) {
+      setSelection(null);
+      void publishSelection();
+      return;
+    }
+    if (e.button !== 0) return;
+    if (!selection) {
+      flash('make a selection before using Move');
+      return;
+    }
+    const handle = selectionHandleAt(e);
+    if (handle) {
+      beginSelectionHandleTransform(handle, e);
+      return;
+    }
+    const point = gridCell(e);
+    if (selectionContains(selection, point.x, point.y)) {
+      beginSelectionMove(point);
+    }
     return;
   }
   if (currentTool === 'select') {
@@ -1439,21 +2314,14 @@ grid.addEventListener('mousedown', (e) => {
       return;
     }
     if (e.button !== 0) return;
-    const handle = selectionHandleAt(e);
-    if (selection && handle) {
-      beginSelectionHandleTransform(handle, e);
-      return;
-    }
+    const mode = selectionCombineMode(e);
     const point = gridCell(e);
-    if (selection && pointInRect(point, selection)) {
-      beginSelectionMove(point);
-      return;
-    }
-    selectionStart = point;
+    selectionStart = { ...point, mode, base: selectionCells(selection) };
     ($('selectionAngle') as HTMLInputElement).value = '0';
-    setSelection({ x: point.x, y: point.y, w: 1, h: 1 });
+    applyRectangularSelection(point);
     return;
   }
+  if (!requireEditableLayer()) return;
   saveHistory();
   erasing = e.button === 2;
   painting = true;
@@ -1463,8 +2331,13 @@ grid.addEventListener('mousedown', (e) => {
 grid.addEventListener('mousemove', (e) => {
   hoverPointer = { x: e.clientX, y: e.clientY };
   updateBrushCursor();
+  updateSelectionModifierCursor(e);
   if (picking) {
     pickColor(e, false);
+    return;
+  }
+  if (magicSelectionDrag) {
+    updateMagicSelectionDrag(gridCell(e));
     return;
   }
   if (selectionHandleTransform) {
@@ -1472,10 +2345,7 @@ grid.addEventListener('mousemove', (e) => {
     return;
   }
   if (selectionStart) {
-    const point = gridCell(e);
-    const x = Math.min(selectionStart.x, point.x);
-    const y = Math.min(selectionStart.y, point.y);
-    setSelection({ x, y, w: Math.abs(point.x - selectionStart.x) + 1, h: Math.abs(point.y - selectionStart.y) + 1 });
+    applyRectangularSelection(gridCell(e));
     return;
   }
   if (selectionMove) {
@@ -1493,9 +2363,19 @@ grid.addEventListener('mouseleave', () => {
 });
 window.addEventListener('mouseup', () => {
   picking = false;
+  if (magicSelectionDrag) {
+    const mode = magicSelectionDrag.initialMode;
+    magicSelectionDrag = null;
+    void publishSelection();
+    const count = selection ? selectionPixelCount(selection) : 0;
+    flash(count ? `selected ${count} pixels (${mode})` : 'selection cleared');
+  }
   if (selectionStart) {
+    const mode = selectionStart.mode;
     selectionStart = null;
     void publishSelection();
+    const count = selection ? selectionPixelCount(selection) : 0;
+    flash(count ? `selected ${count} pixels (${mode})` : 'selection cleared');
   }
   if (selectionMove) {
     const moved = selectionMove.moved;
@@ -1515,7 +2395,7 @@ window.addEventListener('mouseup', () => {
       flash(handle === 'rotate' ? 'rotated selection' : 'resized selection');
     }
     ($('selectionAngle') as HTMLInputElement).value = '0';
-    grid.style.cursor = currentTool === 'select' ? 'cell' : '';
+    grid.style.cursor = currentTool === 'move' ? 'default' : currentTool === 'select' ? 'cell' : '';
   }
   if (painting) {
     painting = false;
@@ -1542,7 +2422,10 @@ function gridCell(e: MouseEvent): { x: number; y: number } {
 
 function pickColor(e: MouseEvent, announce = true): void {
   const { x, y } = gridCell(e);
-  currentChar = cur()[y][x];
+  // Sampling follows what the artist sees, while painting still targets only
+  // the active layer. This makes it possible to borrow a base-layer shade for
+  // a correction layer without temporarily merging the artwork.
+  currentChar = compositeCur()[y][x];
   buildPalette();
   if (announce) {
     const color = pal()[currentChar];
@@ -1550,9 +2433,233 @@ function pickColor(e: MouseEvent, announce = true): void {
   }
 }
 
+function magicTolerance(): number {
+  return Math.max(0, Math.min(255, Math.round(($('magicTolerance') as HTMLInputElement).valueAsNumber || 0)));
+}
+
+function selectionCombineMode(e: { shiftKey: boolean; altKey: boolean }): SelectionCombineMode {
+  if (e.shiftKey && e.altKey) return 'intersect';
+  if (e.shiftKey) return 'add';
+  if (e.altKey) return 'subtract';
+  return 'replace';
+}
+
+function combineSelectionCells(
+  existing: Set<string>,
+  incoming: Set<string>,
+  mode: SelectionCombineMode,
+): Set<string> {
+  if (mode === 'add') return new Set([...existing, ...incoming]);
+  if (mode === 'subtract') return new Set([...existing].filter((key) => !incoming.has(key)));
+  if (mode === 'intersect') return new Set([...existing].filter((key) => incoming.has(key)));
+  return incoming;
+}
+
+function applyRectangularSelection(point: { x: number; y: number }): void {
+  if (!selectionStart) return;
+  const minX = Math.min(selectionStart.x, point.x);
+  const maxX = Math.max(selectionStart.x, point.x);
+  const minY = Math.min(selectionStart.y, point.y);
+  const maxY = Math.max(selectionStart.y, point.y);
+  const rectangle = new Set<string>();
+  for (let y = minY; y <= maxY; y++) for (let x = minX; x <= maxX; x++) {
+    rectangle.add(`${x},${y}`);
+  }
+  setSelection(selectionFromCells(combineSelectionCells(selectionStart.base, rectangle, selectionStart.mode)));
+}
+
+function magicMatchCells(startX: number, startY: number): Set<string> {
+  const rows = cur();
+  const seedChar = rows[startY]?.[startX];
+  const result = new Set<string>();
+  if (seedChar === undefined) return result;
+  const seed = parseRgb(pal()[seedChar]);
+  const threshold = magicTolerance() ** 2;
+  const matches = (x: number, y: number): boolean => {
+    const candidateChar = rows[y]?.[x];
+    if (candidateChar === undefined) return false;
+    if (!seed) return !parseRgb(pal()[candidateChar]);
+    const candidate = parseRgb(pal()[candidateChar]);
+    // RGB has three independent 0-255 channels. Average their squared
+    // differences so the UI tolerance keeps its advertised 0-255 range:
+    // 255 includes even black versus white, while palette quantization can
+    // continue using the unnormalized distance metric above.
+    return Boolean(candidate && colorDistance(seed, candidate) / 3 <= threshold);
+  };
+
+  if (!(($('magicContiguous') as HTMLInputElement).checked)) {
+    for (let y = 0; y < H(); y++) for (let x = 0; x < W(); x++) {
+      if (matches(x, y)) result.add(`${x},${y}`);
+    }
+    return result;
+  }
+
+  const queue: [number, number][] = [[startX, startY]];
+  const visited = new Set<string>();
+  for (let index = 0; index < queue.length; index++) {
+    const [x, y] = queue[index];
+    const key = `${x},${y}`;
+    if (visited.has(key)) continue;
+    visited.add(key);
+    if (!matches(x, y)) continue;
+    result.add(key);
+    if (x > 0) queue.push([x - 1, y]);
+    if (x + 1 < W()) queue.push([x + 1, y]);
+    if (y > 0) queue.push([x, y - 1]);
+    if (y + 1 < H()) queue.push([x, y + 1]);
+  }
+  return result;
+}
+
+function applyMagicSelectionAt(
+  existing: Set<string>,
+  point: { x: number; y: number },
+  mode: SelectionCombineMode,
+): Set<string> {
+  // Subtraction is intentionally pencil-like. A region-aware subtraction is
+  // too destructive when an artist is cleaning a few accidental wand pixels.
+  const matched = mode === 'subtract'
+    ? new Set([`${point.x},${point.y}`])
+    : magicMatchCells(point.x, point.y);
+  return combineSelectionCells(existing, matched, mode);
+}
+
+function beginMagicSelection(e: MouseEvent): void {
+  const point = gridCell(e);
+  const initialMode = selectionCombineMode(e);
+  const next = applyMagicSelectionAt(selectionCells(selection), point, initialMode);
+  setSelection(selectionFromCells(next));
+  magicSelectionDrag = {
+    initialMode,
+    // A normal click establishes the new selection. Continuing the same
+    // gesture expands it, matching how artists paint a wand selection.
+    mode: initialMode === 'replace' ? 'add' : initialMode,
+    last: point,
+  };
+}
+
+function pointsOnGridLine(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): Array<{ x: number; y: number }> {
+  const steps = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y));
+  if (!steps) return [to];
+  const points: Array<{ x: number; y: number }> = [];
+  let previous = '';
+  for (let step = 1; step <= steps; step++) {
+    const point = {
+      x: Math.round(from.x + (to.x - from.x) * step / steps),
+      y: Math.round(from.y + (to.y - from.y) * step / steps),
+    };
+    const key = `${point.x},${point.y}`;
+    if (key !== previous) points.push(point);
+    previous = key;
+  }
+  return points;
+}
+
+function updateMagicSelectionDrag(point: { x: number; y: number }): void {
+  const drag = magicSelectionDrag;
+  if (!drag || (point.x === drag.last.x && point.y === drag.last.y)) return;
+  let cells = selectionCells(selection);
+  let changed = false;
+  for (const nextPoint of pointsOnGridLine(drag.last, point)) {
+    const key = `${nextPoint.x},${nextPoint.y}`;
+    // Add-mode wand drags only need work when the pointer leaves the current
+    // selection. Subtract-mode keeps erasing individual pixels along the path.
+    if (drag.mode === 'add' && cells.has(key)) continue;
+    if (drag.mode === 'subtract' && !cells.has(key)) continue;
+    const next = applyMagicSelectionAt(cells, nextPoint, drag.mode);
+    if (next.size !== cells.size || [...next].some((cell) => !cells.has(cell))) changed = true;
+    cells = next;
+  }
+  drag.last = point;
+  if (changed) setSelection(selectionFromCells(cells));
+}
+
+function shiftSelectionColors(startX: number, startY: number): void {
+  if (!selection || !selectionContains(selection, startX, startY)) {
+    flash('select an area, then click a source color inside it');
+    return;
+  }
+  const sourceChar = cur()[startY]?.[startX];
+  const source = parseRgb(pal()[sourceChar]);
+  const target = parseRgb(pal()[currentChar]);
+  if (!source || !target || currentChar === '.') {
+    flash('color match needs an opaque source and paint color');
+    return;
+  }
+  const delta = { r: target.r - source.r, g: target.g - source.g, b: target.b - source.b };
+  let changed = 0;
+  for (let y = selection.y; y < selection.y + selection.h; y++) {
+    for (let x = selection.x; x < selection.x + selection.w; x++) {
+      if (!selectionContains(selection, x, y)) continue;
+      const original = parseRgb(pal()[cur()[y][x]]);
+      if (!original) continue;
+      const next = x === startX && y === startY
+        ? currentChar
+        : paletteCharFor({ r: original.r + delta.r, g: original.g + delta.g, b: original.b + delta.b });
+      if (cur()[y][x] !== next) {
+        setPixel(x, y, next);
+        changed++;
+      }
+    }
+  }
+  flash(changed
+    ? `matched ${changed} selected pixels from ${pal()[sourceChar]} to ${pal()[currentChar]}`
+    : 'selected colors already match');
+}
+
 function pointInRect(point: { x: number; y: number }, rect: PixelRect): boolean {
   return point.x >= rect.x && point.y >= rect.y
     && point.x < rect.x + rect.w && point.y < rect.y + rect.h;
+}
+
+function cloneSelection(value: PixelSelection): PixelSelection {
+  return { ...value, mask: value.mask?.slice() };
+}
+
+function selectionContains(value: PixelSelection, x: number, y: number): boolean {
+  if (!pointInRect({ x, y }, value)) return false;
+  return !value.mask || value.mask[y - value.y]?.[x - value.x] === '1';
+}
+
+function selectionPixelCount(value: PixelSelection): number {
+  if (!value.mask) return value.w * value.h;
+  let count = 0;
+  for (const row of value.mask) for (const bit of row) if (bit === '1') count++;
+  return count;
+}
+
+function selectionCells(value: PixelSelection | null): Set<string> {
+  const cells = new Set<string>();
+  if (!value) return cells;
+  for (let y = value.y; y < value.y + value.h; y++) {
+    for (let x = value.x; x < value.x + value.w; x++) {
+      if (selectionContains(value, x, y)) cells.add(`${x},${y}`);
+    }
+  }
+  return cells;
+}
+
+function selectionFromCells(cells: Set<string>): PixelSelection | null {
+  if (!cells.size) return null;
+  const points = [...cells].map((key) => key.split(',').map(Number) as [number, number]);
+  const minX = Math.min(...points.map(([x]) => x));
+  const maxX = Math.max(...points.map(([x]) => x));
+  const minY = Math.min(...points.map(([, y]) => y));
+  const maxY = Math.max(...points.map(([, y]) => y));
+  const w = maxX - minX + 1;
+  const h = maxY - minY + 1;
+  return {
+    x: minX,
+    y: minY,
+    w,
+    h,
+    mask: Array.from({ length: h }, (_, dy) =>
+      Array.from({ length: w }, (_, dx) => cells.has(`${minX + dx},${minY + dy}`) ? '1' : '.').join(''),
+    ),
+  };
 }
 
 function pixelsInRect(rect: PixelRect, rows = cur()): PixelClipboard {
@@ -1565,9 +2672,35 @@ function pixelsInRect(rect: PixelRect, rows = cur()): PixelClipboard {
   };
 }
 
+function pixelsInSelection(value: PixelSelection, rows = cur()): PixelClipboard {
+  const clip = pixelsInRect(value, rows);
+  if (!value.mask) return clip;
+  return {
+    ...clip,
+    rows: clip.rows.map((row, y) => [...row]
+      .map((pixel, x) => value.mask![y][x] === '1' ? pixel : '.')
+      .join('')),
+    mask: value.mask.slice(),
+  };
+}
+
 function clearRect(rows: string[], rect: PixelRect): void {
   for (let y = rect.y; y < rect.y + rect.h; y++) {
     rows[y] = rows[y].slice(0, rect.x) + '.'.repeat(rect.w) + rows[y].slice(rect.x + rect.w);
+  }
+}
+
+function clearSelectionPixels(rows: string[], value: PixelSelection): void {
+  if (!value.mask) {
+    clearRect(rows, value);
+    return;
+  }
+  for (let dy = 0; dy < value.h; dy++) {
+    const destination = [...rows[value.y + dy]];
+    for (let dx = 0; dx < value.w; dx++) {
+      if (value.mask[dy][dx] === '1') destination[value.x + dx] = '.';
+    }
+    rows[value.y + dy] = destination.join('');
   }
 }
 
@@ -1589,6 +2722,7 @@ function pastePixels(
     }
     const destination = [...rows[y + dy]];
     for (let dx = 0; dx < pastedW; dx++) {
+      if (clip.mask && clip.mask[dy]?.[dx] !== '1') continue;
       const pixel = clip.rows[dy][dx];
       if (pixel !== '.') destination[x + dx] = pixel;
     }
@@ -1597,11 +2731,12 @@ function pastePixels(
 }
 
 function beginSelectionMove(point: { x: number; y: number }): void {
+  if (!requireEditableLayer()) return;
   if (!selection) return;
-  const original = { ...selection };
+  const original = cloneSelection(selection);
   const baseFrame = cur().slice();
-  const source = pixelsInRect(original, baseFrame);
-  clearRect(baseFrame, original);
+  const source = pixelsInSelection(original, baseFrame);
+  clearSelectionPixels(baseFrame, original);
   selectionMove = {
     start: point,
     original,
@@ -1626,7 +2761,7 @@ function moveSelectionDrag(point: { x: number; y: number }): void {
   pastePixels(rows, selectionMove.source, x, y, true);
   anim().frames[frameIdx] = rows;
   editVersion++;
-  setSelection({ x, y, w: selectionMove.original.w, h: selectionMove.original.h });
+  setSelection({ x, y, w: selectionMove.original.w, h: selectionMove.original.h, mask: selectionMove.source.mask?.slice() });
 }
 
 function gridPointer(e: MouseEvent): { x: number; y: number } {
@@ -1672,7 +2807,7 @@ function selectionHandlePositions(rect: PixelRect): Array<{
 }
 
 function selectionHandleAt(e: MouseEvent): SelectionHandle | null {
-  if (currentTool !== 'select' || !selection) return null;
+  if (currentTool !== 'move' || !selection) return null;
   const pointer = gridPointer(e);
   const handles = selectionHandlePositions(selection);
   // Rotation wins where a very small selection makes handles overlap.
@@ -1689,7 +2824,11 @@ function selectionHandleAt(e: MouseEvent): SelectionHandle | null {
 
 function updateSelectionCursor(e?: MouseEvent): void {
   grid.classList.remove('selection-movable');
-  if (currentTool !== 'select' || !selection || !e) {
+  if (selectionCombineMode(selectionModifierKeys) !== 'replace') {
+    grid.style.cursor = '';
+    return;
+  }
+  if (currentTool !== 'move' || !selection || !e) {
     grid.style.cursor = '';
     return;
   }
@@ -1703,27 +2842,29 @@ function updateSelectionCursor(e?: MouseEvent): void {
     grid.style.cursor = cursors[handle] ?? 'default';
     return;
   }
-  if (pointInRect(gridCell(e), selection)) {
+  const point = gridCell(e);
+  if (selectionContains(selection, point.x, point.y)) {
     grid.classList.add('selection-movable');
     grid.style.cursor = 'move';
   } else {
-    grid.style.cursor = 'cell';
+    grid.style.cursor = 'default';
   }
 }
 
 function beginSelectionHandleTransform(handle: SelectionHandle, e: MouseEvent): void {
+  if (!requireEditableLayer()) return;
   if (!selection) return;
-  const original = { ...selection };
+  const original = cloneSelection(selection);
   const sourceFrame = cur().slice();
   const baseFrame = sourceFrame.slice();
-  clearRect(baseFrame, original);
+  clearSelectionPixels(baseFrame, original);
   const pointer = gridPointer(e);
   const centerX = original.x + original.w / 2;
   const centerY = original.y + original.h / 2;
   selectionHandleTransform = {
     handle,
     original,
-    source: pixelsInRect(original, sourceFrame),
+    source: pixelsInSelection(original, sourceFrame),
     baseFrame,
     startPointer: pointer,
     startAngle: Math.atan2(pointer.y - centerY, pointer.x - centerX),
@@ -1748,7 +2889,7 @@ function applyLiveSelectionTransform(
   pastePixels(rows, clip, x, y, true);
   anim().frames[frameIdx] = rows;
   editVersion++;
-  setSelection({ x, y, w: clip.w, h: clip.h });
+  setSelection({ x, y, w: clip.w, h: clip.h, mask: clip.mask?.slice() });
 }
 
 function updateSelectionHandleTransform(e: MouseEvent): void {
@@ -1790,31 +2931,26 @@ function updateSelectionHandleTransform(e: MouseEvent): void {
   applyLiveSelectionTransform(transform, scaled, left, top, `resize:${left},${top},${width},${height}`);
 }
 
-function setSelection(next: PixelRect | null): void {
+function setSelection(next: PixelSelection | null): void {
   selection = next;
   ($('btnCut') as HTMLButtonElement).disabled = !selection;
   ($('btnCopy') as HTMLButtonElement).disabled = !selection;
-  for (const id of ['btnRotateSelectionLeft', 'btnRotateSelectionRight', 'btnRotateSelection', 'btnResizeSelection']) {
-    ($(id) as HTMLButtonElement).disabled = !selection;
-  }
+  updateSelectionTransformControls();
   const selectionW = $('selectionW') as HTMLInputElement;
   const selectionH = $('selectionH') as HTMLInputElement;
-  const selectionAngle = $('selectionAngle') as HTMLInputElement;
-  selectionW.disabled = !selection;
-  selectionH.disabled = !selection;
-  selectionAngle.disabled = !selection;
   if (selection) {
     selectionW.value = String(selection.w);
     selectionH.value = String(selection.h);
   }
   $('selectionStatus').textContent = selection
-    ? `selection: ${selection.w}x${selection.h} at ${selection.x},${selection.y} · shared with agent`
+    ? `selection: ${selectionPixelCount(selection)} px in ${selection.w}x${selection.h} at ${selection.x},${selection.y} · shared with agent`
     : 'selection: none';
   redraw();
 }
 
 function clearSelection(publish = true): void {
   selectionStart = null;
+  magicSelectionDrag = null;
   selectionMove = null;
   selectionHandleTransform = null;
   grid.classList.remove('selection-movable');
@@ -1823,12 +2959,22 @@ function clearSelection(publish = true): void {
   if (publish) void publishSelection();
 }
 
+// Treat the empty canvas workspace like an art application's pasteboard:
+// clicking it dismisses the current pixel selection. Checking the direct
+// target keeps canvas gestures and every surrounding panel/control intact.
+$('center').addEventListener('pointerdown', (event) => {
+  if (event.button !== 0 || event.target !== event.currentTarget || !selection) return;
+  clearSelection();
+});
+
 function paint(e: MouseEvent): void {
   const r = grid.getBoundingClientRect();
   const x = Math.floor((e.clientX - r.left) / cellSize);
   const y = Math.floor((e.clientY - r.top) / cellSize);
   if (currentTool === 'fill') {
-    floodFill(x, y, erasing ? '.' : currentChar);
+    const mode = ($('fillMode') as HTMLSelectElement).value;
+    if (mode === 'match' && !erasing) shiftSelectionColors(x, y);
+    else floodFill(x, y, erasing ? '.' : currentChar);
   } else if (currentTool === 'draw') {
     setPixel(x, y, erasing ? '.' : currentChar);
   } else if (currentTool === 'brush' || currentTool === 'blur') {
@@ -1875,7 +3021,8 @@ function buildFrames(): void {
 
 $('btnAddFrame').onclick = () => {
   saveHistory();
-  anim().frames.push(emptyFrame(W(), H()));
+  eachLayerTrack(animName, (frames) => frames.push(emptyFrame(W(), H())));
+  setTimelineFrameCount(animName, anim().frames.length);
   for (const anchors of Object.values(file.anchors ?? {})) {
     const points = anchors[concreteAnimName()];
     if (points) points.push({ ...(points.at(-1) ?? { x: W() / density() / 2, y: H() / density() / 2 }) });
@@ -1883,12 +3030,14 @@ $('btnAddFrame').onclick = () => {
   frameIdx = anim().frames.length - 1;
   buildFrames();
   buildAnchors();
+  buildAttachmentSlots();
   redraw();
   syncIO();
 };
 $('btnDupFrame').onclick = () => {
   saveHistory();
-  anim().frames.splice(frameIdx + 1, 0, [...cur()]);
+  eachLayerTrack(animName, (frames) => frames.splice(frameIdx + 1, 0, [...frames[frameIdx]]));
+  setTimelineFrameCount(animName, anim().frames.length);
   for (const anchors of Object.values(file.anchors ?? {})) {
     const points = anchors[concreteAnimName()];
     if (points) points.splice(frameIdx + 1, 0, { ...(points[frameIdx] ?? { x: W() / density() / 2, y: H() / density() / 2 }) });
@@ -1904,7 +3053,9 @@ function moveSelectedFrame(delta: -1 | 1): void {
   const target = frameIdx + delta;
   if (target < 0 || target >= frames.length) return;
   saveHistory();
-  [frames[frameIdx], frames[target]] = [frames[target], frames[frameIdx]];
+  eachLayerTrack(animName, (track) => {
+    [track[frameIdx], track[target]] = [track[target], track[frameIdx]];
+  });
   for (const anchors of Object.values(file.anchors ?? {})) {
     const points = anchors[concreteAnimName()];
     if (points?.length === frames.length) {
@@ -1926,7 +3077,8 @@ $('btnFrameRight').onclick = () => moveSelectedFrame(1);
 $('btnDelFrame').onclick = () => {
   if (anim().frames.length <= 1) return;
   saveHistory();
-  anim().frames.splice(frameIdx, 1);
+  eachLayerTrack(animName, (frames) => frames.splice(frameIdx, 1));
+  setTimelineFrameCount(animName, anim().frames.length);
   for (const anchors of Object.values(file.anchors ?? {})) anchors[concreteAnimName()]?.splice(frameIdx, 1);
   frameIdx = Math.min(frameIdx, anim().frames.length - 1);
   buildFrames();
@@ -1941,11 +3093,13 @@ $('btnResize').onclick = () => {
   if (!(w >= 1 && h >= 1 && w <= MAX_GRID_SIZE && h <= MAX_GRID_SIZE)) return;
   saveHistory();
   // Resize every frame of every animation so the sprite stays uniform.
-  for (const [, a] of concreteAnims()) {
-    a.frames = a.frames.map((f: string[]) => {
-      const next: string[] = [];
-      for (let y = 0; y < h; y++) next.push((f[y] ?? '').slice(0, w).padEnd(w, '.'));
-      return next;
+  for (const name of concreteAnimNames()) {
+    eachLayerTrack(name, (frames) => {
+      for (let index = 0; index < frames.length; index++) {
+        const next: string[] = [];
+        for (let y = 0; y < h; y++) next.push((frames[index][y] ?? '').slice(0, w).padEnd(w, '.'));
+        frames[index] = next;
+      }
     });
   }
   redraw();
@@ -1957,21 +3111,9 @@ function redraw(): void {
   grid.height = H() * cellSize;
   gctx.imageSmoothingEnabled = false;
 
-  // 1. Draw base background (gaps/borders)
-  gctx.fillStyle = '#080a18';
-  gctx.fillRect(0, 0, grid.width, grid.height);
-
-  // 2. Draw inset checkerboard for all cells
-  const inset = Math.max(1, Math.min(3, Math.floor(cellSize / 8)));
-  for (let y = 0; y < H(); y++) {
-    for (let x = 0; x < W(); x++) {
-      gctx.fillStyle = (x + y) % 2 ? '#141830' : '#0f1226';
-      gctx.fillRect(x * cellSize + inset, y * cellSize + inset, cellSize - inset * 2, cellSize - inset * 2);
-      
-      gctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
-      gctx.strokeRect(x * cellSize + inset + 0.5, y * cellSize + inset + 0.5, cellSize - inset * 2 - 1, cellSize - inset * 2 - 1);
-    }
-  }
+  // 1. Transparency is a fixed view-space checker. It deliberately ignores
+  // cellSize, so zooming the sprite never turns checker tiles into pixels.
+  drawTransparencyChecker(gctx, grid.width, grid.height);
 
   // 3. Draw reference sprite if enabled
   const showRef = ($('showRef') as HTMLInputElement)?.checked ?? true;
@@ -2002,13 +3144,13 @@ function redraw(): void {
   // 4. Draw onion skin if enabled
   const onion = ($('onionSkin') as HTMLInputElement)?.checked ?? false;
   if (onion && frameIdx > 0) {
-    const prevFrame = anim().frames[frameIdx - 1];
+    const prevFrame = compositeCur(frameIdx - 1);
     if (prevFrame) {
       gctx.save();
       gctx.globalAlpha = 0.2;
       for (let y = 0; y < H(); y++) {
         for (let x = 0; x < W(); x++) {
-          const color = pal()[prevFrame[y]?.[x]];
+          const color = pal()[prevFrame[y]?.[x]] ?? PAL[prevFrame[y]?.[x]];
           if (color) {
             gctx.fillStyle = color;
             gctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
@@ -2020,9 +3162,10 @@ function redraw(): void {
   }
 
   // 5. Draw current frame solid pixels
+  const visibleFrame = compositeCur();
   for (let y = 0; y < H(); y++) {
     for (let x = 0; x < W(); x++) {
-      const color = pal()[cur()[y][x]];
+      const color = pal()[visibleFrame[y][x]] ?? PAL[visibleFrame[y][x]];
       if (color) {
         gctx.fillStyle = color;
         gctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
@@ -2031,7 +3174,7 @@ function redraw(): void {
   }
 
   // 6. Grid lines
-  gctx.strokeStyle = 'rgba(148,176,194,0.1)';
+  gctx.strokeStyle = 'rgba(35, 40, 48, 0.18)';
   for (let x = 0; x <= W(); x++) {
     gctx.beginPath();
     gctx.moveTo(x * cellSize + 0.5, 0);
@@ -2052,43 +3195,69 @@ function redraw(): void {
     const h = selection.h * cellSize;
     gctx.save();
     gctx.fillStyle = 'rgba(255,205,117,0.12)';
-    gctx.fillRect(x, y, w, h);
+    if (selection.mask) {
+      for (let dy = 0; dy < selection.h; dy++) for (let dx = 0; dx < selection.w; dx++) {
+        if (selection.mask[dy][dx] === '1') gctx.fillRect(x + dx * cellSize, y + dy * cellSize, cellSize, cellSize);
+      }
+    } else {
+      gctx.fillRect(x, y, w, h);
+    }
     gctx.strokeStyle = '#ffcd75';
     gctx.lineWidth = 2;
     gctx.setLineDash([Math.max(3, cellSize / 3), Math.max(2, cellSize / 5)]);
-    gctx.strokeRect(x + 1, y + 1, Math.max(0, w - 2), Math.max(0, h - 2));
+    if (selection.mask) {
+      const mask = selection.mask;
+      gctx.setLineDash([]);
+      gctx.lineWidth = Math.max(1, Math.min(2, cellSize / 6));
+      for (let dy = 0; dy < selection.h; dy++) for (let dx = 0; dx < selection.w; dx++) {
+        if (mask[dy][dx] !== '1') continue;
+        const px = x + dx * cellSize;
+        const py = y + dy * cellSize;
+        const selectedAt = (mx: number, my: number) => mask[my]?.[mx] === '1';
+        gctx.beginPath();
+        if (!selectedAt(dx, dy - 1)) { gctx.moveTo(px, py); gctx.lineTo(px + cellSize, py); }
+        if (!selectedAt(dx + 1, dy)) { gctx.moveTo(px + cellSize, py); gctx.lineTo(px + cellSize, py + cellSize); }
+        if (!selectedAt(dx, dy + 1)) { gctx.moveTo(px + cellSize, py + cellSize); gctx.lineTo(px, py + cellSize); }
+        if (!selectedAt(dx - 1, dy)) { gctx.moveTo(px, py + cellSize); gctx.lineTo(px, py); }
+        gctx.stroke();
+      }
+    } else {
+      gctx.strokeRect(x + 1, y + 1, Math.max(0, w - 2), Math.max(0, h - 2));
+    }
     gctx.restore();
 
-    const handles = selectionHandlePositions(selection);
-    const rotation = handles.find((handle) => handle.handle === 'rotate');
-    gctx.save();
-    gctx.setLineDash([]);
-    gctx.lineWidth = 2;
-    if (rotation?.stemX !== undefined && rotation.stemY !== undefined) {
-      gctx.strokeStyle = '#ffcd75';
-      gctx.beginPath();
-      gctx.moveTo(rotation.stemX * cellSize, rotation.stemY * cellSize);
-      gctx.lineTo(rotation.x * cellSize, rotation.y * cellSize);
-      gctx.stroke();
-    }
-    for (const handle of handles) {
-      const handleX = handle.x * cellSize;
-      const handleY = handle.y * cellSize;
-      if (handle.handle === 'rotate') {
-        gctx.fillStyle = '#38b764';
-        gctx.strokeStyle = '#07070d';
+    if (currentTool === 'move') {
+      const handles = selectionHandlePositions(selection);
+      const rotation = handles.find((handle) => handle.handle === 'rotate');
+      gctx.save();
+      gctx.setLineDash([]);
+      gctx.lineWidth = 2;
+      if (rotation?.stemX !== undefined && rotation.stemY !== undefined) {
+        gctx.strokeStyle = '#ffcd75';
         gctx.beginPath();
-        gctx.arc(handleX, handleY, 6, 0, Math.PI * 2);
-        gctx.fill();
+        gctx.moveTo(rotation.stemX * cellSize, rotation.stemY * cellSize);
+        gctx.lineTo(rotation.x * cellSize, rotation.y * cellSize);
         gctx.stroke();
-      } else {
-        gctx.fillStyle = '#f4f4f4';
-        gctx.strokeStyle = '#33447f';
-        gctx.fillRect(handleX - 4, handleY - 4, 8, 8);
-        gctx.strokeRect(handleX - 4, handleY - 4, 8, 8);
       }
+      for (const handle of handles) {
+        const handleX = handle.x * cellSize;
+        const handleY = handle.y * cellSize;
+        if (handle.handle === 'rotate') {
+          gctx.fillStyle = '#38b764';
+          gctx.strokeStyle = '#07070d';
+          gctx.beginPath();
+          gctx.arc(handleX, handleY, 6, 0, Math.PI * 2);
+          gctx.fill();
+          gctx.stroke();
+        } else {
+          gctx.fillStyle = '#f4f4f4';
+          gctx.strokeStyle = '#33447f';
+          gctx.fillRect(handleX - 4, handleY - 4, 8, 8);
+          gctx.strokeRect(handleX - 4, handleY - 4, 8, 8);
+        }
+      }
+      gctx.restore();
     }
-    gctx.restore();
   }
 
   if (($('showAnchors') as HTMLInputElement)?.checked) {
@@ -2380,8 +3549,7 @@ function renderComposite(t: number): boolean {
   preview.width = VW * SCALE;
   preview.height = VH * SCALE;
   pctx.imageSmoothingEnabled = false;
-  pctx.fillStyle = '#0a0c1c';
-  pctx.fillRect(0, 0, preview.width, preview.height);
+  drawTransparencyChecker(pctx, preview.width, preview.height);
   pctx.save();
   pctx.scale(SCALE, SCALE);
   // Ground line, so the feet anchor reads.
@@ -2447,17 +3615,12 @@ function renderComposite(t: number): boolean {
     ? Math.min(Math.floor(tIn * bodyFps), bodyAnim.frames.length - 1)
     : Math.floor(tIn * bodyFps) % bodyAnim.frames.length;
   const rows = bodyAnim.frames[frame] ?? [];
-  bodyImg = sprite(
-    bodyFile.hd === false ? rows : epx(epx(rows)),
-    bodyFile.palette ?? PAL,
-  );
   const bodyGeometry = geometryOf(bodyFile, rows);
   dw = bodyGeometry.w;
   dh = bodyGeometry.h;
 
   pctx.save();
   pctx.translate(fx, fy);
-  pctx.drawImage(bodyImg, -dw / 2, -dh, dw, dh);
   // Attachment points are authored from the sheet's top-left, while
   // held-weapon renderers work from the player's feet-centred origin.
   // Feed the raw-sheet composite the same converted hand anchors that
@@ -2472,15 +3635,47 @@ function renderComposite(t: number): boolean {
   // an attack pose, fall back to idle rather than throwing mid-paint.
   const known = weaponVisuals.get(wdef!.visual).animations;
   const weaponAnim = !known || known.includes(animName) ? animName : 'idle';
-  try {
-    drawHeldWeapon(pctx, wdef!.visual, {
-      facing: 1, anim: weaponAnim, frame, animT: tIn,
-      bodyW: dw, bodyH: dh,
-      frontHand: sheetAnchor('frontHand'),
-      rearHand: sheetAnchor('rearHand'),
-      attack: pose,
-    });
-  } catch { /* a half-painted sheet mid-edit; next frame will catch up */ }
+  const weaponContext = {
+    facing: 1 as const, anim: weaponAnim, frame, animT: tIn,
+    bodyW: dw, bodyH: dh,
+    frontHand: sheetAnchor('frontHand'),
+    rearHand: sheetAnchor('rearHand'),
+    attack: pose,
+  };
+  const bodyLayerVisible = (layer: SpriteLayerData): boolean => (
+    bodyFile !== file
+      || (soloLayerId ? layer.id === soloLayerId : !hiddenLayerIds.has(layer.id))
+  );
+  const bodyRowsForTag = (tag: string): string[] | undefined => {
+    if (!isLayeredSpriteFile(bodyFile)) {
+      return tag === defaultLayerTag(bodyFile) ? rows : undefined;
+    }
+    if (!bodyFile.layers.some((layer) => layer.tag === tag && bodyLayerVisible(layer))) return undefined;
+    return compositeSpriteFrame(
+      bodyFile,
+      requestedBodyAnim,
+      frame,
+      PAL,
+      (layer) => layer.tag === tag && bodyLayerVisible(layer),
+    );
+  };
+
+  // Raw-sheet previews must use the same shared render-band order as
+  // Player.render. Flattening the body first and drawing the weapon last
+  // hid authored overlays such as a front hand intended to cover its grip.
+  for (const tag of renderTagIds()) {
+    const tagRows = bodyRowsForTag(tag);
+    if (tagRows) {
+      bodyImg = sprite(
+        bodyFile.hd === false ? tagRows : epx(epx(tagRows)),
+        bodyFile.palette ?? PAL,
+      );
+      pctx.drawImage(bodyImg, -dw / 2, -dh, dw, dh);
+    }
+    try {
+      drawHeldWeaponTag(pctx, wdef!.visual, weaponContext, tag);
+    } catch { /* a half-painted sheet mid-edit; next frame will catch up */ }
+  }
   pctx.restore();
 
   if (pose && ($('compTrail') as HTMLInputElement).checked) {
@@ -2533,7 +3728,7 @@ function renderPreview(): void {
   maybeRebakeEditedEquipment();
   const hd = ($('hd') as HTMLInputElement).checked;
   const p = pal();
-  const a = anim();
+  const a = visibleAnim();
   // Editing is frame-oriented: the game-scale preview must show the frame
   // selected in the grid unless the author explicitly asks to play the
   // animation. Previously the preview always ran on wall-clock time, so its
@@ -2586,10 +3781,11 @@ function renderPreview(): void {
   preview.height = displayH + 24;
 
   pctx.imageSmoothingEnabled = false;
-  pctx.fillStyle = '#0a0c1c';
-  pctx.fillRect(0, 0, preview.width, preview.height);
+  drawTransparencyChecker(pctx, preview.width, preview.height);
 
   // Draw active animation text label
+  pctx.fillStyle = 'rgba(7, 7, 13, 0.78)';
+  pctx.fillRect(0, 0, preview.width, 20);
   pctx.fillStyle = '#ffcd75';
   pctx.font = '11px monospace';
   pctx.fillText(`${animName}  ${a.fps}fps`, 8, 16);
@@ -2762,6 +3958,15 @@ function normalize(raw: unknown): SpriteFile {
     const f = r as unknown as SpriteFile;
     if (!f.anims || !Object.keys(f.anims).length) throw new Error('no animations');
     const normalized = { ...f, hd: f.hd ?? true, palette: f.palette ?? { ...PAL } };
+    if (isLayeredSpriteFile(normalized)) {
+      // Drafts created by the first layer-system release predate render tags.
+      // Give them the role default once, then every saved layer is explicit.
+      for (const layer of normalized.layers) layer.tag ||= defaultLayerTag(normalized);
+      validateLayeredSpriteFile(normalized);
+      for (const layer of normalized.layers) {
+        if (!hasRenderTag(layer.tag)) throw new Error(`sprite layer "${layer.id}" uses unknown player render tag "${layer.tag}"`);
+      }
+    }
     geometryOf(normalized, resolveAnim(normalized, Object.keys(normalized.anims)[0])?.frames[0] ?? []);
     return normalized;
   }
@@ -2785,26 +3990,66 @@ function updateToolUI(): void {
   $('btnToolFill').classList.toggle('active', visibleTool === 'fill');
   $('btnToolPicker').classList.toggle('active', visibleTool === 'picker');
   $('btnToolSelect').classList.toggle('active', visibleTool === 'select');
+  $('btnToolMagic').classList.toggle('active', visibleTool === 'magic');
+  $('btnToolMove').classList.toggle('active', visibleTool === 'move');
   grid.classList.toggle('selecting', visibleTool === 'select');
+  grid.classList.toggle('magic-selecting', visibleTool === 'magic');
+  grid.classList.toggle('selection-transforming', visibleTool === 'move');
   grid.classList.toggle('picking', visibleTool === 'picker');
   grid.classList.toggle('soft-tool', visibleTool === 'brush' || visibleTool === 'blur');
-  if (visibleTool !== 'select') {
+  if (visibleTool !== 'move') {
     grid.classList.remove('selection-movable');
     grid.style.cursor = '';
   } else if (!selectionHandleTransform) {
-    grid.style.cursor = 'cell';
+    grid.style.cursor = 'default';
   }
+  updateSelectionModifierCursor();
   const hasSize = currentTool === 'brush' || currentTool === 'blur';
+  const hasMagic = currentTool === 'magic';
+  const hasFill = currentTool === 'fill';
   $('brushSizeConfig').hidden = !hasSize;
-  $('toolConfigEmpty').hidden = hasSize;
+  $('magicConfig').hidden = !hasMagic;
+  $('fillConfig').hidden = !hasFill;
+  $('toolConfigEmpty').hidden = hasSize || hasMagic || hasFill;
   $('toolConfigTitle').textContent = hasSize
     ? `${currentTool === 'brush' ? 'soft brush' : 'blur'} settings`
-    : 'tool settings';
+    : hasMagic ? 'magic selection settings'
+      : hasFill ? 'fill settings' : 'tool settings';
   $('brushSizeLabel').textContent = currentTool === 'blur' ? 'blur size' : 'brush size';
   $('toolConfigHint').textContent = currentTool === 'blur'
     ? 'Averages neighboring colors at the center and feathers the effect toward the edge.'
     : 'The solid center overwrites color; the soft edge blends into neighboring pixels.';
+  updateSelectionTransformControls();
   updateBrushCursor();
+}
+
+function updateSelectionTransformControls(): void {
+  const enabled = Boolean(selection) && currentTool === 'move';
+  for (const id of [
+    'btnRotateSelectionLeft', 'btnRotateSelectionRight', 'btnRotateSelection', 'btnResizeSelection',
+    'btnNudgeLeft', 'btnNudgeRight', 'btnNudgeUp', 'btnNudgeDown',
+  ]) {
+    ($(id) as HTMLButtonElement).disabled = !enabled;
+  }
+  ($('selectionW') as HTMLInputElement).disabled = !enabled;
+  ($('selectionH') as HTMLInputElement).disabled = !enabled;
+  ($('selectionAngle') as HTMLInputElement).disabled = !enabled;
+}
+
+function updateSelectionModifierCursor(keys?: { shiftKey: boolean; altKey: boolean }): void {
+  if (keys) selectionModifierKeys = { shiftKey: keys.shiftKey, altKey: keys.altKey };
+  const selectionTool = currentTool === 'select' || currentTool === 'magic';
+  const mode = selectionTool ? selectionCombineMode(selectionModifierKeys) : 'replace';
+  grid.classList.toggle('selection-add', mode === 'add');
+  grid.classList.toggle('selection-subtract', mode === 'subtract');
+  grid.classList.toggle('selection-intersect', mode === 'intersect');
+  if (mode !== 'replace') {
+    grid.classList.remove('selection-movable');
+    grid.style.cursor = '';
+  } else if (currentTool === 'select' && !selectionHandleTransform) {
+    // Pointer movement will refine this to move/resize when appropriate.
+    grid.style.cursor = 'cell';
+  }
 }
 
 function updateBrushCursor(): void {
@@ -2824,8 +4069,8 @@ function updateBrushCursor(): void {
 
 function setTool(tool: EditorTool): void {
   currentTool = tool;
-  if (tool === 'brush' || tool === 'blur') activatePanel('left', 'left-tool');
-  if (tool === 'select') activatePanel('right', 'right-transform');
+  if (tool === 'brush' || tool === 'blur' || tool === 'magic' || tool === 'fill') activatePanel('left', 'left-tool');
+  if (tool === 'move') activatePanel('right', 'right-transform');
   updateToolUI();
   redraw();
 }
@@ -2836,6 +4081,8 @@ $('btnToolBlur').onclick = () => setTool('blur');
 $('btnToolFill').onclick = () => setTool('fill');
 $('btnToolPicker').onclick = () => setTool('picker');
 $('btnToolSelect').onclick = () => setTool('select');
+$('btnToolMagic').onclick = () => setTool('magic');
+$('btnToolMove').onclick = () => setTool('move');
 
 $('btnCompactPalette').onclick = () => {
   const before = JSON.stringify(file);
@@ -2867,7 +4114,7 @@ $('btnBrushSizeUp').onclick = () => setBrushSize(brushSize() + 1);
 function copySelection(): PixelClipboard | null {
   const snapshot = selectionSnapshot();
   if (!snapshot) return null;
-  pixelClipboard = { w: snapshot.w, h: snapshot.h, rows: snapshot.rows };
+  pixelClipboard = { w: snapshot.w, h: snapshot.h, rows: snapshot.rows, mask: snapshot.mask?.slice() };
   const envelope = JSON.stringify({ kind: 'hitstop-sprite-selection', v: 1, ...snapshot });
   void navigator.clipboard?.writeText(envelope).catch(() => {});
   flash(`copied ${snapshot.w}x${snapshot.h} pixels`);
@@ -2875,12 +4122,10 @@ function copySelection(): PixelClipboard | null {
 }
 
 function cutSelection(): void {
+  if (!requireEditableLayer()) return;
   if (!selection || !copySelection()) return;
   saveHistory();
-  for (let y = selection.y; y < selection.y + selection.h; y++) {
-    const row = cur()[y];
-    cur()[y] = row.slice(0, selection.x) + '.'.repeat(selection.w) + row.slice(selection.x + selection.w);
-  }
+  clearSelectionPixels(cur(), selection);
   redraw();
   syncIO();
   void publishSelection();
@@ -2889,19 +4134,23 @@ function cutSelection(): void {
 
 function parsePixelClipboard(text: string): PixelClipboard | null {
   try {
-    const value = JSON.parse(text) as { kind?: unknown; w?: unknown; h?: unknown; rows?: unknown };
+    const value = JSON.parse(text) as { kind?: unknown; w?: unknown; h?: unknown; rows?: unknown; mask?: unknown };
     if (value.kind !== 'hitstop-sprite-selection' || !Number.isInteger(value.w) || !Number.isInteger(value.h)
       || !Array.isArray(value.rows) || !value.rows.every((row) => typeof row === 'string')) return null;
     const w = Number(value.w);
     const h = Number(value.h);
     if (w < 1 || h < 1 || value.rows.length !== h || value.rows.some((row) => row.length !== w)) return null;
-    return { w, h, rows: value.rows as string[] };
+    const mask = value.mask;
+    if (mask !== undefined && (!Array.isArray(mask) || mask.length !== h
+      || !mask.every((row) => typeof row === 'string' && row.length === w && /^[1.]+$/.test(row)))) return null;
+    return { w, h, rows: value.rows as string[], mask: mask as string[] | undefined };
   } catch {
     return null;
   }
 }
 
 async function pasteSelection(): Promise<void> {
+  if (!requireEditableLayer()) return;
   let clip = pixelClipboard;
   if (!clip) {
     try { clip = parsePixelClipboard(await navigator.clipboard.readText()); } catch { /* permission denied */ }
@@ -2922,7 +4171,8 @@ async function pasteSelection(): Promise<void> {
   pastePixels(rows, clip, x, y, true);
   anim().frames[frameIdx] = rows;
   editVersion++;
-  setSelection({ x, y, w: pastedW, h: pastedH });
+  const clippedMask = clip.mask?.slice(0, pastedH).map((row) => row.slice(0, pastedW));
+  setSelection({ x, y, w: pastedW, h: pastedH, mask: clippedMask });
   syncIO();
   void publishSelection();
   flash(`pasted ${pastedW}x${pastedH} pixels`);
@@ -2937,22 +4187,24 @@ function commitSelectionPixels(
   if (!selection) return;
   saveHistory();
   const rows = cur().slice();
-  clearRect(rows, selection);
+  clearSelectionPixels(rows, selection);
   pastePixels(rows, clip, x, y, true);
   anim().frames[frameIdx] = rows;
   editVersion++;
-  setSelection({ x, y, w: clip.w, h: clip.h });
+  setSelection({ x, y, w: clip.w, h: clip.h, mask: clip.mask?.slice() });
   syncIO();
   void publishSelection();
   flash(message);
 }
 
 function moveSelectionBy(dx: number, dy: number): void {
+  if (currentTool !== 'move') return;
+  if (!requireEditableLayer()) return;
   if (!selection) return;
   const x = Math.max(0, Math.min(W() - selection.w, selection.x + dx));
   const y = Math.max(0, Math.min(H() - selection.h, selection.y + dy));
   if (x === selection.x && y === selection.y) return;
-  commitSelectionPixels(pixelsInRect(selection), x, y, `moved selection to ${x},${y}`);
+  commitSelectionPixels(pixelsInSelection(selection), x, y, `moved selection to ${x},${y}`);
 }
 
 function scaleSelectionRows(source: PixelClipboard, w: number, h: number): PixelClipboard {
@@ -2966,10 +4218,19 @@ function scaleSelectionRows(source: PixelClipboard, w: number, h: number): Pixel
         return source.rows[sourceY][sourceX];
       }).join('');
     }),
+    mask: source.mask && Array.from({ length: h }, (_, y) => {
+      const sourceY = Math.min(source.h - 1, Math.floor(y * source.h / h));
+      return Array.from({ length: w }, (_, x) => {
+        const sourceX = Math.min(source.w - 1, Math.floor(x * source.w / w));
+        return source.mask![sourceY][sourceX];
+      }).join('');
+    }),
   };
 }
 
 function resizeSelection(): void {
+  if (currentTool !== 'move') return;
+  if (!requireEditableLayer()) return;
   if (!selection) return;
   const requestedW = Math.round(($('selectionW') as HTMLInputElement).valueAsNumber);
   const requestedH = Math.round(($('selectionH') as HTMLInputElement).valueAsNumber);
@@ -2982,7 +4243,7 @@ function resizeSelection(): void {
     flash('selection already has that size');
     return;
   }
-  const source = pixelsInRect(selection);
+  const source = pixelsInSelection(selection);
   const scaled = scaleSelectionRows(source, requestedW, requestedH);
   const x = Math.max(0, Math.min(W() - requestedW,
     Math.round(selection.x + (selection.w - requestedW) / 2)));
@@ -2999,6 +4260,12 @@ function rotateSelectionQuarter(source: PixelClipboard, clockwise: boolean): Pix
       Array.from({ length: source.h }, (_, x) => clockwise
         ? source.rows[source.h - 1 - x][y]
         : source.rows[x][source.w - 1 - y],
+      ).join(''),
+    ),
+    mask: source.mask && Array.from({ length: source.w }, (_, y) =>
+      Array.from({ length: source.h }, (_, x) => clockwise
+        ? source.mask![source.h - 1 - x][y]
+        : source.mask![x][source.w - 1 - y],
       ).join(''),
     ),
   };
@@ -3045,16 +4312,31 @@ function rotateSelectionRows(source: PixelClipboard, degrees: number): PixelClip
           : '.';
       }).join(''),
     ),
+    mask: source.mask && Array.from({ length: height }, (_, y) =>
+      Array.from({ length: width }, (_, x) => {
+        const destinationX = x + 0.5 - width / 2;
+        const destinationY = y + 0.5 - height / 2;
+        const sourceX = cosine * destinationX + sine * destinationY + source.w / 2;
+        const sourceY = -sine * destinationX + cosine * destinationY + source.h / 2;
+        const sampleX = Math.floor(sourceX);
+        const sampleY = Math.floor(sourceY);
+        return sampleX >= 0 && sampleX < source.w && sampleY >= 0 && sampleY < source.h
+          ? source.mask![sampleY][sampleX]
+          : '.';
+      }).join(''),
+    ),
   };
 }
 
 function rotateSelectionBy(degrees: number, message?: string): void {
+  if (currentTool !== 'move') return;
+  if (!requireEditableLayer()) return;
   if (!selection || !Number.isFinite(degrees)) return;
   if (Math.abs(degrees % 360) < 0.0001) {
     flash('enter a non-zero rotation');
     return;
   }
-  const source = pixelsInRect(selection);
+  const source = pixelsInSelection(selection);
   const rotated = rotateSelectionRows(source, degrees);
   if (rotated.w > W() || rotated.h > H()) {
     flash(`rotated selection does not fit ${W()}x${H()} canvas`);
@@ -3068,6 +4350,7 @@ function rotateSelectionBy(degrees: number, message?: string): void {
 }
 
 function rotateSelection(clockwise: boolean): void {
+  if (!requireEditableLayer()) return;
   rotateSelectionBy(clockwise ? 90 : -90, `rotated selection ${clockwise ? 'right' : 'left'} 90°`);
 }
 
@@ -3167,44 +4450,10 @@ $('selectRefSprite').onchange = (e) => {
 };
 ($('onionSkin') as HTMLInputElement).onchange = () => redraw();
 
-$('btnNudgeLeft').onclick = () => nudge(-1, 0);
-$('btnNudgeRight').onclick = () => nudge(1, 0);
-$('btnNudgeUp').onclick = () => nudge(0, -1);
-$('btnNudgeDown').onclick = () => nudge(0, 1);
-
-function nudge(dx: number, dy: number): void {
-  saveHistory();
-  const w = W();
-  const h = H();
-  const f = cur();
-  const next: string[] = [];
-  
-  for (let y = 0; y < h; y++) {
-    const srcY = (y - dy + h) % h;
-    let row = '';
-    for (let x = 0; x < w; x++) {
-      const srcX = (x - dx + w) % w;
-      row += f[srcY][srcX];
-    }
-    next.push(row);
-  }
-  
-  anim().frames[frameIdx] = next;
-  const logicalW = w / density();
-  const logicalH = h / density();
-  const concrete = concreteAnimName();
-  let movedAnchor = false;
-  for (const groups of Object.values(file.anchors ?? {})) {
-    const point = groups[concrete]?.[frameIdx];
-    if (!point) continue;
-    point.x = (point.x + dx / density() + logicalW) % logicalW;
-    point.y = (point.y + dy / density() + logicalH) % logicalH;
-    movedAnchor = true;
-  }
-  if (movedAnchor) buildAnchors();
-  redraw();
-  syncIO();
-}
+$('btnNudgeLeft').onclick = () => moveSelectionBy(-1, 0);
+$('btnNudgeRight').onclick = () => moveSelectionBy(1, 0);
+$('btnNudgeUp').onclick = () => moveSelectionBy(0, -1);
+$('btnNudgeDown').onclick = () => moveSelectionBy(0, 1);
 
 /* ---------------- history (undo / redo) ---------------- */
 
@@ -3284,7 +4533,8 @@ window.addEventListener('keydown', (e) => {
     editMenu.open = false;
     return;
   }
-  if (e.key === 'Alt') {
+  updateSelectionModifierCursor(e);
+  if (e.key === 'Alt' && currentTool !== 'magic' && currentTool !== 'select' && currentTool !== 'move') {
     e.preventDefault();
     altPickerActive = true;
     updateToolUI();
@@ -3313,7 +4563,7 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     setTool('select');
   }
-  if (!typing && selection && currentTool === 'select' && key.startsWith('arrow')) {
+  if (!typing && selection && currentTool === 'move' && key.startsWith('arrow')) {
     e.preventDefault();
     const distance = e.shiftKey ? 4 : 1;
     if (key === 'arrowleft') moveSelectionBy(-distance, 0);
@@ -3327,6 +4577,8 @@ window.addEventListener('keydown', (e) => {
       b: 'brush',
       u: 'blur',
       g: 'fill',
+      w: 'magic',
+      v: 'move',
     };
     const tool = shortcut[key];
     if (tool) {
@@ -3349,6 +4601,7 @@ window.addEventListener('keydown', (e) => {
 });
 
 window.addEventListener('keyup', (e) => {
+  updateSelectionModifierCursor(e);
   if (e.key !== 'Alt') return;
   e.preventDefault();
   altPickerActive = false;
@@ -3356,6 +4609,8 @@ window.addEventListener('keyup', (e) => {
 });
 
 window.addEventListener('blur', () => {
+  selectionModifierKeys = { shiftKey: false, altKey: false };
+  magicSelectionDrag = null;
   altPickerActive = false;
   picking = false;
   updateToolUI();
@@ -3413,10 +4668,13 @@ function onHitboxChange(): void {
 /* ---------------- boot ---------------- */
 
 function refreshUI(): void {
+  reconcileLayerState();
   buildPalette();
+  buildLayers();
   buildAnims();
   buildFrames();
   buildAnchors();
+  buildAttachmentSlots();
   redraw();
   syncIO();
 
@@ -3461,12 +4719,21 @@ Object.defineProperty(window, '__editor', {
       updateUndoRedoButtons();
       void publishSharedSprite();
     },
-    setPixels(changes: { anim?: string; frame?: number; pixels: { x: number; y: number; char: string }[] }) {
+    setPixels(changes: { anim?: string; frame?: number; layerId?: string; pixels: { x: number; y: number; char: string }[] }) {
       const targetName = changes.anim ?? animName;
-      const targetAnim = resolveAnim(file, targetName);
-      if (!targetAnim) throw new Error(`unknown animation "${targetName}"`);
+      const concrete = resolveAnimName(file, targetName);
+      let frames: string[][];
+      if (isLayeredSpriteFile(file)) {
+        const layer = file.layers.find((candidate) => candidate.id === (changes.layerId ?? activeLayerId));
+        if (!layer) throw new Error(`unknown layer "${changes.layerId ?? activeLayerId}"`);
+        frames = layer.tracks[concrete];
+      } else {
+        const targetAnim = file.anims[concrete];
+        if (!targetAnim || typeof targetAnim === 'string') throw new Error(`unknown animation "${targetName}"`);
+        frames = targetAnim.frames;
+      }
       const targetFrame = changes.frame ?? frameIdx;
-      const rows = targetAnim.frames[targetFrame];
+      const rows = frames[targetFrame];
       if (!rows) throw new Error(`unknown frame ${targetFrame} in "${targetName}"`);
       rememberForUndo();
       for (const pixel of changes.pixels) {

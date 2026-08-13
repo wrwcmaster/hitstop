@@ -50,7 +50,18 @@
     canvas { image-rendering: pixelated; }
     #grid { cursor: crosshair; border: 1px solid #33447f; }
     #grid.selecting { cursor: cell; }
-    #grid.selecting.selection-movable { cursor: move; }
+    #grid.magic-selecting { cursor: pointer; }
+    #grid.selection-transforming { cursor: default; }
+    #grid.selection-add {
+      cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Cpath d='M12 2v20M2 12h20' stroke='%23fff' stroke-width='3'/%3E%3Cpath d='M12 2v20M2 12h20' stroke='%23000'/%3E%3Ccircle cx='23' cy='23' r='7' fill='%23070b16' stroke='%23fff'/%3E%3Cpath d='M23 19v8M19 23h8' stroke='%2338b764' stroke-width='2'/%3E%3C/svg%3E") 12 12, crosshair !important;
+    }
+    #grid.selection-subtract {
+      cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Cpath d='M12 2v20M2 12h20' stroke='%23fff' stroke-width='3'/%3E%3Cpath d='M12 2v20M2 12h20' stroke='%23000'/%3E%3Ccircle cx='23' cy='23' r='7' fill='%23070b16' stroke='%23fff'/%3E%3Cpath d='M19 23h8' stroke='%23b13e53' stroke-width='2'/%3E%3C/svg%3E") 12 12, crosshair !important;
+    }
+    #grid.selection-intersect {
+      cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Cpath d='M12 2v20M2 12h20' stroke='%23fff' stroke-width='3'/%3E%3Cpath d='M12 2v20M2 12h20' stroke='%23000'/%3E%3Ccircle cx='23' cy='23' r='7' fill='%23070b16' stroke='%23fff'/%3E%3Cpath d='m20 20 6 6m0-6-6 6' stroke='%23ffcd75' stroke-width='2'/%3E%3C/svg%3E") 12 12, crosshair !important;
+    }
+    #grid.selection-transforming.selection-movable { cursor: move; }
     #grid.picking { cursor: copy; }
     #grid.soft-tool { cursor: none; }
     #brushCursor {
@@ -92,6 +103,31 @@
     .command-menu-panel button:hover { background: #1f2a57; }
     .command-menu-panel button:disabled { color: #566c86; cursor: default; }
     .command-menu-panel kbd { color: #94b0c2; font: inherit; white-space: nowrap; }
+    .command-menu-separator { height: 1px; margin: 5px 3px; background: #33447f; }
+    dialog {
+      width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto;
+      color: #94b0c2; background: #101430; border: 1px solid #33447f; border-radius: 6px;
+      box-shadow: 0 14px 42px rgba(0, 0, 0, .65);
+    }
+    dialog::backdrop { background: rgba(7, 7, 13, .72); }
+    .dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .dialog-heading h2 { margin: 0; }
+    #renderTagsEditor { display: flex; flex-direction: column; gap: 5px; margin: 12px 0; }
+    .render-tag-entry { padding: 5px; border: 1px solid #252f5e; border-radius: 4px; }
+    .render-tag-row {
+      display: grid; grid-template-columns: 28px 28px minmax(110px, .8fr) minmax(140px, 1fr) 30px;
+      align-items: center; gap: 4px;
+    }
+    .render-tag-row input { min-width: 0; width: 100%; }
+    .render-tag-row button { min-width: 0; padding: 4px; }
+    .render-tag-dependencies {
+      margin: 5px 0 0 64px; padding-left: 18px; color: #d88962; font-size: 11px;
+    }
+    #renderTagCreate {
+      display: grid; grid-template-columns: minmax(120px, .8fr) minmax(140px, 1fr) auto auto;
+      gap: 4px; margin: 8px 0;
+    }
+    #renderTagCreate[hidden] { display: none; }
     .panel-tabs {
       position: sticky; top: -10px; z-index: 5;
       display: flex; gap: 3px; margin: -10px -10px 10px; padding: 8px 8px 6px;
@@ -138,7 +174,7 @@
     }
     .palette-cell:hover { transform: scale(1.08); position: relative; z-index: 1; }
     .palette-cell.none {
-      background: repeating-conic-gradient(#39405a 0 25%, #11162b 0 50%) 0 0 / 10px 10px;
+      background: repeating-conic-gradient(#f0f0f0 0 25%, #b8b8b8 0 50%) 0 0 / 12px 12px;
     }
     #palette .palette-cell.active {
       border-color: #f4f4f4;
@@ -147,15 +183,36 @@
     .swatch { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
     .swatch button { flex: 1; text-align: left; }
     .chip { width: 14px; height: 14px; border: 1px solid #566c86; display: inline-block; flex-shrink: 0; }
-    .chip.none { background: repeating-conic-gradient(#333 0 25%, #111 0 50%) 0 0 / 8px 8px; }
+    .chip.none { background: repeating-conic-gradient(#f0f0f0 0 25%, #b8b8b8 0 50%) 0 0 / 12px 12px; }
     label { display: block; margin: 4px 0; }
     input[type=number] { width: 56px; }
     input[type=color] { padding: 0; width: 32px; height: 22px; }
     textarea { width: 100%; height: 140px; background: #07070d; color: #94b0c2; border: 1px solid #33447f; font: 11px monospace; }
     .hint { color: #566c86; font-size: 11px; }
     #frames button { margin-right: 4px; }
+    #layers { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+    .layer-row {
+      display: grid; grid-template-columns: 28px 28px minmax(0, 1fr) minmax(82px, .8fr) 28px;
+      align-items: center; gap: 3px; padding: 3px;
+      border: 1px solid #263563; border-radius: 4px; background: #0b0e20;
+    }
+    .layer-row.active { border-color: #ffcd75; background: #1a2349; }
+    .layer-row button { min-width: 0; padding: 3px; }
+    .layer-row .layer-name { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .layer-row input.layer-name { min-width: 0; width: 100%; box-sizing: border-box; }
+    .layer-row .layer-tag { min-width: 0; font-size: 10px; padding: 3px; }
+    .layer-row .layer-toggle.off { color: #566c86; background: #11162b; }
+    .layer-row .layer-toggle.on { color: #ffcd75; }
     #preview { border: 1px solid #33447f; background: #0a0c1c; max-width: 100%; height: auto; }
-    #status { color: #38b764; margin-left: auto; }
+    #status {
+      position: fixed; top: 12px; right: 12px; z-index: 200;
+      max-width: min(420px, calc(100vw - 24px)); padding: 7px 10px;
+      color: #38b764; background: rgba(7, 7, 13, 0.94);
+      border: 1px solid #38b764; border-radius: 5px;
+      box-shadow: 0 7px 22px rgba(0, 0, 0, 0.48);
+      pointer-events: none;
+    }
+    #status:empty { display: none; }
     #bridgeStatus { color: #566c86; }
     #bridgeStatus.connected { color: #38b764; }
     #bridgeStatus.dirty { color: #ffcd75; }
@@ -173,6 +230,9 @@
         <button id="btnCut" title="Cut selected pixels (Ctrl+X)" role="menuitem" disabled><span>cut</span><kbd>Ctrl+X</kbd></button>
         <button id="btnCopy" title="Copy selected pixels (Ctrl+C)" role="menuitem" disabled><span>copy</span><kbd>Ctrl+C</kbd></button>
         <button id="btnPaste" title="Paste pixels at the selection (Ctrl+V)" role="menuitem"><span>paste</span><kbd>Ctrl+V</kbd></button>
+        <div class="command-menu-separator" role="separator"></div>
+        <button id="btnOpenLayerTags" title="Manage shared layer tags and their render order" role="menuitem"><span>edit layer tags</span></button>
+        <button id="btnOpenData" title="Open the sprite JSON workspace" role="menuitem"><span>sprite data</span></button>
       </div>
     </details>
     <select id="selectSprite" style="background:#1f2a57; color:#f4f4f4; border:1px solid #33447f; border-radius:4px; padding:4px;">
@@ -202,8 +262,17 @@
       <button id="btnToolPicker" class="icon-tool" title="Color picker (hold Alt)" aria-label="Color picker (hold Alt)">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12 3l5 5-8.5 8.5H4v-4.5z"/><path d="M10.5 4.5l5 5M4 16.5l-1.5 1"/></svg>
       </button>
+    </div>
+    <span class="separator" aria-hidden="true"></span>
+    <div class="group" aria-label="selection tools">
       <button id="btnToolSelect" class="icon-tool" title="Rectangular selection (M)" aria-label="Rectangular selection (M)">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path stroke-dasharray="3 2" d="M3 3h14v14H3z"/><path d="M14 14l3.5 3.5M14 17.5h3.5V14"/></svg>
+      </button>
+      <button id="btnToolMagic" class="icon-tool" title="Magic selection (W)" aria-label="Magic selection (W)">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 17L15.5 6.5M12.5 3.5l4 4M4 3v3M2.5 4.5h3M15.5 13v3M14 14.5h3M7.5 8l1.5 1.5"/></svg>
+      </button>
+      <button id="btnToolMove" class="icon-tool" title="Move and transform selection (V)" aria-label="Move and transform selection (V)">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v16M2 10h16"/><path d="M7 5l3-3 3 3M7 15l3 3 3-3M5 7l-3 3 3 3M15 7l3 3-3 3"/></svg>
       </button>
     </div>
     <span id="selectionStatus" class="hint">selection: none</span>
@@ -245,6 +314,20 @@
           </div>
           <p id="toolConfigHint" class="hint">The solid center overwrites color; the soft edge blends into neighboring pixels.</p>
         </div>
+        <div id="magicConfig" hidden>
+          <label>color tolerance <input id="magicTolerance" type="number" min="0" max="255" step="1" value="24"></label>
+          <label><input id="magicContiguous" type="checkbox" checked> contiguous pixels only</label>
+          <p class="hint">Click a color region. Drag normally or with Shift to keep adding regions as the pointer reaches unselected pixels; drag with Alt to erase selection like a pencil. Shift+Alt intersects. Increase tolerance to include nearby shades.</p>
+        </div>
+        <div id="fillConfig" hidden>
+          <label>fill mode
+            <select id="fillMode">
+              <option value="replace">replace connected color</option>
+              <option value="match">match selected color drift</option>
+            </select>
+          </label>
+          <p class="hint">Color drift mode maps the clicked source pixel to the active palette color, then applies the same RGB shift to every opaque pixel in the selection so highlights and shadows move together.</p>
+        </div>
         <p id="toolConfigEmpty" class="hint">The selected tool has no adjustable settings.</p>
       </section>
       <section id="left-reference" class="panel-page" data-panel-page="left" hidden>
@@ -285,9 +368,9 @@
       <div id="right-workspace-scroll">
       <div class="panel-tabs" role="tablist" aria-label="sprite workspace">
         <button class="active" data-panel-tab="right" data-panel-target="right-animate" role="tab" aria-selected="true">animate</button>
+        <button data-panel-tab="right" data-panel-target="right-layers" role="tab" aria-selected="false">layers</button>
         <button data-panel-tab="right" data-panel-target="right-transform" role="tab" aria-selected="false">transform</button>
         <button data-panel-tab="right" data-panel-target="right-rig" role="tab" aria-selected="false">rig</button>
-        <button data-panel-tab="right" data-panel-target="right-data" role="tab" aria-selected="false">data</button>
       </div>
       <section id="right-animate" class="panel-page" data-panel-page="right">
       <div class="panel-group">
@@ -331,6 +414,24 @@
       </div>
 
       </section>
+      <section id="right-layers" class="panel-page" data-panel-page="right" hidden>
+        <div class="panel-group">
+          <h2>layers <span id="layerStatus" class="hint">flat sprite</span></h2>
+          <div id="layers"></div>
+          <div class="panel-row">
+            <button id="btnAddLayer" title="Add a transparent layer">+ layer</button>
+            <button id="btnDupLayer" title="Duplicate active layer">dup</button>
+            <button id="btnLayerUp" title="Move active layer toward the front">&uarr;</button>
+            <button id="btnLayerDown" title="Move active layer toward the back">&darr;</button>
+          </div>
+          <div class="panel-row">
+            <button id="btnMergeLayer" title="Merge active layer into the layer below">merge down</button>
+            <button id="btnDelLayer" title="Delete active layer">delete</button>
+            <button id="btnFlattenLayers" title="Flatten all layers back to a single-layer sprite">flatten</button>
+          </div>
+          <p class="hint" style="margin:0">Render tags set cross-sprite order. Arrows only reorder layers within the same tag; eye, solo, and lock are editor-only.</p>
+        </div>
+      </section>
       <section id="right-rig" class="panel-page" data-panel-page="right" hidden>
 
       <h2>sprite size</h2>
@@ -370,10 +471,21 @@
       </div>
       <p class="hint" style="margin:0 0 8px">Shift+Alt-click the grid to place the selected anchor. For a right-facing knight, frontHand is the knight's right/weapon hand, on the left side of the image.</p>
 
+      <h2>attachment slots</h2>
+      <div style="display:flex; gap:4px; margin:5px 0">
+        <select id="attachmentSlotName" style="min-width:100px; flex:1"><option value="">-- none --</option></select>
+        <button id="btnAddAttachmentSlot" title="Add a semantic socket bound to an anchor">+</button>
+        <button id="btnDelAttachmentSlot" title="Delete the selected attachment slot">del</button>
+      </div>
+      <label style="margin:0 0 8px; display:flex; gap:6px; align-items:center">anchor
+        <select id="attachmentSlotAnchor" style="min-width:100px; flex:1"><option value="">-- anchor --</option></select>
+      </label>
+      <p class="hint" style="margin:0 0 8px">A slot gives gameplay a stable name such as mainHand; its anchor may move independently in every animation frame.</p>
+
       </section>
       <section id="right-transform" class="panel-page" data-panel-page="right" hidden>
         <h2>selection</h2>
-        <p class="hint">Use Select (M), then drag a rectangle on the canvas. Transparent pixels are ignored while moving and transforming.</p>
+        <p class="hint">Use Select (M) for a rectangle or Magic (W) for a color-shaped mask, then choose Move (V) to drag, resize, rotate, or nudge it. Transparent and unselected pixels are ignored.</p>
         <div id="selectionTransforms">
           <div class="panel-group">
             <h2>rotate</h2>
@@ -413,14 +525,32 @@
       <textarea id="io" spellcheck="false" style="height:240px; margin-bottom:6px;"></textarea>
       <p class="hint" style="margin:0">
         paint: left-drag &middot; erase: right-drag &middot; picker: Alt<br>
-        pencil P &middot; brush B &middot; blur U &middot; fill G &middot; select M<br>
-        selection: drag inside to move &middot; drag square handles to resize &middot; drag green handle to rotate &middot; Shift snaps 15&deg;<br>
+        pencil P &middot; brush B &middot; blur U &middot; fill G &middot; select M &middot; magic W<br>
+        selection: Shift adds &middot; Alt removes &middot; Shift+Alt intersects &middot; drag inside to move &middot; drag square handles to resize &middot; drag green handle to rotate &middot; Shift snaps 15&deg;<br>
         export/import JSON (content/sprites/*.json)
       </p>
       </section>
       </div>
     </div>
   </main>
+  <dialog id="renderTagsDialog" aria-labelledby="renderTagsTitle">
+    <div class="dialog-heading">
+      <h2 id="renderTagsTitle">layer tags</h2>
+      <button id="btnCloseRenderTags" type="button" title="Close layer tag editor" aria-label="Close layer tag editor">&times;</button>
+    </div>
+    <p class="hint">Tags are shared by character and equipment layers. Their top-to-bottom order here is their back-to-front render order. A tag can be deleted when it has no dependencies; blocked tags list every consumer below.</p>
+    <div id="renderTagsEditor"></div>
+    <div id="renderTagCreate" hidden>
+      <input id="renderTagNewId" type="text" placeholder="tag-id" aria-label="New layer tag id" autocomplete="off">
+      <input id="renderTagNewLabel" type="text" placeholder="display label" aria-label="New layer tag label" autocomplete="off">
+      <button id="btnConfirmRenderTag" type="button">add</button>
+      <button id="btnCancelRenderTag" type="button">cancel</button>
+    </div>
+    <div class="panel-row" style="margin:0">
+      <button id="btnAddRenderTag" type="button">+ tag</button>
+      <button id="btnDoneRenderTags" type="button">done</button>
+    </div>
+  </dialog>
   <script type="module" src="/tools/src/sprite-editor.ts"></script>
 </body>
 </html>

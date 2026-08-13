@@ -21,11 +21,13 @@ interface ActiveSelection {
   path: string | null;
   anim: string;
   frame: number;
+  layerId?: string;
   x: number;
   y: number;
   w: number;
   h: number;
   rows: string[];
+  mask?: string[];
   source: string;
   updatedAt: number;
 }
@@ -37,6 +39,7 @@ interface ActiveSelection {
  */
 export function spriteEditorBridge(root: string): Plugin {
   const spriteRoot = path.resolve(root, 'src/game/content/sprites');
+  const renderTagsPath = path.resolve(root, 'src/game/content/render-tags.json');
   let active: ActiveSprite | null = null;
   let selection: ActiveSelection | null = null;
   let preview: Buffer | null = null;
@@ -89,13 +92,30 @@ export function spriteEditorBridge(root: string): Plugin {
     if (!anims || typeof anims !== 'object' || Array.isArray(anims) || !Object.keys(anims).length) {
       throw new Error('sprite needs at least one animation');
     }
+    const renderTag = (candidate as { renderTag?: unknown }).renderTag;
+    if (renderTag !== undefined && (typeof renderTag !== 'string' || !renderTag.trim())) {
+      throw new Error('sprite renderTag must be non-empty');
+    }
+    const layers = (candidate as { layers?: unknown }).layers;
+    const layered = Array.isArray(layers);
+    const concreteCounts = new Map<string, number>();
     for (const [name, value] of Object.entries(anims)) {
       if (typeof value === 'string') continue;
-      if (!value || typeof value !== 'object' || !Array.isArray((value as { frames?: unknown }).frames)) {
+      if (!value || typeof value !== 'object') throw new Error(`animation "${name}" needs timing data or an alias`);
+      if (layered) {
+        const count = (value as { frameCount?: unknown }).frameCount;
+        if (!Number.isInteger(count) || Number(count) < 1) {
+          throw new Error(`layered animation "${name}" needs a positive frameCount`);
+        }
+        concreteCounts.set(name, Number(count));
+        continue;
+      }
+      if (!Array.isArray((value as { frames?: unknown }).frames)) {
         throw new Error(`animation "${name}" needs frames or an alias`);
       }
       const frames = (value as { frames: unknown[] }).frames;
       if (!frames.length) throw new Error(`animation "${name}" has no frames`);
+      concreteCounts.set(name, frames.length);
       for (const frame of frames) {
         if (!Array.isArray(frame) || !frame.length || !frame.every((row) => typeof row === 'string')) {
           throw new Error(`animation "${name}" has an invalid frame`);
@@ -103,6 +123,37 @@ export function spriteEditorBridge(root: string): Plugin {
         const width = (frame[0] as string).length;
         if (!width || !frame.every((row) => (row as string).length === width)) {
           throw new Error(`animation "${name}" frames must be rectangular`);
+        }
+      }
+    }
+    if (layered) {
+      if (!layers.length) throw new Error('layered sprite needs at least one layer');
+      const ids = new Set<string>();
+      for (const rawLayer of layers) {
+        if (!rawLayer || typeof rawLayer !== 'object' || Array.isArray(rawLayer)) throw new Error('sprite layer must be an object');
+        const layer = rawLayer as { id?: unknown; name?: unknown; tag?: unknown; tracks?: unknown };
+        if (typeof layer.id !== 'string' || !layer.id.trim() || ids.has(layer.id)) throw new Error('sprite layers need unique ids');
+        if (typeof layer.name !== 'string' || !layer.name.trim()) throw new Error(`layer "${layer.id}" needs a name`);
+        if (typeof layer.tag !== 'string' || !layer.tag.trim()) throw new Error(`layer "${layer.id}" needs a render tag`);
+        if (!layer.tracks || typeof layer.tracks !== 'object' || Array.isArray(layer.tracks)) {
+          throw new Error(`layer "${layer.id}" needs tracks`);
+        }
+        ids.add(layer.id);
+        const tracks = layer.tracks as Record<string, unknown>;
+        for (const [name, count] of concreteCounts) {
+          const frames = tracks[name];
+          if (!Array.isArray(frames) || frames.length !== count) {
+            throw new Error(`layer "${layer.id}.${name}" needs ${count} frames`);
+          }
+          for (const frame of frames) {
+            if (!Array.isArray(frame) || !frame.length || !frame.every((row) => typeof row === 'string')) {
+              throw new Error(`layer "${layer.id}.${name}" has an invalid frame`);
+            }
+            const width = (frame[0] as string).length;
+            if (!width || !frame.every((row) => (row as string).length === width)) {
+              throw new Error(`layer "${layer.id}.${name}" frames must be rectangular`);
+            }
+          }
         }
       }
     }
@@ -122,10 +173,15 @@ export function spriteEditorBridge(root: string): Plugin {
             resolvedName = resolved;
             resolved = (anims as Record<string, unknown>)[resolvedName];
           }
-          if (!resolved || typeof resolved !== 'object' || !Array.isArray((resolved as { frames?: unknown }).frames)) {
+          if (!resolved || typeof resolved !== 'object') {
             throw new Error(`anchor "${pointName}.${animName}" refers to an unknown animation`);
           }
-          const frameCount = (resolved as { frames: unknown[] }).frames.length;
+          const frameCount = layered
+            ? Number((resolved as { frameCount?: unknown }).frameCount)
+            : Array.isArray((resolved as { frames?: unknown }).frames)
+              ? (resolved as { frames: unknown[] }).frames.length
+              : 0;
+          if (!frameCount) throw new Error(`anchor "${pointName}.${animName}" refers to an invalid animation`);
           if (points.length !== frameCount) {
             throw new Error(`anchor "${pointName}.${animName}" needs ${frameCount} points, got ${points.length}`);
           }
@@ -138,6 +194,36 @@ export function spriteEditorBridge(root: string): Plugin {
           }
         }
       }
+    }
+    const slots = (candidate as { attachmentSlots?: unknown }).attachmentSlots;
+    if (slots !== undefined) {
+      if (!slots || typeof slots !== 'object' || Array.isArray(slots)) {
+        throw new Error('sprite attachmentSlots must be an object');
+      }
+      for (const [slotName, rawSlot] of Object.entries(slots)) {
+        const slot = rawSlot as { anchor?: unknown };
+        if (!slotName.trim() || !rawSlot || typeof rawSlot !== 'object' || Array.isArray(rawSlot)
+          || typeof slot.anchor !== 'string' || !slot.anchor.trim()) {
+          throw new Error('sprite attachment slots need names and anchors');
+        }
+        if (!anchors || typeof anchors !== 'object' || !(slot.anchor in anchors)) {
+          throw new Error(`attachment slot "${slotName}" uses unknown anchor "${slot.anchor}"`);
+        }
+      }
+    }
+  };
+
+  const validateRenderTags = (candidate: unknown): asserts candidate is { id: string; label: string }[] => {
+    if (!Array.isArray(candidate) || !candidate.length) throw new Error('render tags need a non-empty array');
+    const ids = new Set<string>();
+    for (const raw of candidate) {
+      const tag = raw as { id?: unknown; label?: unknown };
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)
+        || typeof tag.id !== 'string' || !/^[a-z][a-z0-9-]*$/.test(tag.id)
+        || typeof tag.label !== 'string' || !tag.label.trim() || ids.has(tag.id)) {
+        throw new Error('render tags need unique lowercase ids and non-empty labels');
+      }
+      ids.add(tag.id);
     }
   };
 
@@ -160,6 +246,37 @@ export function spriteEditorBridge(root: string): Plugin {
       else if (entry.isFile() && entry.name.endsWith('.json')) out.push(relative);
     }
     return out.sort();
+  };
+
+  const validateSpriteRenderTagReferences = async (
+    renderTags: { id: string; label: string }[],
+    pending: { target: { relative: string }; file: unknown }[],
+  ): Promise<void> => {
+    const known = new Set(renderTags.map((tag) => tag.id));
+    const overrides = new Map(pending.map((document) => [document.target.relative, document.file]));
+    const missing = new Map<string, string[]>();
+    for (const relative of await listSprites()) {
+      const sprite = (overrides.get(relative)
+        ?? JSON.parse(await fs.readFile(spritePath(relative).absolute, 'utf8'))) as {
+        renderTag?: unknown;
+        layers?: unknown;
+      };
+      const note = (tag: unknown, detail: string): void => {
+        if (typeof tag !== 'string' || known.has(tag)) return;
+        const references = missing.get(tag) ?? [];
+        references.push(`${relative} - ${detail}`);
+        missing.set(tag, references);
+      };
+      note(sprite.renderTag, 'flat sprite render tag');
+      if (Array.isArray(sprite.layers)) for (const rawLayer of sprite.layers) {
+        const layer = rawLayer as { id?: unknown; name?: unknown; tag?: unknown };
+        note(layer.tag, `layer "${String(layer.name ?? layer.id ?? 'unnamed')}"`);
+      }
+    }
+    if (missing.size) {
+      const details = [...missing].map(([tag, references]) => `"${tag}": ${references.join(', ')}`).join('; ');
+      throw new Error(`cannot remove render tags with sprite dependencies: ${details}`);
+    }
   };
 
   const headers = (res: ServerResponse, contentType = 'application/json'): void => {
@@ -203,6 +320,12 @@ export function spriteEditorBridge(root: string): Plugin {
             return send(res, 200, { sprites: await listSprites() });
           }
 
+          if (req.method === 'GET' && url.pathname === `${API}/render-tags`) {
+            const renderTags = JSON.parse(await fs.readFile(renderTagsPath, 'utf8')) as unknown;
+            validateRenderTags(renderTags);
+            return send(res, 200, { renderTags });
+          }
+
           if (req.method === 'GET' && url.pathname === `${API}/state`) {
             return active ? send(res, 200, active) : send(res, 404, { error: 'no sprite is open' });
           }
@@ -219,6 +342,7 @@ export function spriteEditorBridge(root: string): Plugin {
             }
             const value = body.selection as Record<string, unknown>;
             const rows = value.rows;
+            const mask = value.mask;
             const numbers = ['frame', 'x', 'y', 'w', 'h'] as const;
             if (numbers.some((key) => !Number.isInteger(value[key]))
               || Number(value.x) < 0 || Number(value.y) < 0 || Number(value.w) < 1 || Number(value.h) < 1
@@ -226,15 +350,21 @@ export function spriteEditorBridge(root: string): Plugin {
               || rows.length !== Number(value.h) || rows.some((row) => row.length !== Number(value.w))) {
               return send(res, 400, { error: 'selection needs integer bounds and matching pixel rows' });
             }
+            if (mask !== undefined && (!Array.isArray(mask) || mask.length !== Number(value.h)
+              || !mask.every((row) => typeof row === 'string' && row.length === Number(value.w) && /^[1.]+$/.test(row)))) {
+              return send(res, 400, { error: 'selection mask must match the selection bounds' });
+            }
             selection = {
               path: value.path == null ? null : String(value.path),
               anim: value.anim,
               frame: Number(value.frame),
+              layerId: value.layerId == null ? undefined : String(value.layerId),
               x: Number(value.x),
               y: Number(value.y),
               w: Number(value.w),
               h: Number(value.h),
               rows: rows as string[],
+              mask: mask as string[] | undefined,
               source: String(value.source ?? 'browser'),
               updatedAt: Number(value.updatedAt) || Date.now(),
             };
@@ -353,6 +483,11 @@ export function spriteEditorBridge(root: string): Plugin {
               validateSprite(document.file);
               return { target, file: document.file };
             });
+            const renderTags = body.renderTags;
+            if (renderTags !== undefined) {
+              validateRenderTags(renderTags);
+              await validateSpriteRenderTagReferences(renderTags, documents);
+            }
 
             const activeDocument = active
               ? documents.find((document) => document.target.relative === active!.path)
@@ -373,6 +508,11 @@ export function spriteEditorBridge(root: string): Plugin {
               await fs.writeFile(temporary, text, 'utf8');
               await fs.rename(temporary, document.target.absolute);
             }
+            if (renderTags !== undefined) {
+              const temporary = `${renderTagsPath}.tmp`;
+              await fs.writeFile(temporary, `${JSON.stringify(renderTags, null, 2)}\n`, 'utf8');
+              await fs.rename(temporary, renderTagsPath);
+            }
 
             if (active && activeDocument) {
               // Saving acknowledges the exact browser document included in
@@ -390,6 +530,7 @@ export function spriteEditorBridge(root: string): Plugin {
             }
             return send(res, 200, {
               saved: documents.map((document) => document.target.relative),
+              renderTagsSaved: renderTags !== undefined,
               state: active,
             });
           }

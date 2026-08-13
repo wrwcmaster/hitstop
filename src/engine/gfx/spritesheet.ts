@@ -32,6 +32,8 @@ export interface SheetAnimData {
 }
 
 export interface SheetDescriptor extends SpriteGeometry {
+  /** Shared render band contributed by this flat sheet. */
+  renderTag?: string;
   /** Source image filename — tooling/metadata only; runtime takes the image directly. */
   image?: string;
   /** Uniform grid cell size (px). Ignored for frames covered by `rects`. */
@@ -91,19 +93,25 @@ export function loadSheet(image: CanvasImageSource, desc: SheetDescriptor): Load
   const geometry = resolveSpriteGeometry(desc, naturalRect.w / texel, naturalRect.h / texel);
 
   const framesOf = (name: string): HTMLCanvasElement[] => (desc.anims[name]?.frames ?? []).map(bake);
+  const animSet = (): AnimSet => {
+    const set: AnimSet = {};
+    for (const [name, a] of Object.entries(desc.anims)) {
+      set[name] = { frames: framesOf(name), fps: a.fps, loop: a.loop };
+    }
+    return set;
+  };
+  const renderTag = desc.renderTag ?? 'base';
+  if (!renderTag.trim()) throw new Error('sprite sheet: renderTag must be non-empty');
 
   return {
     ...geometry,
     frame: (name, i = 0) => framesOf(name)[i],
     frames: framesOf,
     names: () => Object.keys(desc.anims),
-    animSet: () => {
-      const set: AnimSet = {};
-      for (const [name, a] of Object.entries(desc.anims)) {
-        set[name] = { frames: framesOf(name), fps: a.fps, loop: a.loop };
-      }
-      return set;
-    },
+    animSet,
+    tags: () => [renderTag],
+    tagFrames: (tag, name) => tag === renderTag ? framesOf(name) : [],
+    tagAnimSet: (tag) => tag === renderTag ? animSet() : {},
   };
 }
 

@@ -1,5 +1,6 @@
 import { loadSprite, loadSheet, loadImage, withFacing, type SpriteFile, type SheetDescriptor } from '@engine/index';
 import { PAL } from './palette';
+import { validatePlayerRenderTags } from './render-tags';
 import knightJson from './sprites/knight-v2.json';
 import duelistJson from './sprites/duelist.json';
 import slimeJson from './sprites/slime.json';
@@ -27,24 +28,28 @@ const load = (file: unknown) => loadSprite(file as SpriteFile, PAL);
 // sprite regardless of loadout.
 // Live bindings let a PNG sheet replace both the art and its geometry at
 // boot; consumers should not retain a snapshot of this object.
+validatePlayerRenderTags(knightJson as SpriteFile);
 export let baseKnight = load(knightJson);
 export let KNIGHT_ANIMS = withFacing(baseKnight.animSet());
+export let KNIGHT_TAG_ANIMS = new Map(baseKnight.tags().map((tag) => [tag, withFacing(baseKnight.tagAnimSet(tag))]));
 export let KNIGHT_IDLE_SPRITE = baseKnight.frame('idle', 0);
 
 function applyKnight(sprite: typeof baseKnight): void {
   baseKnight = sprite;
   KNIGHT_ANIMS = withFacing(sprite.animSet());
+  KNIGHT_TAG_ANIMS = new Map(sprite.tags().map((tag) => [tag, withFacing(sprite.tagAnimSet(tag))]));
   KNIGHT_IDLE_SPRITE = sprite.frame('idle', 0);
 }
 
 /** Tooling seam: make an in-memory editor draft the live player body. */
 export function rebuildKnightSprite(file: SpriteFile): void {
+  validatePlayerRenderTags(file);
   applyKnight(loadSprite(file, PAL));
 }
 
 export async function loadKnightSheet(imageUrl: string, desc: SheetDescriptor): Promise<void> {
   const img = await loadImage(imageUrl);
-  applyKnight(loadSheet(img, desc));
+  applyKnight(loadSheet(img, { ...desc, renderTag: desc.renderTag ?? baseKnight.tags()[0] }));
 }
 
 /* ---------------- the Duelist (human boss) ---------------- */

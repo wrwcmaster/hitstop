@@ -5,9 +5,11 @@ import {
   whiteOf,
   withFacing,
   type FacingAnimSet,
+  type LoadedSprite,
   type SpriteFile,
 } from '@engine/index';
 import { COLORS, PAL } from './palette';
+import { orderedPlayerRenderTags, validatePlayerRenderTags } from './render-tags';
 import { TEXEL } from './sprites';
 import { drawArrowSprite } from './ballistics';
 import { normalizedItemIcon } from './item-icon';
@@ -63,8 +65,16 @@ export interface WeaponVisual {
   /** Authored animation names, exposed for weapon-definition validation. */
   animations?: readonly string[];
   /** Which authored hands must render in front of the weapon. */
-  gripHands?: 'none' | 'front' | 'bothWhenCharging';
+  gripHands?: 'none' | 'front' | 'rear' | 'bothWhenCharging';
+  /** Character attachment slot used to position this visual. */
+  attachmentSlot?: string;
+  /** Shared render bands contributed by this visual. */
+  renderTags: readonly string[];
+  /** Optional band for the procedural hand overlay; defaults to the visual's frontmost band. */
+  gripRenderTag?: string;
   drawHeld(g: CanvasRenderingContext2D, ctx: HeldWeaponCtx): void;
+  /** Draw one authored band without flattening the whole weapon. */
+  drawHeldTag?(g: CanvasRenderingContext2D, ctx: HeldWeaponCtx, tag: string): void;
   drawTrail?(g: CanvasRenderingContext2D, ctx: WeaponTrailCtx): void;
 }
 
@@ -108,6 +118,13 @@ export function defineSlashVisual(id: string, visual: SlashVisual): void {
 export const RANGED_HAND_Y = -7.5;
 
 export function defineWeaponVisual(id: string, visual: WeaponVisual): void {
+  const known = new Set(orderedPlayerRenderTags());
+  for (const tag of visual.renderTags) {
+    if (!known.has(tag)) throw new Error(`weapon visual "${id}" uses unknown render tag "${tag}"`);
+  }
+  if (visual.gripRenderTag && !known.has(visual.gripRenderTag)) {
+    throw new Error(`weapon visual "${id}" uses unknown grip render tag "${visual.gripRenderTag}"`);
+  }
   weaponVisuals.register(id, visual);
 }
 
@@ -115,11 +132,41 @@ export function drawHeldWeapon(g: CanvasRenderingContext2D, id: string | null, c
   if (id) weaponVisuals.get(id).drawHeld(g, ctx);
 }
 
+export function drawHeldWeaponTag(
+  g: CanvasRenderingContext2D,
+  id: string | null,
+  ctx: HeldWeaponCtx,
+  tag: string,
+): void {
+  if (!id) return;
+  const visual = weaponVisuals.get(id);
+  if (visual.drawHeldTag) visual.drawHeldTag(g, ctx, tag);
+  else if (visual.renderTags.includes(tag)) visual.drawHeld(g, ctx);
+}
+
 export function heldWeaponHands(id: string | null, charging: boolean): ('front' | 'rear')[] {
   if (!id) return [];
   const usage = weaponVisuals.get(id).gripHands ?? 'front';
   if (usage === 'none') return [];
+  if (usage === 'rear') return ['rear'];
   return usage === 'bothWhenCharging' && charging ? ['front', 'rear'] : ['front'];
+}
+
+/** Bands this held visual contributes, entirely authored by its content. */
+export function heldWeaponRenderTags(id: string | null): readonly string[] {
+  return id ? weaponVisuals.get(id).renderTags : [];
+}
+
+/** Band where the generated hand overlay belongs. */
+export function heldWeaponGripRenderTag(id: string | null): string | undefined {
+  if (!id) return undefined;
+  const visual = weaponVisuals.get(id);
+  return visual.gripRenderTag ?? visual.renderTags.at(-1);
+}
+
+/** Resolve the character-side socket used by a held visual. */
+export function heldWeaponAttachmentSlot(id: string | null): string {
+  return id ? (weaponVisuals.get(id).attachmentSlot ?? 'mainHand') : 'mainHand';
 }
 
 export function drawWeaponTrail(g: CanvasRenderingContext2D, id: string | null, ctx: WeaponTrailCtx): void {
@@ -188,6 +235,10 @@ export function weaponIcon(id: string): HTMLCanvasElement {
 export interface SpriteWeaponConfig {
   /** Transparent weapon-only frames. */
   anims: FacingAnimSet;
+  /** Layer-preserving source used for shared render-tag composition. */
+  sprite?: LoadedSprite;
+  /** Character attachment slot; defaults to the primary weapon hand. */
+  attachmentSlot?: string;
   /** Legacy feet origin, used by animations that do not yet author a grip. */
   origin?: { x: number; y: number };
   /** Resolve the weapon-side grip point from the right-facing source art. */
@@ -203,10 +254,27 @@ export function spriteWeapon(config: SpriteWeaponConfig): WeaponVisual {
   const iconFrame = config.anims.right.idle?.frames[0]
     ?? Object.values(config.anims.right)[0]?.frames[0];
   if (!iconFrame) throw new Error('sprite weapon needs at least one frame');
+  const authoredTags = config.sprite?.tags() ?? ['base'];
+  const renderTags = authoredTags;
+  const taggedVisuals = new Map<string, WeaponVisual>();
+  if (config.sprite) {
+    for (const authoredTag of authoredTags) {
+      taggedVisuals.set(authoredTag, spriteWeapon({
+        ...config,
+        sprite: undefined,
+        anims: withFacing(config.sprite.tagAnimSet(authoredTag)),
+      }));
+    }
+  }
   return {
     icon: normalizedItemIcon(iconFrame),
     animations: Object.keys(config.anims.right),
     gripHands: 'front',
+    attachmentSlot: config.attachmentSlot ?? 'mainHand',
+    renderTags,
+    drawHeldTag(g, ctx, tag) {
+      taggedVisuals.get(tag)?.drawHeld(g, ctx);
+    },
     drawHeld(g, ctx) {
       const set = ctx.facing === 1 ? config.anims.right : config.anims.left;
       // A move whose named animation isn't in the sheet falls back to
@@ -273,6 +341,7 @@ export interface ProceduralBladeConfig {
 export function proceduralBlade(config: ProceduralBladeConfig): WeaponVisual {
   return {
     gripHands: 'front',
+    renderTags: ['front-hand-held-object'],
     drawHeld(g, ctx) {
       const f = ctx.facing;
       let hx = ctx.frontHand?.x ?? 1.75;
@@ -510,6 +579,7 @@ function attackFrame(attack: WeaponAttackPose, frameCount: number): number {
 
 defineWeaponVisual('unarmed', {
   gripHands: 'none',
+  renderTags: [],
   drawHeld() {},
   drawTrail: drawSlashTrail,
 });
@@ -542,9 +612,11 @@ type SpriteWeaponRegistrationConfig = Omit<SpriteWeaponConfig, 'anims' | 'grip'>
 const spriteWeaponConfigs = new Map<string, SpriteWeaponRegistrationConfig>();
 
 function weaponFromSprite(file: SpriteFile, config: SpriteWeaponRegistrationConfig): WeaponVisual {
+  validatePlayerRenderTags(file);
   const loaded = loadSprite(file, PAL);
   return spriteWeapon({
     ...config,
+    sprite: loaded,
     anims: withFacing(loaded.animSet()),
     grip: (anim, frame) => loaded.anchor?.('grip', anim, frame),
   });
@@ -672,6 +744,7 @@ export function drawBow(g: CanvasRenderingContext2D, pose: BowPose): void {
 // arc leans with the run cycle like the blades do.
 defineWeaponVisual('hunting-bow', {
   gripHands: 'bothWhenCharging',
+  renderTags: ['front-hand-held-object'],
   // The icon IS the held bow: the same pixel stave + slack string at
   // 1:1 (the stave is authored 8 tall, exactly the icon frame) —
   // inventory, pickups, and the knight's hand can never drift apart.
@@ -708,6 +781,7 @@ defineWeaponVisual('hunting-bow', {
 // The flintlock: a stubby barrel + drooping grip at the hand.
 defineWeaponVisual('flintlock', {
   gripHands: 'front',
+  renderTags: ['front-hand-held-object'],
   icon: bakedIcon((px) => {
     px(1, 3, 6, 1, COLORS.steel); px(6, 2, 1, 1, COLORS.white); // barrel + muzzle
     px(1, 4, 2, 1, WOOD); px(1, 5, 1, 2, WOOD_DARK); // stock + grip
