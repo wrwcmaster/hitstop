@@ -19,7 +19,7 @@ import repositoryRenderTagDefs from '@game/content/render-tags.json';
 // game draws. The weapon anchors and the trail are code, not sprites;
 // no sprite-only overlay could show this truthfully.
 import {
-  drawHeldWeapon,
+  drawHeldWeaponTag,
   drawWeaponTrail,
   weaponVisuals,
   rebuildSpriteWeapon,
@@ -3530,17 +3530,12 @@ function renderComposite(t: number): boolean {
     ? Math.min(Math.floor(tIn * bodyFps), bodyAnim.frames.length - 1)
     : Math.floor(tIn * bodyFps) % bodyAnim.frames.length;
   const rows = bodyAnim.frames[frame] ?? [];
-  bodyImg = sprite(
-    bodyFile.hd === false ? rows : epx(epx(rows)),
-    bodyFile.palette ?? PAL,
-  );
   const bodyGeometry = geometryOf(bodyFile, rows);
   dw = bodyGeometry.w;
   dh = bodyGeometry.h;
 
   pctx.save();
   pctx.translate(fx, fy);
-  pctx.drawImage(bodyImg, -dw / 2, -dh, dw, dh);
   // Attachment points are authored from the sheet's top-left, while
   // held-weapon renderers work from the player's feet-centred origin.
   // Feed the raw-sheet composite the same converted hand anchors that
@@ -3555,15 +3550,47 @@ function renderComposite(t: number): boolean {
   // an attack pose, fall back to idle rather than throwing mid-paint.
   const known = weaponVisuals.get(wdef!.visual).animations;
   const weaponAnim = !known || known.includes(animName) ? animName : 'idle';
-  try {
-    drawHeldWeapon(pctx, wdef!.visual, {
-      facing: 1, anim: weaponAnim, frame, animT: tIn,
-      bodyW: dw, bodyH: dh,
-      frontHand: sheetAnchor('frontHand'),
-      rearHand: sheetAnchor('rearHand'),
-      attack: pose,
-    });
-  } catch { /* a half-painted sheet mid-edit; next frame will catch up */ }
+  const weaponContext = {
+    facing: 1 as const, anim: weaponAnim, frame, animT: tIn,
+    bodyW: dw, bodyH: dh,
+    frontHand: sheetAnchor('frontHand'),
+    rearHand: sheetAnchor('rearHand'),
+    attack: pose,
+  };
+  const bodyLayerVisible = (layer: SpriteLayerData): boolean => (
+    bodyFile !== file
+      || (soloLayerId ? layer.id === soloLayerId : !hiddenLayerIds.has(layer.id))
+  );
+  const bodyRowsForTag = (tag: string): string[] | undefined => {
+    if (!isLayeredSpriteFile(bodyFile)) {
+      return tag === defaultLayerTag(bodyFile) ? rows : undefined;
+    }
+    if (!bodyFile.layers.some((layer) => layer.tag === tag && bodyLayerVisible(layer))) return undefined;
+    return compositeSpriteFrame(
+      bodyFile,
+      requestedBodyAnim,
+      frame,
+      PAL,
+      (layer) => layer.tag === tag && bodyLayerVisible(layer),
+    );
+  };
+
+  // Raw-sheet previews must use the same shared render-band order as
+  // Player.render. Flattening the body first and drawing the weapon last
+  // hid authored overlays such as a front hand intended to cover its grip.
+  for (const tag of renderTagIds()) {
+    const tagRows = bodyRowsForTag(tag);
+    if (tagRows) {
+      bodyImg = sprite(
+        bodyFile.hd === false ? tagRows : epx(epx(tagRows)),
+        bodyFile.palette ?? PAL,
+      );
+      pctx.drawImage(bodyImg, -dw / 2, -dh, dw, dh);
+    }
+    try {
+      drawHeldWeaponTag(pctx, wdef!.visual, weaponContext, tag);
+    } catch { /* a half-painted sheet mid-edit; next frame will catch up */ }
+  }
   pctx.restore();
 
   if (pose && ($('compTrail') as HTMLInputElement).checked) {
