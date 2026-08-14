@@ -28,6 +28,12 @@
     }
     #toolbar .separator { width: 1px; height: 24px; margin: 0 5px; background: #33447f; }
     #toolbar label { display: flex; align-items: center; gap: 3px; margin: 0; }
+    #toolbar .mode-toggle {
+      height: 30px; padding: 4px 7px; border: 1px solid #33447f; border-radius: 4px;
+      color: #94b0c2; background: #1f2a57; cursor: pointer; user-select: none;
+    }
+    #toolbar .mode-toggle:has(input:checked) { color: #07070d; background: #38b764; border-color: #38b764; }
+    #toolbar .mode-toggle:has(input:disabled) { opacity: .45; cursor: default; }
     #gridZoomPercent { width: 72px; text-align: right; }
     #brushSize { width: 58px; text-align: right; }
     main { flex: 1; display: flex; min-height: 0; }
@@ -281,9 +287,9 @@
       <button id="btnToolMagic" class="icon-tool" title="Magic selection (W)" aria-label="Magic selection (W)">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 17L15.5 6.5M12.5 3.5l4 4M4 3v3M2.5 4.5h3M15.5 13v3M14 14.5h3M7.5 8l1.5 1.5"/></svg>
       </button>
-      <button id="btnToolMove" class="icon-tool" title="Move and transform selection (V)" aria-label="Move and transform selection (V)">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v16M2 10h16"/><path d="M7 5l3-3 3 3M7 15l3 3 3-3M5 7l-3 3 3 3M15 7l3 3-3 3"/></svg>
-      </button>
+      <label class="mode-toggle" title="Move, resize, and rotate the current selection (V)">
+        <input id="transformMode" type="checkbox" disabled> transform
+      </label>
     </div>
     <span id="selectionStatus" class="hint">selection: none</span>
     <span class="separator" aria-hidden="true"></span>
@@ -337,6 +343,37 @@
             </select>
           </label>
           <p class="hint">Color drift mode maps the clicked source pixel to the active palette color, then applies the same RGB shift to every opaque pixel in the selection so highlights and shadows move together.</p>
+        </div>
+        <div id="transformConfig" hidden>
+          <p class="hint">Drag the selection or its handles on the canvas. Transparent and unselected pixels are ignored.</p>
+          <div id="selectionTransforms">
+            <div class="panel-group">
+              <h2>rotate</h2>
+              <div class="panel-row">
+                <button id="btnRotateSelectionLeft" title="Rotate selection 90 degrees counter-clockwise" disabled>&#8634; 90&deg;</button>
+                <button id="btnRotateSelectionRight" title="Rotate selection 90 degrees clockwise" disabled>&#8635; 90&deg;</button>
+              </div>
+              <div class="panel-row">
+                <label>angle <input id="selectionAngle" type="number" min="-359" max="359" step="1" value="0" disabled>&deg;</label>
+                <button id="btnRotateSelection" title="Rotate selection by any angle using nearest-neighbor inverse mapping" disabled>apply</button>
+              </div>
+            </div>
+            <div class="panel-group">
+              <h2>resize</h2>
+              <div class="panel-row">
+                <label>w <input id="selectionW" type="number" min="1" max="160" value="1" disabled></label>
+                <label>h <input id="selectionH" type="number" min="1" max="160" value="1" disabled></label>
+                <button id="btnResizeSelection" title="Resize selection with nearest-neighbor sampling" disabled>apply</button>
+              </div>
+            </div>
+          </div>
+          <div class="panel-group">
+            <h2>nudge</h2>
+            <div class="transform-grid">
+              <span></span><button id="btnNudgeUp" title="Nudge up">&uarr;</button><span></span>
+              <button id="btnNudgeLeft" title="Nudge left">&larr;</button><button id="btnNudgeDown" title="Nudge down">&darr;</button><button id="btnNudgeRight" title="Nudge right">&rarr;</button>
+            </div>
+          </div>
         </div>
         <p id="toolConfigEmpty" class="hint">The selected tool has no adjustable settings.</p>
       </section>
@@ -400,7 +437,6 @@
       <div class="panel-tabs" role="tablist" aria-label="sprite workspace">
         <button class="active" data-panel-tab="right" data-panel-target="right-animate" role="tab" aria-selected="true">animate</button>
         <button data-panel-tab="right" data-panel-target="right-layers" role="tab" aria-selected="false">layers</button>
-        <button data-panel-tab="right" data-panel-target="right-transform" role="tab" aria-selected="false">transform</button>
         <button data-panel-tab="right" data-panel-target="right-rig" role="tab" aria-selected="false">rig</button>
       </div>
       <section id="right-animate" class="panel-page" data-panel-page="right">
@@ -512,39 +548,6 @@
       <p class="hint" style="margin:0 0 8px">A slot gives gameplay a stable name such as mainHand; its anchor may move independently in every animation frame.</p>
 
       </section>
-      <section id="right-transform" class="panel-page" data-panel-page="right" hidden>
-        <h2>selection</h2>
-        <p class="hint">Use Select (M) for a rectangle or Magic (W) for a color-shaped mask, then choose Move (V) to drag, resize, rotate, or nudge it. Transparent and unselected pixels are ignored.</p>
-        <div id="selectionTransforms">
-          <div class="panel-group">
-            <h2>rotate</h2>
-            <div class="panel-row">
-              <button id="btnRotateSelectionLeft" title="Rotate selection 90 degrees counter-clockwise" disabled>&#8634; 90&deg;</button>
-              <button id="btnRotateSelectionRight" title="Rotate selection 90 degrees clockwise" disabled>&#8635; 90&deg;</button>
-            </div>
-            <div class="panel-row">
-              <label>angle <input id="selectionAngle" type="number" min="-359" max="359" step="1" value="0" disabled>&deg;</label>
-              <button id="btnRotateSelection" title="Rotate selection by any angle using nearest-neighbor inverse mapping" disabled>apply</button>
-            </div>
-          </div>
-          <div class="panel-group">
-            <h2>resize</h2>
-            <div class="panel-row">
-              <label>w <input id="selectionW" type="number" min="1" max="160" value="1" disabled></label>
-              <label>h <input id="selectionH" type="number" min="1" max="160" value="1" disabled></label>
-              <button id="btnResizeSelection" title="Resize selection with nearest-neighbor sampling" disabled>apply</button>
-            </div>
-          </div>
-        </div>
-        <div class="panel-group">
-          <h2>nudge</h2>
-          <div class="transform-grid">
-            <span></span><button id="btnNudgeUp" title="Nudge up">&uarr;</button><span></span>
-            <button id="btnNudgeLeft" title="Nudge left">&larr;</button><button id="btnNudgeDown" title="Nudge down">&darr;</button><button id="btnNudgeRight" title="Nudge right">&rarr;</button>
-          </div>
-        </div>
-      </section>
-
       <section id="right-data" class="panel-page" data-panel-page="right" hidden>
       <h2>sprite json</h2>
       <div class="panel-row">
@@ -555,7 +558,7 @@
       <p class="hint" style="margin:0">
         paint: left-drag &middot; erase: right-drag &middot; picker: Alt<br>
         pencil P &middot; brush B &middot; blur U &middot; fill G &middot; select M &middot; magic W<br>
-        selection: Shift adds &middot; Alt removes &middot; Shift+Alt intersects &middot; drag inside to move &middot; drag square handles to resize &middot; drag green handle to rotate &middot; Shift snaps 15&deg;<br>
+        selection: Shift adds &middot; Alt removes &middot; Shift+Alt intersects &middot; transform V &middot; drag inside to move &middot; drag square handles to resize &middot; drag green handle to rotate &middot; Shift snaps 15&deg;<br>
         export/import JSON (content/sprites/*.json)
       </p>
       </section>

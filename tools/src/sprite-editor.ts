@@ -68,8 +68,9 @@ let previewStepping = false;
 let currentChar = firstPaintChar();
 let painting = false;
 let erasing = false;
-type EditorTool = 'draw' | 'brush' | 'blur' | 'fill' | 'picker' | 'select' | 'magic' | 'move';
+type EditorTool = 'draw' | 'brush' | 'blur' | 'fill' | 'picker' | 'select' | 'magic';
 let currentTool: EditorTool = 'draw';
+let transformMode = false;
 let altPickerActive = false;
 let picking = false;
 let lastPaintCell: { x: number; y: number } | null = null;
@@ -77,7 +78,7 @@ let hoverPointer: { x: number; y: number } | null = null;
 let strokePaletteChanged = false;
 interface PixelRect { x: number; y: number; w: number; h: number }
 interface PixelSelection extends PixelRect { mask?: string[] }
-interface PixelClipboard { w: number; h: number; rows: string[]; mask?: string[] }
+interface PixelClipboard { w: number; h: number; rows: string[]; mask?: string[]; palette?: Palette }
 interface SelectionMove {
   start: { x: number; y: number };
   original: PixelSelection;
@@ -137,6 +138,11 @@ let activeLayerId = FLAT_LAYER_ID;
 let hiddenLayerIds = new Set<string>();
 let lockedLayerIds = new Set<string>();
 let soloLayerId: string | null = null;
+// Versioned separately from the broad editor view state: older view snapshots
+// could have Front Hand active merely because it used to be the fallback.
+// They must not be mistaken for an intentional per-sprite layer choice.
+const LAYER_SELECTIONS_KEY = 'hitstop.sprite-editor.layer-selections.v2';
+let layerSelectionBySprite = readLayerSelections();
 let layerExtractTargetId = '';
 let layerExtractAnchorName = 'frontHand';
 let layerExtractAnchorManuallySet = false;
@@ -337,6 +343,53 @@ function firstPaintChar(): string {
 }
 
 const pal = (): Palette => file.palette ?? {};
+
+function readLayerSelections(): Record<string, string> {
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(LAYER_SELECTIONS_KEY) ?? '{}') as unknown;
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return {};
+    return Object.fromEntries(Object.entries(stored as Record<string, unknown>)
+      .filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+  } catch {
+    return {};
+  }
+}
+
+function persistLayerSelections(): void {
+  try {
+    sessionStorage.setItem(LAYER_SELECTIONS_KEY, JSON.stringify(layerSelectionBySprite));
+  } catch {
+    // Layer continuity is convenience state; storage denial must not block editing.
+  }
+}
+
+function defaultActiveLayerId(spriteFile: SpriteFile = file): string {
+  if (!isLayeredSpriteFile(spriteFile)) return FLAT_LAYER_ID;
+  // The first authored/base layer is the safest editing surface. A foreground
+  // detail such as Front Hand must never become active merely because it is
+  // last in render order.
+  return spriteFile.layers.find((layer) => layer.id === FLAT_LAYER_ID)?.id
+    ?? spriteFile.layers.find((layer) => /^base$/i.test(layer.name))?.id
+    ?? spriteFile.layers[0]?.id
+    ?? FLAT_LAYER_ID;
+}
+
+function rememberActiveLayer(path: string | null = currentRepoPath): void {
+  if (!path || !isLayeredSpriteFile(file) || !file.layers.some((layer) => layer.id === activeLayerId)) return;
+  layerSelectionBySprite[path] = activeLayerId;
+  persistLayerSelections();
+}
+
+function restoreActiveLayer(path: string | null, spriteFile: SpriteFile = file): void {
+  if (!isLayeredSpriteFile(spriteFile)) {
+    activeLayerId = FLAT_LAYER_ID;
+    return;
+  }
+  const remembered = path ? layerSelectionBySprite[path] : undefined;
+  activeLayerId = remembered && spriteFile.layers.some((layer) => layer.id === remembered)
+    ? remembered
+    : defaultActiveLayerId(spriteFile);
+}
 /**
  * The animation being edited, RESOLVED: an alias entry ("plunge":
  * "attack") has no frames of its own, so selecting one jumps to its
@@ -413,7 +466,7 @@ function reconcileLayerState(reset = false): void {
     return;
   }
   const ids = new Set(file.layers.map((layer) => layer.id));
-  if (reset || !ids.has(activeLayerId)) activeLayerId = file.layers.at(-1)?.id ?? FLAT_LAYER_ID;
+  if (reset || !ids.has(activeLayerId)) activeLayerId = defaultActiveLayerId(file);
   hiddenLayerIds = new Set([...hiddenLayerIds].filter((id) => ids.has(id)));
   lockedLayerIds = new Set([...lockedLayerIds].filter((id) => ids.has(id)));
   if (soloLayerId && !ids.has(soloLayerId)) soloLayerId = null;
@@ -455,6 +508,7 @@ function ensureLayeredFile(): LayeredSpriteFile {
   } as LayeredSpriteFile & EditorSpriteFile;
   activeLayerId = FLAT_LAYER_ID;
   reconcileLayerState();
+  rememberActiveLayer();
   return file as LayeredSpriteFile;
 }
 
@@ -585,7 +639,17 @@ function configureCompositeForPath(path: string): void {
 
   if (path.includes('equipment/')) {
     const stem = path.split('/').at(-1)!.replace(/\.json$/, '');
-    body.value = 'player';
+    // Equipment sheets need a concrete body because `edited sprite` is the
+    // equipment itself. Prefer an authored body that declares it can equip a
+    // weapon (Knight V2 today), but keep a body the author explicitly chose.
+    // The old unconditional `player` assignment silently switched previews
+    // back to the legacy full-player sheet, so frame N no longer represented
+    // frame N of the body the author had just been editing.
+    if (body.value === 'edited') {
+      body.value = [...body.options]
+        .find((option) => option.value.startsWith('sprite:'))?.value
+        ?? 'player';
+    }
     if (weapons.has(stem)) {
       weapon.value = stem;
       gear.checked = false;
@@ -642,6 +706,7 @@ interface EditorViewState {
   frame: number;
   paintChar: string;
   tool: EditorTool;
+  transformMode?: boolean;
   zoom: number;
   anchor: string;
   selection: PixelSelection | null;
@@ -679,6 +744,7 @@ function captureEditorViewState(): EditorViewState {
     frame: frameIdx,
     paintChar: currentChar,
     tool: currentTool,
+    transformMode,
     zoom: cellSize,
     anchor: selectedAnchorName,
     selection: selection ? cloneSelection(selection) : null,
@@ -729,15 +795,22 @@ function restoreEditorViewState(saved?: EditorViewState): void {
     if (file.anims[state.anim]) animName = state.anim;
     frameIdx = Math.max(0, Math.min(state.frame, anim().frames.length - 1));
     if (state.paintChar in (file.palette ?? {})) currentChar = state.paintChar;
-    if ((['draw', 'brush', 'blur', 'fill', 'picker', 'select', 'magic', 'move'] as EditorTool[]).includes(state.tool)) {
-      currentTool = state.tool;
+    const savedTool = state.tool as string;
+    if ((['draw', 'brush', 'blur', 'fill', 'picker', 'select', 'magic'] as EditorTool[]).includes(savedTool as EditorTool)) {
+      currentTool = savedTool as EditorTool;
+    } else if (savedTool === 'move') {
+      // Migrate sessions from the old standalone Move tool.
+      currentTool = 'select';
     }
     selectedAnchorName = state.anchor;
     if (state.layer) {
-      activeLayerId = state.layer.active;
       hiddenLayerIds = new Set(state.layer.hidden);
       lockedLayerIds = new Set(state.layer.locked);
       soloLayerId = state.layer.solo;
+      // Active-layer continuity has its own per-sprite store. Until the user
+      // explicitly selects a layer for this sprite, opening it starts on Base
+      // even if an older general view snapshot happened to contain Front Hand.
+      restoreActiveLayer(currentRepoPath, file);
       reconcileLayerState();
     }
     previewStepping = state.preview.stepping;
@@ -774,11 +847,13 @@ function restoreEditorViewState(saved?: EditorViewState): void {
     if (state.leftPanel) activatePanel('left', state.leftPanel);
     if (state.rightPanel) activatePanel('right', state.rightPanel);
     const selected = state.selection;
-    setSelection(selected
+    const restoredSelection = selected
       && selected.x >= 0 && selected.y >= 0
       && selected.x + selected.w <= W() && selected.y + selected.h <= H()
       ? selected
-      : null);
+      : null;
+    setSelection(restoredSelection);
+    setTransformMode(Boolean(restoredSelection && (state.transformMode || savedTool === 'move')), false);
     schedulePreviewUpload();
     void publishSelection();
   } catch {
@@ -899,6 +974,7 @@ function updateBridgeMeta(state: BridgeState): void {
 function applyBridgeState(state: BridgeState, force = false): void {
   if (!force && state.revision <= bridgeRevision) return;
   const switchedSprite = state.path !== currentRepoPath;
+  if (switchedSprite) rememberActiveLayer();
   const local = JSON.stringify(file);
   const unsentLocalEdit = Boolean(lastSharedFile) && local !== lastSharedFile;
   if (!force && state.source === bridgeClientId && unsentLocalEdit) {
@@ -924,6 +1000,8 @@ function applyBridgeState(state: BridgeState, force = false): void {
     rememberForUndo();
     clearSelection(false);
     file = normalize(structuredClone(state.file));
+    if (switchedSprite) restoreActiveLayer(state.path, file);
+    else reconcileLayerState();
     if (!file.anims[animName]) animName = Object.keys(file.anims)[0];
     frameIdx = Math.min(frameIdx, anim().frames.length - 1);
     currentChar = firstPaintChar();
@@ -932,6 +1010,11 @@ function applyBridgeState(state: BridgeState, force = false): void {
     updateUndoRedoButtons();
     if (switchedSprite) fitGrid();
     if (state.source !== bridgeClientId) flash(`updated by ${state.source}`);
+  } else if (switchedSprite) {
+    clearSelection(false);
+    restoreActiveLayer(state.path, file);
+    refreshUI();
+    fitGrid();
   }
   updateBridgeMeta(state);
   if (switchedSprite && state.path) configureCompositeForPath(state.path);
@@ -1005,6 +1088,7 @@ async function openSharedSprite(path: string): Promise<boolean> {
     // changes the selector. Flush it, then keep a browser-local draft keyed
     // by sprite path. Switching documents must never require a repository
     // save merely to protect work in progress.
+    rememberActiveLayer();
     if (lastSharedFile && JSON.stringify(file) !== lastSharedFile) {
       await publishSharedSprite();
     }
@@ -1701,6 +1785,7 @@ function buildLayers(): void {
     name.onclick = () => {
       if (activeLayerId === layer.id) return;
       activeLayerId = layer.id;
+      rememberActiveLayer();
       clearSelection(false);
       host.querySelector('.layer-row.active')?.classList.remove('active');
       row.classList.add('active');
@@ -1932,6 +2017,7 @@ $('btnAddLayer').onclick = () => {
   };
   layered.layers.push(layer);
   activeLayerId = layer.id;
+  rememberActiveLayer();
   buildLayers();
   redraw();
   syncIO();
@@ -1948,6 +2034,7 @@ $('btnDupLayer').onclick = () => {
   copy.name = `${source.name} copy`;
   file.layers.splice(index + 1, 0, copy);
   activeLayerId = copy.id;
+  rememberActiveLayer();
   buildLayers();
   redraw();
   syncIO();
@@ -1992,6 +2079,7 @@ $('btnMergeLayer').onclick = () => {
   file.layers.splice(index, 1);
   activeLayerId = bottom.id;
   reconcileLayerState();
+  rememberActiveLayer();
   buildLayers();
   redraw();
   syncIO();
@@ -2005,6 +2093,7 @@ $('btnDelLayer').onclick = () => {
   file.layers.splice(index, 1);
   activeLayerId = file.layers[Math.min(index, file.layers.length - 1)].id;
   reconcileLayerState();
+  rememberActiveLayer();
   clearSelection(false);
   buildLayers();
   redraw();
@@ -2410,7 +2499,7 @@ function floodFill(startX: number, startY: number, fillChar: string): void {
 
 grid.addEventListener('contextmenu', (e) => e.preventDefault());
 grid.addEventListener('mousedown', (e) => {
-  if (currentTool !== 'magic' && currentTool !== 'select' && currentTool !== 'move'
+  if (currentTool !== 'magic' && currentTool !== 'select' && !transformMode
     && e.altKey && e.shiftKey && selectedAnchorName) {
     e.preventDefault();
     const bounds = grid.getBoundingClientRect();
@@ -2423,7 +2512,7 @@ grid.addEventListener('mousedown', (e) => {
     syncIO();
     return;
   }
-  if (currentTool === 'magic') {
+  if (currentTool === 'magic' && !transformMode) {
     e.preventDefault();
     if (e.button === 2) {
       clearSelection();
@@ -2433,23 +2522,22 @@ grid.addEventListener('mousedown', (e) => {
     beginMagicSelection(e);
     return;
   }
-  if ((e.altKey && currentTool !== 'select' && currentTool !== 'move') || currentTool === 'picker') {
+  if (!transformMode && ((e.altKey && currentTool !== 'select') || currentTool === 'picker')) {
     e.preventDefault();
     if (e.button !== 0) return;
     picking = true;
     pickColor(e);
     return;
   }
-  if (currentTool === 'move') {
+  if (transformMode) {
     e.preventDefault();
     if (e.button === 2) {
-      setSelection(null);
-      void publishSelection();
+      clearSelection();
       return;
     }
     if (e.button !== 0) return;
     if (!selection) {
-      flash('make a selection before using Move');
+      setTransformMode(false);
       return;
     }
     const handle = selectionHandleAt(e);
@@ -2466,8 +2554,7 @@ grid.addEventListener('mousedown', (e) => {
   if (currentTool === 'select') {
     e.preventDefault();
     if (e.button === 2) {
-      setSelection(null);
-      void publishSelection();
+      clearSelection();
       return;
     }
     if (e.button !== 0) return;
@@ -2532,6 +2619,10 @@ window.addEventListener('mouseup', () => {
     selectionStart = null;
     void publishSelection();
     const count = selection ? selectionPixelCount(selection) : 0;
+    // A plain rectangle is normally the boundary of an object the author
+    // wants to manipulate next. Modifier-assisted add/subtract/intersect
+    // gestures stay in Select so several refinements can be made in a row.
+    if (count && mode === 'replace') setTransformMode(true);
     flash(count ? `selected ${count} pixels (${mode})` : 'selection cleared');
   }
   if (selectionMove) {
@@ -2552,7 +2643,7 @@ window.addEventListener('mouseup', () => {
       flash(handle === 'rotate' ? 'rotated selection' : 'resized selection');
     }
     ($('selectionAngle') as HTMLInputElement).value = '0';
-    grid.style.cursor = currentTool === 'move' ? 'default' : currentTool === 'select' ? 'cell' : '';
+    grid.style.cursor = transformMode ? 'default' : currentTool === 'select' ? 'cell' : '';
   }
   if (painting) {
     painting = false;
@@ -2964,7 +3055,7 @@ function selectionHandlePositions(rect: PixelRect): Array<{
 }
 
 function selectionHandleAt(e: MouseEvent): SelectionHandle | null {
-  if (currentTool !== 'move' || !selection) return null;
+  if (!transformMode || !selection) return null;
   const pointer = gridPointer(e);
   const handles = selectionHandlePositions(selection);
   // Rotation wins where a very small selection makes handles overlap.
@@ -2985,7 +3076,7 @@ function updateSelectionCursor(e?: MouseEvent): void {
     grid.style.cursor = '';
     return;
   }
-  if (currentTool !== 'move' || !selection || !e) {
+  if (!transformMode || !selection || !e) {
     grid.style.cursor = '';
     return;
   }
@@ -3090,6 +3181,8 @@ function updateSelectionHandleTransform(e: MouseEvent): void {
 
 function setSelection(next: PixelSelection | null): void {
   selection = next;
+  const transformEnded = !selection && transformMode;
+  if (transformEnded) transformMode = false;
   ($('btnCut') as HTMLButtonElement).disabled = !selection;
   ($('btnCopy') as HTMLButtonElement).disabled = !selection;
   updateSelectionTransformControls();
@@ -3103,6 +3196,7 @@ function setSelection(next: PixelSelection | null): void {
     ? `selection: ${selectionPixelCount(selection)} px in ${selection.w}x${selection.h} at ${selection.x},${selection.y} · shared with agent`
     : 'selection: none';
   buildLayerExtractionControls();
+  if (transformEnded) updateToolUI();
   redraw();
 }
 
@@ -3384,7 +3478,7 @@ function redraw(): void {
     }
     gctx.restore();
 
-    if (currentTool === 'move') {
+    if (transformMode) {
       const handles = selectionHandlePositions(selection);
       const rotation = handles.find((handle) => handle.handle === 'rotate');
       gctx.save();
@@ -3680,7 +3774,7 @@ function resolveCompositeBodyClock(bodySelection: string) {
  * animation's own length if that is longer, so the trail sweeps at its
  * true speed and you still get a readable pause between swings.
  */
-function renderComposite(t: number): boolean {
+function renderComposite(t: number, pausedFrame?: number): boolean {
   const weaponId = ($('compWeapon') as HTMLSelectElement).value;
   const hasWeapon = Boolean(weaponId && weapons.has(weaponId));
   const bodySel = ($('compBody') as HTMLSelectElement).value;
@@ -3816,9 +3910,11 @@ function renderComposite(t: number): boolean {
     pctx.restore();
     return false;
   }
-  frame = bodyAnim.loop === false
-    ? Math.min(Math.floor(tIn * bodyFps), bodyAnim.frames.length - 1)
-    : Math.floor(tIn * bodyFps) % bodyAnim.frames.length;
+  frame = pausedFrame === undefined
+    ? bodyAnim.loop === false
+      ? Math.min(Math.floor(tIn * bodyFps), bodyAnim.frames.length - 1)
+      : Math.floor(tIn * bodyFps) % bodyAnim.frames.length
+    : Math.min(pausedFrame, bodyAnim.frames.length - 1);
   const rows = bodyAnim.frames[frame] ?? [];
   const bodyGeometry = geometryOf(bodyFile, rows);
   dw = bodyGeometry.w;
@@ -3845,7 +3941,13 @@ function renderComposite(t: number): boolean {
     bodyW: dw, bodyH: dh,
     frontHand: sheetAnchor('frontHand'),
     rearHand: sheetAnchor('rearHand'),
-    attack: pose,
+    // A paused authoring preview is frame-addressed, not time-addressed.
+    // Leaving the attack pose attached here made spriteWeapon() remap the
+    // selected frame through the move's real duration (for example, frame 2
+    // of a six-frame 12fps sheet became frame 4 of a 0.16s attack). During
+    // playback the real attack clock remains authoritative; while paused,
+    // omitting it makes the weapon follow this explicit body/frame index.
+    attack: pausedFrame === undefined ? pose : undefined,
   };
   const bodyLayerVisible = (layer: SpriteLayerData): boolean => (
     bodyFile !== file
@@ -3947,7 +4049,7 @@ function renderPreview(): void {
   const displayedFrame = previewPlaying ? previewFrameAt(t, timing) : pausedFrame;
   $('previewFrame').textContent = `${displayedFrame + 1}/${timing.frameCount}`;
 
-  const composite = renderComposite(t);
+  const composite = renderComposite(t, previewPlaying ? undefined : pausedFrame);
   const context = $('previewContext');
   if (composite) {
     const weapon = ($('compWeapon') as HTMLSelectElement).value || 'no weapon';
@@ -4075,12 +4177,14 @@ $('btnLoad').onclick = () => ($('fileInput') as HTMLInputElement).click();
   const reader = new FileReader();
   reader.onload = () => {
     try {
+      rememberActiveLayer();
       file = normalize(JSON.parse(String(reader.result)));
       animName = Object.keys(file.anims)[0];
       frameIdx = 0;
       currentChar = firstPaintChar();
       currentFileName = f.name;
       currentRepoPath = null;
+      restoreActiveLayer(null, file);
       editVersion++;
       undoStack.length = 0;
       redoStack.length = 0;
@@ -4106,6 +4210,7 @@ $('selectSprite').onchange = async (e) => {
   // picker, canvas, preview, and bridge each describe different sprites.
   if (bridgeConnected) return;
   try {
+    rememberActiveLayer();
     file = existingSprite(val);
     animName = Object.keys(file.anims)[0];
     frameIdx = 0;
@@ -4115,6 +4220,7 @@ $('selectSprite').onchange = async (e) => {
     const parts = val.split('/');
     currentFileName = parts[parts.length - 1];
     currentRepoPath = val;
+    restoreActiveLayer(val, file);
 
     configureCompositeForPath(val);
 
@@ -4196,30 +4302,32 @@ function updateToolUI(): void {
   $('btnToolPicker').classList.toggle('active', visibleTool === 'picker');
   $('btnToolSelect').classList.toggle('active', visibleTool === 'select');
   $('btnToolMagic').classList.toggle('active', visibleTool === 'magic');
-  $('btnToolMove').classList.toggle('active', visibleTool === 'move');
-  grid.classList.toggle('selecting', visibleTool === 'select');
-  grid.classList.toggle('magic-selecting', visibleTool === 'magic');
-  grid.classList.toggle('selection-transforming', visibleTool === 'move');
+  grid.classList.toggle('selecting', visibleTool === 'select' && !transformMode);
+  grid.classList.toggle('magic-selecting', visibleTool === 'magic' && !transformMode);
+  grid.classList.toggle('selection-transforming', transformMode);
   grid.classList.toggle('picking', visibleTool === 'picker');
   grid.classList.toggle('soft-tool', visibleTool === 'brush' || visibleTool === 'blur');
-  if (visibleTool !== 'move') {
+  if (!transformMode) {
     grid.classList.remove('selection-movable');
     grid.style.cursor = '';
   } else if (!selectionHandleTransform) {
     grid.style.cursor = 'default';
   }
   updateSelectionModifierCursor();
-  const hasSize = currentTool === 'brush' || currentTool === 'blur';
-  const hasMagic = currentTool === 'magic';
-  const hasFill = currentTool === 'fill';
+  const hasSize = !transformMode && (currentTool === 'brush' || currentTool === 'blur');
+  const hasMagic = currentTool === 'magic' && !transformMode;
+  const hasFill = currentTool === 'fill' && !transformMode;
+  const hasTransform = transformMode;
   $('brushSizeConfig').hidden = !hasSize;
   $('magicConfig').hidden = !hasMagic;
   $('fillConfig').hidden = !hasFill;
-  $('toolConfigEmpty').hidden = hasSize || hasMagic || hasFill;
+  $('transformConfig').hidden = !hasTransform;
+  $('toolConfigEmpty').hidden = hasSize || hasMagic || hasFill || hasTransform;
   $('toolConfigTitle').textContent = hasSize
     ? `${currentTool === 'brush' ? 'soft brush' : 'blur'} settings`
     : hasMagic ? 'magic selection settings'
-      : hasFill ? 'fill settings' : 'tool settings';
+      : hasFill ? 'fill settings'
+        : hasTransform ? 'transform selection' : 'tool settings';
   $('brushSizeLabel').textContent = currentTool === 'blur' ? 'blur size' : 'brush size';
   $('toolConfigHint').textContent = currentTool === 'blur'
     ? 'Averages neighboring colors at the center and feathers the effect toward the edge.'
@@ -4229,7 +4337,10 @@ function updateToolUI(): void {
 }
 
 function updateSelectionTransformControls(): void {
-  const enabled = Boolean(selection) && currentTool === 'move';
+  const toggle = $('transformMode') as HTMLInputElement;
+  toggle.disabled = !selection;
+  toggle.checked = Boolean(selection) && transformMode;
+  const enabled = Boolean(selection) && transformMode;
   for (const id of [
     'btnRotateSelectionLeft', 'btnRotateSelectionRight', 'btnRotateSelection', 'btnResizeSelection',
     'btnNudgeLeft', 'btnNudgeRight', 'btnNudgeUp', 'btnNudgeDown',
@@ -4243,7 +4354,7 @@ function updateSelectionTransformControls(): void {
 
 function updateSelectionModifierCursor(keys?: { shiftKey: boolean; altKey: boolean }): void {
   if (keys) selectionModifierKeys = { shiftKey: keys.shiftKey, altKey: keys.altKey };
-  const selectionTool = currentTool === 'select' || currentTool === 'magic';
+  const selectionTool = !transformMode && (currentTool === 'select' || currentTool === 'magic');
   const mode = selectionTool ? selectionCombineMode(selectionModifierKeys) : 'replace';
   grid.classList.toggle('selection-add', mode === 'add');
   grid.classList.toggle('selection-subtract', mode === 'subtract');
@@ -4273,9 +4384,18 @@ function updateBrushCursor(): void {
 }
 
 function setTool(tool: EditorTool): void {
+  transformMode = false;
   currentTool = tool;
-  if (tool === 'brush' || tool === 'blur' || tool === 'magic' || tool === 'fill') activatePanel('left', 'left-tool');
-  if (tool === 'move') activatePanel('right', 'right-transform');
+  if (tool === 'brush' || tool === 'blur' || tool === 'magic' || tool === 'fill') {
+    activatePanel('left', 'left-tool');
+  }
+  updateToolUI();
+  redraw();
+}
+
+function setTransformMode(enabled: boolean, focusPanel = true): void {
+  transformMode = enabled && Boolean(selection);
+  if (transformMode && focusPanel) activatePanel('left', 'left-tool');
   updateToolUI();
   redraw();
 }
@@ -4287,7 +4407,9 @@ $('btnToolFill').onclick = () => setTool('fill');
 $('btnToolPicker').onclick = () => setTool('picker');
 $('btnToolSelect').onclick = () => setTool('select');
 $('btnToolMagic').onclick = () => setTool('magic');
-$('btnToolMove').onclick = () => setTool('move');
+($('transformMode') as HTMLInputElement).onchange = (event) => {
+  setTransformMode((event.target as HTMLInputElement).checked);
+};
 
 $('btnCompactPalette').onclick = () => {
   const before = JSON.stringify(file);
@@ -4319,8 +4441,18 @@ $('btnBrushSizeUp').onclick = () => setBrushSize(brushSize() + 1);
 function copySelection(): PixelClipboard | null {
   const snapshot = selectionSnapshot();
   if (!snapshot) return null;
-  pixelClipboard = { w: snapshot.w, h: snapshot.h, rows: snapshot.rows, mask: snapshot.mask?.slice() };
-  const envelope = JSON.stringify({ kind: 'hitstop-sprite-selection', v: 1, ...snapshot });
+  const copiedPalette: Palette = { '.': null };
+  for (const ch of new Set(snapshot.rows.flatMap((row) => [...row]))) {
+    copiedPalette[ch] = ch === '.' ? null : (pal()[ch] ?? null);
+  }
+  pixelClipboard = {
+    w: snapshot.w,
+    h: snapshot.h,
+    rows: snapshot.rows,
+    mask: snapshot.mask?.slice(),
+    palette: copiedPalette,
+  };
+  const envelope = JSON.stringify({ kind: 'hitstop-sprite-selection', v: 2, ...snapshot, palette: copiedPalette });
   void navigator.clipboard?.writeText(envelope).catch(() => {});
   flash(`copied ${snapshot.w}x${snapshot.h} pixels`);
   return pixelClipboard;
@@ -4337,9 +4469,27 @@ function cutSelection(): void {
   flash(`cut ${selection.w}x${selection.h} pixels`);
 }
 
+function deleteSelectionContents(): void {
+  if (!selection || !requireEditableLayer()) return;
+  saveHistory();
+  clearSelectionPixels(cur(), selection);
+  redraw();
+  syncIO();
+  schedulePreviewUpload();
+  void publishSelection();
+  flash(`cleared ${selectionPixelCount(selection)} selected pixels`);
+}
+
 function parsePixelClipboard(text: string): PixelClipboard | null {
   try {
-    const value = JSON.parse(text) as { kind?: unknown; w?: unknown; h?: unknown; rows?: unknown; mask?: unknown };
+    const value = JSON.parse(text) as {
+      kind?: unknown;
+      w?: unknown;
+      h?: unknown;
+      rows?: unknown;
+      mask?: unknown;
+      palette?: unknown;
+    };
     if (value.kind !== 'hitstop-sprite-selection' || !Number.isInteger(value.w) || !Number.isInteger(value.h)
       || !Array.isArray(value.rows) || !value.rows.every((row) => typeof row === 'string')) return null;
     const w = Number(value.w);
@@ -4348,10 +4498,99 @@ function parsePixelClipboard(text: string): PixelClipboard | null {
     const mask = value.mask;
     if (mask !== undefined && (!Array.isArray(mask) || mask.length !== h
       || !mask.every((row) => typeof row === 'string' && row.length === w && /^[1.]+$/.test(row)))) return null;
-    return { w, h, rows: value.rows as string[], mask: mask as string[] | undefined };
+    let copiedPalette: Palette | undefined;
+    if (value.palette !== undefined) {
+      if (!value.palette || typeof value.palette !== 'object' || Array.isArray(value.palette)) return null;
+      const entries = Object.entries(value.palette as Record<string, unknown>);
+      if (!entries.every(([ch, color]) => ch.length === 1 && (typeof color === 'string' || color === null))) return null;
+      copiedPalette = Object.fromEntries(entries) as Palette;
+    }
+    return {
+      w,
+      h,
+      rows: value.rows as string[],
+      mask: mask as string[] | undefined,
+      palette: copiedPalette,
+    };
   } catch {
     return null;
   }
+}
+
+function remapClipboardPalette(clip: PixelClipboard): {
+  clip: PixelClipboard;
+  added: number;
+  approximated: number;
+} {
+  // Version-1 clipboard payloads did not carry colors. Preserve their old
+  // same-document behavior rather than guessing what their characters meant.
+  if (!clip.palette) return { clip, added: 0, approximated: 0 };
+
+  const destination = pal();
+  const destinationUsage = paletteUsage();
+  const reserved = new Set<string>();
+  const used = new Set(clip.rows.flatMap((row) => [...row]));
+  const remap = new Map<string, string>([['.', '.']]);
+  let added = 0;
+  let approximated = 0;
+
+  for (const sourceChar of used) {
+    if (sourceChar === '.') continue;
+    const color = clip.palette[sourceChar];
+    if (!color) {
+      remap.set(sourceChar, '.');
+      continue;
+    }
+    const normalized = color.toLowerCase();
+    if (destination[sourceChar]?.toLowerCase() === normalized) {
+      remap.set(sourceChar, sourceChar);
+      continue;
+    }
+    const existing = Object.entries(destination)
+      .find(([ch, value]) => ch !== '.' && value?.toLowerCase() === normalized)?.[0];
+    if (existing) {
+      remap.set(sourceChar, existing);
+      continue;
+    }
+
+    const free = [...AUTO_PALETTE_CHARS].find((ch) => !(ch in destination));
+    const recyclable = free ?? Object.keys(destination).find((ch) =>
+      ch !== '.' && ch !== currentChar && !destinationUsage.has(ch) && !reserved.has(ch),
+    );
+    if (recyclable) {
+      destination[recyclable] = color;
+      reserved.add(recyclable);
+      remap.set(sourceChar, recyclable);
+      added++;
+      continue;
+    }
+
+    const sourceRgb = parseRgb(color);
+    let nearest = '';
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    if (sourceRgb) {
+      for (const [ch, value] of Object.entries(destination)) {
+        const rgb = parseRgb(value);
+        if (!rgb) continue;
+        const distance = colorDistance(sourceRgb, rgb);
+        if (distance < nearestDistance) {
+          nearest = ch;
+          nearestDistance = distance;
+        }
+      }
+    }
+    remap.set(sourceChar, nearest || (destination[currentChar] ? currentChar : '.'));
+    approximated++;
+  }
+
+  return {
+    clip: {
+      ...clip,
+      rows: clip.rows.map((row) => [...row].map((ch) => remap.get(ch) ?? '.').join('')),
+    },
+    added,
+    approximated,
+  };
 }
 
 async function pasteSelection(): Promise<void> {
@@ -4370,6 +4609,8 @@ async function pasteSelection(): Promise<void> {
   const pastedH = Math.min(clip.h, H() - y);
   if (pastedW <= 0 || pastedH <= 0) return;
   saveHistory();
+  const remapped = remapClipboardPalette(clip);
+  clip = remapped.clip;
   const rows = cur().slice();
   // A copied selection behaves like an image object: transparent pixels
   // reveal the destination instead of punching holes through it.
@@ -4378,9 +4619,13 @@ async function pasteSelection(): Promise<void> {
   editVersion++;
   const clippedMask = clip.mask?.slice(0, pastedH).map((row) => row.slice(0, pastedW));
   setSelection({ x, y, w: pastedW, h: pastedH, mask: clippedMask });
+  setTransformMode(true);
+  if (remapped.added) buildPalette();
   syncIO();
+  schedulePreviewUpload();
   void publishSelection();
-  flash(`pasted ${pastedW}x${pastedH} pixels`);
+  flash(`pasted ${pastedW}x${pastedH} pixels${remapped.added ? `; added ${remapped.added} colors` : ''}`
+    + `${remapped.approximated ? `; palette full, approximated ${remapped.approximated}` : ''}`);
 }
 
 function commitSelectionPixels(
@@ -4403,7 +4648,7 @@ function commitSelectionPixels(
 }
 
 function moveSelectionBy(dx: number, dy: number): void {
-  if (currentTool !== 'move') return;
+  if (!transformMode) return;
   if (!requireEditableLayer()) return;
   if (!selection) return;
   const x = Math.max(0, Math.min(W() - selection.w, selection.x + dx));
@@ -4434,7 +4679,7 @@ function scaleSelectionRows(source: PixelClipboard, w: number, h: number): Pixel
 }
 
 function resizeSelection(): void {
-  if (currentTool !== 'move') return;
+  if (!transformMode) return;
   if (!requireEditableLayer()) return;
   if (!selection) return;
   const requestedW = Math.round(($('selectionW') as HTMLInputElement).valueAsNumber);
@@ -4534,7 +4779,7 @@ function rotateSelectionRows(source: PixelClipboard, degrees: number): PixelClip
 }
 
 function rotateSelectionBy(degrees: number, message?: string): void {
-  if (currentTool !== 'move') return;
+  if (!transformMode) return;
   if (!requireEditableLayer()) return;
   if (!selection || !Number.isFinite(degrees)) return;
   if (Math.abs(degrees % 360) < 0.0001) {
@@ -4739,7 +4984,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   updateSelectionModifierCursor(e);
-  if (e.key === 'Alt' && currentTool !== 'magic' && currentTool !== 'select' && currentTool !== 'move') {
+  if (e.key === 'Alt' && currentTool !== 'magic' && currentTool !== 'select' && !transformMode) {
     e.preventDefault();
     altPickerActive = true;
     updateToolUI();
@@ -4764,11 +5009,17 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     clearSelection();
   }
+  if (!typing && selection && !e.ctrlKey && !e.metaKey && !e.altKey
+    && (key === 'delete' || key === 'backspace')) {
+    e.preventDefault();
+    deleteSelectionContents();
+    return;
+  }
   if (!typing && key === 'm' && !e.ctrlKey && !e.metaKey) {
     e.preventDefault();
     setTool('select');
   }
-  if (!typing && selection && currentTool === 'move' && key.startsWith('arrow')) {
+  if (!typing && selection && transformMode && key.startsWith('arrow')) {
     e.preventDefault();
     const distance = e.shiftKey ? 4 : 1;
     if (key === 'arrowleft') moveSelectionBy(-distance, 0);
@@ -4777,13 +5028,17 @@ window.addEventListener('keydown', (e) => {
     else if (key === 'arrowdown') moveSelectionBy(0, distance);
   }
   if (!typing && !e.ctrlKey && !e.metaKey) {
+    if (key === 'v') {
+      e.preventDefault();
+      setTransformMode(!transformMode);
+      return;
+    }
     const shortcut: Partial<Record<string, EditorTool>> = {
       p: 'draw',
       b: 'brush',
       u: 'blur',
       g: 'fill',
       w: 'magic',
-      v: 'move',
     };
     const tool = shortcut[key];
     if (tool) {
@@ -4912,10 +5167,12 @@ Object.defineProperty(window, '__editor', {
     },
     open(path: string) { return openSharedSprite(path); },
     replace(next: SpriteFile, path: string | null = currentRepoPath) {
+      rememberActiveLayer();
       rememberForUndo();
       file = normalize(structuredClone(next));
       currentRepoPath = path;
       currentFileName = path?.split('/').at(-1) ?? currentFileName;
+      restoreActiveLayer(path, file);
       animName = Object.keys(file.anims)[0];
       frameIdx = 0;
       currentChar = firstPaintChar();

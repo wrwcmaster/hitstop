@@ -37,6 +37,11 @@ function bodyPose(p: Player): { shear: number; ox: number; oy: number; sx: numbe
     const prog = clamp(p.fsm.t / p.attackDur, 0, 1);
     const attack = p.attackDef;
     if (!attack) return { shear: 0, ox: 0, oy: 0, sx: 1, sy: 1 };
+    // Authored attack art already carries the coil, swing, and recovery.
+    // Procedurally shearing those frames would pose the same action twice.
+    if (p.animSet.right[attack.animation]) {
+      return { shear: 0, ox: 0, oy: 0, sx: 1, sy: 1 };
+    }
     const mag = attack.bodyWeight;
     let shear: number;
     let ox: number;
@@ -93,7 +98,18 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
   if (p.onGround) anim = Math.abs(p.vx) > 8 ? 'run' : 'idle';
   else if (p.vy < -35 && set.rise) anim = 'rise';
   else if (p.vy > 45 && set.fall) anim = 'fall';
-  let img = frameAt(set, anim, p.animT);
+  let animT = p.animT;
+  const authoredAttack = p.fsm.is('attack') && p.attackDef
+    ? set[p.attackDef.animation]
+    : undefined;
+  if (authoredAttack && p.attackDef) {
+    anim = p.attackDef.animation;
+    // Attack timing belongs to the move, not the world's locomotion clock.
+    // Spread every authored pose across the move and hold the final frame at 1.
+    const progress = clamp(p.fsm.t / p.attackDur, 0, 1);
+    animT = Math.min(progress, 0.999999) * authoredAttack.frames.length / authoredAttack.fps;
+  }
+  let img = frameAt(set, anim, animT);
   if (p.flashT > 0) img = whiteOf(img);
 
   // Entity coordinates describe the collision box. Sprite geometry maps
@@ -141,8 +157,8 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
   const animObj = p.animSet.right[anim];
   const frameIdx = animObj
     ? (animObj.loop === false
-      ? Math.min(Math.floor(p.animT * animObj.fps), animObj.frames.length - 1)
-      : Math.floor(p.animT * animObj.fps) % animObj.frames.length)
+      ? Math.min(Math.floor(animT * animObj.fps), animObj.frames.length - 1)
+      : Math.floor(animT * animObj.fps) % animObj.frames.length)
     : 0;
   const bodyAnchor = (name: string): { x: number; y: number } | undefined => {
     const anchor = baseKnight.anchor?.(name, anim, frameIdx);
@@ -156,7 +172,7 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
   const drawBodyTag = (tag: string): void => {
     const tagged = KNIGHT_TAG_ANIMS.get(tag);
     if (!tagged) return;
-    let layerImg = frameAt(p.facing === 1 ? tagged.right : tagged.left, anim, p.animT);
+    let layerImg = frameAt(p.facing === 1 ? tagged.right : tagged.left, anim, animT);
     if (p.flashT > 0) layerImg = whiteOf(layerImg);
     else if (isSwallowed) layerImg = tintOf(layerImg, COLORS.red, 0.55);
     g.drawImage(layerImg, -dw / 2, -dh, dw, dh);
@@ -167,8 +183,10 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
     const f = p.facing;
     for (const [, visual] of equippedGear) {
       const layerSet = f === 1 ? visual.anims.right : visual.anims.left;
-      const layerImg = frameAt(layerSet, anim, p.animT);
-      const anchor = visual.anchors?.[anim]?.[frameIdx] ?? { x: 0, y: 0, angle: 0 };
+      const gearAnim = layerSet[anim] ? anim : layerSet.idle ? 'idle' : Object.keys(layerSet)[0];
+      if (!gearAnim) continue;
+      const layerImg = frameAt(layerSet, gearAnim, animT);
+      const anchor = visual.anchors?.[gearAnim]?.[frameIdx] ?? { x: 0, y: 0, angle: 0 };
 
       g.save();
       g.translate(anchor.x * f, anchor.y);
@@ -188,7 +206,7 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
       facing: p.facing,
       anim,
       frame: frameIdx,
-      animT: p.animT,
+      animT,
       bodyW: dw,
       bodyH: dh,
       frontHand: bodyAnchor(weaponSlot?.anchor ?? 'frontHand'),
