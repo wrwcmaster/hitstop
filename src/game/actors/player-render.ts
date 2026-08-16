@@ -107,7 +107,8 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
     // Attack timing belongs to the move, not the world's locomotion clock.
     // Spread every authored pose across the move and hold the final frame at 1.
     const progress = clamp(p.fsm.t / p.attackDur, 0, 1);
-    animT = Math.min(progress, 0.999999) * authoredAttack.frames.length / authoredAttack.fps;
+    const directedProgress = p.attackDef.frameDirection === -1 ? 1 - progress : progress;
+    animT = Math.min(directedProgress, 0.999999) * authoredAttack.frames.length / authoredAttack.fps;
   }
   let img = frameAt(set, anim, animT);
   if (p.flashT > 0) img = whiteOf(img);
