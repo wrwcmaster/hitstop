@@ -1,4 +1,5 @@
 import { sprite, epx, type Palette } from './sprite';
+import { offscreen } from './canvas';
 import type { AnimSet } from './animation';
 import type { Rect } from '../math/rect';
 
@@ -272,6 +273,64 @@ export function compositeSpriteFrameByTags(
   return out.map((row) => row.join(''));
 }
 
+export interface SpriteRasterOptions {
+  /** Optional render-band order. Layers within a band retain file order. */
+  tagOrder?: readonly string[];
+  /** Tooling hook for temporary layer visibility/solo state. */
+  include?: (layer: SpriteLayerData) => boolean;
+  /** Apply the file format's two EPX passes. Defaults to the file's `hd` setting. */
+  upscale?: boolean;
+}
+
+/**
+ * Rasterize one frame while preserving authored layer alpha.
+ *
+ * Text-grid compositors can only retain one palette character per cell, so
+ * they cannot represent a translucent pixel over a lower color. Rasterizing
+ * each layer independently and drawing bottom-to-top lets Canvas perform the
+ * correct source-over blend without changing the compact on-disk format.
+ */
+export function rasterizeSpriteFrame(
+  file: SpriteFile,
+  name: string,
+  frame: number,
+  base: Palette = {},
+  options: SpriteRasterOptions = {},
+): HTMLCanvasElement | undefined {
+  if (!(name in file.anims)) return undefined;
+  const target = resolveAnimName(file, name);
+  const palette = { ...base, ...(file.palette ?? {}) };
+  const upscale = options.upscale ?? file.hd !== false;
+  const raster = (rows: string[]): HTMLCanvasElement => sprite(upscale ? epx(epx(rows)) : rows, palette);
+
+  if (!isLayeredSpriteFile(file)) {
+    const entry = file.anims[target];
+    const rows = typeof entry === 'string' ? undefined : entry?.frames[frame];
+    return rows ? raster(rows) : undefined;
+  }
+
+  const timeline = file.anims[target];
+  if (!timeline || typeof timeline === 'string' || frame < 0 || frame >= timeline.frameCount) return undefined;
+  const first = file.layers[0]?.tracks[target]?.[frame];
+  if (!first) return undefined;
+  const sample = raster(first.map((row) => '.'.repeat(row.length)));
+  const [canvas, context] = offscreen(sample.width, sample.height);
+  const include = options.include ?? (() => true);
+  let layers = file.layers;
+  if (options.tagOrder) {
+    const missing = spriteLayerTags(file).filter((tag) => !options.tagOrder!.includes(tag));
+    if (missing.length) {
+      throw new Error(`sprite: render tag order is missing ${missing.map((tag) => `"${tag}"`).join(', ')}`);
+    }
+    layers = options.tagOrder.flatMap((tag) => file.layers.filter((layer) => layer.tag === tag));
+  }
+  for (const layer of layers) {
+    if (!include(layer)) continue;
+    context.drawImage(raster(layer.tracks[target][frame]), 0, 0);
+  }
+  return canvas;
+}
+
 /** Resolve an animation to flat frames for all existing consumers. */
 export function resolveAnim(file: SpriteFile, name: string, base: Palette = {}): SpriteAnimData | undefined {
   const timing = resolveAnimTiming(file, name);
@@ -354,7 +413,6 @@ export function resolveSpriteGeometry(
 
 /** Bake a SpriteFile into lazily cached canvases. */
 export function loadSprite(file: SpriteFile, base: Palette = {}): LoadedSprite {
-  const pal: Palette = { ...base, ...(file.palette ?? {}) };
   if (file.renderTag !== undefined && !file.renderTag.trim()) {
     throw new Error('sprite: renderTag must be non-empty');
   }
@@ -380,9 +438,6 @@ export function loadSprite(file: SpriteFile, base: Palette = {}): LoadedSprite {
       throw new Error(`sprite attachment slot "${slotName}" uses unknown anchor "${slot.anchor}"`);
     }
   }
-  const bake = (rows: string[]): HTMLCanvasElement =>
-    file.hd === false ? sprite(rows, pal) : sprite(epx(epx(rows)), pal);
-
   const firstFrame = compositeSpriteFrame(file, Object.keys(file.anims)[0], 0, base) ?? [];
   const cellH = firstFrame.length || 1;
   const cellW = Math.max(1, ...firstFrame.map((row) => row.length));
@@ -399,7 +454,7 @@ export function loadSprite(file: SpriteFile, base: Palette = {}): LoadedSprite {
       baked = timing
         ? Array.from(
           { length: timing.frameCount },
-          (_, frame) => bake(compositeSpriteFrame(file, target, frame, base)!),
+          (_, frame) => rasterizeSpriteFrame(file, target, frame, base)!,
         )
         : [];
       cache.set(target, baked);
@@ -421,7 +476,9 @@ export function loadSprite(file: SpriteFile, base: Palette = {}): LoadedSprite {
       baked = timing && spriteLayerTags(file).includes(tag)
         ? Array.from(
           { length: timing.frameCount },
-          (_, frame) => bake(compositeSpriteTagFrame(file, target, frame, tag, base)!),
+          (_, frame) => rasterizeSpriteFrame(file, target, frame, base, {
+            include: (layer) => layer.tag === tag,
+          })!,
         )
         : [];
       cacheForTag.set(target, baked);

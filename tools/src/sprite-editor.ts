@@ -3,7 +3,7 @@
 import {
   resolveSpriteGeometry, resolveAnim, resolveAnimName, resolveAnimTiming,
   compositeSpriteFrame, compositeSpriteFrameByTags, isLayeredSpriteFile, validateLayeredSpriteFile,
-  sprite, epx,
+  rasterizeSpriteFrame,
   type Palette, type SpriteFile, type FlatSpriteFile, type LayeredSpriteFile,
   type SpriteAnimData, type LayeredSpriteAnimData, type SpriteLayerData, type SpriteAnchor,
 } from '@engine/index';
@@ -75,11 +75,14 @@ let frameIdx = 0;
 let previewStepFrame = 0;
 let previewStepping = false;
 let previewDisplayedFrame = 0;
+let previewZoom = 1;
+let previewZoomFit = true;
 let currentChar = firstPaintChar();
 let painting = false;
 let erasing = false;
 type EditorTool = 'draw' | 'brush' | 'blur' | 'fill' | 'picker' | 'select' | 'magic';
 let currentTool: EditorTool = 'draw';
+let selectionTool: Extract<EditorTool, 'select' | 'magic'> = 'select';
 let transformMode = false;
 let altPickerActive = false;
 let picking = false;
@@ -144,6 +147,7 @@ let refFile: SpriteFile | null = null;
 let currentFileName = 'new sprite.json';
 let currentRepoPath: string | null = null;
 let selectedAnchorName = '';
+let anchorPlacementMode = false;
 let selectedAttachmentSlotName = '';
 const FLAT_LAYER_ID = 'base';
 let activeLayerId = FLAT_LAYER_ID;
@@ -488,14 +492,21 @@ const concreteAnims = (): [string, SpriteAnimData][] =>
     frames: activeFrames(name),
   }]);
 const cur = () => anim().frames[frameIdx];
+const visibleLayer = (layer: SpriteLayerData): boolean => (
+  soloLayerId ? layer.id === soloLayerId : !hiddenLayerIds.has(layer.id)
+);
 const compositeCur = (index = frameIdx): string[] => {
-  const include = (layer: SpriteLayerData) => (
-    soloLayerId ? layer.id === soloLayerId : !hiddenLayerIds.has(layer.id)
-  );
   return (isLayeredSpriteFile(file)
-    ? compositeSpriteFrameByTags(file, animName, index, renderTagIds(), PAL, include)
-    : compositeSpriteFrame(file, animName, index, PAL, include)) ?? cur();
+    ? compositeSpriteFrameByTags(file, animName, index, renderTagIds(), PAL, visibleLayer)
+    : compositeSpriteFrame(file, animName, index, PAL, visibleLayer)) ?? cur();
 };
+const rasterizedCur = (index = frameIdx, upscale = false): HTMLCanvasElement | undefined => (
+  rasterizeSpriteFrame(file, animName, index, PAL, {
+    tagOrder: isLayeredSpriteFile(file) ? renderTagIds() : undefined,
+    include: visibleLayer,
+    upscale,
+  })
+);
 const visibleAnim = (): SpriteAnimData => {
   const timing = resolveAnimTiming(file, animName)!;
   return {
@@ -773,7 +784,7 @@ interface EditorViewState {
   layer?: { active: string; hidden: string[]; locked: string[]; solo: string | null };
   leftPanel?: string;
   rightPanel?: string;
-  preview: { playing: boolean; stepping: boolean; frame: number };
+  preview: { playing: boolean; stepping: boolean; frame: number; zoom?: number; fit?: boolean };
   composite: {
     weapon: string;
     move: string;
@@ -820,6 +831,8 @@ function captureEditorViewState(): EditorViewState {
       playing: ($('previewPlay') as HTMLInputElement).checked,
       stepping: previewStepping,
       frame: previewStepFrame,
+      zoom: previewZoom,
+      fit: previewZoomFit,
     },
     composite: {
       weapon: ($('compWeapon') as HTMLSelectElement).value,
@@ -875,6 +888,8 @@ function restoreEditorViewState(saved?: EditorViewState): void {
     }
     previewStepping = state.preview.stepping;
     previewStepFrame = state.preview.frame;
+    previewZoom = Math.max(0.1, Math.min(8, state.preview.zoom ?? previewZoom));
+    previewZoomFit = state.preview.fit ?? previewZoomFit;
 
     const weapon = $('compWeapon') as HTMLSelectElement;
     if ([...weapon.options].some((option) => option.value === state.composite.weapon)) {
@@ -1538,6 +1553,8 @@ function buildAnchors(): void {
   x.value = point ? String(point.x) : '';
   y.value = point ? String(point.y) : '';
   ($('btnDelAnchor') as HTMLButtonElement).disabled = !selectedAnchorName;
+  if (!selectedAnchorName) anchorPlacementMode = false;
+  updateToolUI();
 }
 
 function buildAttachmentSlots(): void {
@@ -1578,6 +1595,17 @@ function buildAttachmentSlots(): void {
   redraw();
 };
 
+$('btnPlaceAnchor').onclick = () => {
+  anchorPlacementMode = !anchorPlacementMode && Boolean(selectedAnchorName);
+  if (anchorPlacementMode) {
+    transformMode = false;
+    altPickerActive = false;
+    picking = false;
+  }
+  updateToolUI();
+  redraw();
+};
+
 $('btnAddAnchor').onclick = () => {
   const name = prompt('anchor name (e.g. frontHand, rearHand, head):', '')?.trim();
   if (!name) return;
@@ -1609,6 +1637,7 @@ $('btnDelAnchor').onclick = () => {
   saveHistory();
   delete file.anchors[selectedAnchorName];
   selectedAnchorName = '';
+  anchorPlacementMode = false;
   refreshUI();
 };
 
@@ -1871,14 +1900,17 @@ function makeTransparentTracks(): Record<string, string[][]> {
   return tracks;
 }
 
+/** The actual bottom-to-top stack shown by the editor and used at runtime. */
+function layersInRenderOrder(layerFile: LayeredSpriteFile): SpriteLayerData[] {
+  return renderTagIds().flatMap((tag) => layerFile.layers.filter((layer) => layer.tag === tag));
+}
+
 function buildLayers(): void {
   reconcileLayerState();
   const host = $('layers');
   host.innerHTML = '';
   const layers = isLayeredSpriteFile(file)
-    ? renderTagIds().slice().reverse().flatMap((tag) => (
-      (file as LayeredSpriteFile).layers.filter((layer) => layer.tag === tag).reverse()
-    ))
+    ? layersInRenderOrder(file).reverse()
     : [{ id: FLAT_LAYER_ID, name: 'Base', tag: defaultLayerTag(), tracks: {} }];
   for (const layer of layers) {
     const row = document.createElement('div');
@@ -1994,16 +2026,22 @@ function buildLayers(): void {
 
   const layerFile = isLayeredSpriteFile(file) ? file : null;
   const layered = Boolean(layerFile);
-  const index = layerFile ? layerFile.layers.findIndex((layer) => layer.id === activeLayerId) : 0;
-  const activeTag = layerFile?.layers[index]?.tag;
-  const canMoveUp = Boolean(layerFile && index < layerFile.layers.length - 1
-    && layerFile.layers[index + 1].tag === activeTag);
-  const canMoveDown = Boolean(layerFile && index > 0 && layerFile.layers[index - 1].tag === activeTag);
+  const active = layerFile?.layers.find((layer) => layer.id === activeLayerId);
+  const tagLayers = layerFile && active
+    ? layerFile.layers.filter((layer) => layer.tag === active.tag)
+    : [];
+  const tagIndex = tagLayers.findIndex((layer) => layer.id === activeLayerId);
+  const renderIndex = layerFile
+    ? layersInRenderOrder(layerFile).findIndex((layer) => layer.id === activeLayerId)
+    : -1;
+  const canMoveUp = tagIndex >= 0 && tagIndex < tagLayers.length - 1;
+  const canMoveDown = tagIndex > 0;
+  const canMergeDown = renderIndex > 0;
   $('layerStatus').textContent = layerFile ? `${layerFile.layers.length} layers` : 'flat sprite';
   ($('btnDupLayer') as HTMLButtonElement).disabled = !layered;
   ($('btnLayerUp') as HTMLButtonElement).disabled = !canMoveUp;
   ($('btnLayerDown') as HTMLButtonElement).disabled = !canMoveDown;
-  ($('btnMergeLayer') as HTMLButtonElement).disabled = !canMoveDown;
+  ($('btnMergeLayer') as HTMLButtonElement).disabled = !canMergeDown;
   ($('btnDelLayer') as HTMLButtonElement).disabled = !layerFile || layerFile.layers.length <= 1;
   ($('btnFlattenLayers') as HTMLButtonElement).disabled = !layered;
   buildLayerExtractionControls();
@@ -2171,10 +2209,14 @@ $('btnDupLayer').onclick = () => {
 
 function moveLayer(delta: -1 | 1): void {
   if (!isLayeredSpriteFile(file)) return;
-  const index = file.layers.findIndex((layer) => layer.id === activeLayerId);
-  const target = index + delta;
-  if (index < 0 || target < 0 || target >= file.layers.length) return;
-  if (file.layers[index].tag !== file.layers[target].tag) return;
+  const active = file.layers.find((layer) => layer.id === activeLayerId);
+  if (!active) return;
+  const peers = file.layers.filter((layer) => layer.tag === active.tag);
+  const peerIndex = peers.findIndex((layer) => layer.id === activeLayerId);
+  const targetLayer = peers[peerIndex + delta];
+  if (!targetLayer) return;
+  const index = file.layers.indexOf(active);
+  const target = file.layers.indexOf(targetLayer);
   saveHistory();
   [file.layers[index], file.layers[target]] = [file.layers[target], file.layers[index]];
   buildLayers();
@@ -2187,31 +2229,39 @@ $('btnLayerDown').onclick = () => moveLayer(-1);
 
 $('btnMergeLayer').onclick = () => {
   if (!isLayeredSpriteFile(file)) return;
-  const index = file.layers.findIndex((layer) => layer.id === activeLayerId);
-  if (index <= 0) return;
+  const rendered = layersInRenderOrder(file);
+  const renderIndex = rendered.findIndex((layer) => layer.id === activeLayerId);
+  if (renderIndex <= 0) return;
+  const top = rendered[renderIndex];
+  const bottom = rendered[renderIndex - 1];
   saveHistory();
-  const top = file.layers[index];
-  const bottom = file.layers[index - 1];
-  if (top.tag !== bottom.tag) return;
   for (const name of concreteAnimNames()) {
     for (let frame = 0; frame < top.tracks[name].length; frame++) {
       const over = top.tracks[name][frame];
       const under = [...bottom.tracks[name][frame]];
       for (let y = 0; y < over.length; y++) for (let x = 0; x < over[y].length; x++) {
         const ch = over[y][x];
-        if (ch === '.' || pal()[ch] === null) continue;
-        under[y] = under[y].slice(0, x) + ch + under[y].slice(x + 1);
+        const overColor = parseRgba(pal()[ch]);
+        if (!overColor || overColor.a <= 0) continue;
+        const underColor = parseRgba(pal()[under[y][x]]);
+        const merged = !underColor || overColor.a >= 255
+          ? ch
+          : paletteCharFor(sourceOverRgba(overColor, underColor));
+        under[y] = under[y].slice(0, x) + merged + under[y].slice(x + 1);
       }
       bottom.tracks[name][frame] = under;
     }
   }
-  file.layers.splice(index, 1);
+  file.layers.splice(file.layers.indexOf(top), 1);
   activeLayerId = bottom.id;
   reconcileLayerState();
   rememberActiveLayer();
   buildLayers();
   redraw();
   syncIO();
+  schedulePreviewUpload();
+  void publishSelection();
+  flash(`merged “${top.name}” into “${bottom.name}”`);
 };
 
 $('btnDelLayer').onclick = () => {
@@ -2387,7 +2437,11 @@ interface Rgba { r: number; g: number; b: number; a: number }
 // browser-only alpha in the canvas preview. Excluding dot, quote, and slash
 // keeps rows easy to read while leaving ample room for generated blends.
 const AUTO_PALETTE_CHARS =
-  '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#@$%&*+=!?~^;:,<>[]{}()_-|`';
+  '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#@$%&*+=!?~^;:,<>[]{}()_-|`'
+  // BMP code points remain one UTF-16 code unit, so text-grid width and
+  // direct row indexing stay exact while large layered sheets can preserve
+  // more than the original ASCII palette's 89 colors.
+  + Array.from({ length: 256 }, (_, index) => String.fromCharCode(0x0100 + index)).join('');
 
 function parseRgba(color: string | null | undefined): Rgba | null {
   const match = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(color ?? '');
@@ -2398,6 +2452,22 @@ function parseRgba(color: string | null | undefined): Rgba | null {
     g: (value >> 8) & 0xff,
     b: value & 0xff,
     a: match[2] ? Number.parseInt(match[2], 16) : 255,
+  };
+}
+
+function sourceOverRgba(over: Rgba, under: Rgba): Rgba {
+  const overAlpha = over.a / 255;
+  const underAlpha = under.a / 255;
+  const alpha = overAlpha + underAlpha * (1 - overAlpha);
+  if (alpha <= 0) return { r: 0, g: 0, b: 0, a: 0 };
+  const channel = (front: number, back: number): number => (
+    (front * overAlpha + back * underAlpha * (1 - overAlpha)) / alpha
+  );
+  return {
+    r: channel(over.r, under.r),
+    g: channel(over.g, under.g),
+    b: channel(over.b, under.b),
+    a: alpha * 255,
   };
 }
 
@@ -2650,17 +2720,18 @@ function floodFill(startX: number, startY: number, fillChar: string): void {
 
 grid.addEventListener('contextmenu', (e) => e.preventDefault());
 grid.addEventListener('mousedown', (e) => {
-  if (currentTool !== 'magic' && currentTool !== 'select' && !transformMode
-    && e.altKey && e.shiftKey && selectedAnchorName) {
+  if (anchorPlacementMode && selectedAnchorName) {
     e.preventDefault();
-    const bounds = grid.getBoundingClientRect();
-    const sourceX = Math.floor((e.clientX - bounds.left) / cellSize);
-    const sourceY = Math.floor((e.clientY - bounds.top) / cellSize);
+    if (e.button !== 0) return;
+    const point = gridCell(e);
+    if (point.x < 0 || point.y < 0 || point.x >= W() || point.y >= H()) return;
     saveHistory();
-    Object.assign(ensureCurrentAnchor(), { x: sourceX / density(), y: sourceY / density() });
+    Object.assign(ensureCurrentAnchor(), { x: point.x / density(), y: point.y / density() });
+    anchorPlacementMode = false;
     buildAnchors();
     redraw();
     syncIO();
+    flash(`placed ${selectedAnchorName} at ${point.x / density()}, ${point.y / density()}`);
     return;
   }
   if (currentTool === 'magic' && !transformMode) {
@@ -3381,6 +3452,9 @@ function updateSelectionHandleTransform(e: MouseEvent): void {
 }
 
 function setSelection(next: PixelSelection | null): void {
+  if (next && !transformMode && (currentTool === 'select' || currentTool === 'magic')) {
+    selectionTool = currentTool;
+  }
   selection = next;
   const transformEnded = !selection && transformMode;
   if (transformEnded) transformMode = false;
@@ -3397,7 +3471,9 @@ function setSelection(next: PixelSelection | null): void {
     ? `selection: ${selectionPixelCount(selection)} px in ${selection.w}x${selection.h} at ${selection.x},${selection.y} · shared with agent`
     : 'selection: none';
   buildLayerExtractionControls();
-  if (transformEnded) updateToolUI();
+  // Selection is an independent canvas state. Keep its originating selection
+  // tool highlighted alongside a paint/edit tool until the mask is cleared.
+  updateToolUI();
   redraw();
 }
 
@@ -3413,10 +3489,17 @@ function clearSelection(publish = true): void {
 }
 
 // Treat the empty canvas workspace like an art application's pasteboard:
-// clicking it dismisses the current pixel selection. Checking the direct
-// target keeps canvas gestures and every surrounding panel/control intact.
+// a fresh press there dismisses the current pixel selection. Finishing a
+// transform drag outside the canvas therefore keeps the selection because
+// mouseup/click never owns dismissal. Exclude the native scrollbar gutters so
+// scrolling the workspace does not count as a pasteboard press.
 $('center').addEventListener('pointerdown', (event) => {
-  if (event.button !== 0 || event.target !== event.currentTarget || !selection) return;
+  const center = event.currentTarget as HTMLElement;
+  const pasteboard = event.target === event.currentTarget || event.target === $('canvasStage');
+  const bounds = center.getBoundingClientRect();
+  const inScrollbarGutter = event.clientX >= bounds.left + center.clientWidth
+    || event.clientY >= bounds.top + center.clientHeight;
+  if (event.button !== 0 || !pasteboard || inScrollbarGutter || !selection) return;
   clearSelection();
 });
 
@@ -3472,6 +3555,26 @@ function buildFrames(): void {
   ($('btnFrameRight') as HTMLButtonElement).disabled = frameIdx === anim().frames.length - 1;
 }
 
+/**
+ * Frame-list edits change more than the active grid. They invalidate the
+ * in-memory weapon/body registration used by the composite preview and must
+ * put the preview back on the newly selected editor frame. Keeping that
+ * bookkeeping in one place prevents add/duplicate/delete/reorder from each
+ * leaving a different stale preview behind.
+ */
+function finishFrameStructureEdit(rebuildSlots = false): void {
+  editVersion++;
+  previewStepping = false;
+  previewStepFrame = frameIdx;
+  buildFrames();
+  buildAnchors();
+  if (rebuildSlots) buildAttachmentSlots();
+  redraw();
+  syncIO();
+  schedulePreviewUpload();
+  void publishSelection();
+}
+
 $('btnAddFrame').onclick = () => {
   saveHistory();
   eachLayerTrack(animName, (frames) => frames.push(emptyFrame(W(), H())));
@@ -3481,11 +3584,7 @@ $('btnAddFrame').onclick = () => {
     if (points) points.push({ ...(points.at(-1) ?? { x: W() / density() / 2, y: H() / density() / 2 }) });
   }
   frameIdx = anim().frames.length - 1;
-  buildFrames();
-  buildAnchors();
-  buildAttachmentSlots();
-  redraw();
-  syncIO();
+  finishFrameStructureEdit(true);
 };
 $('btnDupFrame').onclick = () => {
   saveHistory();
@@ -3496,10 +3595,7 @@ $('btnDupFrame').onclick = () => {
     if (points) points.splice(frameIdx + 1, 0, { ...(points[frameIdx] ?? { x: W() / density() / 2, y: H() / density() / 2 }) });
   }
   frameIdx++;
-  buildFrames();
-  buildAnchors();
-  redraw();
-  syncIO();
+  finishFrameStructureEdit();
 };
 function moveSelectedFrame(delta: -1 | 1): void {
   const frames = anim().frames;
@@ -3516,13 +3612,7 @@ function moveSelectedFrame(delta: -1 | 1): void {
     }
   }
   frameIdx = target;
-  previewStepping = false;
-  buildFrames();
-  buildAnchors();
-  redraw();
-  syncIO();
-  schedulePreviewUpload();
-  void publishSelection();
+  finishFrameStructureEdit();
 }
 
 $('btnFrameLeft').onclick = () => moveSelectedFrame(-1);
@@ -3534,10 +3624,7 @@ $('btnDelFrame').onclick = () => {
   setTimelineFrameCount(animName, anim().frames.length);
   for (const anchors of Object.values(file.anchors ?? {})) anchors[concreteAnimName()]?.splice(frameIdx, 1);
   frameIdx = Math.min(frameIdx, anim().frames.length - 1);
-  buildFrames();
-  buildAnchors();
-  redraw();
-  syncIO();
+  finishFrameStructureEdit();
 };
 
 $('btnResize').onclick = () => {
@@ -3571,24 +3658,15 @@ function redraw(): void {
   // 3. Draw reference sprite if enabled
   const showRef = ($('showRef') as HTMLInputElement)?.checked ?? true;
   if (refFile && showRef) {
-    const refAnim = resolveAnim(refFile, animName in refFile.anims ? animName : Object.keys(refFile.anims)[0]);
+    const refAnimName = animName in refFile.anims ? animName : Object.keys(refFile.anims)[0];
+    const refAnim = resolveAnim(refFile, refAnimName);
     if (refAnim) {
-      const refFrame = refAnim.frames[frameIdx % refAnim.frames.length];
-      if (refFrame) {
+      const refFrameIndex = frameIdx % refAnim.frames.length;
+      const refImage = rasterizeSpriteFrame(refFile, refAnimName, refFrameIndex, PAL, { upscale: false });
+      if (refImage) {
         gctx.save();
         gctx.globalAlpha = 0.3;
-        for (let y = 0; y < H(); y++) {
-          for (let x = 0; x < W(); x++) {
-            const char = refFrame[y]?.[x];
-            if (char) {
-              const color = (refFile.palette ?? {})[char] ?? PAL[char];
-              if (color) {
-                gctx.fillStyle = color;
-                gctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
-              }
-            }
-          }
-        }
+        gctx.drawImage(refImage, 0, 0, refImage.width * cellSize, refImage.height * cellSize);
         gctx.restore();
       }
     }
@@ -3597,34 +3675,19 @@ function redraw(): void {
   // 4. Draw onion skin if enabled
   const onion = ($('onionSkin') as HTMLInputElement)?.checked ?? false;
   if (onion && frameIdx > 0) {
-    const prevFrame = compositeCur(frameIdx - 1);
-    if (prevFrame) {
+    const previousImage = rasterizedCur(frameIdx - 1, false);
+    if (previousImage) {
       gctx.save();
       gctx.globalAlpha = 0.2;
-      for (let y = 0; y < H(); y++) {
-        for (let x = 0; x < W(); x++) {
-          const color = pal()[prevFrame[y]?.[x]] ?? PAL[prevFrame[y]?.[x]];
-          if (color) {
-            gctx.fillStyle = color;
-            gctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
-          }
-        }
-      }
+      gctx.drawImage(previousImage, 0, 0, grid.width, grid.height);
       gctx.restore();
     }
   }
 
-  // 5. Draw current frame solid pixels
-  const visibleFrame = compositeCur();
-  for (let y = 0; y < H(); y++) {
-    for (let x = 0; x < W(); x++) {
-      const color = pal()[visibleFrame[y][x]] ?? PAL[visibleFrame[y][x]];
-      if (color) {
-        gctx.fillStyle = color;
-        gctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
-      }
-    }
-  }
+  // 5. Draw visible layers bottom-to-top. Rasterizing each layer separately
+  // preserves source-over alpha instead of replacing the lower palette cell.
+  const visibleImage = rasterizedCur(frameIdx, false);
+  if (visibleImage) gctx.drawImage(visibleImage, 0, 0, grid.width, grid.height);
 
   // 6. Grid lines
   gctx.strokeStyle = 'rgba(35, 40, 48, 0.18)';
@@ -4235,6 +4298,13 @@ function renderComposite(t: number, pausedFrame?: number): boolean {
     frameCount: bodyFrameCount,
     cycle: bodyCycle,
   } = bodyClock;
+  // The body normally owns the equipment clock. During weapon authoring a
+  // newly added equipment frame still needs to be directly addressable before
+  // matching body art exists; the body can safely hold its last pose.
+  const previewFrameCount = Math.max(
+    bodyFrameCount,
+    editedSelectedWeaponFrameCount(weaponId) ?? 0,
+  );
   // Long moves are time-compressed. The plunge's 0.9s duration is a
   // MAXIMUM — in play the landing cuts it short — so previewed raw it
   // is three-quarters of a second of nothing moving. Compression sweeps
@@ -4255,7 +4325,7 @@ function renderComposite(t: number, pausedFrame?: number): boolean {
   // beat after a move holds its final pose; it does not restart a sheet whose
   // local animation metadata happens to be shorter.
   const attackClock = atkDef
-    ? attackPreviewClock(t, atkDef, bodyFrameCount, pausedFrame)
+    ? attackPreviewClock(t, atkDef, previewFrameCount, pausedFrame)
     : null;
   const tIn = attackClock?.time ?? (t % bodyCycle);
   const pose = atkDef && attackClock
@@ -4345,7 +4415,6 @@ function renderComposite(t: number, pausedFrame?: number): boolean {
   // edited sheet is the weapon itself. Draw size comes from the sprite's
   // DECLARED geometry (knight art is 35x63 cells drawn at 10x18), never
   // from the baked image — the game scales exactly the same way.
-  let bodyImg: HTMLCanvasElement;
   let frame: number;
   let dw: number;
   let dh: number;
@@ -4353,14 +4422,15 @@ function renderComposite(t: number, pausedFrame?: number): boolean {
     pctx.restore();
     return false;
   }
-  frame = attackClock
-    ? Math.min(attackClock.frame, bodyAnim.frames.length - 1)
+  const sharedFrame = attackClock
+    ? attackClock.frame
     : pausedFrame === undefined
       ? bodyAnim.loop === false
-        ? Math.min(Math.floor(tIn * bodyFps), bodyAnim.frames.length - 1)
-        : Math.floor(tIn * bodyFps) % bodyAnim.frames.length
-      : Math.min(pausedFrame, bodyAnim.frames.length - 1);
-  if (compositePreviewFrame === null) compositePreviewFrame = frame;
+        ? Math.min(Math.floor(tIn * bodyFps), previewFrameCount - 1)
+        : Math.floor(tIn * bodyFps) % previewFrameCount
+      : Math.min(pausedFrame, previewFrameCount - 1);
+  frame = Math.min(sharedFrame, bodyAnim.frames.length - 1);
+  if (compositePreviewFrame === null) compositePreviewFrame = sharedFrame;
   const rows = bodyAnim.frames[frame] ?? [];
   const bodyGeometry = geometryOf(bodyFile, rows);
   dw = bodyGeometry.w;
@@ -4393,7 +4463,7 @@ function renderComposite(t: number, pausedFrame?: number): boolean {
   const known = weaponVisuals.get(wdef!.visual).animations;
   const weaponAnim = !known || known.includes(animName) ? animName : 'idle';
   const weaponContext = {
-    facing: 1 as const, anim: weaponAnim, frame, animT: tIn,
+    facing: 1 as const, anim: weaponAnim, frame: sharedFrame, animT: tIn,
     bodyW: dw, bodyH: dh,
     frontHand: sheetAnchor('frontHand'),
     rearHand: sheetAnchor('rearHand'),
@@ -4409,30 +4479,24 @@ function renderComposite(t: number, pausedFrame?: number): boolean {
     bodyFile !== file
       || (soloLayerId ? layer.id === soloLayerId : !hiddenLayerIds.has(layer.id))
   );
-  const bodyRowsForTag = (tag: string): string[] | undefined => {
+  const bodyImageForTag = (tag: string): HTMLCanvasElement | undefined => {
     if (!isLayeredSpriteFile(bodyFile)) {
-      return tag === defaultLayerTag(bodyFile) ? rows : undefined;
+      return tag === defaultLayerTag(bodyFile)
+        ? rasterizeSpriteFrame(bodyFile, requestedBodyAnim, frame, PAL)
+        : undefined;
     }
     if (!bodyFile.layers.some((layer) => layer.tag === tag && bodyLayerVisible(layer))) return undefined;
-    return compositeSpriteFrame(
-      bodyFile,
-      requestedBodyAnim,
-      frame,
-      PAL,
-      (layer) => layer.tag === tag && bodyLayerVisible(layer),
-    );
+    return rasterizeSpriteFrame(bodyFile, requestedBodyAnim, frame, PAL, {
+      include: (layer) => layer.tag === tag && bodyLayerVisible(layer),
+    });
   };
 
   // Raw-sheet previews must use the same shared render-band order as
   // Player.render. Flattening the body first and drawing the weapon last
   // hid authored overlays such as a front hand intended to cover its grip.
   for (const tag of renderTagIds()) {
-    const tagRows = bodyRowsForTag(tag);
-    if (tagRows) {
-      bodyImg = sprite(
-        bodyFile.hd === false ? tagRows : epx(epx(tagRows)),
-        bodyFile.palette ?? PAL,
-      );
+    const bodyImg = bodyImageForTag(tag);
+    if (bodyImg) {
       pctx.drawImage(bodyImg, -dw / 2, -dh, dw, dh);
     }
     try {
@@ -4470,7 +4534,11 @@ function currentPreviewTiming(): { fps: number; frameCount: number; loop: boolea
   const weaponId = ($('compWeapon') as HTMLSelectElement).value;
   if ((weaponId && weapons.has(weaponId)) || bodySelection === 'player') {
     const clock = resolveCompositeBodyClock(bodySelection, selectedCombatMove()?.move.def.animation ?? animName);
-    return { fps: clock.fps, frameCount: clock.frameCount, loop: clock.loop };
+    return {
+      fps: clock.fps,
+      frameCount: Math.max(clock.frameCount, editedSelectedWeaponFrameCount(weaponId) ?? 0),
+      loop: clock.loop,
+    };
   }
   const a = anim();
   return {
@@ -4500,6 +4568,59 @@ function updateCombatHitboxOverlay(): void {
   overlay.style.top = `${geometry.rect.y / geometry.viewH * 100}%`;
   overlay.style.width = `${geometry.rect.w / geometry.viewW * 100}%`;
   overlay.style.height = `${geometry.rect.h / geometry.viewH * 100}%`;
+}
+
+const PREVIEW_ZOOMS = [0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8];
+
+/** Keep the same content point beneath the visible viewport center while zooming. */
+function updateZoomPreservingViewport(
+  viewport: HTMLElement,
+  content: HTMLElement,
+  update: () => void,
+  preserveViewport: boolean,
+): void {
+  const before = content.getBoundingClientRect();
+  const viewportRect = viewport.getBoundingClientRect();
+  const viewportX = viewportRect.left + viewport.clientWidth / 2;
+  const viewportY = viewportRect.top + viewport.clientHeight / 2;
+  const anchorX = before.width > 0 ? (viewportX - before.left) / before.width : 0.5;
+  const anchorY = before.height > 0 ? (viewportY - before.top) / before.height : 0.5;
+
+  update();
+
+  if (!preserveViewport || before.width <= 0 || before.height <= 0) return;
+  const after = content.getBoundingClientRect();
+  viewport.scrollLeft += after.left + anchorX * after.width - viewportX;
+  viewport.scrollTop += after.top + anchorY * after.height - viewportY;
+}
+
+function fittedPreviewZoom(): number {
+  const viewport = $('previewViewport');
+  if (!preview.width || !viewport.clientWidth) return 1;
+  // Fit preserves the editor's old behaviour: shrink oversized previews,
+  // but do not enlarge small sprites unless the author explicitly zooms in.
+  return Math.min(1, Math.max(0.1, (viewport.clientWidth - 2) / preview.width));
+}
+
+function activePreviewZoom(): number {
+  return previewZoomFit ? fittedPreviewZoom() : previewZoom;
+}
+
+function applyPreviewZoom(preserveViewport = false): void {
+  updateZoomPreservingViewport($('previewViewport'), preview, () => {
+    const scale = activePreviewZoom();
+    preview.style.width = `${preview.width * scale}px`;
+    preview.style.height = `${preview.height * scale}px`;
+    ($('previewZoomPercent') as HTMLInputElement).value = String(Math.round(scale * 100));
+    $('previewZoomFit').classList.toggle('active', previewZoomFit);
+    $('previewZoomFit').setAttribute('aria-pressed', String(previewZoomFit));
+  }, preserveViewport);
+}
+
+function setPreviewZoom(value: number): void {
+  previewZoomFit = false;
+  previewZoom = Math.max(PREVIEW_ZOOMS[0], Math.min(PREVIEW_ZOOMS.at(-1)!, value));
+  applyPreviewZoom(true);
 }
 
 interface CombatHitboxDrag {
@@ -4578,7 +4699,6 @@ $('combatHitboxOverlay').addEventListener('pointercancel', finishCombatHitboxDra
 function renderPreview(): void {
   maybeRebakeEditedEquipment();
   const hd = ($('hd') as HTMLInputElement).checked;
-  const p = pal();
   const a = visibleAnim();
   // Editing is frame-oriented: the game-scale preview must show the frame
   // selected in the grid unless the author explicitly asks to play the
@@ -4596,7 +4716,6 @@ function renderPreview(): void {
     : pausedFrame;
   previewDisplayedFrame = displayedFrame;
   $('previewFrame').textContent = `${displayedFrame + 1}/${timing.frameCount}`;
-  updateCombatHitboxOverlay();
   const context = $('previewContext');
   if (composite) {
     const weapon = ($('compWeapon') as HTMLSelectElement).value || 'no weapon';
@@ -4614,6 +4733,8 @@ function renderPreview(): void {
   // determines the panel width regardless of which editor panel is open.
   $('side-right').classList.toggle('wide', composite);
   if (composite) {
+    applyPreviewZoom();
+    updateCombatHitboxOverlay();
     requestAnimationFrame(renderPreview);
     return;
   }
@@ -4633,6 +4754,8 @@ function renderPreview(): void {
 
   preview.width = displayW + 16;
   preview.height = displayH + 24;
+  applyPreviewZoom();
+  updateCombatHitboxOverlay();
 
   pctx.imageSmoothingEnabled = false;
   drawTransparencyChecker(pctx, preview.width, preview.height);
@@ -4645,8 +4768,7 @@ function renderPreview(): void {
   pctx.fillText(`${animName}  ${a.fps}fps`, 8, 16);
 
   const isHighRes = file.hd === false;
-  const drawRows = (isHighRes || !hd) ? rows : epx(epx(rows));
-  const img = sprite(drawRows, p);
+  const img = rasterizedCur(idx, !(isHighRes || !hd));
 
   const x = 8;
   const y = 20;
@@ -4665,18 +4787,22 @@ function renderPreview(): void {
 
       const refGeometry = geometryOf(refFile, refRows);
       const refIsHighRes = refFile.hd === false;
-      const refDrawRows = (refIsHighRes || !hd) ? refRows : epx(epx(refRows));
-      const refImg = sprite(refDrawRows, refFile.palette ?? PAL);
+      const refName = animName in refFile.anims ? animName : Object.keys(refFile.anims)[0];
+      const refImg = rasterizeSpriteFrame(refFile, refName, refIdx, PAL, {
+        upscale: !(refIsHighRes || !hd),
+      });
 
-      pctx.save();
-      pctx.globalAlpha = 0.3;
-      pctx.drawImage(refImg, x, y, refGeometry.w * 8, refGeometry.h * 8);
-      pctx.restore();
+      if (refImg) {
+        pctx.save();
+        pctx.globalAlpha = 0.3;
+        pctx.drawImage(refImg, x, y, refGeometry.w * 8, refGeometry.h * 8);
+        pctx.restore();
+      }
     }
   }
 
   // Draw active sprite frame
-  pctx.drawImage(img, x, y, w * 8, h * 8);
+  if (img) pctx.drawImage(img, x, y, w * 8, h * 8);
 
   // Draw hitbox border (if enabled)
   if (($('showHitbox') as HTMLInputElement).checked) {
@@ -4749,8 +4875,14 @@ $('btnLoad').onclick = () => ($('fileInput') as HTMLInputElement).click();
 };
 
 $('selectSprite').onchange = async (e) => {
-  const val = (e.target as HTMLSelectElement).value;
+  const select = e.target as HTMLSelectElement;
+  const val = select.value;
   if (!val) return;
+  // A sprite switch is a document operation, not an editing session inside
+  // the picker. Release its focus immediately so the common workflow
+  // (copy pixels, choose another sprite, Ctrl+V) reaches the canvas shortcut
+  // instead of being swallowed by the still-focused <select>.
+  select.blur();
   if (await openSharedSprite(val)) return;
   // A connected bridge returning false refused the switch to protect dirty
   // shared work. Do not then load a local copy anyway: that would make the
@@ -4847,13 +4979,18 @@ function updateToolUI(): void {
   $('btnToolBlur').classList.toggle('active', visibleTool === 'blur');
   $('btnToolFill').classList.toggle('active', visibleTool === 'fill');
   $('btnToolPicker').classList.toggle('active', visibleTool === 'picker');
-  $('btnToolSelect').classList.toggle('active', visibleTool === 'select');
-  $('btnToolMagic').classList.toggle('active', visibleTool === 'magic');
+  $('btnToolSelect').classList.toggle('active', visibleTool === 'select' || Boolean(selection && selectionTool === 'select'));
+  $('btnToolMagic').classList.toggle('active', visibleTool === 'magic' || Boolean(selection && selectionTool === 'magic'));
   grid.classList.toggle('selecting', visibleTool === 'select' && !transformMode);
   grid.classList.toggle('magic-selecting', visibleTool === 'magic' && !transformMode);
   grid.classList.toggle('selection-transforming', transformMode);
   grid.classList.toggle('picking', visibleTool === 'picker');
   grid.classList.toggle('soft-tool', visibleTool === 'brush' || visibleTool === 'blur');
+  grid.classList.toggle('anchor-placing', anchorPlacementMode);
+  const placeAnchor = $('btnPlaceAnchor') as HTMLButtonElement;
+  placeAnchor.disabled = !selectedAnchorName;
+  placeAnchor.classList.toggle('active', anchorPlacementMode);
+  placeAnchor.setAttribute('aria-pressed', String(anchorPlacementMode));
   if (!transformMode) {
     grid.classList.remove('selection-movable');
     grid.style.cursor = '';
@@ -4918,6 +5055,7 @@ function updateSelectionModifierCursor(keys?: { shiftKey: boolean; altKey: boole
 function updateBrushCursor(): void {
   const visible = Boolean(hoverPointer)
     && !altPickerActive
+    && !anchorPlacementMode
     && (currentTool === 'brush' || currentTool === 'blur');
   brushCursor.style.display = visible ? 'block' : 'none';
   if (!visible || !hoverPointer) return;
@@ -4931,8 +5069,10 @@ function updateBrushCursor(): void {
 }
 
 function setTool(tool: EditorTool): void {
+  anchorPlacementMode = false;
   transformMode = false;
   currentTool = tool;
+  if (selection && (tool === 'select' || tool === 'magic')) selectionTool = tool;
   if (tool === 'brush' || tool === 'blur' || tool === 'magic' || tool === 'fill') {
     activatePanel('left', 'left-tool');
   }
@@ -4941,6 +5081,7 @@ function setTool(tool: EditorTool): void {
 }
 
 function setTransformMode(enabled: boolean, focusPanel = true): void {
+  anchorPlacementMode = false;
   transformMode = enabled && Boolean(selection);
   if (transformMode && focusPanel) activatePanel('left', 'left-tool');
   updateToolUI();
@@ -5144,6 +5285,12 @@ function remapClipboardPalette(clip: PixelClipboard): {
     added,
     approximated,
   };
+}
+
+/** The editor document may itself be the equipment selected in composite. */
+function editedSelectedWeaponFrameCount(weaponId: string): number | undefined {
+  if (!weaponId || currentFileName.replace(/\.json$/, '') !== weaponId) return undefined;
+  return anim().frames.length;
 }
 
 async function pasteSelection(): Promise<void> {
@@ -5393,10 +5540,14 @@ $('btnResizeSelection').onclick = () => resizeSelection();
 
 const GRID_ZOOMS = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64];
 
-function setGridZoom(value: number): void {
-  cellSize = Math.max(GRID_ZOOMS[0], Math.min(GRID_ZOOMS.at(-1)!, Math.round(value)));
-  ($('gridZoomPercent') as HTMLInputElement).value = String(cellSize * 100);
-  redraw();
+function setGridZoom(value: number, preserveViewport = true): void {
+  const nextCellSize = Math.max(GRID_ZOOMS[0], Math.min(GRID_ZOOMS.at(-1)!, Math.round(value)));
+  const center = $('center');
+  updateZoomPreservingViewport(center, grid, () => {
+    cellSize = nextCellSize;
+    ($('gridZoomPercent') as HTMLInputElement).value = String(cellSize * 100);
+    redraw();
+  }, preserveViewport);
 }
 
 function fitGrid(): void {
@@ -5404,7 +5555,9 @@ function fitGrid(): void {
   const availableW = Math.max(1, center.clientWidth - 40);
   const availableH = Math.max(1, center.clientHeight - 40);
   const ideal = Math.floor(Math.min(availableW / W(), availableH / H()));
-  setGridZoom([...GRID_ZOOMS].reverse().find((size) => size <= ideal) ?? GRID_ZOOMS[0]);
+  setGridZoom([...GRID_ZOOMS].reverse().find((size) => size <= ideal) ?? GRID_ZOOMS[0], false);
+  center.scrollLeft = 0;
+  center.scrollTop = 0;
 }
 
 ($('gridZoomPercent') as HTMLInputElement).onchange = (event) => {
@@ -5546,25 +5699,38 @@ window.addEventListener('keydown', (e) => {
     editMenu.open = false;
     return;
   }
+  if (e.key === 'Escape' && anchorPlacementMode) {
+    e.preventDefault();
+    anchorPlacementMode = false;
+    updateToolUI();
+    redraw();
+    return;
+  }
   updateSelectionModifierCursor(e);
   if (e.key === 'Alt' && currentTool !== 'magic' && currentTool !== 'select' && !transformMode) {
     e.preventDefault();
+    anchorPlacementMode = false;
     altPickerActive = true;
     updateToolUI();
     return;
   }
   const target = e.target as HTMLElement | null;
   const typing = target?.matches('input, textarea, select, [contenteditable="true"]') ?? false;
+  // Selects do not accept pasted text, but they commonly retain focus after
+  // choosing another sprite. Clipboard commands still belong to the editor
+  // in that state. Real text fields and inline layer-name editors retain
+  // their native copy/cut/paste behavior.
+  const editingText = target?.matches('input, textarea, [contenteditable="true"]') ?? false;
   const key = e.key.toLowerCase();
-  if (!typing && (e.ctrlKey || e.metaKey) && key === 'c' && selection) {
+  if (!editingText && (e.ctrlKey || e.metaKey) && key === 'c' && selection) {
     e.preventDefault();
     copySelection();
   }
-  if (!typing && (e.ctrlKey || e.metaKey) && key === 'x' && selection) {
+  if (!editingText && (e.ctrlKey || e.metaKey) && key === 'x' && selection) {
     e.preventDefault();
     cutSelection();
   }
-  if (!typing && (e.ctrlKey || e.metaKey) && key === 'v') {
+  if (!editingText && (e.ctrlKey || e.metaKey) && key === 'v') {
     e.preventDefault();
     void pasteSelection();
   }
@@ -5811,6 +5977,26 @@ function stepPreview(delta: number): void {
 
 $('previewPrev').onclick = () => stepPreview(-1);
 $('previewNext').onclick = () => stepPreview(1);
+($('previewZoomPercent') as HTMLInputElement).onchange = (event) => {
+  setPreviewZoom(Number((event.target as HTMLInputElement).value) / 100);
+};
+$('previewZoomOut').onclick = () => {
+  const current = activePreviewZoom();
+  setPreviewZoom([...PREVIEW_ZOOMS].reverse().find((zoom) => zoom < current - 0.001) ?? PREVIEW_ZOOMS[0]);
+};
+$('previewZoomIn').onclick = () => {
+  const current = activePreviewZoom();
+  setPreviewZoom(PREVIEW_ZOOMS.find((zoom) => zoom > current + 0.001) ?? PREVIEW_ZOOMS.at(-1)!);
+};
+$('previewZoomFit').onclick = () => {
+  previewZoomFit = true;
+  applyPreviewZoom();
+  $('previewViewport').scrollLeft = 0;
+  $('previewViewport').scrollTop = 0;
+};
+window.addEventListener('resize', () => {
+  if (previewZoomFit) applyPreviewZoom();
+});
 ($('previewPlay') as HTMLInputElement).addEventListener('change', () => {
   if (($('previewPlay') as HTMLInputElement).checked) previewStepping = false;
 });

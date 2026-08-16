@@ -40,6 +40,7 @@ export {
   compositeSpriteFrame,
   compositeSpriteTagFrame,
   compositeSpriteFrameByTags,
+  rasterizeSpriteFrame,
   spriteLayerTags,
   isLayeredSpriteFile,
   validateLayeredSpriteFile,
@@ -54,6 +55,7 @@ export {
   type SpriteAnchor,
   type SpriteAnchors,
   type SpriteAttachmentSlot,
+  type SpriteRasterOptions,
   type LoadedSprite,
 } from './gfx/spritefile';
 export {

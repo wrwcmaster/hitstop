@@ -250,6 +250,7 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
   const bodyTags = new Set(baseKnight.tags());
   const bodyOverlayTag = [...renderTags].reverse().find((tag) => bodyTags.has(tag));
   const gripRenderTag = heldWeaponGripRenderTag(weapon.visual);
+  const embeddedHeldObject = p.fsm.is('attack') && p.attackDef?.embeddedHeldObject;
   for (const tag of renderTags) {
     drawBodyTag(tag);
     if (tag === bodyOverlayTag) {
@@ -259,8 +260,10 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
       }
       if (p.flashT <= 0 && p.equipment.get('charm')) renderCharm(g, dh);
     }
-    if (p.flashT <= 0) drawHeldWeaponTag(g, weapon.visual, weaponCtx, tag);
-    if (p.flashT <= 0 && tag === gripRenderTag) {
+    if (p.flashT <= 0 && !embeddedHeldObject) {
+      drawHeldWeaponTag(g, weapon.visual, weaponCtx, tag);
+    }
+    if (p.flashT <= 0 && !embeddedHeldObject && tag === gripRenderTag) {
       for (const hand of heldWeaponHands(weapon.visual, p.fsm.is('draw'))) {
         drawGrip(hand === 'front' ? weaponCtx.frontHand : weaponCtx.rearHand);
       }

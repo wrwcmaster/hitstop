@@ -53,16 +53,22 @@
       padding: 0; overflow: hidden; display: flex; flex-direction: column;
     }
     #persistent-preview {
-      flex: 0 0 auto; max-height: 56%; overflow-y: auto; padding: 10px;
+      flex: 0 0 auto; max-height: 56%; min-height: 0; overflow: hidden; padding: 10px;
+      display: flex; flex-direction: column; box-sizing: border-box;
       background: #101430; border-bottom: 1px solid #33447f;
     }
+    #persistent-preview > :not(#previewViewport) { flex: 0 0 auto; }
     #right-workspace-scroll {
       flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px;
     }
     /* The composite preview renders at the game's on-screen scale (8px
        per world pixel), which needs more room than a sheet thumbnail. */
     #side-right.wide { width: 452px; }
-    #center { flex: 1; overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 20px; background: #07070d; }
+    #center { flex: 1; overflow: auto; padding: 20px; background: #07070d; }
+    /* The stage is at least as wide as the viewport, so a small canvas keeps
+       the original centered layout. Its max-content width grows with a
+       zoomed canvas, giving the scroll container a real, reachable left edge. */
+    #canvasStage { min-width: 100%; width: max-content; display: flex; justify-content: center; align-items: flex-start; }
     canvas { image-rendering: pixelated; }
     #grid { cursor: crosshair; border: 1px solid #33447f; }
     #grid.selecting { cursor: cell; }
@@ -80,6 +86,7 @@
     #grid.selection-transforming.selection-movable { cursor: move; }
     #grid.picking { cursor: copy; }
     #grid.soft-tool { cursor: none; }
+    #grid.anchor-placing { cursor: crosshair !important; }
     #brushCursor {
       position: fixed; display: none; pointer-events: none; z-index: 100;
       border: 2px dashed #ffcd75; border-radius: 50%;
@@ -182,7 +189,17 @@
       border: 2px solid #ffcd75; border-radius: 3px; background: #1f2a57;
       pointer-events: auto; cursor: ew-resize;
     }
-    #previewStage { position: relative; line-height: 0; max-width: 100%; }
+    #previewZoomPercent { width: 62px; text-align: right; }
+    #previewZoomFit.active { background: #38b764; color: #07070d; border-color: #38b764; }
+    #previewViewport {
+      flex: 1 1 auto; min-height: 0; width: 100%; overflow: auto;
+      margin-bottom: 10px;
+    }
+    #previewCanvasStage {
+      min-width: 100%; width: max-content; display: flex;
+      justify-content: center; align-items: flex-start;
+    }
+    #previewStage { position: relative; line-height: 0; width: max-content; }
     #combatHitboxOverlay {
       position: absolute; z-index: 3; border: 2px solid #ffcd75;
       background: rgba(86, 108, 134, .08); cursor: move; line-height: normal;
@@ -286,7 +303,7 @@
     .layer-row .layer-tag { min-width: 0; font-size: 10px; padding: 3px; }
     .layer-row .layer-toggle.off { color: #566c86; background: #11162b; }
     .layer-row .layer-toggle.on { color: #ffcd75; }
-    #preview { border: 1px solid #33447f; background: #0a0c1c; max-width: 100%; height: auto; }
+    #preview { display: block; border: 1px solid #33447f; background: #0a0c1c; max-width: none; height: auto; }
     #status {
       position: fixed; top: 12px; right: 12px; z-index: 200;
       max-width: min(420px, calc(100vw - 24px)); padding: 7px 10px;
@@ -486,7 +503,7 @@
     </div>
 
     <div id="center">
-      <canvas id="grid"></canvas>
+      <div id="canvasStage"><canvas id="grid"></canvas></div>
       <div id="brushCursor" aria-hidden="true"></div>
     </div>
 
@@ -500,11 +517,19 @@
           <label style="display:inline"><input type="checkbox" id="hd" checked> hd</label>
         </h2>
         <div id="previewContext" class="hint" style="margin:-2px 0 6px">sprite preview</div>
-        <div style="display:flex; justify-content:center; margin-bottom:10px;">
-          <div id="previewStage">
-            <canvas id="preview" width="200" height="80"></canvas>
-            <div id="combatHitboxOverlay" hidden title="Drag to move the attack region; drag the corner to resize">
-              <span class="combat-resize-handle" data-combat-handle="resize"></span>
+        <div class="panel-row" role="group" aria-label="preview zoom" style="align-items:center; margin-bottom:6px">
+          <button id="previewZoomOut" type="button" title="Zoom preview out" aria-label="Zoom preview out">&minus;</button>
+          <label style="display:flex; align-items:center; gap:3px; flex:0 0 auto">zoom <input id="previewZoomPercent" type="number" min="10" max="800" step="25" value="100">%</label>
+          <button id="previewZoomIn" type="button" title="Zoom preview in" aria-label="Zoom preview in">+</button>
+          <button id="previewZoomFit" class="active" type="button" title="Fit preview to panel" aria-label="Fit preview to panel" aria-pressed="true">fit</button>
+        </div>
+        <div id="previewViewport">
+          <div id="previewCanvasStage">
+            <div id="previewStage">
+              <canvas id="preview" width="200" height="80"></canvas>
+              <div id="combatHitboxOverlay" hidden title="Drag to move the attack region; drag the corner to resize">
+                <span class="combat-resize-handle" data-combat-handle="resize"></span>
+              </div>
             </div>
           </div>
         </div>
@@ -650,8 +675,9 @@
       <div style="display:flex; gap:6px; align-items:center; margin-bottom:4px">
         <label style="margin:0">x <input id="anchorX" type="number" step="0.25" style="width:58px"></label>
         <label style="margin:0">y <input id="anchorY" type="number" step="0.25" style="width:58px"></label>
+        <button id="btnPlaceAnchor" type="button" aria-pressed="false" title="Place the selected anchor by clicking the canvas">place</button>
       </div>
-      <p class="hint" style="margin:0 0 8px">Shift+Alt-click the grid to place the selected anchor. For a right-facing knight, frontHand is the knight's right/weapon hand, on the left side of the image.</p>
+      <p class="hint" style="margin:0 0 8px">Select place, then click the grid. Choosing another canvas tool exits anchor placement. For a right-facing knight, frontHand is the knight's right/weapon hand, on the left side of the image.</p>
 
       <h2>attachment slots</h2>
       <div style="display:flex; gap:4px; margin:5px 0">

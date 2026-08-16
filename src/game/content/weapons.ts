@@ -71,6 +71,8 @@ export interface WeaponAttackDef {
   lunge: number;
   hitbox: WeaponHitboxDef;
   trail: WeaponTrailDef;
+  /** The selected body animation already contains the held object. */
+  embeddedHeldObject?: boolean;
   /** Body-English multiplier and vertical lift during the swing. */
   bodyWeight: number;
   lift: number;
@@ -304,6 +306,9 @@ export function defineWeaponType(id: string, def: WeaponTypeDef): void {
     if (attack.trail.overlay !== undefined && typeof attack.trail.overlay !== 'boolean') {
       throw new Error(`${path}.trail.overlay: expected a boolean`);
     }
+    if (attack.embeddedHeldObject !== undefined && typeof attack.embeddedHeldObject !== 'boolean') {
+      throw new Error(`${path}.embeddedHeldObject: expected a boolean`);
+    }
     if (attack.trail.sprite !== undefined && !slashVisuals.has(attack.trail.sprite)) {
       throw new Error(`${path}.trail.sprite: unknown slash visual "${attack.trail.sprite}"`);
     }
@@ -504,8 +509,11 @@ defineWeaponType('sword', {
       animation: 'attack2',
       duration: 0.17, active: [0.14, 0.56], damageScale: 1, strength: 0.46, lunge: 50,
       hitbox: { forward: -2, y: -1, w: 20, h: 17 },
-      trail: { startAngle: 1.3, endAngle: -1.3, radius: 14, thickness: 3.5 },
-      frameDirection: -1,
+      // This move's complete body, blade, hand, and arc are authored on one
+      // timeline in the knight's own layered sprite.
+      trail: { startAngle: 1.3, endAngle: -1.3, radius: 14, thickness: 3.5, overlay: false },
+      embeddedHeldObject: true,
+      frameDirection: 1,
       lift: 3,
     }),
     attack({
