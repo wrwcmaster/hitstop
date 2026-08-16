@@ -2497,6 +2497,7 @@ function paletteCharFor(color: Rgba): string {
     b: Math.min(255, Math.round(color.b / 8) * 8),
     a: Math.min(255, Math.round(color.a / 8) * 8),
   };
+  if (quantized.a <= 0) return '.';
   const hex = rgbaHex(quantized);
   let nearest = '';
   let nearestDistance = Number.POSITIVE_INFINITY;
@@ -2545,7 +2546,7 @@ function brushStrength(dx: number, dy: number, size = brushSize()): number {
 
 function paintBrush(centerX: number, centerY: number, erase: boolean): void {
   const selected = parseRgba(pal()[currentChar]);
-  if (!erase && (!selected || currentChar === '.')) erase = true;
+  if (!erase && (!selected || currentChar === '.' || selected.a <= 0)) erase = true;
   const extent = Math.ceil((brushSize() + 1) / 2);
   for (let dy = -extent; dy <= extent; dy++) {
     for (let dx = -extent; dx <= extent; dx++) {
@@ -2554,15 +2555,19 @@ function paintBrush(centerX: number, centerY: number, erase: boolean): void {
       const x = centerX + dx;
       const y = centerY + dy;
       if (x < 0 || y < 0 || x >= W() || y >= H()) continue;
-      if (erase) {
-        setPixel(x, y, '.');
-        continue;
-      }
       const oldChar = cur()[y][x];
       const old = parseRgba(pal()[oldChar]);
-      if (strength >= 0.995) setPixel(x, y, currentChar);
-      else if (old) setPixel(x, y, paletteCharFor(mixRgba(old, selected!, strength)));
-      else setPixel(x, y, paletteCharFor({ ...selected!, a: selected!.a * strength }));
+      if (erase) {
+        if (!old) continue;
+        const alpha = old.a * (1 - strength);
+        setPixel(x, y, alpha <= 0.5 ? '.' : paletteCharFor({ ...old, a: alpha }));
+      } else if (strength >= 0.995) {
+        setPixel(x, y, currentChar);
+      } else if (old) {
+        setPixel(x, y, paletteCharFor(mixRgba(old, selected!, strength)));
+      } else {
+        setPixel(x, y, paletteCharFor({ ...selected!, a: selected!.a * strength }));
+      }
     }
   }
 }
