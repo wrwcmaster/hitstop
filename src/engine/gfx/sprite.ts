@@ -4,7 +4,8 @@ import { offscreen } from './canvas';
  * Text-grid pixel art.
  *
  * Sprites are authored as rows of characters plus a palette mapping each
- * character to a color (or null for transparent):
+ * character to a CSS color (including #RRGGBBAA for partial opacity), or
+ * null for fully transparent pixels:
  *
  *   sprite(["..PP..",
  *           ".PWWP.",

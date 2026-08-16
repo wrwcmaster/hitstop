@@ -502,6 +502,7 @@ function drawAuthoredTrail(
 function drawSlashTrail(g: CanvasRenderingContext2D, ctx: WeaponTrailCtx): void {
   const { attack } = ctx;
   const trail = attack.def.trail;
+  if (trail.overlay === false) return;
   const radius = trail.radius;
   const bias = trail.bias ?? 0.8;
   const glow = trail.glow ?? 0;

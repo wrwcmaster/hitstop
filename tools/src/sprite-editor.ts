@@ -24,7 +24,16 @@ import {
   weaponVisuals,
   rebuildSpriteWeapon,
 } from '@game/content/weapon-visuals';
-import { weapons, weaponTypeOf, allAttacks } from '@game/content/weapons';
+import {
+  weapons,
+  weaponTypeOf,
+  allAttacks,
+  replaceWeaponCombatTuning,
+  type WeaponCombatTuning,
+  type WeaponCombatTuningEntry,
+  type WeaponCombatTuningProfile,
+} from '@game/content/weapons';
+import repositoryWeaponCombat from '@game/content/weapon-combat.json';
 import {
   KNIGHT_ANIMS,
   PLAYER_BODY_SPRITE_PATH,
@@ -65,6 +74,7 @@ let animName = 'idle';
 let frameIdx = 0;
 let previewStepFrame = 0;
 let previewStepping = false;
+let previewDisplayedFrame = 0;
 let currentChar = firstPaintChar();
 let painting = false;
 let erasing = false;
@@ -98,6 +108,8 @@ interface SelectionHandleTransform {
   startAngle: number;
   lastKey: string;
   moved: boolean;
+  flipX: boolean;
+  flipY: boolean;
 }
 interface SharedSelection extends PixelRect {
   path: string | null;
@@ -181,10 +193,57 @@ let lastRepositoryFile = '';
 let previewTimer = 0;
 const DRAFT_PREFIX = 'hitstop.sprite-editor.draft:';
 const RENDER_TAG_DRAFT_KEY = 'hitstop.sprite-editor.render-tags.draft';
+const WEAPON_COMBAT_DRAFT_KEY = 'hitstop.sprite-editor.weapon-combat.draft.v2';
 let lastDraftSignature = '';
 let editorViewReady = false;
 let savedRenderTagSignature = JSON.stringify(repositoryRenderTagDefs);
 let renderTagDefs: PlayerRenderTagDef[] = readRenderTagDraft();
+let savedWeaponCombatSignature = JSON.stringify(repositoryWeaponCombat);
+let weaponCombatTuning: WeaponCombatTuning = readWeaponCombatDraft();
+
+function validWeaponCombatTuning(value: unknown): value is WeaponCombatTuning {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return Object.values(value).every((rawProfile) => {
+    if (!rawProfile || typeof rawProfile !== 'object' || Array.isArray(rawProfile)) return false;
+    const profile = rawProfile as WeaponCombatTuningProfile;
+    return Number.isFinite(profile.fps) && profile.fps > 0
+      && profile.moves && typeof profile.moves === 'object' && !Array.isArray(profile.moves)
+      && Object.values(profile.moves).every((entry) => (
+      entry && typeof entry === 'object' && !Array.isArray(entry)
+      && Number.isInteger((entry as WeaponCombatTuningEntry).frameCount)
+      && Array.isArray((entry as WeaponCombatTuningEntry).activeFrames)
+      && (entry as WeaponCombatTuningEntry).activeFrames.length === 2
+      && Object.values((entry as WeaponCombatTuningEntry).hitbox ?? {}).every(Number.isFinite)
+      ));
+  });
+}
+
+function readWeaponCombatDraft(): WeaponCombatTuning {
+  try {
+    const stored = JSON.parse(localStorage.getItem(WEAPON_COMBAT_DRAFT_KEY) ?? 'null') as unknown;
+    if (validWeaponCombatTuning(stored)) return structuredClone(stored);
+  } catch {
+    // A malformed convenience draft must not prevent the editor opening.
+  }
+  return structuredClone(repositoryWeaponCombat) as unknown as WeaponCombatTuning;
+}
+
+function weaponCombatDirty(): boolean {
+  return JSON.stringify(weaponCombatTuning) !== savedWeaponCombatSignature;
+}
+
+function persistWeaponCombatDraft(): void {
+  try {
+    if (weaponCombatDirty()) localStorage.setItem(WEAPON_COMBAT_DRAFT_KEY, JSON.stringify(weaponCombatTuning));
+    else localStorage.removeItem(WEAPON_COMBAT_DRAFT_KEY);
+  } catch {
+    // Combat editing remains usable when storage is unavailable.
+  }
+}
+
+for (const [typeId, tuning] of Object.entries(weaponCombatTuning)) {
+  try { replaceWeaponCombatTuning(typeId, tuning); } catch { /* stale draft for a removed weapon type */ }
+}
 
 function validRenderTagDefs(value: unknown): value is PlayerRenderTagDef[] {
   if (!Array.isArray(value) || value.length === 0) return false;
@@ -689,6 +748,7 @@ function activatePanel(group: 'left' | 'right', target: string): void {
   panels.forEach((panel) => {
     panel.hidden = panel.id !== target;
   });
+  if (group === 'right' && target === 'right-combat') refreshCombatPanel();
 }
 
 for (const group of ['left', 'right'] as const) {
@@ -906,14 +966,16 @@ function updateBridgeStatus(): void {
   const save = $('btnSaveRepo') as HTMLButtonElement;
   const draftCount = storedDrafts().length;
   const tagDirty = renderTagsDirty();
+  const combatDirty = weaponCombatDirty();
   const pending = [
     draftCount ? `${draftCount} modified sprite${draftCount === 1 ? '' : 's'}` : '',
     tagDirty ? 'layer tags' : '',
+    combatDirty ? 'combat tuning' : '',
   ].filter(Boolean);
-  save.disabled = !bridgeConnected || bridgeConflict || (!bridgeDirty && draftCount === 0 && !tagDirty);
+  save.disabled = !bridgeConnected || bridgeConflict || (!bridgeDirty && draftCount === 0 && !tagDirty && !combatDirty);
   save.title = pending.length
     ? `Save ${pending.join(' and ')} to the repository`
-    : 'Save all modified sprites and layer tags to the repository';
+    : 'Save all modified sprites, layer tags, and combat tuning to the repository';
 }
 
 function historySnapshot(spriteFile: SpriteFile = file, selected: PixelSelection | null = selection): string {
@@ -1194,7 +1256,8 @@ async function saveWorkspaceSprites(): Promise<void> {
     documents.set(currentRepoPath, file);
   }
   const saveRenderTags = renderTagsDirty();
-  if (!documents.size && !saveRenderTags) {
+  const saveWeaponCombat = weaponCombatDirty();
+  if (!documents.size && !saveRenderTags && !saveWeaponCombat) {
     flash('all sprites are already saved');
     updateBridgeStatus();
     return;
@@ -1211,6 +1274,7 @@ async function saveWorkspaceSprites(): Promise<void> {
       body: JSON.stringify({
         documents: [...documents].map(([path, spriteFile]) => ({ path, file: spriteFile })),
         renderTags: saveRenderTags ? renderTagDefs : undefined,
+        weaponCombat: saveWeaponCombat ? weaponCombatTuning : undefined,
         baseRevision: bridgeRevision,
         source: bridgeClientId,
       }),
@@ -1229,11 +1293,20 @@ async function saveWorkspaceSprites(): Promise<void> {
       savedRenderTagSignature = JSON.stringify(renderTagDefs);
       localStorage.removeItem(RENDER_TAG_DRAFT_KEY);
     }
+    const combatSaved = body.weaponCombatSaved === true;
+    if (combatSaved) {
+      savedWeaponCombatSignature = JSON.stringify(weaponCombatTuning);
+      localStorage.removeItem(WEAPON_COMBAT_DRAFT_KEY);
+    }
     const state = body.state as BridgeState | null;
     if (state) applyBridgeState(state, true);
     restoreEditorViewState(viewState);
     updateBridgeStatus();
-    const parts = [saved.length ? `${saved.length} sprite${saved.length === 1 ? '' : 's'}` : '', tagsSaved ? 'layer tags' : ''].filter(Boolean);
+    const parts = [
+      saved.length ? `${saved.length} sprite${saved.length === 1 ? '' : 's'}` : '',
+      tagsSaved ? 'layer tags' : '',
+      combatSaved ? 'combat tuning' : '',
+    ].filter(Boolean);
     flash(`saved ${parts.join(' and ')}`);
   } catch (error) {
     flash(`repo save failed: ${(error as Error).message}`);
@@ -1296,16 +1369,16 @@ interface PaletteSortColor {
   hue: number;
   saturation: number;
   lightness: number;
+  alpha: number;
   neutral: boolean;
 }
 
-function paletteSortColor(hex: string): PaletteSortColor | null {
-  const match = /^#([0-9a-f]{6})$/i.exec(hex);
-  if (!match) return null;
-  const value = Number.parseInt(match[1], 16);
-  const r = ((value >> 16) & 0xff) / 255;
-  const g = ((value >> 8) & 0xff) / 255;
-  const b = (value & 0xff) / 255;
+function paletteSortColor(color: string): PaletteSortColor | null {
+  const rgba = parseRgba(color);
+  if (!rgba) return null;
+  const r = rgba.r / 255;
+  const g = rgba.g / 255;
+  const b = rgba.b / 255;
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
   const chroma = max - min;
@@ -1321,7 +1394,13 @@ function paletteSortColor(hex: string): PaletteSortColor | null {
   // Hue becomes visually meaningless for near-grey ramps. Keep those ramps
   // together and order them by value instead of scattering them around the
   // chromatic palette.
-  return { hue, saturation, lightness, neutral: chroma < 0.08 || saturation < 0.12 };
+  return {
+    hue,
+    saturation,
+    lightness,
+    alpha: rgba.a,
+    neutral: chroma < 0.08 || saturation < 0.12,
+  };
 }
 
 function sortedPaletteEntries(): [string, string][] {
@@ -1333,11 +1412,13 @@ function sortedPaletteEntries(): [string, string][] {
       if (a.sort.neutral !== b.sort.neutral) return a.sort.neutral ? -1 : 1;
       if (a.sort.neutral) {
         return a.sort.lightness - b.sort.lightness
+          || b.sort.alpha - a.sort.alpha
           || a.sort.saturation - b.sort.saturation
           || a.index - b.index;
       }
       return a.sort.hue - b.sort.hue
         || a.sort.lightness - b.sort.lightness
+        || b.sort.alpha - a.sort.alpha
         || a.sort.saturation - b.sort.saturation
         || a.index - b.index;
     })
@@ -1356,7 +1437,12 @@ function buildPalette(): void {
     b.className = `palette-cell${color ? '' : ' none'}${ch === currentChar ? ' active' : ''}`;
     b.title = color ? `${ch}  ${color}` : '.  erase';
     b.setAttribute('aria-label', color ? `palette ${ch}, ${color}` : 'erase transparent pixels');
-    if (color) b.style.background = color;
+    if (color) {
+      const fill = document.createElement('span');
+      fill.className = 'palette-color';
+      fill.style.background = color;
+      b.appendChild(fill);
+    }
     b.onclick = () => {
       currentChar = ch;
       buildPalette();
@@ -1367,12 +1453,55 @@ function buildPalette(): void {
   const total = Object.keys(pal()).filter((ch) => ch !== '.').length;
   const used = [...usage.keys()].filter((ch) => ch !== '.' && ch in pal()).length;
   $('paletteStatus').textContent = `${used}/${total}`;
+  syncPaletteColorControls();
 }
+
+function paletteAlphaByte(): number {
+  const percent = Math.max(0, Math.min(100, ($('paletteAlpha') as HTMLInputElement).valueAsNumber || 0));
+  return Math.round(percent * 255 / 100);
+}
+
+function updatePaletteAlphaVisual(): void {
+  const input = $('paletteAlpha') as HTMLInputElement;
+  const percent = Math.max(0, Math.min(100, input.valueAsNumber || 0));
+  input.style.setProperty('--alpha-fill', `${percent}%`);
+  $('paletteAlphaValue').textContent = `${Math.round(percent)}%`;
+}
+
+function syncPaletteColorControls(): void {
+  const selected = parseRgba(pal()[currentChar]);
+  if (selected) {
+    ($('newColor') as HTMLInputElement).value = rgbaHex({ ...selected, a: 255 });
+    ($('paletteAlpha') as HTMLInputElement).value = String(Math.round(selected.a * 100 / 255));
+  }
+  updatePaletteAlphaVisual();
+}
+
+function colorFromPaletteControls(): Rgba {
+  const rgb = parseRgba(($('newColor') as HTMLInputElement).value) ?? { r: 56, g: 183, b: 100, a: 255 };
+  return { ...rgb, a: paletteAlphaByte() };
+}
+
+function updateSelectedPaletteColor(): void {
+  if (currentChar === '.' || typeof pal()[currentChar] !== 'string') return;
+  saveHistory();
+  (file.palette ??= {})[currentChar] = rgbaHex(colorFromPaletteControls());
+  editVersion++;
+  buildPalette();
+  redraw();
+  syncIO();
+}
+
+($('paletteAlpha') as HTMLInputElement).oninput = () => {
+  updatePaletteAlphaVisual();
+};
+($('paletteAlpha') as HTMLInputElement).onchange = updateSelectedPaletteColor;
+($('newColor') as HTMLInputElement).onchange = updateSelectedPaletteColor;
 
 $('btnAddColor').onclick = () => {
   saveHistory();
   const ch = ($('newChar') as HTMLInputElement).value || '?';
-  const color = ($('newColor') as HTMLInputElement).value;
+  const color = rgbaHex(colorFromPaletteControls());
   (file.palette ??= {})[ch] = color;
   currentChar = ch;
   buildPalette();
@@ -2251,7 +2380,7 @@ function setPixel(x: number, y: number, ch: string): void {
   editVersion++;
 }
 
-interface Rgb { r: number; g: number; b: number }
+interface Rgba { r: number; g: number; b: number; a: number }
 
 // Sprite files address colors with one-character palette keys. Soft tools
 // therefore bake their result into real palette entries rather than hiding
@@ -2260,29 +2389,37 @@ interface Rgb { r: number; g: number; b: number }
 const AUTO_PALETTE_CHARS =
   '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#@$%&*+=!?~^;:,<>[]{}()_-|`';
 
-function parseRgb(color: string | null | undefined): Rgb | null {
-  const match = /^#([0-9a-f]{6})$/i.exec(color ?? '');
+function parseRgba(color: string | null | undefined): Rgba | null {
+  const match = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(color ?? '');
   if (!match) return null;
   const value = Number.parseInt(match[1], 16);
-  return { r: (value >> 16) & 0xff, g: (value >> 8) & 0xff, b: value & 0xff };
+  return {
+    r: (value >> 16) & 0xff,
+    g: (value >> 8) & 0xff,
+    b: value & 0xff,
+    a: match[2] ? Number.parseInt(match[2], 16) : 255,
+  };
 }
 
-function rgbHex(color: Rgb): string {
+function rgbaHex(color: Rgba): string {
   const byte = (value: number) => Math.max(0, Math.min(255, Math.round(value)))
     .toString(16).padStart(2, '0');
-  return `#${byte(color.r)}${byte(color.g)}${byte(color.b)}`;
+  const rgb = `#${byte(color.r)}${byte(color.g)}${byte(color.b)}`;
+  return color.a >= 254.5 ? rgb : `${rgb}${byte(color.a)}`;
 }
 
-function mixRgb(from: Rgb, to: Rgb, amount: number): Rgb {
+function mixRgba(from: Rgba, to: Rgba, amount: number): Rgba {
   return {
     r: from.r + (to.r - from.r) * amount,
     g: from.g + (to.g - from.g) * amount,
     b: from.b + (to.b - from.b) * amount,
+    a: from.a + (to.a - from.a) * amount,
   };
 }
 
-function colorDistance(a: Rgb, b: Rgb): number {
-  return (a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2;
+function colorDistance(a: Rgba, b: Rgba): number {
+  return (a.r - b.r) ** 2 + (a.g - b.g) ** 2
+    + (a.b - b.b) ** 2 + (a.a - b.a) ** 2;
 }
 
 function paletteUsage(): Map<string, number> {
@@ -2306,7 +2443,8 @@ function compactPalette(removeUnused = true): PaletteCompaction {
   const groups = new Map<string, string[]>();
   for (const [ch, color] of Object.entries(pal())) {
     if (ch === '.' || typeof color !== 'string') continue;
-    const key = color.toLowerCase();
+    const parsed = parseRgba(color);
+    const key = parsed ? rgbaHex(parsed) : color.toLowerCase();
     const group = groups.get(key) ?? [];
     group.push(ch);
     groups.set(key, group);
@@ -2350,22 +2488,23 @@ function compactPalette(removeUnused = true): PaletteCompaction {
   return { changed, merged: remap.size, removed };
 }
 
-function paletteCharFor(color: Rgb): string {
+function paletteCharFor(color: Rgba): string {
   // Small quantization absorbs imperceptible differences caused by repeated
   // feathered stamps and lets neighboring edge pixels reuse colors.
   const quantized = {
     r: Math.min(255, Math.round(color.r / 8) * 8),
     g: Math.min(255, Math.round(color.g / 8) * 8),
     b: Math.min(255, Math.round(color.b / 8) * 8),
+    a: Math.min(255, Math.round(color.a / 8) * 8),
   };
-  const hex = rgbHex(quantized);
+  const hex = rgbaHex(quantized);
   let nearest = '';
   let nearestDistance = Number.POSITIVE_INFINITY;
   for (const [ch, value] of Object.entries(pal())) {
-    const rgb = parseRgb(value);
-    if (!rgb) continue;
-    if ((value ?? '').toLowerCase() === hex) return ch;
-    const distance = colorDistance(quantized, rgb);
+    const rgba = parseRgba(value);
+    if (!rgba) continue;
+    if (rgbaHex(rgba) === hex) return ch;
+    const distance = colorDistance(quantized, rgba);
     if (distance < nearestDistance) {
       nearest = ch;
       nearestDistance = distance;
@@ -2405,7 +2544,7 @@ function brushStrength(dx: number, dy: number, size = brushSize()): number {
 }
 
 function paintBrush(centerX: number, centerY: number, erase: boolean): void {
-  const selected = parseRgb(pal()[currentChar]);
+  const selected = parseRgba(pal()[currentChar]);
   if (!erase && (!selected || currentChar === '.')) erase = true;
   const extent = Math.ceil((brushSize() + 1) / 2);
   for (let dy = -extent; dy <= extent; dy++) {
@@ -2420,12 +2559,10 @@ function paintBrush(centerX: number, centerY: number, erase: boolean): void {
         continue;
       }
       const oldChar = cur()[y][x];
-      const old = parseRgb(pal()[oldChar]);
+      const old = parseRgba(pal()[oldChar]);
       if (strength >= 0.995) setPixel(x, y, currentChar);
-      else if (old) setPixel(x, y, paletteCharFor(mixRgb(old, selected!, strength)));
-      // The format has binary transparency. At the silhouette edge, use a
-      // half-coverage cutoff rather than inventing a matte-background color.
-      else if (strength >= 0.5) setPixel(x, y, currentChar);
+      else if (old) setPixel(x, y, paletteCharFor(mixRgba(old, selected!, strength)));
+      else setPixel(x, y, paletteCharFor({ ...selected!, a: selected!.a * strength }));
     }
   }
 }
@@ -2446,26 +2583,35 @@ function blurBrush(centerX: number, centerY: number, erase: boolean): void {
       const x = centerX + dx;
       const y = centerY + dy;
       if (x < 0 || y < 0 || x >= W() || y >= H()) continue;
-      const original = parseRgb(pal()[source[y][x]]);
+      const original = parseRgba(pal()[source[y][x]]);
       if (!original) continue; // blur color, but never grow the silhouette
-      let r = 0;
-      let g = 0;
-      let b = 0;
+      let premultipliedR = 0;
+      let premultipliedG = 0;
+      let premultipliedB = 0;
+      let alpha = 0;
       let count = 0;
       for (let sy = -sampleRadius; sy <= sampleRadius; sy++) {
         for (let sx = -sampleRadius; sx <= sampleRadius; sx++) {
           if (Math.hypot(sx, sy) > sampleRadius + 0.25) continue;
-          const sample = parseRgb(pal()[source[y + sy]?.[x + sx]]);
-          if (!sample) continue;
-          r += sample.r;
-          g += sample.g;
-          b += sample.b;
+          const sample = parseRgba(pal()[source[y + sy]?.[x + sx]]);
+          const sampleAlpha = (sample?.a ?? 0) / 255;
+          premultipliedR += (sample?.r ?? 0) * sampleAlpha;
+          premultipliedG += (sample?.g ?? 0) * sampleAlpha;
+          premultipliedB += (sample?.b ?? 0) * sampleAlpha;
+          alpha += sample?.a ?? 0;
           count++;
         }
       }
       if (!count) continue;
-      const average = { r: r / count, g: g / count, b: b / count };
-      setPixel(x, y, paletteCharFor(mixRgb(original, average, strength)));
+      const averageAlpha = alpha / count;
+      const alphaWeight = alpha / 255;
+      const average = {
+        r: alphaWeight ? premultipliedR / alphaWeight : original.r,
+        g: alphaWeight ? premultipliedG / alphaWeight : original.g,
+        b: alphaWeight ? premultipliedB / alphaWeight : original.b,
+        a: averageAlpha,
+      };
+      setPixel(x, y, paletteCharFor(mixRgba(original, average, strength)));
     }
   }
 }
@@ -2634,13 +2780,20 @@ window.addEventListener('mouseup', () => {
     }
   }
   if (selectionHandleTransform) {
-    const moved = selectionHandleTransform.moved;
-    const handle = selectionHandleTransform.handle;
+    const completedTransform = selectionHandleTransform;
+    const moved = completedTransform.moved;
+    const handle = completedTransform.handle;
     selectionHandleTransform = null;
     if (moved) {
       syncIO();
       void publishSelection();
-      flash(handle === 'rotate' ? 'rotated selection' : 'resized selection');
+      const flipped = [
+        completedTransform.flipX ? 'horizontal' : '',
+        completedTransform.flipY ? 'vertical' : '',
+      ].filter(Boolean).join(' + ');
+      flash(handle === 'rotate'
+        ? 'rotated selection'
+        : flipped ? `resized + flipped ${flipped}` : 'resized selection');
     }
     ($('selectionAngle') as HTMLInputElement).value = '0';
     grid.style.cursor = transformMode ? 'default' : currentTool === 'select' ? 'cell' : '';
@@ -2721,18 +2874,18 @@ function magicMatchCells(startX: number, startY: number): Set<string> {
   const seedChar = rows[startY]?.[startX];
   const result = new Set<string>();
   if (seedChar === undefined) return result;
-  const seed = parseRgb(pal()[seedChar]);
+  const seed = parseRgba(pal()[seedChar]);
   const threshold = magicTolerance() ** 2;
   const matches = (x: number, y: number): boolean => {
     const candidateChar = rows[y]?.[x];
     if (candidateChar === undefined) return false;
-    if (!seed) return !parseRgb(pal()[candidateChar]);
-    const candidate = parseRgb(pal()[candidateChar]);
-    // RGB has three independent 0-255 channels. Average their squared
+    if (!seed) return !parseRgba(pal()[candidateChar]);
+    const candidate = parseRgba(pal()[candidateChar]);
+    // RGBA has four independent 0-255 channels. Average their squared
     // differences so the UI tolerance keeps its advertised 0-255 range:
     // 255 includes even black versus white, while palette quantization can
     // continue using the unnormalized distance metric above.
-    return Boolean(candidate && colorDistance(seed, candidate) / 3 <= threshold);
+    return Boolean(candidate && colorDistance(seed, candidate) / 4 <= threshold);
   };
 
   if (!(($('magicContiguous') as HTMLInputElement).checked)) {
@@ -2831,10 +2984,10 @@ function shiftSelectionColors(startX: number, startY: number): void {
     return;
   }
   const sourceChar = cur()[startY]?.[startX];
-  const source = parseRgb(pal()[sourceChar]);
-  const target = parseRgb(pal()[currentChar]);
+  const source = parseRgba(pal()[sourceChar]);
+  const target = parseRgba(pal()[currentChar]);
   if (!source || !target || currentChar === '.') {
-    flash('color match needs an opaque source and paint color');
+    flash('color match needs a visible source and paint color');
     return;
   }
   const delta = { r: target.r - source.r, g: target.g - source.g, b: target.b - source.b };
@@ -2842,11 +2995,16 @@ function shiftSelectionColors(startX: number, startY: number): void {
   for (let y = selection.y; y < selection.y + selection.h; y++) {
     for (let x = selection.x; x < selection.x + selection.w; x++) {
       if (!selectionContains(selection, x, y)) continue;
-      const original = parseRgb(pal()[cur()[y][x]]);
+      const original = parseRgba(pal()[cur()[y][x]]);
       if (!original) continue;
       const next = x === startX && y === startY
         ? currentChar
-        : paletteCharFor({ r: original.r + delta.r, g: original.g + delta.g, b: original.b + delta.b });
+        : paletteCharFor({
+          r: original.r + delta.r,
+          g: original.g + delta.g,
+          b: original.b + delta.b,
+          a: original.a,
+        });
       if (cur()[y][x] !== next) {
         setPixel(x, y, next);
         changed++;
@@ -3118,6 +3276,8 @@ function beginSelectionHandleTransform(handle: SelectionHandle, e: MouseEvent): 
     startAngle: Math.atan2(pointer.y - centerY, pointer.x - centerX),
     lastKey: '',
     moved: false,
+    flipX: false,
+    flipY: false,
   };
   grid.style.cursor = handle === 'rotate' ? 'grabbing' : grid.style.cursor;
 }
@@ -3169,14 +3329,50 @@ function updateSelectionHandleTransform(e: MouseEvent): void {
   let right = original.x + original.w;
   let top = original.y;
   let bottom = original.y + original.h;
-  if (transform.handle.includes('w')) left = Math.max(0, Math.min(right - 1, Math.round(pointer.x)));
-  if (transform.handle.includes('e')) right = Math.max(left + 1, Math.min(W(), Math.round(pointer.x)));
-  if (transform.handle.includes('n')) top = Math.max(0, Math.min(bottom - 1, Math.round(pointer.y)));
-  if (transform.handle.includes('s')) bottom = Math.max(top + 1, Math.min(H(), Math.round(pointer.y)));
+  let flipX = false;
+  let flipY = false;
+  if (transform.handle.includes('w')) {
+    const fixed = right;
+    let moving = Math.max(0, Math.min(W(), Math.round(pointer.x)));
+    if (moving === fixed) moving = Math.max(0, fixed - 1);
+    left = Math.min(moving, fixed);
+    right = Math.max(moving, fixed);
+    flipX = moving > fixed;
+  } else if (transform.handle.includes('e')) {
+    const fixed = left;
+    let moving = Math.max(0, Math.min(W(), Math.round(pointer.x)));
+    if (moving === fixed) moving = Math.min(W(), fixed + 1);
+    left = Math.min(moving, fixed);
+    right = Math.max(moving, fixed);
+    flipX = moving < fixed;
+  }
+  if (transform.handle.includes('n')) {
+    const fixed = bottom;
+    let moving = Math.max(0, Math.min(H(), Math.round(pointer.y)));
+    if (moving === fixed) moving = Math.max(0, fixed - 1);
+    top = Math.min(moving, fixed);
+    bottom = Math.max(moving, fixed);
+    flipY = moving > fixed;
+  } else if (transform.handle.includes('s')) {
+    const fixed = top;
+    let moving = Math.max(0, Math.min(H(), Math.round(pointer.y)));
+    if (moving === fixed) moving = Math.min(H(), fixed + 1);
+    top = Math.min(moving, fixed);
+    bottom = Math.max(moving, fixed);
+    flipY = moving < fixed;
+  }
   const width = right - left;
   const height = bottom - top;
-  const scaled = scaleSelectionRows(transform.source, width, height);
-  applyLiveSelectionTransform(transform, scaled, left, top, `resize:${left},${top},${width},${height}`);
+  transform.flipX = flipX;
+  transform.flipY = flipY;
+  const scaled = scaleSelectionRows(transform.source, width, height, flipX, flipY);
+  applyLiveSelectionTransform(
+    transform,
+    scaled,
+    left,
+    top,
+    `resize:${left},${top},${width},${height},${Number(flipX)},${Number(flipY)}`,
+  );
 }
 
 function setSelection(next: PixelSelection | null): void {
@@ -3625,15 +3821,193 @@ function getPosePlayer(): Player | null {
  * exactly why the composite needs a selector: the sheet alone cannot say
  * which move you are looking at.
  */
-function movesOf(weaponId: string): { key: string; label: string; def: ReturnType<typeof allAttacks>[number] }[] {
+interface WeaponMoveView {
+  key: string;
+  label: string;
+  def: ReturnType<typeof allAttacks>[number];
+}
+
+function movesOf(weaponId: string): WeaponMoveView[] {
   const type = weaponTypeOf(weapons.get(weaponId));
-  const out: { key: string; label: string; def: ReturnType<typeof allAttacks>[number] }[] = [];
+  const out: WeaponMoveView[] = [];
   type.attacks.forEach((def, i) => out.push({ key: `combo${i}`, label: `combo ${i + 1}`, def }));
   for (const key of ['aerial', 'plunge', 'upper', 'dashAttack'] as const) {
     const def = type[key];
     if (def) out.push({ key, label: key === 'dashAttack' ? 'dash' : key, def });
   }
   return out;
+}
+
+function selectedCombatMove(): { weaponId: string; typeId: string; move: WeaponMoveView } | null {
+  const weaponId = ($('compWeapon') as HTMLSelectElement).value;
+  if (!weaponId || !weapons.has(weaponId)) return null;
+  const moves = movesOf(weaponId);
+  const moveId = ($('combatMove') as HTMLSelectElement).value;
+  const move = moves.find((candidate) => candidate.key === moveId) ?? moves[0];
+  if (!move) return null;
+  return { weaponId, typeId: weapons.get(weaponId).type, move };
+}
+
+function combatPanelActive(): boolean {
+  return !$('right-combat').hidden;
+}
+
+function combatFrameCount(move: WeaponMoveView): number {
+  const bodySelection = ($('compBody') as HTMLSelectElement).value;
+  if (bodySelection === 'player') {
+    const bodyAnim = KNIGHT_ANIMS.right[move.def.animation]
+      ?? KNIGHT_ANIMS.right.attack
+      ?? KNIGHT_ANIMS.right.idle;
+    return Math.max(1, bodyAnim?.frames.length ?? 1);
+  }
+
+  const bodyFile = selectedWeaponBody(bodySelection)
+    ?? (bodySelection === 'edited' && (file as EditorSpriteFile).editor?.canEquipWeapon ? file : null);
+  if (bodyFile) {
+    const timing = resolveAnimTiming(bodyFile, move.def.animation)
+      ?? resolveAnimTiming(bodyFile, 'attack')
+      ?? resolveAnimTiming(bodyFile, animName);
+    if (timing) return Math.max(1, timing.frameCount);
+  }
+
+  const editedTiming = resolveAnimTiming(file, move.def.animation)
+    ?? resolveAnimTiming(file, 'attack')
+    ?? resolveAnimTiming(file, animName);
+  return Math.max(1, editedTiming?.frameCount ?? anim().frames.length);
+}
+
+function syncCombatTimelineLabels(entry: WeaponCombatTuningEntry): void {
+  const [start, end] = entry.activeFrames;
+  $('combatActiveBand').style.left = `${((start - 1) / entry.frameCount) * 100}%`;
+  $('combatActiveBand').style.width = `${((end - start + 1) / entry.frameCount) * 100}%`;
+  $('combatActiveStartLabel').textContent = `start frame ${start}`;
+  $('combatActiveEndLabel').textContent = `end frame ${end}`;
+  $('combatFrameCountLabel').textContent = `${entry.frameCount} frames · one shared attack clock`;
+}
+
+function combatEntryFromMove(move: WeaponMoveView): WeaponCombatTuningEntry {
+  const frameCount = combatFrameCount(move);
+  const centerFrame = (progress: number): number => Math.max(
+    1,
+    Math.min(frameCount, Math.floor(progress * frameCount + 0.5) + 1),
+  );
+  const endFrame = (progress: number): number => Math.max(
+    1,
+    Math.min(frameCount, Math.ceil(progress * frameCount - 0.5)),
+  );
+  return {
+    frameCount,
+    activeFrames: [centerFrame(move.def.active[0]), endFrame(move.def.active[1])],
+    hitbox: { ...move.def.hitbox },
+  };
+}
+
+function combatEntryFor(
+  typeId: string,
+  move: WeaponMoveView,
+): WeaponCombatTuningEntry {
+  const fallback = combatEntryFromMove(move);
+  const stored = weaponCombatTuning[typeId]?.moves[move.key];
+  if (!stored) return fallback;
+  const frameCount = fallback.frameCount;
+  return {
+    frameCount,
+    activeFrames: [
+      Math.max(1, Math.min(stored.activeFrames[0], frameCount)),
+      Math.max(1, Math.min(stored.activeFrames[1], frameCount)),
+    ],
+    hitbox: { ...stored.hitbox },
+  };
+}
+
+function refreshCombatPanel(): void {
+  const select = $('combatMove') as HTMLSelectElement;
+  const weaponId = ($('compWeapon') as HTMLSelectElement).value;
+  const previous = select.value;
+  select.innerHTML = '';
+  const moves = weaponId && weapons.has(weaponId) ? movesOf(weaponId) : [];
+  for (const move of moves) {
+    const option = document.createElement('option');
+    option.value = move.key;
+    option.textContent = move.label;
+    select.appendChild(option);
+  }
+  const animationMatch = moves.find((move) => move.def.animation === animName)?.key;
+  const compositeMove = ($('compMove') as HTMLSelectElement).value;
+  const wanted = compositeMove || previous || animationMatch;
+  if (wanted && moves.some((move) => move.key === wanted)) select.value = wanted;
+  const selection = selectedCombatMove();
+  $('combatWeaponLabel').textContent = selection ? `${selection.weaponId} / ${selection.typeId}` : 'select a weapon in Compose';
+  const controls = [
+    'combatMove', 'combatFps', 'combatActiveStart', 'combatActiveEnd',
+    'combatForward', 'combatY', 'combatW', 'combatH',
+  ].map((id) => $(id) as HTMLInputElement | HTMLSelectElement);
+  controls.forEach((control) => { control.disabled = !selection; });
+  if (!selection) return;
+  const entry = combatEntryFor(selection.typeId, selection.move);
+  const sharedFps = weaponCombatTuning[selection.typeId]?.fps
+    ?? entry.frameCount / selection.move.def.duration;
+  ($('combatFps') as HTMLInputElement).value = String(sharedFps);
+  for (const id of ['combatActiveStart', 'combatActiveEnd']) {
+    const control = $(id) as HTMLInputElement;
+    control.max = String(entry.frameCount);
+  }
+  ($('combatActiveStart') as HTMLInputElement).value = String(entry.activeFrames[0]);
+  ($('combatActiveEnd') as HTMLInputElement).value = String(entry.activeFrames[1]);
+  ($('combatAim') as HTMLSelectElement).value = selection.move.def.aim ?? 'forward';
+  ($('combatForward') as HTMLInputElement).value = String(entry.hitbox.forward);
+  ($('combatY') as HTMLInputElement).value = String(entry.hitbox.y);
+  ($('combatW') as HTMLInputElement).value = String(entry.hitbox.w);
+  ($('combatH') as HTMLInputElement).value = String(entry.hitbox.h);
+  syncCombatTimelineLabels(entry);
+}
+
+function updateCombatTuningFromControls(): void {
+  const selection = selectedCombatMove();
+  if (!selection) return;
+  const fps = ($('combatFps') as HTMLInputElement).valueAsNumber;
+  const frameCount = combatFrameCount(selection.move);
+  let start = Math.round(($('combatActiveStart') as HTMLInputElement).valueAsNumber);
+  let end = Math.round(($('combatActiveEnd') as HTMLInputElement).valueAsNumber);
+  const hitbox = {
+    forward: ($('combatForward') as HTMLInputElement).valueAsNumber,
+    y: ($('combatY') as HTMLInputElement).valueAsNumber,
+    w: ($('combatW') as HTMLInputElement).valueAsNumber,
+    h: ($('combatH') as HTMLInputElement).valueAsNumber,
+  };
+  if (!(fps > 0) || !Object.values(hitbox).every(Number.isFinite) || !(hitbox.w > 0) || !(hitbox.h > 0)) return;
+  start = Math.max(1, Math.min(start, frameCount));
+  end = Math.max(1, Math.min(end, frameCount));
+  if (start > end) {
+    const changedStart = document.activeElement === $('combatActiveStart');
+    if (changedStart) end = start;
+    else start = end;
+  }
+  const entry: WeaponCombatTuningEntry = { frameCount, activeFrames: [start, end], hitbox };
+  const previous = weaponCombatTuning[selection.typeId];
+  const moves = { ...(previous?.moves ?? {}) };
+  // Grounded combo animations deliberately share one playback rate. Seed
+  // their frame-native records together the first time the artist changes
+  // that clock, so changing this one field cannot leave attack2/attack3 on
+  // an older millisecond duration.
+  for (const move of movesOf(selection.weaponId)) {
+    if (move.key.startsWith('combo') && !moves[move.key]) {
+      moves[move.key] = combatEntryFromMove(move);
+    }
+  }
+  moves[selection.move.key] = entry;
+  weaponCombatTuning[selection.typeId] = { fps, moves };
+  replaceWeaponCombatTuning(selection.typeId, weaponCombatTuning[selection.typeId]);
+  for (const id of ['combatActiveStart', 'combatActiveEnd']) {
+    const control = $(id) as HTMLInputElement;
+    control.max = String(frameCount);
+  }
+  ($('combatActiveStart') as HTMLInputElement).value = String(start);
+  ($('combatActiveEnd') as HTMLInputElement).value = String(end);
+  syncCombatTimelineLabels(entry);
+  persistWeaponCombatDraft();
+  updateBridgeStatus();
+  schedulePreviewUpload();
 }
 
 /** Refill the move selector for the chosen weapon, keeping a still-valid
@@ -3663,20 +4037,60 @@ function rebuildMoveSelect(weaponId: string): void {
  * (facing right here), down off the feet, up off the head — so what the
  * panel shows is where the game would actually hit.
  */
+interface CombatPreviewGeometry {
+  body: { x: number; y: number; w: number; h: number };
+  rect: { x: number; y: number; w: number; h: number };
+  aim: 'forward' | 'up' | 'down';
+  viewW: number;
+  viewH: number;
+}
+
+let combatPreviewGeometry: CombatPreviewGeometry | null = null;
+let combatPreviewActive = false;
+let compositePreviewFrame: number | null = null;
+const ATTACK_PREVIEW_CAP = 0.5;
+const ATTACK_PREVIEW_HOLD = 0.35;
+
+function attackPreviewClock(
+  t: number,
+  def: WeaponMoveView['def'],
+  frameCount: number,
+  pausedFrame?: number,
+): { progress: number; live: boolean; frame: number; time: number } {
+  const duration = Math.max(1 / 120, Math.min(def.duration, ATTACK_PREVIEW_CAP));
+  if (pausedFrame !== undefined) {
+    const frame = Math.max(0, Math.min(pausedFrame, frameCount - 1));
+    const progress = (frame + 0.5) / frameCount;
+    return { progress, live: true, frame, time: progress * duration };
+  }
+  const time = t % (duration + ATTACK_PREVIEW_HOLD);
+  const live = time < duration;
+  const progress = live ? Math.min(1, time / duration) : 1;
+  const frame = Math.min(Math.floor(Math.min(progress, 0.999999) * frameCount), frameCount - 1);
+  return { progress, live, frame, time };
+}
+
+function attackRect(
+  def: ReturnType<typeof allAttacks>[number],
+  body: { x: number; y: number; w: number; h: number },
+): { x: number; y: number; w: number; h: number } {
+  const hb = def.hitbox;
+  const aim = def.aim ?? 'forward';
+  const cx = body.x + body.w / 2;
+  return aim === 'down'
+    ? { x: cx - hb.w / 2, y: body.y + body.h + hb.forward, w: hb.w, h: hb.h }
+    : aim === 'up'
+      ? { x: cx - hb.w / 2, y: body.y - hb.forward - hb.h, w: hb.w, h: hb.h }
+      : { x: body.x + body.w + hb.forward, y: body.y + body.h / 2 - hb.h / 2 + hb.y, w: hb.w, h: hb.h };
+}
+
 function drawAttackBox(
   g: CanvasRenderingContext2D,
   def: ReturnType<typeof allAttacks>[number],
   body: { x: number; y: number; w: number; h: number },
   progress: number,
 ): void {
-  const hb = def.hitbox;
-  const aim = def.aim ?? 'forward';
-  const cx = body.x + body.w / 2;
-  const rect = aim === 'down'
-    ? { x: cx - hb.w / 2, y: body.y + body.h + hb.forward, w: hb.w, h: hb.h }
-    : aim === 'up'
-      ? { x: cx - hb.w / 2, y: body.y - hb.forward - hb.h, w: hb.w, h: hb.h }
-      : { x: body.x + body.w + hb.forward, y: body.y + body.h / 2 - hb.h / 2 + hb.y, w: hb.w, h: hb.h };
+  const rect = attackRect(def, body);
   const live = progress > def.active[0] && progress < def.active[1];
   g.save();
   g.strokeStyle = live ? '#ff4444' : '#566c86';
@@ -3739,17 +4153,22 @@ function posePlayerLocomotion(p: Player, animation: string): void {
 }
 
 /** The body is the authority for a neutral composite's frame clock. */
-function resolveCompositeBodyClock(bodySelection: string) {
+function resolveCompositeBodyClock(bodySelection: string, requestedAnimation = animName) {
   const selectedBody = selectedWeaponBody(bodySelection);
   const bodyFile = selectedBody ?? file;
-  const requestedBodyAnim = resolveAnim(bodyFile, animName)
-    ? animName
+  const requestedBodyAnim = resolveAnim(bodyFile, requestedAnimation)
+    ? requestedAnimation
+    : requestedAnimation !== 'attack' && resolveAnim(bodyFile, 'attack')
+      ? 'attack'
     : resolveAnim(bodyFile, 'idle')
       ? 'idle'
       : Object.keys(bodyFile.anims)[0];
   const bodyAnim = resolveAnim(bodyFile, requestedBodyAnim);
   const fullPlayerAnim = bodySelection === 'player'
-    ? KNIGHT_ANIMS.right[animName] ?? KNIGHT_ANIMS.right.idle ?? Object.values(KNIGHT_ANIMS.right)[0]
+    ? KNIGHT_ANIMS.right[requestedAnimation]
+      ?? KNIGHT_ANIMS.right.attack
+      ?? KNIGHT_ANIMS.right.idle
+      ?? Object.values(KNIGHT_ANIMS.right)[0]
     : undefined;
   const renderedAnim = fullPlayerAnim ?? bodyAnim;
   const fps = renderedAnim?.fps || 1;
@@ -3770,11 +4189,13 @@ function resolveCompositeBodyClock(bodySelection: string) {
  * drawn by the same code the game uses (see Player.render — body at a
  * feet origin, weapon inside that transform, trail in world space).
  *
- * One cycle = the attack's real duration plus a beat of hold, or the
- * animation's own length if that is longer, so the trail sweeps at its
- * true speed and you still get a readable pause between swings.
+ * One cycle = the attack's frame count / shared combat FPS plus a beat of
+ * hold. Asset-local FPS values never create a second attack clock.
  */
 function renderComposite(t: number, pausedFrame?: number): boolean {
+  combatPreviewGeometry = null;
+  combatPreviewActive = false;
+  compositePreviewFrame = null;
   const weaponId = ($('compWeapon') as HTMLSelectElement).value;
   const hasWeapon = Boolean(weaponId && weapons.has(weaponId));
   const bodySel = ($('compBody') as HTMLSelectElement).value;
@@ -3783,18 +4204,6 @@ function renderComposite(t: number, pausedFrame?: number): boolean {
   if (!hasWeapon && bodySel !== 'player') return false;
   const a = anim();
   if (!a || !a.frames.length) return false;
-
-  // Neutral equipment is frame-aligned to the selected body, so the body
-  // must own the preview clock too. Otherwise a one-frame weapon animation
-  // restarts the whole composite before a longer body animation can advance.
-  const bodyClock = resolveCompositeBodyClock(bodySel);
-  const {
-    bodyFile,
-    requestedBodyAnim,
-    bodyAnim,
-    fps: bodyFps,
-    cycle: bodyCycle,
-  } = bodyClock;
 
   const wdef = hasWeapon ? weapons.get(weaponId) : null;
   const moves = hasWeapon ? movesOf(weaponId) : [];
@@ -3809,13 +4218,24 @@ function renderComposite(t: number, pausedFrame?: number): boolean {
   const wantKey = ($('compMove') as HTMLSelectElement).value;
   const move = candidates.find((m) => m.key === wantKey) ?? candidates[0];
   const atkDef = move?.def;
+  // Neutral equipment is frame-aligned to the selected body, so the body
+  // owns the preview frame set. A move without dedicated body art falls back
+  // to the base attack sheet, never to idle.
+  const bodyClock = resolveCompositeBodyClock(bodySel, atkDef?.animation ?? animName);
+  const {
+    bodyFile,
+    requestedBodyAnim,
+    bodyAnim,
+    fps: bodyFps,
+    frameCount: bodyFrameCount,
+    cycle: bodyCycle,
+  } = bodyClock;
   // Long moves are time-compressed. The plunge's 0.9s duration is a
   // MAXIMUM — in play the landing cuts it short — so previewed raw it
   // is three-quarters of a second of nothing moving. Compression sweeps
   // the full progress on a shorter wall clock; every trail and pose
   // clock is a fraction of progress, so the whole move scales together.
   // The label owns up to it with an xN tag.
-  const ATTACK_PREVIEW_CAP = 0.5;
   const realDur = atkDef?.duration ?? 0;
   const speedup = realDur > ATTACK_PREVIEW_CAP ? realDur / ATTACK_PREVIEW_CAP : 1;
   const moveTag = move ? ` [${move.label}${speedup > 1 ? ` x${speedup.toFixed(1)}` : ''}]` : '';
@@ -3825,16 +4245,24 @@ function renderComposite(t: number, pausedFrame?: number): boolean {
     ? ''
     : `  (attacks play on: ${[...new Set(moves.map((m) => m.def.animation))].join(', ') || 'none'})`;
 
-  const fps = a.fps || 1;
-  const dur = Math.min(realDur, ATTACK_PREVIEW_CAP);
-  // An attack retains its authored weapon/attack timing. Everywhere else,
-  // body and attached weapon are one layered animation on the body's clock.
-  const animCycle = atkDef ? a.frames.length / fps : bodyCycle;
-  const cycle = Math.max(animCycle, dur + 0.35);
-  const tIn = t % cycle;
-  const pose = atkDef && tIn <= dur
-    ? { progress: Math.min(1, tIn / dur), def: atkDef }
+  // Authored FPS is now the one combat clock. Body, weapon, trail, hitbox,
+  // timeline label, and stepping all consume this same progress. The quiet
+  // beat after a move holds its final pose; it does not restart a sheet whose
+  // local animation metadata happens to be shorter.
+  const attackClock = atkDef
+    ? attackPreviewClock(t, atkDef, bodyFrameCount, pausedFrame)
+    : null;
+  const tIn = attackClock?.time ?? (t % bodyCycle);
+  const pose = atkDef && attackClock
+    ? { progress: attackClock.progress, def: atkDef }
     : undefined;
+  const attackLive = attackClock?.live ?? false;
+  combatPreviewActive = Boolean(
+    pose && attackLive
+    && pose.progress > pose.def.active[0]
+    && pose.progress < pose.def.active[1]
+  );
+  compositePreviewFrame = attackClock?.frame ?? null;
 
   // Game parity: the game draws a world pixel at 8 screen px (ZOOM 4 x
   // WORLD_ZOOM 2), and judging attack art at any other size is judging
@@ -3866,17 +4294,27 @@ function renderComposite(t: number, pausedFrame?: number): boolean {
       p.facing = 1;
       posePlayerLocomotion(p, animName);
       p.animT = tIn;
-      p.renderTrail = ($('compTrail') as HTMLInputElement).checked;
+      p.renderTrail = attackLive && ($('compTrail') as HTMLInputElement).checked;
       p.poseAttack(pose ? pose.def : null, pose ? pose.progress : 0);
       p.x = fx - p.w / 2;
       p.y = fy - p.h;
+      if (atkDef) {
+        const body = { x: p.x, y: p.y, w: p.w, h: p.h };
+        combatPreviewGeometry = {
+          body,
+          rect: attackRect(atkDef, body),
+          aim: atkDef.aim ?? 'forward',
+          viewW: VW,
+          viewH: VH,
+        };
+      }
       try {
         p.render(pctx);
       } catch (e) {
         posePlayerError = String(e);
       }
       // The player's own box math is the truth; draw straight from it.
-      if (pose && ($('compHitbox') as HTMLInputElement).checked) {
+      if (pose && attackLive && ($('compHitbox') as HTMLInputElement).checked) {
         drawAttackBox(pctx, pose.def, { x: p.x, y: p.y, w: p.w, h: p.h }, pose.progress);
       }
       pctx.restore();
@@ -3910,15 +4348,28 @@ function renderComposite(t: number, pausedFrame?: number): boolean {
     pctx.restore();
     return false;
   }
-  frame = pausedFrame === undefined
-    ? bodyAnim.loop === false
-      ? Math.min(Math.floor(tIn * bodyFps), bodyAnim.frames.length - 1)
-      : Math.floor(tIn * bodyFps) % bodyAnim.frames.length
-    : Math.min(pausedFrame, bodyAnim.frames.length - 1);
+  frame = attackClock
+    ? Math.min(attackClock.frame, bodyAnim.frames.length - 1)
+    : pausedFrame === undefined
+      ? bodyAnim.loop === false
+        ? Math.min(Math.floor(tIn * bodyFps), bodyAnim.frames.length - 1)
+        : Math.floor(tIn * bodyFps) % bodyAnim.frames.length
+      : Math.min(pausedFrame, bodyAnim.frames.length - 1);
+  if (compositePreviewFrame === null) compositePreviewFrame = frame;
   const rows = bodyAnim.frames[frame] ?? [];
   const bodyGeometry = geometryOf(bodyFile, rows);
   dw = bodyGeometry.w;
   dh = bodyGeometry.h;
+  if (atkDef) {
+    const body = { x: fx - dw / 2, y: fy - dh, w: dw, h: dh };
+    combatPreviewGeometry = {
+      body,
+      rect: attackRect(atkDef, body),
+      aim: atkDef.aim ?? 'forward',
+      viewW: VW,
+      viewH: VH,
+    };
+  }
 
   pctx.save();
   pctx.translate(fx, fy);
@@ -3985,7 +4436,7 @@ function renderComposite(t: number, pausedFrame?: number): boolean {
   }
   pctx.restore();
 
-  if (pose && ($('compTrail') as HTMLInputElement).checked) {
+  if (pose && attackLive && ($('compTrail') as HTMLInputElement).checked) {
     try {
       drawWeaponTrail(pctx, wdef!.visual, {
         x: fx, y: fy - dh * 0.45, facing: 1,
@@ -3995,7 +4446,7 @@ function renderComposite(t: number, pausedFrame?: number): boolean {
   }
   // dw/dh are the sprite's DECLARED physical dims (see above), which is
   // the body the game's box math would use.
-  if (pose && ($('compHitbox') as HTMLInputElement).checked) {
+  if (pose && attackLive && ($('compHitbox') as HTMLInputElement).checked) {
     drawAttackBox(pctx, pose.def, { x: fx - dw / 2, y: fy - dh, w: dw, h: dh }, pose.progress);
   }
   pctx.restore();
@@ -4013,7 +4464,7 @@ function currentPreviewTiming(): { fps: number; frameCount: number; loop: boolea
   const bodySelection = ($('compBody') as HTMLSelectElement).value;
   const weaponId = ($('compWeapon') as HTMLSelectElement).value;
   if ((weaponId && weapons.has(weaponId)) || bodySelection === 'player') {
-    const clock = resolveCompositeBodyClock(bodySelection);
+    const clock = resolveCompositeBodyClock(bodySelection, selectedCombatMove()?.move.def.animation ?? animName);
     return { fps: clock.fps, frameCount: clock.frameCount, loop: clock.loop };
   }
   const a = anim();
@@ -4031,6 +4482,94 @@ function previewFrameAt(t: number, timing: ReturnType<typeof currentPreviewTimin
     : Math.min(raw, timing.frameCount - 1);
 }
 
+function updateCombatHitboxOverlay(): void {
+  const overlay = $('combatHitboxOverlay');
+  const geometry = combatPreviewGeometry;
+  if (!combatPanelActive() || !geometry || !selectedCombatMove()) {
+    overlay.hidden = true;
+    return;
+  }
+  overlay.hidden = false;
+  overlay.classList.toggle('active', combatPreviewActive);
+  overlay.style.left = `${geometry.rect.x / geometry.viewW * 100}%`;
+  overlay.style.top = `${geometry.rect.y / geometry.viewH * 100}%`;
+  overlay.style.width = `${geometry.rect.w / geometry.viewW * 100}%`;
+  overlay.style.height = `${geometry.rect.h / geometry.viewH * 100}%`;
+}
+
+interface CombatHitboxDrag {
+  mode: 'move' | 'resize';
+  pointerId: number;
+  startX: number;
+  startY: number;
+  geometry: CombatPreviewGeometry;
+  hitbox: WeaponCombatTuningEntry['hitbox'];
+}
+
+let combatHitboxDrag: CombatHitboxDrag | null = null;
+
+function setCombatHitboxFields(hitbox: WeaponCombatTuningEntry['hitbox']): void {
+  ($('combatForward') as HTMLInputElement).value = String(Math.round(hitbox.forward * 4) / 4);
+  ($('combatY') as HTMLInputElement).value = String(Math.round(hitbox.y * 4) / 4);
+  ($('combatW') as HTMLInputElement).value = String(Math.round(hitbox.w * 4) / 4);
+  ($('combatH') as HTMLInputElement).value = String(Math.round(hitbox.h * 4) / 4);
+  updateCombatTuningFromControls();
+}
+
+$('combatHitboxOverlay').addEventListener('pointerdown', (event) => {
+  const pointer = event as PointerEvent;
+  const selected = selectedCombatMove();
+  if (!selected || !combatPreviewGeometry) return;
+  const mode = (pointer.target as HTMLElement).dataset.combatHandle === 'resize' ? 'resize' : 'move';
+  combatHitboxDrag = {
+    mode,
+    pointerId: pointer.pointerId,
+    startX: pointer.clientX,
+    startY: pointer.clientY,
+    geometry: structuredClone(combatPreviewGeometry),
+    hitbox: { ...selected.move.def.hitbox },
+  };
+  ($('combatHitboxOverlay') as HTMLElement).setPointerCapture(pointer.pointerId);
+  pointer.preventDefault();
+});
+
+$('combatHitboxOverlay').addEventListener('pointermove', (event) => {
+  const pointer = event as PointerEvent;
+  const drag = combatHitboxDrag;
+  if (!drag || pointer.pointerId !== drag.pointerId) return;
+  const bounds = preview.getBoundingClientRect();
+  if (!bounds.width || !bounds.height) return;
+  const dx = (pointer.clientX - drag.startX) * drag.geometry.viewW / bounds.width;
+  const dy = (pointer.clientY - drag.startY) * drag.geometry.viewH / bounds.height;
+  const next = { ...drag.hitbox };
+  if (drag.mode === 'move') {
+    if (drag.geometry.aim === 'forward') {
+      next.forward += dx;
+      next.y += dy;
+    } else {
+      next.forward += drag.geometry.aim === 'up' ? -dy : dy;
+    }
+  } else {
+    next.w = Math.max(0.25, drag.hitbox.w + dx);
+    next.h = Math.max(0.25, drag.hitbox.h + dy);
+    if (drag.geometry.aim === 'forward') {
+      // Keep the top edge under the pointer while resizing the centered box.
+      next.y += (next.h - drag.hitbox.h) / 2;
+    }
+  }
+  setCombatHitboxFields(next);
+  pointer.preventDefault();
+});
+
+function finishCombatHitboxDrag(event: Event): void {
+  const pointer = event as PointerEvent;
+  if (!combatHitboxDrag || pointer.pointerId !== combatHitboxDrag.pointerId) return;
+  combatHitboxDrag = null;
+}
+
+$('combatHitboxOverlay').addEventListener('pointerup', finishCombatHitboxDrag);
+$('combatHitboxOverlay').addEventListener('pointercancel', finishCombatHitboxDrag);
+
 function renderPreview(): void {
   maybeRebakeEditedEquipment();
   const hd = ($('hd') as HTMLInputElement).checked;
@@ -4046,10 +4585,13 @@ function renderPreview(): void {
     ? ((previewStepFrame % timing.frameCount) + timing.frameCount) % timing.frameCount
     : Math.min(frameIdx, timing.frameCount - 1);
   const t = previewPlaying ? performance.now() / 1000 : pausedFrame / timing.fps;
-  const displayedFrame = previewPlaying ? previewFrameAt(t, timing) : pausedFrame;
-  $('previewFrame').textContent = `${displayedFrame + 1}/${timing.frameCount}`;
-
   const composite = renderComposite(t, previewPlaying ? undefined : pausedFrame);
+  const displayedFrame = previewPlaying
+    ? (compositePreviewFrame ?? previewFrameAt(t, timing))
+    : pausedFrame;
+  previewDisplayedFrame = displayedFrame;
+  $('previewFrame').textContent = `${displayedFrame + 1}/${timing.frameCount}`;
+  updateCombatHitboxOverlay();
   const context = $('previewContext');
   if (composite) {
     const weapon = ($('compWeapon') as HTMLSelectElement).value || 'no weapon';
@@ -4541,13 +5083,19 @@ function remapClipboardPalette(clip: PixelClipboard): {
       remap.set(sourceChar, '.');
       continue;
     }
-    const normalized = color.toLowerCase();
-    if (destination[sourceChar]?.toLowerCase() === normalized) {
+    const parsedSource = parseRgba(color);
+    const normalized = parsedSource ? rgbaHex(parsedSource) : color.toLowerCase();
+    const normalizedDestinationChar = parseRgba(destination[sourceChar]);
+    if ((normalizedDestinationChar ? rgbaHex(normalizedDestinationChar) : destination[sourceChar]?.toLowerCase()) === normalized) {
       remap.set(sourceChar, sourceChar);
       continue;
     }
     const existing = Object.entries(destination)
-      .find(([ch, value]) => ch !== '.' && value?.toLowerCase() === normalized)?.[0];
+      .find(([ch, value]) => {
+        if (ch === '.') return false;
+        const parsed = parseRgba(value);
+        return (parsed ? rgbaHex(parsed) : value?.toLowerCase()) === normalized;
+      })?.[0];
     if (existing) {
       remap.set(sourceChar, existing);
       continue;
@@ -4565,14 +5113,14 @@ function remapClipboardPalette(clip: PixelClipboard): {
       continue;
     }
 
-    const sourceRgb = parseRgb(color);
+    const sourceRgba = parseRgba(color);
     let nearest = '';
     let nearestDistance = Number.POSITIVE_INFINITY;
-    if (sourceRgb) {
+    if (sourceRgba) {
       for (const [ch, value] of Object.entries(destination)) {
-        const rgb = parseRgb(value);
-        if (!rgb) continue;
-        const distance = colorDistance(sourceRgb, rgb);
+        const rgba = parseRgba(value);
+        if (!rgba) continue;
+        const distance = colorDistance(sourceRgba, rgba);
         if (distance < nearestDistance) {
           nearest = ch;
           nearestDistance = distance;
@@ -4657,21 +5205,31 @@ function moveSelectionBy(dx: number, dy: number): void {
   commitSelectionPixels(pixelsInSelection(selection), x, y, `moved selection to ${x},${y}`);
 }
 
-function scaleSelectionRows(source: PixelClipboard, w: number, h: number): PixelClipboard {
+function scaleSelectionRows(
+  source: PixelClipboard,
+  w: number,
+  h: number,
+  flipX = false,
+  flipY = false,
+): PixelClipboard {
   return {
     w,
     h,
     rows: Array.from({ length: h }, (_, y) => {
-      const sourceY = Math.min(source.h - 1, Math.floor(y * source.h / h));
+      const scaledY = Math.min(source.h - 1, Math.floor(y * source.h / h));
+      const sourceY = flipY ? source.h - 1 - scaledY : scaledY;
       return Array.from({ length: w }, (_, x) => {
-        const sourceX = Math.min(source.w - 1, Math.floor(x * source.w / w));
+        const scaledX = Math.min(source.w - 1, Math.floor(x * source.w / w));
+        const sourceX = flipX ? source.w - 1 - scaledX : scaledX;
         return source.rows[sourceY][sourceX];
       }).join('');
     }),
     mask: source.mask && Array.from({ length: h }, (_, y) => {
-      const sourceY = Math.min(source.h - 1, Math.floor(y * source.h / h));
+      const scaledY = Math.min(source.h - 1, Math.floor(y * source.h / h));
+      const sourceY = flipY ? source.h - 1 - scaledY : scaledY;
       return Array.from({ length: w }, (_, x) => {
-        const sourceX = Math.min(source.w - 1, Math.floor(x * source.w / w));
+        const scaledX = Math.min(source.w - 1, Math.floor(x * source.w / w));
+        const sourceX = flipX ? source.w - 1 - scaledX : scaledX;
         return source.mask![sourceY][sourceX];
       }).join('');
     }),
@@ -5140,6 +5698,7 @@ function refreshUI(): void {
 
   const hdCheckbox = $('hd') as HTMLInputElement;
   if (hdCheckbox) hdCheckbox.checked = file.hd ?? true;
+  refreshCombatPanel();
   updateBridgeStatus();
 }
 
@@ -5219,6 +5778,7 @@ Object.defineProperty(window, '__editor', {
     previewStepping = false;
     previewStepFrame = 0;
     rebuildMoveSelect(sel.value);
+    refreshCombatPanel();
     schedulePreviewUpload();
   };
   for (const id of weapons.ids()) {
@@ -5236,7 +5796,7 @@ function stepPreview(delta: number): void {
   const start = previewStepping
     ? previewStepFrame
     : play.checked
-      ? previewFrameAt(performance.now() / 1000, timing)
+      ? previewDisplayedFrame
       : Math.min(frameIdx, timing.frameCount - 1);
   play.checked = false;
   previewStepFrame = ((start + delta) % timing.frameCount + timing.frameCount) % timing.frameCount;
@@ -5253,7 +5813,35 @@ for (const id of ['compMove', 'compBody']) {
   $(id).addEventListener('change', () => {
     previewStepping = false;
     previewStepFrame = 0;
+    if (id === 'compMove') refreshCombatPanel();
   });
+}
+
+($('combatMove') as HTMLSelectElement).addEventListener('change', () => {
+  const combatMove = ($('combatMove') as HTMLSelectElement).value;
+  const compositeMove = $('compMove') as HTMLSelectElement;
+  if ([...compositeMove.options].some((option) => option.value === combatMove)) {
+    compositeMove.value = combatMove;
+  }
+  const selected = selectedCombatMove();
+  if (selected && file.anims[selected.move.def.animation]) {
+    animName = selected.move.def.animation;
+    frameIdx = 0;
+    refreshUI();
+  } else {
+    refreshCombatPanel();
+  }
+  previewStepping = false;
+  previewStepFrame = 0;
+  schedulePreviewUpload();
+});
+
+for (const id of [
+  'combatFps', 'combatActiveStart', 'combatActiveEnd',
+  'combatForward', 'combatY', 'combatW', 'combatH',
+]) {
+  $(id).addEventListener('input', updateCombatTuningFromControls);
+  $(id).addEventListener('change', updateCombatTuningFromControls);
 }
 
 // These controls change only the rendered preview, not the sprite document.

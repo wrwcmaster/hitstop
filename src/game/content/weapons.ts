@@ -1,6 +1,7 @@
 import { Registry } from '@engine/index';
 import { COLORS } from './palette';
 import { weaponVisuals, slashVisuals } from './weapon-visuals';
+import repositoryWeaponCombat from './weapon-combat.json';
 
 export interface WeaponHitboxDef {
   /** Gap from the player's front edge; negative values overlap the body. */
@@ -16,6 +17,12 @@ export interface WeaponTrailDef {
   endAngle: number;
   radius: number;
   thickness: number;
+  /**
+   * Whether to draw a separate slash overlay. Set this to false when the
+   * weapon's authored attack frames already contain the slash arc; the
+   * remaining trail fields still drive pose/frame timing.
+   */
+  overlay?: boolean;
   /**
    * Where along the swept arc the blade is fattest, 0 (tail) to 1
    * (leading edge). This is what separates a crescent from a smear:
@@ -145,6 +152,74 @@ export interface WeaponDef {
   colors: readonly string[];
 }
 
+/**
+ * The small, art-facing part of an attack definition that the sprite editor
+ * is allowed to tune. Move semantics (damage, lunge, trail, pogo, and so on)
+ * stay in this registry module; timing and contact geometry live in data so
+ * an artist can adjust what the preview shows without rewriting TypeScript.
+ */
+export interface WeaponCombatTuningEntry {
+  /** Number of authored poses in this move's attack animation. */
+  frameCount: number;
+  /** One-based, inclusive frames during which the attack can deal damage. */
+  activeFrames: [number, number];
+  hitbox: WeaponHitboxDef;
+}
+
+export interface WeaponCombatTuningProfile {
+  /** One clock for every authored attack animation in this weapon type. */
+  fps: number;
+  moves: Record<string, WeaponCombatTuningEntry>;
+}
+
+export type WeaponCombatTuning = Record<string, WeaponCombatTuningProfile>;
+
+function tuneAttack(
+  attack: WeaponAttackDef | undefined,
+  tuning: WeaponCombatTuningEntry | undefined,
+  fps: number,
+): WeaponAttackDef | undefined {
+  if (!attack || !tuning) return attack;
+  const [activeStart, activeEnd] = tuning.activeFrames;
+  return {
+    ...attack,
+    duration: tuning.frameCount / fps,
+    // Runtime simulation still benefits from normalized progress, but the
+    // authored source stays frame-native. Frame N occupies
+    // [(N - 1) / count, N / count), so an inclusive frame window maps to
+    // these two boundaries without a second timing source.
+    active: [
+      (activeStart - 1) / tuning.frameCount,
+      activeEnd / tuning.frameCount,
+    ] as [number, number],
+    hitbox: { ...tuning.hitbox },
+  };
+}
+
+function tuneWeaponType(
+  type: WeaponTypeDef,
+  tuning: WeaponCombatTuningProfile | undefined,
+): WeaponTypeDef {
+  if (!tuning) return type;
+  const move = tuning.moves;
+  return {
+    ...type,
+    attacks: type.attacks.map((attack, index) => tuneAttack(attack, move[`combo${index}`], tuning.fps)!),
+    aerial: tuneAttack(type.aerial, move.aerial, tuning.fps),
+    plunge: tuneAttack(type.plunge, move.plunge, tuning.fps),
+    upper: tuneAttack(type.upper, move.upper, tuning.fps),
+    dashAttack: tuneAttack(type.dashAttack, move.dashAttack, tuning.fps),
+  };
+}
+
+/** Deliberate editor hot-reload seam; ordinary game code never calls this. */
+export function replaceWeaponCombatTuning(
+  typeId: string,
+  tuning: WeaponCombatTuningProfile,
+): void {
+  weaponTypes.replace(typeId, tuneWeaponType(weaponTypes.get(typeId), tuning));
+}
+
 export const weaponTypes = new Registry<WeaponTypeDef>('weaponType');
 export const weapons = new Registry<WeaponDef>('weapon');
 
@@ -161,6 +236,7 @@ export function allAttacks(type: WeaponTypeDef): WeaponAttackDef[] {
 }
 
 export function defineWeaponType(id: string, def: WeaponTypeDef): void {
+  def = tuneWeaponType(def, (repositoryWeaponCombat as unknown as WeaponCombatTuning)[id]);
   if (!Number.isFinite(def.comboWindow) || def.comboWindow < 0) {
     throw new Error(`weapon type "${id}".comboWindow: expected a non-negative finite number`);
   }
@@ -222,8 +298,11 @@ export function defineWeaponType(id: string, def: WeaponTypeDef): void {
       throw new Error(`${path}.hitbox: width and height must be positive`);
     }
     for (const [field, value] of Object.entries(attack.trail)) {
-      if (field === 'sprite') continue; // the one non-numeric trail field
+      if (field === 'sprite' || field === 'overlay') continue;
       finite(value, `${path}.trail.${field}`);
+    }
+    if (attack.trail.overlay !== undefined && typeof attack.trail.overlay !== 'boolean') {
+      throw new Error(`${path}.trail.overlay: expected a boolean`);
     }
     if (attack.trail.sprite !== undefined && !slashVisuals.has(attack.trail.sprite)) {
       throw new Error(`${path}.trail.sprite: unknown slash visual "${attack.trail.sprite}"`);
@@ -416,7 +495,10 @@ defineWeaponType('sword', {
     attack({
       duration: 0.16, active: [0.15, 0.56], damageScale: 1, strength: 0.42, lunge: 45,
       hitbox: { forward: -2, y: 0, w: 20, h: 16 },
-      trail: { startAngle: -1.3, endAngle: 1.3, radius: 13, thickness: 3.5 },
+      // Attack 1's slash is authored directly in the sword frames. Keep
+      // this geometry for pose timing, but do not stack a generated arc
+      // over the baked pixels.
+      trail: { startAngle: -1.3, endAngle: 1.3, radius: 13, thickness: 3.5, overlay: false },
     }),
     attack({
       animation: 'attack2',

@@ -161,6 +161,39 @@
     .panel-row { display: flex; gap: 4px; align-items: center; margin-bottom: 6px; }
     .panel-row > button { flex: 1; }
     #right-rig input[type=number] { width: 64px !important; }
+    #right-combat input[type=number] { width: 72px; }
+    .combat-timeline {
+      position: relative; height: 34px; margin: 10px 2px 5px;
+      border: 1px solid #33447f; border-radius: 4px; background: #0b0e20;
+    }
+    #combatActiveBand {
+      position: absolute; top: 8px; bottom: 8px; left: 15%; width: 41%;
+      background: rgba(239, 125, 87, .45); border: 1px solid #ef7d57;
+      pointer-events: none;
+    }
+    .combat-timeline input[type=range] {
+      position: absolute; inset: 0; width: 100%; height: 100%; margin: 0;
+      padding: 0; border: 0; background: transparent; pointer-events: none;
+      appearance: none;
+    }
+    .combat-timeline input[type=range]::-webkit-slider-runnable-track { height: 2px; background: #566c86; }
+    .combat-timeline input[type=range]::-webkit-slider-thumb {
+      appearance: none; width: 12px; height: 22px; margin-top: -10px;
+      border: 2px solid #ffcd75; border-radius: 3px; background: #1f2a57;
+      pointer-events: auto; cursor: ew-resize;
+    }
+    #previewStage { position: relative; line-height: 0; max-width: 100%; }
+    #combatHitboxOverlay {
+      position: absolute; z-index: 3; border: 2px solid #ffcd75;
+      background: rgba(86, 108, 134, .08); cursor: move; line-height: normal;
+      box-shadow: 0 0 0 1px rgba(7, 7, 13, .8); touch-action: none;
+    }
+    #combatHitboxOverlay.active { background: rgba(239, 68, 68, .2); }
+    #combatHitboxOverlay[hidden] { display: none; }
+    .combat-resize-handle {
+      position: absolute; right: -6px; bottom: -6px; width: 11px; height: 11px;
+      border: 2px solid #07070d; background: #ffcd75; cursor: nwse-resize;
+    }
     .transform-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
     .transform-grid label { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
     .transform-grid input { width: 72px; }
@@ -186,8 +219,12 @@
       padding: 0;
       border-radius: 2px;
       border-color: #566c86;
+      position: relative;
+      overflow: hidden;
+      background: repeating-conic-gradient(#f0f0f0 0 25%, #b8b8b8 0 50%) 0 0 / 12px 12px;
       transition: transform 80ms ease, box-shadow 80ms ease;
     }
+    .palette-cell .palette-color { position: absolute; inset: 0; pointer-events: none; }
     .palette-cell:hover { transform: scale(1.08); position: relative; z-index: 1; }
     .palette-cell.none {
       background: repeating-conic-gradient(#f0f0f0 0 25%, #b8b8b8 0 50%) 0 0 / 12px 12px;
@@ -198,6 +235,36 @@
     }
     .swatch { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
     .swatch button { flex: 1; text-align: left; }
+    .palette-opacity { display: grid; grid-template-columns: auto minmax(70px, 1fr) 38px; align-items: center; gap: 6px; }
+    .palette-opacity input[type=range] {
+      --alpha-fill: 100%;
+      appearance: none;
+      width: 100%; min-width: 0; height: 18px; padding: 0;
+      border: 0; background: transparent;
+    }
+    .palette-opacity input[type=range]::-webkit-slider-runnable-track {
+      height: 4px; border-radius: 2px;
+      background: linear-gradient(to right,
+        #9cc8f4 0 var(--alpha-fill),
+        #566c86 var(--alpha-fill) 100%);
+    }
+    .palette-opacity input[type=range]::-webkit-slider-thumb {
+      appearance: none; width: 14px; height: 14px; margin-top: -5px;
+      border: 1px solid #33447f; border-radius: 50%; background: #b9d8f5;
+      box-shadow: 0 0 0 1px #07070d; cursor: ew-resize;
+    }
+    .palette-opacity input[type=range]::-moz-range-track {
+      height: 4px; border: 0; border-radius: 2px;
+      background: linear-gradient(to right,
+        #9cc8f4 0 var(--alpha-fill),
+        #566c86 var(--alpha-fill) 100%);
+    }
+    .palette-opacity input[type=range]::-moz-range-thumb {
+      width: 14px; height: 14px; border: 1px solid #33447f;
+      border-radius: 50%; background: #b9d8f5;
+      box-shadow: 0 0 0 1px #07070d; cursor: ew-resize;
+    }
+    .palette-opacity output { text-align: right; color: #94b0c2; }
     .chip { width: 14px; height: 14px; border: 1px solid #566c86; display: inline-block; flex-shrink: 0; }
     .chip.none { background: repeating-conic-gradient(#f0f0f0 0 25%, #b8b8b8 0 50%) 0 0 / 12px 12px; }
     label { display: block; margin: 4px 0; }
@@ -308,6 +375,11 @@
           <button id="btnCompactPalette" title="Merge duplicate colors and remove unused palette entries">compact</button>
         </div>
         <div id="palette"></div>
+        <label class="palette-opacity" title="Opacity of the selected palette color">
+          <span>opacity</span>
+          <input id="paletteAlpha" type="range" min="0" max="100" step="1" value="100">
+          <output id="paletteAlphaValue" for="paletteAlpha">100%</output>
+        </label>
         <div class="swatch">
           <input type="color" id="newColor" value="#38b764">
           <input type="text" id="newChar" maxlength="1" placeholder="ch" style="width:34px">
@@ -429,13 +501,19 @@
         </h2>
         <div id="previewContext" class="hint" style="margin:-2px 0 6px">sprite preview</div>
         <div style="display:flex; justify-content:center; margin-bottom:10px;">
-          <canvas id="preview" width="200" height="80"></canvas>
+          <div id="previewStage">
+            <canvas id="preview" width="200" height="80"></canvas>
+            <div id="combatHitboxOverlay" hidden title="Drag to move the attack region; drag the corner to resize">
+              <span class="combat-resize-handle" data-combat-handle="resize"></span>
+            </div>
+          </div>
         </div>
       </section>
 
       <div id="right-workspace-scroll">
       <div class="panel-tabs" role="tablist" aria-label="sprite workspace">
         <button class="active" data-panel-tab="right" data-panel-target="right-animate" role="tab" aria-selected="true">animate</button>
+        <button data-panel-tab="right" data-panel-target="right-combat" role="tab" aria-selected="false">combat</button>
         <button data-panel-tab="right" data-panel-target="right-layers" role="tab" aria-selected="false">layers</button>
         <button data-panel-tab="right" data-panel-target="right-rig" role="tab" aria-selected="false">rig</button>
       </div>
@@ -462,6 +540,45 @@
         <button id="btnDelFrame" style="flex:1">del</button>
       </div>
 
+      </section>
+      <section id="right-combat" class="panel-page" data-panel-page="right" hidden>
+        <h2>combat <span id="combatWeaponLabel" class="hint"></span></h2>
+        <label>move
+          <select id="combatMove" style="width:100%"></select>
+        </label>
+
+        <div class="panel-group">
+          <h2>timing</h2>
+          <label>shared attack FPS <input id="combatFps" type="number" min="1" max="120" step="0.25"></label>
+          <p id="combatFrameCountLabel" class="hint">frames</p>
+          <div class="combat-timeline" aria-label="Attack active window">
+            <div id="combatActiveBand"></div>
+            <input id="combatActiveStart" type="range" min="1" max="1" step="1" aria-label="Active window start frame">
+            <input id="combatActiveEnd" type="range" min="1" max="1" step="1" aria-label="Active window end frame">
+          </div>
+          <div class="panel-row" style="justify-content:space-between">
+            <span id="combatActiveStartLabel" class="hint">start</span>
+            <span id="combatActiveEndLabel" class="hint">end</span>
+          </div>
+        </div>
+
+        <div class="panel-group">
+          <h2>attack region</h2>
+          <label>aim
+            <select id="combatAim" disabled>
+              <option value="forward">forward</option>
+              <option value="up">up</option>
+              <option value="down">down</option>
+            </select>
+          </label>
+          <div class="transform-grid">
+            <label>forward <input id="combatForward" type="number" step="0.25"></label>
+            <label>y <input id="combatY" type="number" step="0.25"></label>
+            <label>width <input id="combatW" type="number" min="0.25" step="0.25"></label>
+            <label>height <input id="combatH" type="number" min="0.25" step="0.25"></label>
+          </div>
+          <p class="hint">Drag the gold region in the preview to move it. Drag its corner to resize. Timing and geometry are saved as weapon-registry tuning, separate from sprite art.</p>
+        </div>
       </section>
       <section id="right-layers" class="panel-page" data-panel-page="right" hidden>
         <div class="panel-group">
