@@ -28,10 +28,26 @@
     }
     #toolbar .separator { width: 1px; height: 24px; margin: 0 5px; background: #33447f; }
     #toolbar label { display: flex; align-items: center; gap: 3px; margin: 0; }
+    #toolbar .mode-toggle {
+      height: 30px; padding: 4px 7px; border: 1px solid #33447f; border-radius: 4px;
+      color: #94b0c2; background: #1f2a57; cursor: pointer; user-select: none;
+    }
+    #toolbar .mode-toggle:has(input:checked) { color: #07070d; background: #38b764; border-color: #38b764; }
+    #toolbar .mode-toggle:has(input:disabled) { opacity: .45; cursor: default; }
     #gridZoomPercent { width: 72px; text-align: right; }
     #brushSize { width: 58px; text-align: right; }
     main { flex: 1; display: flex; min-height: 0; }
-    #side-left, #side-right { width: 260px; padding: 10px; background: #101430; overflow-y: auto; flex-shrink: 0; }
+    #side-left, #side-right { width: 260px; background: #101430; flex-shrink: 0; }
+    #side-left {
+      padding: 0; overflow: hidden; display: flex; flex-direction: column;
+    }
+    #persistent-palette {
+      flex: 0 1 auto; max-height: 56%; overflow-y: auto; padding: 10px;
+      background: #101430; border-bottom: 1px solid #33447f;
+    }
+    #left-workspace-scroll {
+      flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px;
+    }
     #side-right { width: 300px; }
     #side-right {
       padding: 0; overflow: hidden; display: flex; flex-direction: column;
@@ -145,6 +161,39 @@
     .panel-row { display: flex; gap: 4px; align-items: center; margin-bottom: 6px; }
     .panel-row > button { flex: 1; }
     #right-rig input[type=number] { width: 64px !important; }
+    #right-combat input[type=number] { width: 72px; }
+    .combat-timeline {
+      position: relative; height: 34px; margin: 10px 2px 5px;
+      border: 1px solid #33447f; border-radius: 4px; background: #0b0e20;
+    }
+    #combatActiveBand {
+      position: absolute; top: 8px; bottom: 8px; left: 15%; width: 41%;
+      background: rgba(239, 125, 87, .45); border: 1px solid #ef7d57;
+      pointer-events: none;
+    }
+    .combat-timeline input[type=range] {
+      position: absolute; inset: 0; width: 100%; height: 100%; margin: 0;
+      padding: 0; border: 0; background: transparent; pointer-events: none;
+      appearance: none;
+    }
+    .combat-timeline input[type=range]::-webkit-slider-runnable-track { height: 2px; background: #566c86; }
+    .combat-timeline input[type=range]::-webkit-slider-thumb {
+      appearance: none; width: 12px; height: 22px; margin-top: -10px;
+      border: 2px solid #ffcd75; border-radius: 3px; background: #1f2a57;
+      pointer-events: auto; cursor: ew-resize;
+    }
+    #previewStage { position: relative; line-height: 0; max-width: 100%; }
+    #combatHitboxOverlay {
+      position: absolute; z-index: 3; border: 2px solid #ffcd75;
+      background: rgba(86, 108, 134, .08); cursor: move; line-height: normal;
+      box-shadow: 0 0 0 1px rgba(7, 7, 13, .8); touch-action: none;
+    }
+    #combatHitboxOverlay.active { background: rgba(239, 68, 68, .2); }
+    #combatHitboxOverlay[hidden] { display: none; }
+    .combat-resize-handle {
+      position: absolute; right: -6px; bottom: -6px; width: 11px; height: 11px;
+      border: 2px solid #07070d; background: #ffcd75; cursor: nwse-resize;
+    }
     .transform-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
     .transform-grid label { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
     .transform-grid input { width: 72px; }
@@ -170,8 +219,12 @@
       padding: 0;
       border-radius: 2px;
       border-color: #566c86;
+      position: relative;
+      overflow: hidden;
+      background: repeating-conic-gradient(#f0f0f0 0 25%, #b8b8b8 0 50%) 0 0 / 12px 12px;
       transition: transform 80ms ease, box-shadow 80ms ease;
     }
+    .palette-cell .palette-color { position: absolute; inset: 0; pointer-events: none; }
     .palette-cell:hover { transform: scale(1.08); position: relative; z-index: 1; }
     .palette-cell.none {
       background: repeating-conic-gradient(#f0f0f0 0 25%, #b8b8b8 0 50%) 0 0 / 12px 12px;
@@ -182,6 +235,36 @@
     }
     .swatch { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
     .swatch button { flex: 1; text-align: left; }
+    .palette-opacity { display: grid; grid-template-columns: auto minmax(70px, 1fr) 38px; align-items: center; gap: 6px; }
+    .palette-opacity input[type=range] {
+      --alpha-fill: 100%;
+      appearance: none;
+      width: 100%; min-width: 0; height: 18px; padding: 0;
+      border: 0; background: transparent;
+    }
+    .palette-opacity input[type=range]::-webkit-slider-runnable-track {
+      height: 4px; border-radius: 2px;
+      background: linear-gradient(to right,
+        #9cc8f4 0 var(--alpha-fill),
+        #566c86 var(--alpha-fill) 100%);
+    }
+    .palette-opacity input[type=range]::-webkit-slider-thumb {
+      appearance: none; width: 14px; height: 14px; margin-top: -5px;
+      border: 1px solid #33447f; border-radius: 50%; background: #b9d8f5;
+      box-shadow: 0 0 0 1px #07070d; cursor: ew-resize;
+    }
+    .palette-opacity input[type=range]::-moz-range-track {
+      height: 4px; border: 0; border-radius: 2px;
+      background: linear-gradient(to right,
+        #9cc8f4 0 var(--alpha-fill),
+        #566c86 var(--alpha-fill) 100%);
+    }
+    .palette-opacity input[type=range]::-moz-range-thumb {
+      width: 14px; height: 14px; border: 1px solid #33447f;
+      border-radius: 50%; background: #b9d8f5;
+      box-shadow: 0 0 0 1px #07070d; cursor: ew-resize;
+    }
+    .palette-opacity output { text-align: right; color: #94b0c2; }
     .chip { width: 14px; height: 14px; border: 1px solid #566c86; display: inline-block; flex-shrink: 0; }
     .chip.none { background: repeating-conic-gradient(#f0f0f0 0 25%, #b8b8b8 0 50%) 0 0 / 12px 12px; }
     label { display: block; margin: 4px 0; }
@@ -271,9 +354,9 @@
       <button id="btnToolMagic" class="icon-tool" title="Magic selection (W)" aria-label="Magic selection (W)">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 17L15.5 6.5M12.5 3.5l4 4M4 3v3M2.5 4.5h3M15.5 13v3M14 14.5h3M7.5 8l1.5 1.5"/></svg>
       </button>
-      <button id="btnToolMove" class="icon-tool" title="Move and transform selection (V)" aria-label="Move and transform selection (V)">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v16M2 10h16"/><path d="M7 5l3-3 3 3M7 15l3 3 3-3M5 7l-3 3 3 3M15 7l3 3-3 3"/></svg>
-      </button>
+      <label class="mode-toggle" title="Move, resize, and rotate the current selection (V)">
+        <input id="transformMode" type="checkbox" disabled> transform
+      </label>
     </div>
     <span id="selectionStatus" class="hint">selection: none</span>
     <span class="separator" aria-hidden="true"></span>
@@ -286,24 +369,29 @@
   </div>
   <main>
     <div id="side-left">
-      <div class="panel-tabs" role="tablist" aria-label="asset panels">
-        <button class="active" data-panel-tab="left" data-panel-target="left-colors" role="tab" aria-selected="true">colors</button>
-        <button data-panel-tab="left" data-panel-target="left-tool" role="tab" aria-selected="false">tool</button>
-        <button data-panel-tab="left" data-panel-target="left-reference" role="tab" aria-selected="false">reference</button>
-      </div>
-      <section id="left-colors" class="panel-page" data-panel-page="left">
+      <section id="persistent-palette" aria-label="persistent color palette">
         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px">
           <h2 style="margin:0">palette <span id="paletteStatus" class="hint"></span></h2>
           <button id="btnCompactPalette" title="Merge duplicate colors and remove unused palette entries">compact</button>
         </div>
         <div id="palette"></div>
+        <label class="palette-opacity" title="Opacity of the selected palette color">
+          <span>opacity</span>
+          <input id="paletteAlpha" type="range" min="0" max="100" step="1" value="100">
+          <output id="paletteAlphaValue" for="paletteAlpha">100%</output>
+        </label>
         <div class="swatch">
           <input type="color" id="newColor" value="#38b764">
           <input type="text" id="newChar" maxlength="1" placeholder="ch" style="width:34px">
           <button id="btnAddColor">add</button>
         </div>
       </section>
-      <section id="left-tool" class="panel-page" data-panel-page="left" hidden>
+      <div id="left-workspace-scroll">
+      <div class="panel-tabs" role="tablist" aria-label="asset panels">
+        <button class="active" data-panel-tab="left" data-panel-target="left-tool" role="tab" aria-selected="true">tool</button>
+        <button data-panel-tab="left" data-panel-target="left-reference" role="tab" aria-selected="false">compose</button>
+      </div>
+      <section id="left-tool" class="panel-page" data-panel-page="left">
         <h2 id="toolConfigTitle">tool settings</h2>
         <div id="brushSizeConfig" hidden>
           <label id="brushSizeLabel" style="margin-bottom:8px">brush size</label>
@@ -328,10 +416,60 @@
           </label>
           <p class="hint">Color drift mode maps the clicked source pixel to the active palette color, then applies the same RGB shift to every opaque pixel in the selection so highlights and shadows move together.</p>
         </div>
+        <div id="transformConfig" hidden>
+          <p class="hint">Drag the selection or its handles on the canvas. Transparent and unselected pixels are ignored.</p>
+          <div id="selectionTransforms">
+            <div class="panel-group">
+              <h2>rotate</h2>
+              <div class="panel-row">
+                <button id="btnRotateSelectionLeft" title="Rotate selection 90 degrees counter-clockwise" disabled>&#8634; 90&deg;</button>
+                <button id="btnRotateSelectionRight" title="Rotate selection 90 degrees clockwise" disabled>&#8635; 90&deg;</button>
+              </div>
+              <div class="panel-row">
+                <label>angle <input id="selectionAngle" type="number" min="-359" max="359" step="1" value="0" disabled>&deg;</label>
+                <button id="btnRotateSelection" title="Rotate selection by any angle using nearest-neighbor inverse mapping" disabled>apply</button>
+              </div>
+            </div>
+            <div class="panel-group">
+              <h2>resize</h2>
+              <div class="panel-row">
+                <label>w <input id="selectionW" type="number" min="1" max="160" value="1" disabled></label>
+                <label>h <input id="selectionH" type="number" min="1" max="160" value="1" disabled></label>
+                <button id="btnResizeSelection" title="Resize selection with nearest-neighbor sampling" disabled>apply</button>
+              </div>
+            </div>
+          </div>
+          <div class="panel-group">
+            <h2>nudge</h2>
+            <div class="transform-grid">
+              <span></span><button id="btnNudgeUp" title="Nudge up">&uarr;</button><span></span>
+              <button id="btnNudgeLeft" title="Nudge left">&larr;</button><button id="btnNudgeDown" title="Nudge down">&darr;</button><button id="btnNudgeRight" title="Nudge right">&rarr;</button>
+            </div>
+          </div>
+        </div>
         <p id="toolConfigEmpty" class="hint">The selected tool has no adjustable settings.</p>
       </section>
       <section id="left-reference" class="panel-page" data-panel-page="left" hidden>
-        <h2>reference sprite</h2>
+        <div class="panel-group">
+        <h2>composite preview</h2>
+        <div style="display:flex; flex-direction:column; gap:4px">
+          <select id="compWeapon"><option value="">-- no weapon --</option></select>
+          <select id="compMove" title="Choose the move whose weapon pose, trail, timing, and body motion should be previewed"><option value="">move: auto</option></select>
+          <select id="compBody">
+            <option value="edited">body: edited sprite</option>
+            <option value="player">body: player (full)</option>
+          </select>
+          <div class="panel-row">
+            <label><input type="checkbox" id="compTrail" checked> trail</label>
+            <label><input type="checkbox" id="compHitbox" checked> hitbox</label>
+            <label><input type="checkbox" id="compGear"> gear</label>
+          </div>
+        </div>
+        <p class="hint" style="margin:6px 0 0">Body, held weapon, and attack effects use the game's own renderers.</p>
+        </div>
+
+        <div class="panel-group">
+        <h2>reference overlay</h2>
         <div style="display:flex; flex-direction:column; gap:4px">
           <select id="selectRefSprite" style="background:#1f2a57; color:#f4f4f4; border:1px solid #33447f; border-radius:4px; padding:4px;">
             <option value="">-- select reference --</option>
@@ -342,7 +480,9 @@
         <label style="display:block; margin-top:6px">
           <input type="checkbox" id="showRef" checked> show reference (30% opacity)
         </label>
+        </div>
       </section>
+      </div>
     </div>
 
     <div id="center">
@@ -361,36 +501,23 @@
         </h2>
         <div id="previewContext" class="hint" style="margin:-2px 0 6px">sprite preview</div>
         <div style="display:flex; justify-content:center; margin-bottom:10px;">
-          <canvas id="preview" width="200" height="80"></canvas>
+          <div id="previewStage">
+            <canvas id="preview" width="200" height="80"></canvas>
+            <div id="combatHitboxOverlay" hidden title="Drag to move the attack region; drag the corner to resize">
+              <span class="combat-resize-handle" data-combat-handle="resize"></span>
+            </div>
+          </div>
         </div>
       </section>
 
       <div id="right-workspace-scroll">
       <div class="panel-tabs" role="tablist" aria-label="sprite workspace">
         <button class="active" data-panel-tab="right" data-panel-target="right-animate" role="tab" aria-selected="true">animate</button>
+        <button data-panel-tab="right" data-panel-target="right-combat" role="tab" aria-selected="false">combat</button>
         <button data-panel-tab="right" data-panel-target="right-layers" role="tab" aria-selected="false">layers</button>
-        <button data-panel-tab="right" data-panel-target="right-transform" role="tab" aria-selected="false">transform</button>
         <button data-panel-tab="right" data-panel-target="right-rig" role="tab" aria-selected="false">rig</button>
       </div>
       <section id="right-animate" class="panel-page" data-panel-page="right">
-      <div class="panel-group">
-        <h2>composite</h2>
-        <div style="display:flex; flex-direction:column; gap:4px">
-          <select id="compWeapon"><option value="">-- no weapon --</option></select>
-          <select id="compMove" title="Choose the move whose weapon pose, trail, timing, and body motion should be previewed"><option value="">move: auto</option></select>
-          <select id="compBody">
-            <option value="edited">body: edited sprite</option>
-            <option value="player">body: player (full)</option>
-          </select>
-          <div class="panel-row">
-            <label><input type="checkbox" id="compTrail" checked> trail</label>
-            <label><input type="checkbox" id="compHitbox" checked> hitbox</label>
-            <label><input type="checkbox" id="compGear"> gear</label>
-          </div>
-        </div>
-        <p class="hint" style="margin:6px 0 0">Body, held weapon, and attack effects are rendered together with the game's own renderers.</p>
-      </div>
-
       <h2>animations</h2>
       <div id="anims" style="margin-bottom:6px"></div>
       <div style="display:flex; gap:4px; margin-bottom:6px">
@@ -414,6 +541,45 @@
       </div>
 
       </section>
+      <section id="right-combat" class="panel-page" data-panel-page="right" hidden>
+        <h2>combat <span id="combatWeaponLabel" class="hint"></span></h2>
+        <label>move
+          <select id="combatMove" style="width:100%"></select>
+        </label>
+
+        <div class="panel-group">
+          <h2>timing</h2>
+          <label>shared attack FPS <input id="combatFps" type="number" min="1" max="120" step="0.25"></label>
+          <p id="combatFrameCountLabel" class="hint">frames</p>
+          <div class="combat-timeline" aria-label="Attack active window">
+            <div id="combatActiveBand"></div>
+            <input id="combatActiveStart" type="range" min="1" max="1" step="1" aria-label="Active window start frame">
+            <input id="combatActiveEnd" type="range" min="1" max="1" step="1" aria-label="Active window end frame">
+          </div>
+          <div class="panel-row" style="justify-content:space-between">
+            <span id="combatActiveStartLabel" class="hint">start</span>
+            <span id="combatActiveEndLabel" class="hint">end</span>
+          </div>
+        </div>
+
+        <div class="panel-group">
+          <h2>attack region</h2>
+          <label>aim
+            <select id="combatAim" disabled>
+              <option value="forward">forward</option>
+              <option value="up">up</option>
+              <option value="down">down</option>
+            </select>
+          </label>
+          <div class="transform-grid">
+            <label>forward <input id="combatForward" type="number" step="0.25"></label>
+            <label>y <input id="combatY" type="number" step="0.25"></label>
+            <label>width <input id="combatW" type="number" min="0.25" step="0.25"></label>
+            <label>height <input id="combatH" type="number" min="0.25" step="0.25"></label>
+          </div>
+          <p class="hint">Drag the gold region in the preview to move it. Drag its corner to resize. Timing and geometry are saved as weapon-registry tuning, separate from sprite art.</p>
+        </div>
+      </section>
       <section id="right-layers" class="panel-page" data-panel-page="right" hidden>
         <div class="panel-group">
           <h2>layers <span id="layerStatus" class="hint">flat sprite</span></h2>
@@ -430,6 +596,22 @@
             <button id="btnFlattenLayers" title="Flatten all layers back to a single-layer sprite">flatten</button>
           </div>
           <p class="hint" style="margin:0">Render tags set cross-sprite order. Arrows only reorder layers within the same tag; eye, solo, and lock are editor-only.</p>
+        </div>
+        <div class="panel-group">
+          <h2>extract through frames</h2>
+          <div class="panel-row">
+            <label style="flex:1">to layer
+              <select id="layerExtractTarget" style="width:100%"></select>
+            </label>
+            <label style="flex:1">follow anchor
+              <select id="layerExtractAnchor" style="width:100%"></select>
+            </label>
+          </div>
+          <div class="panel-row">
+            <button id="btnExtractSelection" style="flex:1">move selection</button>
+            <button id="btnExtractNext" style="flex:1">move + next</button>
+          </div>
+          <p id="layerExtractStatus" class="hint" style="margin:0">Select pixels on the active source layer. Move + next advances one frame and carries the selection by the chosen anchor.</p>
         </div>
       </section>
       <section id="right-rig" class="panel-page" data-panel-page="right" hidden>
@@ -483,39 +665,6 @@
       <p class="hint" style="margin:0 0 8px">A slot gives gameplay a stable name such as mainHand; its anchor may move independently in every animation frame.</p>
 
       </section>
-      <section id="right-transform" class="panel-page" data-panel-page="right" hidden>
-        <h2>selection</h2>
-        <p class="hint">Use Select (M) for a rectangle or Magic (W) for a color-shaped mask, then choose Move (V) to drag, resize, rotate, or nudge it. Transparent and unselected pixels are ignored.</p>
-        <div id="selectionTransforms">
-          <div class="panel-group">
-            <h2>rotate</h2>
-            <div class="panel-row">
-              <button id="btnRotateSelectionLeft" title="Rotate selection 90 degrees counter-clockwise" disabled>&#8634; 90&deg;</button>
-              <button id="btnRotateSelectionRight" title="Rotate selection 90 degrees clockwise" disabled>&#8635; 90&deg;</button>
-            </div>
-            <div class="panel-row">
-              <label>angle <input id="selectionAngle" type="number" min="-359" max="359" step="1" value="0" disabled>&deg;</label>
-              <button id="btnRotateSelection" title="Rotate selection by any angle using nearest-neighbor inverse mapping" disabled>apply</button>
-            </div>
-          </div>
-          <div class="panel-group">
-            <h2>resize</h2>
-            <div class="panel-row">
-              <label>w <input id="selectionW" type="number" min="1" max="160" value="1" disabled></label>
-              <label>h <input id="selectionH" type="number" min="1" max="160" value="1" disabled></label>
-              <button id="btnResizeSelection" title="Resize selection with nearest-neighbor sampling" disabled>apply</button>
-            </div>
-          </div>
-        </div>
-        <div class="panel-group">
-          <h2>nudge</h2>
-          <div class="transform-grid">
-            <span></span><button id="btnNudgeUp" title="Nudge up">&uarr;</button><span></span>
-            <button id="btnNudgeLeft" title="Nudge left">&larr;</button><button id="btnNudgeDown" title="Nudge down">&darr;</button><button id="btnNudgeRight" title="Nudge right">&rarr;</button>
-          </div>
-        </div>
-      </section>
-
       <section id="right-data" class="panel-page" data-panel-page="right" hidden>
       <h2>sprite json</h2>
       <div class="panel-row">
@@ -526,7 +675,7 @@
       <p class="hint" style="margin:0">
         paint: left-drag &middot; erase: right-drag &middot; picker: Alt<br>
         pencil P &middot; brush B &middot; blur U &middot; fill G &middot; select M &middot; magic W<br>
-        selection: Shift adds &middot; Alt removes &middot; Shift+Alt intersects &middot; drag inside to move &middot; drag square handles to resize &middot; drag green handle to rotate &middot; Shift snaps 15&deg;<br>
+        selection: Shift adds &middot; Alt removes &middot; Shift+Alt intersects &middot; transform V &middot; drag inside to move &middot; drag square handles to resize &middot; drag green handle to rotate &middot; Shift snaps 15&deg;<br>
         export/import JSON (content/sprites/*.json)
       </p>
       </section>

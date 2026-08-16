@@ -24,6 +24,12 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--target-height", type=int, default=110)
     parser.add_argument("--padding", type=int, default=18)
     parser.add_argument(
+        "--columns",
+        type=int,
+        default=0,
+        help="pack frames into this many columns (0 keeps a single row)",
+    )
+    parser.add_argument(
         "--anchor",
         choices=("center", "feet"),
         default="center",
@@ -106,7 +112,10 @@ def main() -> None:
     shared_baseline = frame_height - args.padding
 
     key = (255, 0, 255)
-    sheet = Image.new("RGB", (frame_width * len(images), frame_height), key)
+    columns = args.columns if args.columns > 0 else len(images)
+    columns = min(columns, len(images))
+    rows = math.ceil(len(images) / columns)
+    sheet = Image.new("RGB", (frame_width * columns, frame_height * rows), key)
     rects: list[dict[str, int]] = []
     for index, (image, array, box, mask, anchor) in enumerate(
         zip(images, arrays, boxes, masks, anchors, strict=True)
@@ -123,11 +132,20 @@ def main() -> None:
         source_right = min(source_width, right)
         source_top = max(0, top)
         source_bottom = min(source_height, bottom)
-        destination_x = index * frame_width + max(0, -left)
-        destination_y = max(0, -top)
+        column = index % columns
+        row = index // columns
+        destination_x = column * frame_width + max(0, -left)
+        destination_y = row * frame_height + max(0, -top)
         crop = clean_image.crop((source_left, source_top, source_right, source_bottom))
         sheet.paste(crop, (destination_x, destination_y))
-        rects.append({"x": index * frame_width, "y": 0, "w": frame_width, "h": frame_height})
+        rects.append(
+            {
+                "x": column * frame_width,
+                "y": row * frame_height,
+                "w": frame_width,
+                "h": frame_height,
+            }
+        )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(args.output, optimize=True)
@@ -135,6 +153,7 @@ def main() -> None:
         "sourceFrames": [path.name for path in paths],
         "sourceSize": [source_width, source_height],
         "frameSize": [frame_width, frame_height],
+        "sheetGrid": [columns, rows],
         "targetSize": [args.target_width, args.target_height],
         "rects": rects,
         "bounds": [list(box) for box in boxes],
