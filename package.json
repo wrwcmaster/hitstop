@@ -18,7 +18,9 @@
     "arena-trial": "node tools/agent-play/arena-trial.mjs",
     "measure": "node tools/agent-play/measure.mjs",
     "learn": "node tools/agent-play/learn/train.mjs",
-    "learn:collect": "node tools/agent-play/learn/collect.mjs"
+    "learn:collect": "node tools/agent-play/learn/collect.mjs",
+    "test:sprite-editor": "node tools/sprite-editor-document.test.mjs",
+    "test:sprite-editor:ui": "node tools/sprite-editor-smoke.mjs"
   },
   "devDependencies": {
     "playwright": "^1.61.1",
