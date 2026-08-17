@@ -14,6 +14,12 @@ const server = await createServer({
 try {
   const model = await server.ssrLoadModule('/tools/src/sprite-editor-document.ts');
   const workspace = await server.ssrLoadModule('/tools/src/sprite-editor-workspace.ts');
+  const renderPolicy = await server.ssrLoadModule('/src/game/actors/player-render-policy.ts');
+
+  assert.equal(renderPolicy.shouldSuppressHeldWeapon(true, true), true);
+  assert.equal(renderPolicy.shouldSuppressHeldWeapon(true, false), false);
+  assert.equal(renderPolicy.shouldSuppressHeldWeapon(false, true), false);
+  assert.equal(renderPolicy.shouldSuppressHeldWeapon(undefined, true), false);
 
   const layered = () => ({
     hd: true,

@@ -46,6 +46,7 @@ import { rebuildGearVisual } from '@game/content/gear-visuals';
 // so pulling in items and classes here fills every registry the
 // constructor touches.
 import { Player } from '@game/actors/player';
+import { shouldSuppressHeldWeapon } from '@game/actors/player-render-policy';
 import '@game/content/items';
 import '@game/content/classes';
 import '@game/content/skills';
@@ -4649,6 +4650,13 @@ function renderComposite(t: number, pausedFrame?: number): boolean {
   // an attack pose, fall back to idle rather than throwing mid-paint.
   const known = weaponVisuals.get(wdef!.visual).animations;
   const weaponAnim = !known || known.includes(animName) ? animName : 'idle';
+  // Match Player.render: embeddedHeldObject suppresses the attachment only
+  // when this raw body really owns the requested authored move. If it fell
+  // back to attack/idle, the ordinary weapon is still the only visible blade.
+  const embeddedHeldObject = shouldSuppressHeldWeapon(
+    atkDef?.embeddedHeldObject,
+    Boolean(atkDef && requestedBodyAnim === atkDef.animation),
+  );
   const weaponContext = {
     facing: 1 as const, anim: weaponAnim, frame: sharedFrame, animT: tIn,
     bodyW: dw, bodyH: dh,
@@ -4686,9 +4694,11 @@ function renderComposite(t: number, pausedFrame?: number): boolean {
     if (bodyImg) {
       pctx.drawImage(bodyImg, -dw / 2, -dh, dw, dh);
     }
-    try {
-      drawHeldWeaponTag(pctx, wdef!.visual, weaponContext, tag);
-    } catch { /* a half-painted sheet mid-edit; next frame will catch up */ }
+    if (!embeddedHeldObject) {
+      try {
+        drawHeldWeaponTag(pctx, wdef!.visual, weaponContext, tag);
+      } catch { /* a half-painted sheet mid-edit; next frame will catch up */ }
+    }
   }
   pctx.restore();
 

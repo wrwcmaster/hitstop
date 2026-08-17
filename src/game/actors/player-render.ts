@@ -11,6 +11,7 @@ import {
 import { orderedPlayerRenderTags } from '../content/render-tags';
 import { PLAYER_TUNING } from './player-tuning';
 import type { Player } from './player';
+import { shouldSuppressHeldWeapon } from './player-render-policy';
 
 /**
  * How the knight is drawn — the whole picture, from body English to the
@@ -250,7 +251,15 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
   const bodyTags = new Set(baseKnight.tags());
   const bodyOverlayTag = [...renderTags].reverse().find((tag) => bodyTags.has(tag));
   const gripRenderTag = heldWeaponGripRenderTag(weapon.visual);
-  const embeddedHeldObject = p.fsm.is('attack') && p.attackDef?.embeddedHeldObject;
+  // A move may request authored weapon-in-body art while the installed body
+  // lacks that animation (custom sheets only promise idle/run/air). In that
+  // case the body stays on locomotion art, so the ordinary held weapon must
+  // remain visible. Suppress it only when this body actually supplied the
+  // authored attack frames selected above.
+  const embeddedHeldObject = shouldSuppressHeldWeapon(
+    p.attackDef?.embeddedHeldObject,
+    Boolean(authoredAttack),
+  );
   for (const tag of renderTags) {
     drawBodyTag(tag);
     if (tag === bodyOverlayTag) {
