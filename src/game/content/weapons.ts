@@ -500,10 +500,11 @@ defineWeaponType('sword', {
     attack({
       duration: 0.16, active: [0.15, 0.56], damageScale: 1, strength: 0.42, lunge: 45,
       hitbox: { forward: -2, y: 0, w: 20, h: 16 },
-      // Attack 1's slash is authored directly in the sword frames. Keep
-      // this geometry for pose timing, but do not stack a generated arc
-      // over the baked pixels.
+      // This move's complete body, blade, hand, and arc are authored on one
+      // timeline in the knight's own layered sprite. Weapon-specific overlay
+      // layers can still tint or decorate the embedded blade.
       trail: { startAngle: -1.3, endAngle: 1.3, radius: 13, thickness: 3.5, overlay: false },
+      embeddedHeldObject: true,
     }),
     attack({
       animation: 'attack2',

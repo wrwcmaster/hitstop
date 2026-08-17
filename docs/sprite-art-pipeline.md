@@ -234,6 +234,60 @@ The `knight-v2` eye is one reference example: automatic conversion retained the 
 
 Do not silently replace a dirty shared document. Read its revision, merge only the intended pixels, and leave repository saving explicit until the human accepts the result.
 
+### Patch an embedded weapon one frame at a time
+
+An attack frame may already contain a generic weapon and slash effect while an
+equipment sprite supplies item-specific art. Treat the equipment art as a
+small, layered patch over the approved body frame. Do not regenerate or
+re-normalize the complete character merely to change the weapon.
+
+Use this order for each frame:
+
+1. Open the body and equipment sprites on the same animation and frame number.
+2. Clear only the target equipment frame's `Sword` and `Slash` layers. Confirm
+   that no stale overlay remains before copying anything.
+3. Copy the pristine normalized weapon from its approved source frame. Always
+   restart from this untouched source; rotating an already transformed copy a
+   second time compounds rasterization damage and softens the pixel clusters.
+4. Measure the source and target weapon axes from two visible points, normally
+   grip center to blade tip. Their angle difference gives the rotation; their
+   length ratio gives the per-frame scale, since perspective and pose may make
+   the apparent sword length change. Derive both first and apply scale plus
+   rotation to the untouched source in one resampling pass, then translate the
+   result into place. Prefer uniform scaling unless the approved reference
+   clearly requires a width change. Scale, rotation, and translation are
+   separate visual checks even when scale and rotation share one raster pass.
+5. Align the rendered weapon to the embedded reference in the live composite.
+   The opaque-pixel bounding box is not the transform box: transparent pixels,
+   the selection rectangle, and its pivot all affect placement. Use the live
+   selection bounds and transform state, not an inferred five-pixel component
+   box or stale serialized coordinates.
+6. After the art is visually correct, update both attachment endpoints for the
+   frame: the body's hand anchor and the weapon's grip anchor. Anchors describe
+   the accepted placement; they must not be used to justify a visibly wrong
+   placement when the existing anchor metadata is itself inaccurate.
+7. Add small detached weapon details, such as a pommel cap, as part of the
+   weapon overlay and verify them against the live frame. Preserve the full
+   selection rectangle and pivot when moving these details, even if only a few
+   pixels inside that rectangle are opaque.
+8. Put the slash effect on its own `Slash` overlay. Extract the exact connected
+   effect shape from the approved body frame, excluding the embedded blade,
+   then transfer the material colors from an already approved slash frame.
+   Preserve the source shape and alpha structure; color matching must not
+   redraw its silhouette.
+9. Inspect the editor grid and the body-plus-equipment preview on the same
+   frame. Save only after the overlay covers the embedded reference, the grip
+   is stable, the detached details are aligned, and no original effect color
+   leaks around the patch.
+
+The editor's live document is authoritative during this workflow. Before an
+agent edit, require a synced bridge revision. If the editor reports a conflict,
+stop: do not calculate from or write through the stale bridge state. Reconcile
+the live browser edit first, especially after a human has manually corrected a
+transform. Make one deterministic change, render it, and visually verify it
+before reporting success. A JSON-valid result or a mathematically aligned
+anchor is not evidence that the pixels are aligned.
+
 ## 7. Approval gates
 
 Advance only when the previous applicable gate is accepted:
