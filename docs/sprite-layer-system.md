@@ -119,6 +119,7 @@ interface SpriteLayerData {
   id: string;
   name: string;
   tag: string;
+  composition?: 'base' | 'overlay';
   tracks: Record<string, string[][]>;
 }
 
@@ -150,6 +151,13 @@ The loader and editor enforce these rules rather than repairing malformed conten
 8. Anchors remain sprite-global and frame-aligned. They do not belong to a paint layer.
 9. Tag registry order determines cross-tag z-order. Layer array order is only a stable tie-breaker within one tag.
 10. Initial support uses normal, fully opaque indexed-pixel compositing only.
+
+`composition` is orthogonal to render order. It defaults to `base`: when a
+composite supplies alternate base art (for example, a sword already authored
+inside a body attack frame), that layer is replaced. An `overlay` layer remains
+visible and contains only item-specific decoration such as rust, an enchantment
+glow, blood, or cracks. Render tags still decide whether that decoration sits
+behind or in front of hands and effects.
 
 Requiring complete tracks is intentionally stricter than treating a missing track as transparent. It makes frame duplication, reordering, undo, validation, and agent edits deterministic. The editor creates the transparent data automatically, so artists do not pay the bookkeeping cost.
 
@@ -233,6 +241,12 @@ The initial ordered bands are `behind-body`, `body`, `front-hand-held-object`,
 `foreground-body` therefore covers a weapon blade tagged `front-hand-held-object`.
 A weapon may also contribute its blade to `front-hand-held-object` and its glow to
 `foreground-effects`; both layers use the same attachment transform.
+
+When an attack body embeds the shared weapon silhouette and pose, the renderer
+does not special-case a weapon id or animation name. It draws the body-authored
+base and then draws only the equipped weapon's `overlay` composition layers.
+This keeps the expensive pose animation reusable by weapon type while allowing
+each item to carry a small, frame-aligned visual patch.
 
 Tag ids and order live in one content registry. Adding a tag is a registry
 change, never coordinated numeric z-index edits. Unknown tags fail during

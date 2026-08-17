@@ -38,7 +38,7 @@ try {
         },
       },
       {
-        id: 'hand', name: 'Hand', tag: 'front', tracks: {
+        id: 'hand', name: 'Hand', tag: 'front', composition: 'overlay', tracks: {
           idle: [['..', 'B.'], ['..', '.B']],
           run: [['..', 'B.']],
         },
@@ -54,6 +54,17 @@ try {
     },
     attachmentSlots: { weapon: { anchor: 'grip' } },
   });
+
+  {
+    const file = layered();
+    model.validateSpriteEditorDocument(file);
+    assert.equal(file.layers[1].composition, 'overlay');
+    file.layers[1].composition = 'mystery';
+    assert.throws(
+      () => model.validateSpriteEditorDocument(file),
+      /unknown composition "mystery"/,
+    );
+  }
 
   {
     const file = layered();

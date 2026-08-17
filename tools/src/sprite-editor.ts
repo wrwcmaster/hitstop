@@ -19,6 +19,7 @@ import repositoryRenderTagDefs from '@game/content/render-tags.json';
 // game draws. The weapon anchors and the trail are code, not sprites;
 // no sprite-only overlay could show this truthfully.
 import {
+  drawEmbeddedHeldWeaponTag,
   drawHeldWeaponTag,
   drawWeaponTrail,
   weaponVisuals,
@@ -90,7 +91,6 @@ let previewStepFrame = 0;
 let previewStepping = false;
 let previewDisplayedFrame = 0;
 let previewZoom = 1;
-let previewZoomFit = true;
 let currentChar = firstPaintChar();
 let painting = false;
 let erasing = false;
@@ -909,7 +909,7 @@ interface EditorViewState {
   leftPanel?: string;
   rightPanel?: string;
   panels?: { left: boolean; right: boolean };
-  preview: { playing: boolean; stepping: boolean; frame: number; zoom?: number; fit?: boolean };
+  preview: { playing: boolean; stepping: boolean; frame: number; zoom?: number };
   composite: {
     weapon: string;
     move: string;
@@ -958,7 +958,6 @@ function captureEditorViewState(): EditorViewState {
       stepping: previewStepping,
       frame: previewStepFrame,
       zoom: previewZoom,
-      fit: previewZoomFit,
     },
     composite: {
       weapon: ($('compWeapon') as HTMLSelectElement).value,
@@ -1015,7 +1014,6 @@ function restoreEditorViewState(saved?: EditorViewState): void {
     previewStepping = state.preview.stepping;
     previewStepFrame = state.preview.frame;
     previewZoom = Math.max(0.1, Math.min(8, state.preview.zoom ?? previewZoom));
-    previewZoomFit = state.preview.fit ?? previewZoomFit;
 
     const weapon = $('compWeapon') as HTMLSelectElement;
     if ([...weapon.options].some((option) => option.value === state.composite.weapon)) {
@@ -1090,8 +1088,7 @@ $('btnResetWorkspace').addEventListener('click', () => {
   setPanelVisibility('right', true, false);
   activatePanel('left', 'left-tool');
   activatePanel('right', 'right-animate');
-  previewZoomFit = true;
-  applyPreviewZoom();
+  fitPreview();
   fitGrid();
   persistEditorViewState();
   flash('workspace reset');
@@ -2218,6 +2215,24 @@ function buildLayers(): void {
       }, { refresh: 'all' });
     };
 
+    const composition = document.createElement('select');
+    composition.className = 'layer-composition';
+    composition.title = 'Base art is replaced by an embedded attachment; overlays remain visible';
+    for (const [value, label] of [['base', 'base'], ['overlay', 'overlay']] as const) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      composition.appendChild(option);
+    }
+    composition.value = layer.composition ?? 'base';
+    composition.disabled = !isLayeredSpriteFile(file);
+    composition.onchange = () => {
+      if (!isLayeredSpriteFile(file) || (layer.composition ?? 'base') === composition.value) return;
+      commitDocumentEdit(() => {
+        layer.composition = composition.value as 'base' | 'overlay';
+      }, { refresh: 'all' });
+    };
+
     const lock = document.createElement('button');
     lock.textContent = lockedLayerIds.has(layer.id) ? '◆' : '◇';
     lock.className = `layer-toggle ${lockedLayerIds.has(layer.id) ? 'on' : ''}`;
@@ -2229,7 +2244,7 @@ function buildLayers(): void {
       buildLayers();
     };
 
-    row.append(eye, solo, name, tag, lock);
+    row.append(eye, solo, name, tag, composition, lock);
     host.appendChild(row);
   }
 
@@ -2243,14 +2258,23 @@ function buildLayers(): void {
   const renderIndex = layerFile
     ? layersInRenderOrder(layerFile).findIndex((layer) => layer.id === activeLayerId)
     : -1;
+  const mergeTarget = layerFile && renderIndex > 0
+    ? layersInRenderOrder(layerFile)[renderIndex - 1]
+    : undefined;
   const canMoveUp = tagIndex >= 0 && tagIndex < tagLayers.length - 1;
   const canMoveDown = tagIndex > 0;
-  const canMergeDown = renderIndex > 0;
+  const canMergeDown = Boolean(active && mergeTarget
+    && active.tag === mergeTarget.tag
+    && (active.composition ?? 'base') === (mergeTarget.composition ?? 'base'));
   $('layerStatus').textContent = layerFile ? `${layerFile.layers.length} layers` : 'flat sprite';
   ($('btnDupLayer') as HTMLButtonElement).disabled = !layered;
   ($('btnLayerUp') as HTMLButtonElement).disabled = !canMoveUp;
   ($('btnLayerDown') as HTMLButtonElement).disabled = !canMoveDown;
-  ($('btnMergeLayer') as HTMLButtonElement).disabled = !canMergeDown;
+  const mergeButton = $('btnMergeLayer') as HTMLButtonElement;
+  mergeButton.disabled = !canMergeDown;
+  mergeButton.title = canMergeDown
+    ? 'Merge active layer into the layer below'
+    : 'Merge requires adjacent layers with the same render tag and composition role';
   ($('btnDelLayer') as HTMLButtonElement).disabled = !layerFile || layerFile.layers.length <= 1;
   ($('btnFlattenLayers') as HTMLButtonElement).disabled = !layered;
   buildLayerExtractionControls();
@@ -4694,11 +4718,10 @@ function renderComposite(t: number, pausedFrame?: number): boolean {
     if (bodyImg) {
       pctx.drawImage(bodyImg, -dw / 2, -dh, dw, dh);
     }
-    if (!embeddedHeldObject) {
-      try {
-        drawHeldWeaponTag(pctx, wdef!.visual, weaponContext, tag);
-      } catch { /* a half-painted sheet mid-edit; next frame will catch up */ }
-    }
+    try {
+      if (embeddedHeldObject) drawEmbeddedHeldWeaponTag(pctx, wdef!.visual, weaponContext, tag);
+      else drawHeldWeaponTag(pctx, wdef!.visual, weaponContext, tag);
+    } catch { /* a half-painted sheet mid-edit; next frame will catch up */ }
   }
   pctx.restore();
 
@@ -4769,6 +4792,20 @@ function updateCombatHitboxOverlay(): void {
 
 const PREVIEW_ZOOMS = [0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8];
 
+/** Calculate a two-dimensional "fit in viewport" zoom for every editor surface. */
+function fittedZoom(
+  viewport: HTMLElement,
+  contentWidth: number,
+  contentHeight: number,
+  insetX: number,
+  insetY: number,
+): number {
+  if (contentWidth <= 0 || contentHeight <= 0) return 1;
+  const availableW = Math.max(1, viewport.clientWidth - insetX);
+  const availableH = Math.max(1, viewport.clientHeight - insetY);
+  return Math.min(availableW / contentWidth, availableH / contentHeight);
+}
+
 /** Keep the same content point beneath the visible viewport center while zooming. */
 function updateZoomPreservingViewport(
   viewport: HTMLElement,
@@ -4793,31 +4830,28 @@ function updateZoomPreservingViewport(
 
 function fittedPreviewZoom(): number {
   const viewport = $('previewViewport');
-  if (!preview.width || !viewport.clientWidth) return 1;
-  // Fit preserves the editor's old behaviour: shrink oversized previews,
-  // but do not enlarge small sprites unless the author explicitly zooms in.
-  return Math.min(1, Math.max(0.1, (viewport.clientWidth - 2) / preview.width));
-}
-
-function activePreviewZoom(): number {
-  return previewZoomFit ? fittedPreviewZoom() : previewZoom;
+  const fitted = fittedZoom(viewport, preview.width, preview.height, 2, 2);
+  return Math.max(PREVIEW_ZOOMS[0], Math.min(PREVIEW_ZOOMS.at(-1)!, fitted));
 }
 
 function applyPreviewZoom(preserveViewport = false): void {
   updateZoomPreservingViewport($('previewViewport'), preview, () => {
-    const scale = activePreviewZoom();
-    preview.style.width = `${preview.width * scale}px`;
-    preview.style.height = `${preview.height * scale}px`;
-    ($('previewZoomPercent') as HTMLInputElement).value = String(Math.round(scale * 100));
-    $('previewZoomFit').classList.toggle('active', previewZoomFit);
-    $('previewZoomFit').setAttribute('aria-pressed', String(previewZoomFit));
+    preview.style.width = `${preview.width * previewZoom}px`;
+    preview.style.height = `${preview.height * previewZoom}px`;
+    ($('previewZoomPercent') as HTMLInputElement).value = String(Math.round(previewZoom * 100));
   }, preserveViewport);
 }
 
-function setPreviewZoom(value: number): void {
-  previewZoomFit = false;
+function setPreviewZoom(value: number, preserveViewport = true): void {
   previewZoom = Math.max(PREVIEW_ZOOMS[0], Math.min(PREVIEW_ZOOMS.at(-1)!, value));
-  applyPreviewZoom(true);
+  applyPreviewZoom(preserveViewport);
+}
+
+function fitPreview(): void {
+  setPreviewZoom(fittedPreviewZoom(), false);
+  const viewport = $('previewViewport');
+  viewport.scrollLeft = 0;
+  viewport.scrollTop = 0;
 }
 
 interface CombatHitboxDrag {
@@ -5766,9 +5800,7 @@ function setGridZoom(value: number, preserveViewport = true): void {
 
 function fitGrid(): void {
   const center = $('center');
-  const availableW = Math.max(1, center.clientWidth - 40);
-  const availableH = Math.max(1, center.clientHeight - 40);
-  const ideal = Math.floor(Math.min(availableW / W(), availableH / H()));
+  const ideal = Math.floor(fittedZoom(center, W(), H(), 40, 40));
   setGridZoom([...GRID_ZOOMS].reverse().find((size) => size <= ideal) ?? GRID_ZOOMS[0], false);
   center.scrollLeft = 0;
   center.scrollTop = 0;
@@ -6465,22 +6497,14 @@ $('previewNext').onclick = () => stepPreview(1);
   setPreviewZoom(Number((event.target as HTMLInputElement).value) / 100);
 };
 $('previewZoomOut').onclick = () => {
-  const current = activePreviewZoom();
+  const current = previewZoom;
   setPreviewZoom([...PREVIEW_ZOOMS].reverse().find((zoom) => zoom < current - 0.001) ?? PREVIEW_ZOOMS[0]);
 };
 $('previewZoomIn').onclick = () => {
-  const current = activePreviewZoom();
+  const current = previewZoom;
   setPreviewZoom(PREVIEW_ZOOMS.find((zoom) => zoom > current + 0.001) ?? PREVIEW_ZOOMS.at(-1)!);
 };
-$('previewZoomFit').onclick = () => {
-  previewZoomFit = true;
-  applyPreviewZoom();
-  $('previewViewport').scrollLeft = 0;
-  $('previewViewport').scrollTop = 0;
-};
-window.addEventListener('resize', () => {
-  if (previewZoomFit) applyPreviewZoom();
-});
+$('previewZoomFit').onclick = () => fitPreview();
 ($('previewPlay') as HTMLInputElement).addEventListener('change', () => {
   if (($('previewPlay') as HTMLInputElement).checked) previewStepping = false;
 });

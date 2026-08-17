@@ -33,6 +33,12 @@ export interface SpriteLayerData {
   name: string;
   /** Shared render band used when this sprite is composed with attachments. */
   tag: string;
+  /**
+   * How this layer participates when a composite supplies alternate base art.
+   * `base` layers are replaced with that art; `overlay` layers remain visible
+   * as non-destructive decoration. Default `base`.
+   */
+  composition?: 'base' | 'overlay';
   /** Concrete animation name to one text-grid frame per timeline frame. */
   tracks: Record<string, string[][]>;
 }
@@ -131,6 +137,9 @@ export function validateLayeredSpriteFile(file: LayeredSpriteFile): void {
     ids.add(layer.id);
     if (!layer.name?.trim()) throw new Error(`sprite: layer "${layer.id}" needs a name`);
     if (!layer.tag?.trim()) throw new Error(`sprite: layer "${layer.id}" needs a render tag`);
+    if (layer.composition !== undefined && layer.composition !== 'base' && layer.composition !== 'overlay') {
+      throw new Error(`sprite: layer "${layer.id}" has unknown composition "${layer.composition}"`);
+    }
     if (!layer.tracks || typeof layer.tracks !== 'object') {
       throw new Error(`sprite: layer "${layer.id}" needs tracks`);
     }

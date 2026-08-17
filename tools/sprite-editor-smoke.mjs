@@ -25,7 +25,7 @@ const fixture = () => ({
       },
     },
     {
-      id: 'hand', name: 'Hand', tag: 'front-hand', tracks: {
+      id: 'hand', name: 'Hand', tag: 'front-hand', composition: 'overlay', tracks: {
         idle: [['.B'], ['B.']],
       },
     },
@@ -72,6 +72,37 @@ try {
   assert.equal(await page.locator('#workspaceStatusbar').isVisible(), true);
   assert.equal(await page.locator('#documentIdentity > .document-subline > #bridgeStatus').count(), 1);
   assert.doesNotMatch((await page.locator('#bridgeStatus').textContent()) ?? '', /bridge:|\.json|\//);
+  await page.click('#previewZoomFit');
+  const previewFit = await page.evaluate(() => {
+    const canvas = document.querySelector('#preview');
+    const viewport = document.querySelector('#previewViewport');
+    const actual = parseFloat(canvas.style.width) / canvas.width;
+    const expected = Math.max(0.1, Math.min(8, Math.min(
+      (viewport.clientWidth - 2) / canvas.width,
+      (viewport.clientHeight - 2) / canvas.height,
+    )));
+    return {
+      actual,
+      expected,
+      fitsWidth: canvas.getBoundingClientRect().width <= viewport.clientWidth,
+      fitsHeight: canvas.getBoundingClientRect().height <= viewport.clientHeight,
+    };
+  });
+  assert.ok(
+    Math.abs(previewFit.actual - previewFit.expected) < 0.02,
+    `preview fit mismatch: ${JSON.stringify(previewFit)}`,
+  );
+  assert.equal(previewFit.fitsWidth, true);
+  assert.equal(previewFit.fitsHeight, true);
+  assert.equal(await page.locator('#previewZoomFit').getAttribute('aria-pressed'), null);
+  const firstPreviewFit = await page.locator('#previewZoomPercent').inputValue();
+  await page.click('#previewZoomFit');
+  await page.click('#previewZoomFit');
+  assert.equal(
+    await page.locator('#previewZoomPercent').inputValue(),
+    firstPreviewFit,
+    'repeated preview Fit commands must be idempotent',
+  );
   assert.deepEqual(await page.locator('#activeToolContext').evaluate((element) => {
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
@@ -131,6 +162,20 @@ try {
   }
 
   await page.evaluate((file) => window.__editor.replace(file, null), fixture());
+  assert.deepEqual(
+    await page.locator('.layer-composition').evaluateAll((selects) => (
+      selects.map((select) => select.value)
+    )),
+    ['overlay', 'base'],
+    'layer composition roles must be visible and survive document loading',
+  );
+  await page.locator('.layer-composition').first().evaluate((select) => {
+    select.value = 'base';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  assert.equal(await page.evaluate(() => window.__editor.file.layers[1].composition), 'base');
+  await page.keyboard.press('Control+Z');
+  assert.equal(await page.evaluate(() => window.__editor.file.layers[1].composition), 'overlay');
   await page.keyboard.press('Control+A');
   assert.deepEqual(await page.evaluate(() => {
     const { x, y, w, h } = window.__editor.selection;

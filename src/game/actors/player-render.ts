@@ -4,7 +4,7 @@ import { gearLayers, DEBUG_ANCHORS } from '../content/gear-visuals';
 import { COLORS } from '../content/palette';
 import { IMPACT_DROP_PLUNGE } from '../content/weapons';
 import {
-  drawHeldWeaponTag, drawWeaponTrail, drawNeutralTrail, heldWeaponAttachmentSlot,
+  drawHeldWeaponTag, drawEmbeddedHeldWeaponTag, drawWeaponTrail, drawNeutralTrail, heldWeaponAttachmentSlot,
   heldWeaponGripRenderTag, heldWeaponHands,
   type HeldWeaponCtx,
 } from '../content/weapon-visuals';
@@ -269,8 +269,9 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
       }
       if (p.flashT <= 0 && p.equipment.get('charm')) renderCharm(g, dh);
     }
-    if (p.flashT <= 0 && !embeddedHeldObject) {
-      drawHeldWeaponTag(g, weapon.visual, weaponCtx, tag);
+    if (p.flashT <= 0) {
+      if (embeddedHeldObject) drawEmbeddedHeldWeaponTag(g, weapon.visual, weaponCtx, tag);
+      else drawHeldWeaponTag(g, weapon.visual, weaponCtx, tag);
     }
     if (p.flashT <= 0 && !embeddedHeldObject && tag === gripRenderTag) {
       for (const hand of heldWeaponHands(weapon.visual, p.fsm.is('draw'))) {

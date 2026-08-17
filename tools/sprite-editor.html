@@ -66,7 +66,10 @@
       padding: 0; overflow: hidden; display: flex; flex-direction: column;
     }
     #persistent-preview {
-      flex: 0 0 auto; max-height: 56%; min-height: 0; overflow: hidden; padding: 10px;
+      /* A dock must not derive its size from the artwork inside it. Otherwise
+         Fit shrinks the canvas, the dock follows, and the next Fit shrinks it
+         again. A stable dock makes fitting an idempotent viewport operation. */
+      flex: 0 0 56%; max-height: 56%; min-height: 0; overflow: hidden; padding: 10px;
       display: flex; flex-direction: column; box-sizing: border-box;
       background: #101430; border-bottom: 1px solid #33447f;
     }
@@ -207,7 +210,6 @@
       pointer-events: auto; cursor: ew-resize;
     }
     #previewZoomPercent { width: 62px; text-align: right; }
-    #previewZoomFit.active { background: #38b764; color: #07070d; border-color: #38b764; }
     #previewViewport {
       flex: 1 1 auto; min-height: 0; width: 100%; overflow: auto;
       margin-bottom: 10px;
@@ -313,7 +315,7 @@
     #frames button { margin-right: 4px; }
     #layers { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
     .layer-row {
-      display: grid; grid-template-columns: 28px 28px minmax(0, 1fr) minmax(82px, .8fr) 28px;
+      display: grid; grid-template-columns: 28px 28px minmax(0, 1fr) minmax(76px, .8fr) minmax(64px, .65fr) 28px;
       align-items: center; gap: 3px; padding: 3px;
       border: 1px solid #263563; border-radius: 4px; background: #0b0e20;
     }
@@ -322,6 +324,7 @@
     .layer-row .layer-name { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .layer-row input.layer-name { min-width: 0; width: 100%; box-sizing: border-box; }
     .layer-row .layer-tag { min-width: 0; font-size: 10px; padding: 3px; }
+    .layer-row .layer-composition { min-width: 0; font-size: 10px; padding: 3px; }
     .layer-row .layer-toggle.off { color: #566c86; background: #11162b; }
     .layer-row .layer-toggle.on { color: #ffcd75; }
     #preview { display: block; border: 1px solid #33447f; background: #0a0c1c; max-width: none; height: auto; }
@@ -611,7 +614,7 @@
           <button id="previewZoomOut" type="button" title="Zoom preview out" aria-label="Zoom preview out">&minus;</button>
           <label style="display:flex; align-items:center; gap:3px; flex:0 0 auto">zoom <input id="previewZoomPercent" type="number" min="10" max="800" step="25" value="100">%</label>
           <button id="previewZoomIn" type="button" title="Zoom preview in" aria-label="Zoom preview in">+</button>
-          <button id="previewZoomFit" class="active" type="button" title="Fit preview to panel" aria-label="Fit preview to panel" aria-pressed="true">fit</button>
+          <button id="previewZoomFit" type="button" title="Fit preview to panel" aria-label="Fit preview to panel">fit</button>
         </div>
         <div id="previewViewport">
           <div id="previewCanvasStage">
@@ -711,7 +714,7 @@
             <button id="btnDelLayer" title="Delete active layer">delete</button>
             <button id="btnFlattenLayers" title="Flatten all layers back to a single-layer sprite">flatten</button>
           </div>
-          <p class="hint" style="margin:0">Render tags set cross-sprite order. Arrows only reorder layers within the same tag; eye, solo, and lock are editor-only.</p>
+          <p class="hint" style="margin:0">Render tags set cross-sprite order. Base layers are replaced by body-embedded attachment art; overlay layers remain as item-specific decoration. Eye, solo, and lock are editor-only.</p>
         </div>
         <div class="panel-group">
           <h2>extract through frames</h2>
