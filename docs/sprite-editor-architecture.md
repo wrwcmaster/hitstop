@@ -40,6 +40,13 @@ The browser and the development bridge use this same validator. The bridge is
 the filesystem boundary, so it must reject an invalid complete Save All batch
 before writing any file.
 
+`tools/src/sprite-editor-agent.ts` is the second DOM-free seam: a versioned,
+discoverable semantic command engine over this document model. It executes a
+batch against a clone, validates once at the boundary, and publishes only a
+complete result. Cross-document reads are explicit; writes target only the
+active revision. Its design and extension contract are documented in
+[sprite-editor-agent.md](sprite-editor-agent.md).
+
 `tools/src/sprite-editor-workspace.ts` does the same job for the two other
 persisted aggregates: ordered render tags and frame-native weapon combat
 tuning. Browser-local drafts and bridge writes therefore cannot disagree about

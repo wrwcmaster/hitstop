@@ -9,6 +9,10 @@ import { validateRenderTagDefs, validateWeaponCombatTuning } from './src/sprite-
 import {
   applySpriteAgentTransaction,
   inspectSpriteAgentDocument,
+  spriteAgentSourcePaths,
+  SPRITE_AGENT_CAPABILITIES,
+  SPRITE_AGENT_MAX_INSPECTIONS,
+  SPRITE_AGENT_PROTOCOL_VERSION,
   type SpriteAgentCommand,
   type SpriteAgentCursor,
   type SpriteAgentFrameQuery,
@@ -68,13 +72,14 @@ export function spriteEditorBridge(root: string): Plugin {
   };
 
   const spritePath = (raw: unknown): { relative: string; absolute: string } => {
-    const relative = String(raw ?? '').replaceAll('\\', '/').replace(/^\/+/, '');
-    if (!relative || !relative.endsWith('.json') || relative.split('/').includes('..')) {
+    const requested = String(raw ?? '').replaceAll('\\', '/').replace(/^\/+/, '');
+    if (!requested || !requested.endsWith('.json') || requested.split('/').includes('..')) {
       throw new Error('sprite path must be a relative .json path');
     }
-    const absolute = path.resolve(spriteRoot, ...relative.split('/'));
+    const absolute = path.resolve(spriteRoot, ...requested.split('/'));
     const prefix = `${spriteRoot}${path.sep}`;
     if (!absolute.startsWith(prefix)) throw new Error('sprite path escapes the sprite directory');
+    const relative = path.relative(spriteRoot, absolute).split(path.sep).join('/');
     return { relative, absolute };
   };
 
@@ -171,6 +176,11 @@ export function spriteEditorBridge(root: string): Plugin {
     res.end(JSON.stringify(value));
   };
 
+  const statePayload = (state: ActiveSprite, includeFile = false): Omit<ActiveSprite, 'file'> & { file?: unknown } => {
+    const { file, ...summary } = state;
+    return includeFile ? { ...summary, file } : summary;
+  };
+
   return {
     name: 'hitstop-sprite-editor-bridge',
     apply: 'serve',
@@ -197,6 +207,10 @@ export function spriteEditorBridge(root: string): Plugin {
         try {
           if (req.method === 'GET' && url.pathname === `${API}/sprites`) {
             return send(res, 200, { sprites: await listSprites() });
+          }
+
+          if (req.method === 'GET' && url.pathname === `${API}/capabilities`) {
+            return send(res, 200, SPRITE_AGENT_CAPABILITIES);
           }
 
           if (req.method === 'GET' && url.pathname === `${API}/render-tags`) {
@@ -228,10 +242,25 @@ export function spriteEditorBridge(root: string): Plugin {
             }
             const queries = body.frames === undefined ? [] : body.frames;
             if (!Array.isArray(queries)) return send(res, 400, { error: 'frames must be an array' });
-            if (queries.length > 128) return send(res, 400, { error: 'cannot inspect more than 128 frames at once' });
+            if (queries.length > SPRITE_AGENT_MAX_INSPECTIONS) {
+              return send(res, 400, { error: `cannot inspect more than ${SPRITE_AGENT_MAX_INSPECTIONS} frames at once` });
+            }
+            const normalizedQueries = structuredClone(queries) as SpriteAgentFrameQuery[];
+            for (const query of normalizedQueries) {
+              if (!query || typeof query !== 'object' || Array.isArray(query)) {
+                return send(res, 400, { error: 'each frame query must be an object' });
+              }
+              if (query.path) {
+                const queryPath = spritePath(query.path).relative;
+                if (queryPath !== requestedPath) {
+                  return send(res, 400, { error: 'inspect frame paths must match the requested document path' });
+                }
+                query.path = queryPath;
+              }
+            }
             const inspection = inspectSpriteAgentDocument(
               { activePath: requestedPath, active: file },
-              queries as SpriteAgentFrameQuery[],
+              normalizedQueries,
             );
             return send(res, 200, { revision, dirty: active?.path === requestedPath ? active.dirty : false, inspection });
           }
@@ -346,22 +375,55 @@ export function spriteEditorBridge(root: string): Plugin {
               return send(res, 409, { error: 'revision conflict', state: active });
             }
             if (!Array.isArray(body.commands)) return send(res, 400, { error: 'commands must be an array' });
-            const commands = body.commands as SpriteAgentCommand[];
-            const sourcePaths = new Set(commands.flatMap((command) => (
-              command.op === 'frame.copy' && command.from.path && command.from.path !== active!.path
-                ? [command.from.path]
-                : []
-            )));
+            if (body.protocolVersion !== undefined && body.protocolVersion !== SPRITE_AGENT_PROTOCOL_VERSION) {
+              return send(res, 400, {
+                error: `unsupported protocolVersion ${String(body.protocolVersion)}; expected ${SPRITE_AGENT_PROTOCOL_VERSION}`,
+              });
+            }
+            spriteAgentSourcePaths(body.commands); // Validate envelopes before reading nested fields.
+            const commands = structuredClone(body.commands) as SpriteAgentCommand[];
+            for (const command of commands) {
+              if (command.op === 'frame.copy' && command.from.path) {
+                command.from.path = spritePath(command.from.path).relative;
+              }
+              if ('target' in command && command.target && 'path' in command.target && command.target.path) {
+                command.target.path = spritePath(command.target.path).relative;
+              }
+              if (command.op === 'frame.copy' && command.to.path) {
+                command.to.path = spritePath(command.to.path).relative;
+              }
+            }
+            const inspectQueries = body.inspect === undefined
+              ? undefined
+              : structuredClone(body.inspect) as SpriteAgentFrameQuery[];
+            if (inspectQueries !== undefined && !Array.isArray(inspectQueries)) {
+              return send(res, 400, { error: 'inspect must be an array' });
+            }
+            if ((inspectQueries?.length ?? 0) > SPRITE_AGENT_MAX_INSPECTIONS) {
+              return send(res, 400, { error: `cannot inspect more than ${SPRITE_AGENT_MAX_INSPECTIONS} frames at once` });
+            }
+            for (const query of inspectQueries ?? []) {
+              if (!query || typeof query !== 'object' || Array.isArray(query)) {
+                return send(res, 400, { error: 'each inspection query must be an object' });
+              }
+              if (query.path) query.path = spritePath(query.path).relative;
+            }
+            const sourcePaths = [...new Set([
+              ...spriteAgentSourcePaths(commands),
+              ...(inspectQueries ?? []).flatMap((query) => query.path ? [query.path] : []),
+            ])]
+              .map((relative) => spritePath(relative))
+              .filter((target) => target.relative !== active!.path);
             const documents = new Map<string, SpriteFile>();
-            for (const rawPath of sourcePaths) {
-              const target = spritePath(rawPath);
+            for (const target of sourcePaths) {
               const file = JSON.parse(await fs.readFile(target.absolute, 'utf8')) as SpriteFile;
               validateSprite(file);
               documents.set(target.relative, file);
             }
             const transaction: SpriteAgentTransaction = {
+              protocolVersion: body.protocolVersion as number | undefined,
               commands,
-              inspect: body.inspect as SpriteAgentFrameQuery[] | undefined,
+              inspect: inspectQueries,
               dryRun: body.dryRun === true,
             };
             const result = applySpriteAgentTransaction({
@@ -376,7 +438,17 @@ export function spriteEditorBridge(root: string): Plugin {
                 cursor: result.cursor,
                 results: result.results,
                 inspection: result.inspection,
-                state: { ...active, file: result.file, cursor: result.cursor ?? active.cursor },
+                state: statePayload({ ...active, file: result.file, cursor: result.cursor ?? active.cursor }, body.includeFile === true),
+              });
+            }
+            if (!result.changed) {
+              return send(res, 200, {
+                dryRun: false,
+                changed: false,
+                cursor: result.cursor,
+                results: result.results,
+                inspection: result.inspection,
+                state: statePayload(active, body.includeFile === true),
               });
             }
             const dirty = !(await matchesRepository(active.path, result.file));
@@ -399,7 +471,7 @@ export function spriteEditorBridge(root: string): Plugin {
               cursor: result.cursor,
               results: result.results,
               inspection: result.inspection,
-              state: active,
+              state: statePayload(active, body.includeFile === true),
             });
           }
 

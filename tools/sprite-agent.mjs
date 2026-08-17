@@ -40,6 +40,24 @@ function printStateSummary(value) {
   print({ path: spritePath, revision, source, updatedAt, dirty, cursor });
 }
 
+function printCommandSummary(value) {
+  print({
+    dryRun: value.dryRun,
+    changed: value.changed,
+    cursor: value.cursor,
+    results: value.results,
+    inspection: value.inspection,
+    state: value.state && {
+      path: value.state.path,
+      revision: value.state.revision,
+      source: value.state.source,
+      updatedAt: value.state.updatedAt,
+      dirty: value.state.dirty,
+      cursor: value.state.cursor,
+    },
+  });
+}
+
 async function state() {
   return request('/state');
 }
@@ -47,6 +65,10 @@ async function state() {
 switch (command) {
   case 'list':
     print(await request('/sprites'));
+    break;
+
+  case 'capabilities':
+    print(await request('/capabilities'));
     break;
 
   case 'open': {
@@ -61,7 +83,8 @@ switch (command) {
   }
 
   case 'state':
-    print(await state());
+    if (args.includes('--full')) print(await state());
+    else printStateSummary(await state());
     break;
 
   case 'selection':
@@ -70,9 +93,10 @@ switch (command) {
 
   case 'inspect': {
     const current = await state();
-    const animation = args[0];
-    const range = args[1];
-    const layerId = args[2];
+    const positional = args.filter((arg) => !arg.startsWith('--'));
+    const animation = positional[0];
+    const range = positional[1];
+    const layerId = positional[2];
     let frames = [];
     if (animation) {
       const match = /^(\d+)(?:-(\d+))?$/.exec(range ?? '1');
@@ -84,7 +108,8 @@ switch (command) {
         animation,
         frame: start + index - 1,
         ...(layerId ? { layerId } : {}),
-        components: true,
+        components: !args.includes('--no-components'),
+        colors: !args.includes('--no-colors'),
       }));
     }
     print(await request('/inspect', jsonInit('POST', { path: current.path, frames })));
@@ -96,13 +121,18 @@ switch (command) {
     if (!sourceFile) throw new Error('usage: agent-sprite run <transaction.json> [--dry-run]');
     const transaction = JSON.parse(await fs.readFile(path.resolve(sourceFile), 'utf8'));
     const current = await state();
+    const capabilities = await request('/capabilities');
     const body = Array.isArray(transaction) ? { commands: transaction } : transaction;
-    print(await request('/commands', jsonInit('POST', {
+    const response = await request('/commands', jsonInit('POST', {
       ...body,
+      protocolVersion: body.protocolVersion ?? capabilities.protocolVersion,
       dryRun: args.includes('--dry-run') || body.dryRun === true,
+      includeFile: args.includes('--full'),
       baseRevision: current.revision,
       source: 'agent-sprite',
-    })));
+    }));
+    if (args.includes('--full')) print(response);
+    else printCommandSummary(response);
     break;
   }
 
@@ -153,11 +183,12 @@ switch (command) {
 
 usage:
   npm run agent-sprite -- list
+  npm run agent-sprite -- capabilities
   npm run agent-sprite -- open knight-v2.json [--force]
-  npm run agent-sprite -- state
+  npm run agent-sprite -- state [--full]
   npm run agent-sprite -- selection
-  npm run agent-sprite -- inspect [animation] [display-frame|range] [layer-id]
-  npm run agent-sprite -- run transaction.json [--dry-run]
+  npm run agent-sprite -- inspect [animation] [display-frame|range] [layer-id] [--no-colors] [--no-components]
+  npm run agent-sprite -- run transaction.json [--dry-run] [--full]
   npm run agent-sprite -- preview sprite-preview.png
   npm run agent-sprite -- apply edited.json [repo-path]
   npm run agent-sprite -- save [repo-path]

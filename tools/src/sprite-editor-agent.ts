@@ -62,6 +62,8 @@ export interface SpriteAgentTransform {
 
 export interface SpriteAgentFrameQuery extends SpriteAgentFrameRef {
   components?: boolean;
+  /** Defaults to true; disable when only geometry is needed to reduce output. */
+  colors?: boolean;
 }
 
 export type SpriteAgentCommand =
@@ -148,6 +150,8 @@ export type SpriteAgentCommand =
   };
 
 export interface SpriteAgentTransaction {
+  /** Omit for the current version; incompatible explicit versions are rejected. */
+  protocolVersion?: number;
   commands: SpriteAgentCommand[];
   /** Inspect these frames after the batch, including for dry runs. */
   inspect?: SpriteAgentFrameQuery[];
@@ -176,7 +180,7 @@ export interface SpriteAgentFrameInspection {
   size: { w: number; h: number };
   pixelCount: number;
   bounds: SpriteAgentRect | null;
-  colors: SpriteAgentColorInspection[];
+  colors?: SpriteAgentColorInspection[];
   components?: SpriteAgentComponentInspection[];
   anchors: Record<string, SpriteAnchor>;
 }
@@ -210,6 +214,113 @@ export interface SpriteAgentWorkspace {
   /** Repository documents referenced by frame.copy. */
   documents?: ReadonlyMap<string, SpriteFile>;
 }
+
+export const SPRITE_AGENT_PROTOCOL_VERSION = 1;
+export const SPRITE_AGENT_MAX_COMMANDS = 256;
+export const SPRITE_AGENT_MAX_INSPECTIONS = 128;
+
+export const SPRITE_AGENT_OPERATIONS = [
+  'layer.ensure',
+  'animation.materialize',
+  'frame.insert',
+  'frame.remove',
+  'frame.move',
+  'frame.clear',
+  'frame.copy',
+  'frame.remapColors',
+  'pixel.set',
+  'anchor.set',
+  'assert.frame',
+  'assert.anchor',
+] as const satisfies readonly SpriteAgentCommand['op'][];
+
+const SPRITE_AGENT_OPERATION_SET = new Set<string>(SPRITE_AGENT_OPERATIONS);
+
+const SPRITE_AGENT_COMMAND_REFERENCE = {
+  'layer.ensure': {
+    required: ['layer.id', 'layer.name', 'layer.tag'],
+    optional: ['layer.composition', 'before'],
+    effect: 'Create a shared layer track or update the named layer metadata.',
+  },
+  'animation.materialize': {
+    required: ['animation'],
+    effect: 'Turn an animation alias into an independent timeline, including layer and anchor tracks.',
+  },
+  'frame.insert': {
+    required: ['animation', 'index'],
+    optional: ['mode: empty|duplicate'],
+    effect: 'Insert a frame while keeping every layer and anchor track aligned.',
+  },
+  'frame.remove': {
+    required: ['animation', 'index'],
+    effect: 'Remove a frame from every layer and anchor track.',
+  },
+  'frame.move': {
+    required: ['animation', 'from', 'to'],
+    effect: 'Reorder a frame together with all layer and anchor data.',
+  },
+  'frame.clear': {
+    required: ['target.animation', 'target.frame'],
+    optional: ['target.layerId (* means every layer)', 'region'],
+    effect: 'Make the addressed pixels transparent.',
+  },
+  'frame.copy': {
+    required: ['from.animation', 'from.frame', 'to.animation', 'to.frame', 'to.x', 'to.y'],
+    optional: ['from.path', 'from.layerId', 'to.layerId', 'region', 'transform', 'mode', 'paletteOverflow', 'colorMap'],
+    effect: 'Copy exact-color pixels from an active or repository document, applying scale/mirror/rotation once.',
+  },
+  'frame.remapColors': {
+    required: ['target.animation', 'target.frame', 'colors'],
+    optional: ['target.layerId', 'region', 'paletteOverflow'],
+    effect: 'Replace exact RGBA colors without changing the selected silhouette.',
+  },
+  'pixel.set': {
+    required: ['target.animation', 'target.frame', 'pixels[]: {x,y,color}'],
+    optional: ['target.layerId', 'paletteOverflow'],
+    effect: 'Set sparse pixels by RGBA value rather than palette character.',
+  },
+  'anchor.set': {
+    required: ['anchor', 'animation', 'frame', 'point.x', 'point.y'],
+    optional: ['point.angle'],
+    effect: 'Set one frame-aligned attachment point in the active document.',
+  },
+  'assert.frame': {
+    required: ['target.animation', 'target.frame', 'expected'],
+    optional: ['target.layerId', 'expected.pixelCount', 'expected.bounds', 'expected.componentCount'],
+    effect: 'Abort the complete transaction unless the post-edit frame matches.',
+  },
+  'assert.anchor': {
+    required: ['anchor', 'animation', 'frame', 'expected.x', 'expected.y'],
+    optional: ['expected.angle'],
+    effect: 'Abort the complete transaction unless the post-edit anchor matches.',
+  },
+} as const satisfies Record<SpriteAgentCommand['op'], {
+  required: readonly string[];
+  optional?: readonly string[];
+  effect: string;
+}>;
+
+/** Machine-readable discovery data served by the development bridge. */
+export const SPRITE_AGENT_CAPABILITIES = {
+  protocolVersion: SPRITE_AGENT_PROTOCOL_VERSION,
+  frameIndexing: 'zero-based',
+  colorFormat: '#RRGGBB or #RRGGBBAA; null means transparent',
+  transaction: {
+    atomic: true,
+    revisionChecked: true,
+    maxCommands: SPRITE_AGENT_MAX_COMMANDS,
+    maxInspections: SPRITE_AGENT_MAX_INSPECTIONS,
+  },
+  regions: ['rect', 'componentAt', 'opaqueBounds'],
+  transforms: ['rotate', 'scaleX', 'scaleY', 'negative scale mirrors'],
+  transformPlacement: 'scale/mirror/rotation use the extracted region center; to.x/to.y place the transformed output bounding box top-left',
+  operations: SPRITE_AGENT_OPERATIONS,
+  commandReference: SPRITE_AGENT_COMMAND_REFERENCE,
+  inspectionOptions: {
+    components: 'include connected components; defaults to false',
+    colors: 'include exact palette/color usage; defaults to true',
+  },
+} as const;
 
 interface PixelClip {
   rows: string[];
@@ -459,6 +570,7 @@ function transformClip(clip: PixelClip, transform: SpriteAgentTransform = {}): P
   const maxY = Math.max(...corners.map((point) => point.y));
   const outW = Math.max(1, Math.ceil(maxX - minX - 1e-9));
   const outH = Math.max(1, Math.ceil(maxY - minY - 1e-9));
+  if (outW * outH > 1_000_000) throw new Error(`transformed copy is too large (${outW}x${outH})`);
   const rows = Array.from({ length: outH }, () => Array(outW).fill('.'));
   const mask = Array.from({ length: outH }, () => Array(outW).fill('.'));
 
@@ -689,7 +801,10 @@ function ensureLayer(file: SpriteFile, command: Extract<SpriteAgentCommand, { op
   return { op: command.op, changed: true, detail: { layerId: id, created: true, index } };
 }
 
-function inspectResolvedFrame(frame: ResolvedFrame, includeComponents = false): SpriteAgentFrameInspection {
+function inspectResolvedFrame(
+  frame: ResolvedFrame,
+  options: { components?: boolean; colors?: boolean } = {},
+): SpriteAgentFrameInspection {
   const palette = resolvedPalette(frame.file);
   const colors = new Map<string, { char: string; color: string; count: number }>();
   let pixelCount = 0;
@@ -718,8 +833,10 @@ function inspectResolvedFrame(frame: ResolvedFrame, includeComponents = false): 
     size: { w: frame.rows[0].length, h: frame.rows.length },
     pixelCount,
     bounds: frameBounds(frame.rows, palette),
-    colors: [...colors.values()].sort((a, b) => b.count - a.count || a.char.localeCompare(b.char)),
-    components: includeComponents ? frameComponents(frame.rows, palette) : undefined,
+    colors: options.colors === false
+      ? undefined
+      : [...colors.values()].sort((a, b) => b.count - a.count || a.char.localeCompare(b.char)),
+    components: options.components ? frameComponents(frame.rows, palette) : undefined,
     anchors,
   };
 }
@@ -752,7 +869,7 @@ export function inspectSpriteAgentDocument(
       }))
       : [{ id: 'base', name: 'Base', tag: file.renderTag ?? 'base', composition: 'base' }],
     anchors: Object.keys(file.anchors ?? {}),
-    frames: queries.map((query) => inspectResolvedFrame(resolveFrame(workspace, query), query.components)),
+    frames: queries.map((query) => inspectResolvedFrame(resolveFrame(workspace, query), query)),
   };
 }
 
@@ -821,7 +938,8 @@ function executeCommand(workspace: SpriteAgentWorkspace, command: SpriteAgentCom
     case 'frame.copy': {
       const source = resolveFrame(workspace, command.from);
       const target = resolveFrame(workspace, command.to, true);
-      const clip = transformClip(extractClip(source, command.region), command.transform);
+      const sourceClip = extractClip(source, command.region);
+      const clip = transformClip(sourceClip, command.transform);
       const pasted = pasteClip(
         target, clip, command.to.x, command.to.y,
         command.mode ?? 'over', command.paletteOverflow ?? 'error', command.colorMap,
@@ -830,7 +948,7 @@ function executeCommand(workspace: SpriteAgentWorkspace, command: SpriteAgentCom
         result: {
           op: command.op,
           changed: pasted.changedPixels > 0,
-          detail: { sourceBounds: extractClip(source, command.region).bounds, ...pasted },
+          detail: { sourceBounds: sourceClip.bounds, ...pasted },
         },
         cursor: { animation: command.to.animation, frame: command.to.frame, layerId: command.to.layerId },
       };
@@ -928,7 +1046,7 @@ function executeCommand(workspace: SpriteAgentWorkspace, command: SpriteAgentCom
     }
 
     case 'assert.frame': {
-      const inspection = inspectResolvedFrame(resolveFrame(workspace, command.target), true);
+      const inspection = inspectResolvedFrame(resolveFrame(workspace, command.target), { components: true, colors: false });
       const expected = command.expected;
       if (expected.pixelCount !== undefined && inspection.pixelCount !== expected.pixelCount) {
         throw new Error(`assert.frame pixelCount expected ${expected.pixelCount}, got ${inspection.pixelCount}`);
@@ -939,7 +1057,20 @@ function executeCommand(workspace: SpriteAgentWorkspace, command: SpriteAgentCom
       if (expected.bounds !== undefined && JSON.stringify(inspection.bounds) !== JSON.stringify(expected.bounds)) {
         throw new Error(`assert.frame bounds expected ${JSON.stringify(expected.bounds)}, got ${JSON.stringify(inspection.bounds)}`);
       }
-      return { result: { op: command.op, changed: false, detail: { passed: true, inspection } } };
+      return {
+        result: {
+          op: command.op,
+          changed: false,
+          detail: {
+            passed: true,
+            actual: {
+              pixelCount: inspection.pixelCount,
+              bounds: inspection.bounds,
+              componentCount: inspection.components?.length ?? 0,
+            },
+          },
+        },
+      };
     }
 
     case 'assert.anchor': {
@@ -951,7 +1082,29 @@ function executeCommand(workspace: SpriteAgentWorkspace, command: SpriteAgentCom
       }
       return { result: { op: command.op, changed: false, detail: { passed: true, actual } } };
     }
+
+    default:
+      throw new Error(`unsupported command operation "${String((command as { op?: unknown }).op)}"`);
   }
+}
+
+function validateCommandEnvelope(value: unknown): asserts value is SpriteAgentCommand {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('command must be an object');
+  }
+  const op = (value as { op?: unknown }).op;
+  if (typeof op !== 'string' || !SPRITE_AGENT_OPERATION_SET.has(op)) {
+    throw new Error(`unsupported command operation "${String(op)}"`);
+  }
+}
+
+export function spriteAgentSourcePaths(commands: readonly unknown[]): string[] {
+  const paths = new Set<string>();
+  for (const command of commands) {
+    validateCommandEnvelope(command);
+    if (command.op === 'frame.copy' && command.from?.path) paths.add(command.from.path);
+  }
+  return [...paths];
 }
 
 export function applySpriteAgentTransaction(
@@ -959,10 +1112,22 @@ export function applySpriteAgentTransaction(
   transaction: SpriteAgentTransaction,
 ): SpriteAgentTransactionResult {
   validateSpriteEditorDocument(workspace.active);
+  const protocolVersion = (transaction as SpriteAgentTransaction & { protocolVersion?: unknown }).protocolVersion;
+  if (protocolVersion !== undefined && protocolVersion !== SPRITE_AGENT_PROTOCOL_VERSION) {
+    throw new Error(`unsupported protocolVersion ${String(protocolVersion)}; expected ${SPRITE_AGENT_PROTOCOL_VERSION}`);
+  }
   if (!Array.isArray(transaction.commands) || transaction.commands.length < 1) {
     throw new Error('transaction commands must be a non-empty array');
   }
-  if (transaction.commands.length > 256) throw new Error('transaction cannot exceed 256 commands');
+  if (transaction.commands.length > SPRITE_AGENT_MAX_COMMANDS) {
+    throw new Error(`transaction cannot exceed ${SPRITE_AGENT_MAX_COMMANDS} commands`);
+  }
+  if (transaction.inspect !== undefined && !Array.isArray(transaction.inspect)) {
+    throw new Error('transaction inspect must be an array');
+  }
+  if ((transaction.inspect?.length ?? 0) > SPRITE_AGENT_MAX_INSPECTIONS) {
+    throw new Error(`transaction cannot inspect more than ${SPRITE_AGENT_MAX_INSPECTIONS} frames`);
+  }
   const before = JSON.stringify(workspace.active);
   const active = structuredClone(workspace.active);
   const executionWorkspace: SpriteAgentWorkspace = { ...workspace, active };
@@ -970,11 +1135,14 @@ export function applySpriteAgentTransaction(
   let cursor: SpriteAgentCursor | undefined;
   for (let index = 0; index < transaction.commands.length; index++) {
     try {
-      const executed = executeCommand(executionWorkspace, transaction.commands[index]);
+      const command = transaction.commands[index];
+      validateCommandEnvelope(command);
+      const executed = executeCommand(executionWorkspace, command);
       results.push(executed.result);
       cursor = executed.cursor ?? cursor;
     } catch (error) {
-      throw new Error(`command ${index + 1} (${transaction.commands[index].op}): ${error instanceof Error ? error.message : String(error)}`);
+      const op = (transaction.commands[index] as { op?: unknown } | null | undefined)?.op;
+      throw new Error(`command ${index + 1} (${String(op)}): ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   validateSpriteEditorDocument(active);

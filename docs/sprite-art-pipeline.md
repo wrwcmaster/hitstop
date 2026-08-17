@@ -288,6 +288,12 @@ transform. Make one deterministic change, render it, and visually verify it
 before reporting success. A JSON-valid result or a mathematically aligned
 anchor is not evidence that the pixels are aligned.
 
+For repeatable frames, encode the clear/copy/one-pass transform/color
+remap/anchor/assert sequence as one semantic transaction and dry-run it before
+publication. The command and coordinate contract is documented in
+[Sprite editor agent protocol](sprite-editor-agent.md); it includes a frames
+3–5 example and deliberately keeps repository saving outside the transaction.
+
 ## 7. Approval gates
 
 Advance only when the previous applicable gate is accepted:

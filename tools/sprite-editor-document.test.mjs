@@ -386,6 +386,23 @@ try {
       ],
     }), /command 2 \(assert\.frame\)/);
     assert.equal(JSON.stringify(result.file), beforeFailure, 'failed transaction must be atomic');
+
+    assert.throws(() => agent.applySpriteAgentTransaction({
+      activePath: 'target.json', active: result.file,
+    }, {
+      protocolVersion: 999,
+      commands: [{ op: 'assert.frame', target: { animation: 'attack', frame: 2, layerId: 'sword' }, expected: {} }],
+    }), /unsupported protocolVersion 999/);
+    assert.throws(() => agent.applySpriteAgentTransaction({
+      activePath: 'target.json', active: result.file,
+    }, {
+      commands: [{ op: 'invented.operation' }],
+    }), /command 1 \(invented\.operation\): unsupported command operation/);
+    assert.throws(() => agent.applySpriteAgentTransaction({
+      activePath: 'target.json', active: result.file,
+    }, {
+      commands: [null],
+    }), /command 1 \(undefined\): command must be an object/);
   }
 
   console.log('sprite-editor document tests: ok');

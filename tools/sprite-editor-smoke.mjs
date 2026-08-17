@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 
 const baseUrl = process.env.SPRITE_EDITOR_URL ?? 'http://127.0.0.1:5175';
@@ -9,9 +9,16 @@ const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
 const browser = await chromium.launch({ headless: true, executablePath });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const errors = [];
+const productionTransaction = JSON.parse(readFileSync(
+  new URL('./examples/rusty-sword-agent-frame3-5.json', import.meta.url),
+  'utf8',
+));
 page.on('pageerror', (error) => errors.push(error.message));
+page.on('response', (response) => {
+  if (response.status() >= 400) errors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+});
 page.on('console', (message) => {
-  if (message.type() === 'error') errors.push(message.text());
+  if (message.type() === 'error' && !message.text().startsWith('Failed to load resource:')) errors.push(message.text());
 });
 
 const fixture = () => ({
@@ -321,6 +328,102 @@ try {
   assert.equal(await page.evaluate(() => window.__editor.activeLayerId), 'hand');
   await page.waitForTimeout(500);
   assert.equal(await page.evaluate(async () => (await fetch('/__sprite-editor/preview.png')).status), 200);
+
+  const protocolChecks = await page.evaluate(async () => {
+    const capabilities = await fetch('/__sprite-editor/capabilities').then((response) => response.json());
+    const before = await fetch('/__sprite-editor/state').then((response) => response.json());
+    const noOpResponse = await fetch('/__sprite-editor/commands', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        protocolVersion: capabilities.protocolVersion,
+        baseRevision: before.revision,
+        commands: [{
+          op: 'assert.frame',
+          target: { animation: 'idle', frame: 1, layerId: 'hand' },
+          expected: { pixelCount: 2 },
+        }],
+      }),
+    });
+    const noOp = await noOpResponse.json();
+    const after = await fetch('/__sprite-editor/state').then((response) => response.json());
+    return {
+      capabilities,
+      beforeRevision: before.revision,
+      noOpStatus: noOpResponse.status,
+      noOp,
+      afterRevision: after.revision,
+    };
+  });
+  assert.equal(protocolChecks.capabilities.protocolVersion, 1);
+  assert.equal(protocolChecks.capabilities.transaction.atomic, true);
+  assert.ok(protocolChecks.capabilities.operations.includes('frame.copy'));
+  assert.equal(protocolChecks.noOpStatus, 200);
+  assert.equal(protocolChecks.noOp.changed, false);
+  assert.equal(protocolChecks.noOp.state.file, undefined, 'command responses are compact by default');
+  assert.equal(protocolChecks.afterRevision, protocolChecks.beforeRevision, 'assertion-only batches do not advance revisions');
+  assert.equal(await page.evaluate(async () => (await fetch('/__sprite-editor/preview.png')).status), 200);
+
+  // Exercise the same protocol on the real 160x128 rusty-sword document and
+  // displayed frames 3-5. Publish only to this temporary bridge, wait for the
+  // browser to render the semantic cursor, then reopen the repository copy;
+  // this proves the live path without writing art to disk.
+  const realOpen = await page.evaluate(() => window.__editor.open('equipment/rusty-sword.json'));
+  assert.equal(realOpen, true);
+  await page.waitForFunction(() => {
+    const frame = window.__editor.file.layers?.[0]?.tracks?.attack?.[0];
+    return frame?.length === 128 && frame[0]?.length === 160;
+  });
+  const realAgentResult = await page.evaluate(async (transaction) => {
+    const before = await fetch('/__sprite-editor/state').then((response) => response.json());
+    const dryRunResponse = await fetch('/__sprite-editor/commands', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...transaction, baseRevision: before.revision, source: 'sprite-editor-production-smoke' }),
+    });
+    const dryRun = await dryRunResponse.json();
+    const afterDryRun = await fetch('/__sprite-editor/state').then((response) => response.json());
+    const applyResponse = await fetch('/__sprite-editor/commands', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...transaction,
+        dryRun: false,
+        baseRevision: afterDryRun.revision,
+        source: 'sprite-editor-production-smoke',
+      }),
+    });
+    return {
+      beforeRevision: before.revision,
+      dryRunStatus: dryRunResponse.status,
+      dryRun,
+      afterDryRunRevision: afterDryRun.revision,
+      applyStatus: applyResponse.status,
+      applied: await applyResponse.json(),
+    };
+  }, productionTransaction);
+  assert.equal(realAgentResult.dryRunStatus, 200, JSON.stringify(realAgentResult.dryRun));
+  assert.equal(realAgentResult.afterDryRunRevision, realAgentResult.beforeRevision);
+  assert.deepEqual(realAgentResult.dryRun.inspection.frames.slice(0, 3).map((frame) => frame.pixelCount), [272, 272, 174]);
+  assert.equal(realAgentResult.applyStatus, 200, JSON.stringify(realAgentResult.applied));
+  assert.equal(realAgentResult.applied.state.revision, realAgentResult.beforeRevision + 1);
+  await page.waitForFunction(() => (
+    window.__editor.frameIdx === 4
+    && window.__editor.activeLayerId === 'base'
+    && window.__editor.file.layers[0].tracks.attack[4][14][28] !== '.'
+  ));
+  await page.waitForTimeout(500);
+  assert.equal(await page.evaluate(async () => (await fetch('/__sprite-editor/preview.png')).status), 200);
+  const cleanup = await page.evaluate(async () => {
+    const response = await fetch('/__sprite-editor/open', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: 'equipment/rusty-sword.json', source: 'sprite-editor-production-smoke-cleanup', force: true }),
+    });
+    return { status: response.status, body: await response.json() };
+  });
+  assert.equal(cleanup.status, 200, JSON.stringify(cleanup.body));
+  assert.equal(cleanup.body.dirty, false);
 
   assert.deepEqual(errors, []);
   console.log('sprite-editor UI smoke tests: ok');
