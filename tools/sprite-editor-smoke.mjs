@@ -279,6 +279,49 @@ try {
   await page.keyboard.press('Control+Z');
   assert.equal(await page.evaluate(() => window.__editor.file.anims.air), 'idle');
 
+  // Agent commands use the same revisioned live document as the canvas. A
+  // semantic command must update pixels atomically, focus its target frame and
+  // layer, and publish a preview for the accepted revision without browser
+  // coordinate automation.
+  await page.evaluate((file) => window.__editor.replace(file, null), fixture());
+  await page.waitForFunction(() => window.__editor.bridge.connected && window.__editor.bridge.revision > 0);
+  await page.waitForTimeout(250);
+  const agentResult = await page.evaluate(async () => {
+    const current = await fetch('/__sprite-editor/state').then((response) => response.json());
+    const response = await fetch('/__sprite-editor/commands', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        baseRevision: current.revision,
+        source: 'sprite-editor-smoke-agent',
+        commands: [
+          {
+            op: 'pixel.set',
+            target: { animation: 'idle', frame: 1, layerId: 'hand' },
+            pixels: [{ x: 1, y: 0, color: '#ffffff' }],
+          },
+          {
+            op: 'assert.frame',
+            target: { animation: 'idle', frame: 1, layerId: 'hand' },
+            expected: { pixelCount: 2, bounds: { x: 0, y: 0, w: 2, h: 1 } },
+          },
+        ],
+        inspect: [{ animation: 'idle', frame: 1, layerId: 'hand', components: true }],
+      }),
+    });
+    return { status: response.status, body: await response.json() };
+  });
+  assert.equal(agentResult.status, 200, JSON.stringify(agentResult.body));
+  assert.equal(agentResult.body.inspection.frames[0].pixelCount, 2);
+  await page.waitForFunction(() => (
+    window.__editor.frameIdx === 1
+    && window.__editor.file.layers[1].tracks.idle[1][0][1] === 'A'
+  ));
+  assert.equal(await page.evaluate(() => window.__editor.animName), 'idle');
+  assert.equal(await page.evaluate(() => window.__editor.activeLayerId), 'hand');
+  await page.waitForTimeout(500);
+  assert.equal(await page.evaluate(async () => (await fetch('/__sprite-editor/preview.png')).status), 200);
+
   assert.deepEqual(errors, []);
   console.log('sprite-editor UI smoke tests: ok');
 } finally {

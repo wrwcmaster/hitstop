@@ -205,6 +205,7 @@ interface BridgeState {
   source: string;
   updatedAt: number;
   dirty: boolean;
+  cursor?: { animation: string; frame: number; layerId?: string };
 }
 
 /** Editor-only content metadata. The engine ignores it; tools use it to
@@ -1246,6 +1247,25 @@ function updateBridgeMeta(state: BridgeState): void {
   schedulePreviewUpload();
 }
 
+/** Apply an agent's semantic frame target after accepting its document. */
+function applyBridgeCursor(state: BridgeState): boolean {
+  if (!state.cursor) return false;
+  const next = reconcileSpriteDocumentCursor(file, {
+    animation: state.cursor.animation,
+    frame: state.cursor.frame,
+    layerId: state.cursor.layerId ?? activeLayerId,
+  }, activeLayerId);
+  const changed = animName !== next.animation || frameIdx !== next.frame
+    || (isLayeredSpriteFile(file) && activeLayerId !== next.layerId);
+  animName = next.animation;
+  frameIdx = next.frame;
+  if (isLayeredSpriteFile(file)) {
+    activeLayerId = next.layerId;
+    rememberActiveLayer();
+  }
+  return changed;
+}
+
 function applyBridgeState(state: BridgeState, force = false): void {
   if (!force && state.revision <= bridgeRevision) return;
   const switchedSprite = state.path !== currentRepoPath;
@@ -1287,6 +1307,7 @@ function applyBridgeState(state: BridgeState, force = false): void {
     else reconcileLayerState();
     if (!file.anims[animName]) animName = Object.keys(file.anims)[0];
     frameIdx = Math.min(frameIdx, anim().frames.length - 1);
+    applyBridgeCursor(state);
     currentChar = firstPaintChar();
     editVersion++;
     refreshUI();
@@ -1297,8 +1318,12 @@ function applyBridgeState(state: BridgeState, force = false): void {
     clearHistory();
     resetDocumentInteractionState(true);
     restoreActiveLayer(state.path, file);
+    applyBridgeCursor(state);
     refreshUI();
     fitGrid();
+  } else if (applyBridgeCursor(state)) {
+    resetDocumentInteractionState(false);
+    refreshUI();
   }
   updateBridgeMeta(state);
   if (switchedSprite && state.path) configureCompositeForPath(state.path);
@@ -6394,6 +6419,7 @@ Object.defineProperty(window, '__editor', {
     get currentRepoPath() { return currentRepoPath; },
     get animName() { return animName; },
     get frameIdx() { return frameIdx; },
+    get activeLayerId() { return activeLayerId; },
     get editVersion() { return editVersion; },
     get rebuiltVersion() { return rebuiltVersion; },
     get selection() { return selectionSnapshot(); },

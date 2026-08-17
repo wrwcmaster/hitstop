@@ -6,6 +6,14 @@ import type { Plugin } from 'vite';
 import type { SpriteFile } from '../src/engine/gfx/spritefile';
 import { validateSpriteEditorDocument } from './src/sprite-editor-document';
 import { validateRenderTagDefs, validateWeaponCombatTuning } from './src/sprite-editor-workspace';
+import {
+  applySpriteAgentTransaction,
+  inspectSpriteAgentDocument,
+  type SpriteAgentCommand,
+  type SpriteAgentCursor,
+  type SpriteAgentFrameQuery,
+  type SpriteAgentTransaction,
+} from './src/sprite-editor-agent';
 
 const API = '/__sprite-editor';
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
@@ -19,6 +27,8 @@ interface ActiveSprite {
   source: string;
   updatedAt: number;
   dirty: boolean;
+  /** Last agent-targeted editor location; document revisions remain authoritative. */
+  cursor?: SpriteAgentCursor;
 }
 
 interface ActiveSelection {
@@ -203,6 +213,29 @@ export function spriteEditorBridge(root: string): Plugin {
             return send(res, 200, { selection });
           }
 
+          if (req.method === 'POST' && url.pathname === `${API}/inspect`) {
+            const body = await jsonBody(req);
+            const requestedPath = body.path == null ? active?.path ?? null : spritePath(body.path).relative;
+            let file: SpriteFile;
+            let revision: number | null = null;
+            if (active && requestedPath === active.path) {
+              file = active.file as SpriteFile;
+              revision = active.revision;
+            } else {
+              if (!requestedPath) return send(res, 404, { error: 'no sprite is open' });
+              file = JSON.parse(await fs.readFile(spritePath(requestedPath).absolute, 'utf8')) as SpriteFile;
+              validateSprite(file);
+            }
+            const queries = body.frames === undefined ? [] : body.frames;
+            if (!Array.isArray(queries)) return send(res, 400, { error: 'frames must be an array' });
+            if (queries.length > 128) return send(res, 400, { error: 'cannot inspect more than 128 frames at once' });
+            const inspection = inspectSpriteAgentDocument(
+              { activePath: requestedPath, active: file },
+              queries as SpriteAgentFrameQuery[],
+            );
+            return send(res, 200, { revision, dirty: active?.path === requestedPath ? active.dirty : false, inspection });
+          }
+
           if (req.method === 'PUT' && url.pathname === `${API}/selection`) {
             const body = await jsonBody(req);
             if (body.selection == null) {
@@ -304,6 +337,70 @@ export function spriteEditorBridge(root: string): Plugin {
             };
             publish();
             return send(res, 200, active);
+          }
+
+          if (req.method === 'POST' && url.pathname === `${API}/commands`) {
+            const body = await jsonBody(req);
+            if (!active) return send(res, 404, { error: 'no sprite is open' });
+            if (Number(body.baseRevision) !== active.revision) {
+              return send(res, 409, { error: 'revision conflict', state: active });
+            }
+            if (!Array.isArray(body.commands)) return send(res, 400, { error: 'commands must be an array' });
+            const commands = body.commands as SpriteAgentCommand[];
+            const sourcePaths = new Set(commands.flatMap((command) => (
+              command.op === 'frame.copy' && command.from.path && command.from.path !== active!.path
+                ? [command.from.path]
+                : []
+            )));
+            const documents = new Map<string, SpriteFile>();
+            for (const rawPath of sourcePaths) {
+              const target = spritePath(rawPath);
+              const file = JSON.parse(await fs.readFile(target.absolute, 'utf8')) as SpriteFile;
+              validateSprite(file);
+              documents.set(target.relative, file);
+            }
+            const transaction: SpriteAgentTransaction = {
+              commands,
+              inspect: body.inspect as SpriteAgentFrameQuery[] | undefined,
+              dryRun: body.dryRun === true,
+            };
+            const result = applySpriteAgentTransaction({
+              activePath: active.path,
+              active: active.file as SpriteFile,
+              documents,
+            }, transaction);
+            if (transaction.dryRun) {
+              return send(res, 200, {
+                dryRun: true,
+                changed: result.changed,
+                cursor: result.cursor,
+                results: result.results,
+                inspection: result.inspection,
+                state: { ...active, file: result.file, cursor: result.cursor ?? active.cursor },
+              });
+            }
+            const dirty = !(await matchesRepository(active.path, result.file));
+            active = {
+              ...active,
+              file: result.file,
+              revision: active.revision + 1,
+              source: String(body.source ?? 'agent'),
+              updatedAt: Date.now(),
+              dirty,
+              cursor: result.cursor ?? active.cursor,
+            };
+            preview = null;
+            previewRevision = 0;
+            selection = null;
+            publish();
+            return send(res, 200, {
+              dryRun: false,
+              changed: result.changed,
+              cursor: result.cursor,
+              results: result.results,
+              inspection: result.inspection,
+              state: active,
+            });
           }
 
           if (req.method === 'POST' && url.pathname === `${API}/save`) {

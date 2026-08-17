@@ -13,6 +13,7 @@ const server = await createServer({
 
 try {
   const model = await server.ssrLoadModule('/tools/src/sprite-editor-document.ts');
+  const agent = await server.ssrLoadModule('/tools/src/sprite-editor-agent.ts');
   const workspace = await server.ssrLoadModule('/tools/src/sprite-editor-workspace.ts');
   const renderPolicy = await server.ssrLoadModule('/src/game/actors/player-render-policy.ts');
 
@@ -275,6 +276,116 @@ try {
     assert.doesNotThrow(() => workspace.validateWeaponCombatTuning(combat));
     combat.sword.moves.combo0.activeFrames = [4, 6];
     assert.throws(() => workspace.validateWeaponCombatTuning(combat), /active end <= frameCount/);
+  }
+
+  {
+    // Exercise the production frame-patching workflow on displayed frames
+    // 3-5: pristine source copy, one-pass transforms, exact color transfer,
+    // per-frame anchors, structured inspection, and transactional assertions.
+    const empty = () => Array.from({ length: 6 }, () => '........');
+    const target = {
+      hd: false,
+      palette: { '.': null, A: '#ffffff' },
+      anims: { attack: { fps: 12, frameCount: 5 } },
+      layers: [
+        { id: 'sword', name: 'Sword', tag: 'held', tracks: { attack: Array.from({ length: 5 }, empty) } },
+        { id: 'slash', name: 'Slash', tag: 'effect', composition: 'overlay', tracks: { attack: Array.from({ length: 5 }, empty) } },
+      ],
+      anchors: { grip: { attack: Array.from({ length: 5 }, () => ({ x: 0, y: 0 })) } },
+      attachmentSlots: { grip: { anchor: 'grip' } },
+    };
+    const sourceRows = empty();
+    sourceRows[1] = '.ZZ.....';
+    sourceRows[2] = '.ZZZ....';
+    sourceRows[5] = '.......Z';
+    const source = {
+      hd: false,
+      palette: { '.': null, Z: '#123456' },
+      anims: { attack2: { fps: 12, frameCount: 1 } },
+      layers: [{ id: 'sword', name: 'Sword', tag: 'held', tracks: { attack2: [sourceRows] } }],
+    };
+    const transaction = {
+      commands: [
+        {
+          op: 'frame.copy',
+          from: {
+            path: 'approved.json', animation: 'attack2', frame: 0, layerId: 'sword',
+          },
+          to: { animation: 'attack', frame: 2, layerId: 'sword', x: 1, y: 1 },
+          region: { componentAt: { x: 1, y: 1, connectivity: 8 } },
+        },
+        { op: 'anchor.set', anchor: 'grip', animation: 'attack', frame: 2, point: { x: 2.5, y: 2 } },
+        {
+          op: 'frame.copy',
+          from: {
+            path: 'approved.json', animation: 'attack2', frame: 0, layerId: 'sword',
+          },
+          to: { animation: 'attack', frame: 3, layerId: 'sword', x: 3, y: 1 },
+          region: { componentAt: { x: 1, y: 1 } },
+          transform: { rotate: 90 },
+        },
+        { op: 'anchor.set', anchor: 'grip', animation: 'attack', frame: 3, point: { x: 4, y: 2.5, angle: 90 } },
+        {
+          op: 'frame.copy',
+          from: {
+            path: 'approved.json', animation: 'attack2', frame: 0, layerId: 'sword',
+          },
+          to: { animation: 'attack', frame: 4, layerId: 'sword', x: 1, y: 1 },
+          region: { componentAt: { x: 1, y: 1 } },
+          transform: { scaleX: 2, scaleY: 2 },
+        },
+        {
+          op: 'frame.remapColors',
+          target: { animation: 'attack', frame: 4, layerId: 'sword' },
+          colors: { '#123456': '#654321' },
+        },
+        { op: 'anchor.set', anchor: 'grip', animation: 'attack', frame: 4, point: { x: 3, y: 3 } },
+        {
+          op: 'assert.frame', target: { animation: 'attack', frame: 2, layerId: 'sword' },
+          expected: { pixelCount: 5, bounds: { x: 1, y: 1, w: 3, h: 2 }, componentCount: 1 },
+        },
+        {
+          op: 'assert.frame', target: { animation: 'attack', frame: 3, layerId: 'sword' },
+          expected: { pixelCount: 5, bounds: { x: 3, y: 1, w: 2, h: 3 }, componentCount: 1 },
+        },
+        { op: 'assert.anchor', anchor: 'grip', animation: 'attack', frame: 4, expected: { x: 3, y: 3 } },
+      ],
+      inspect: [2, 3, 4].map((frame) => ({ animation: 'attack', frame, layerId: 'sword', components: true })),
+    };
+    const result = agent.applySpriteAgentTransaction({
+      activePath: 'target.json',
+      active: target,
+      documents: new Map([['approved.json', source]]),
+    }, transaction);
+    assert.equal(result.changed, true);
+    assert.deepEqual(result.cursor, { animation: 'attack', frame: 4 });
+    assert.deepEqual(result.inspection.frames.map((frame) => frame.pixelCount), [5, 5, 20]);
+    assert.deepEqual(result.inspection.frames.map((frame) => frame.bounds), [
+      { x: 1, y: 1, w: 3, h: 2 },
+      { x: 3, y: 1, w: 2, h: 3 },
+      { x: 1, y: 1, w: 6, h: 4 },
+    ]);
+    assert.equal(result.inspection.frames[2].colors[0].color, '#654321');
+    assert.equal(result.file.anchors.grip.attack[2].x, 2.5);
+    assert.equal(source.layers[0].tracks.attack2[0][1], '.ZZ.....', 'source document must stay untouched');
+    assert.equal(target.layers[0].tracks.attack[2][1], '........', 'active input must stay untouched');
+
+    const beforeFailure = JSON.stringify(result.file);
+    assert.throws(() => agent.applySpriteAgentTransaction({
+      activePath: 'target.json', active: result.file,
+    }, {
+      commands: [
+        {
+          op: 'pixel.set', target: { animation: 'attack', frame: 2, layerId: 'sword' },
+          pixels: [{ x: 0, y: 0, color: '#abcdef' }],
+        },
+        {
+          op: 'assert.frame', target: { animation: 'attack', frame: 2, layerId: 'sword' },
+          expected: { pixelCount: 999 },
+        },
+      ],
+    }), /command 2 \(assert\.frame\)/);
+    assert.equal(JSON.stringify(result.file), beforeFailure, 'failed transaction must be atomic');
   }
 
   console.log('sprite-editor document tests: ok');
