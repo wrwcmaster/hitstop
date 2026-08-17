@@ -8,14 +8,25 @@
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
+    .visually-hidden {
+      position: absolute !important; width: 1px !important; height: 1px !important;
+      padding: 0 !important; margin: -1px !important; overflow: hidden !important;
+      clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important;
+    }
     html, body { margin: 0; height: 100%; background: #0d1026; color: #94b0c2; font: 13px/1.5 monospace; }
     body { display: flex; flex-direction: column; }
-    header { padding: 8px 12px; background: #07070d; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    header { min-height: 46px; padding: 7px 12px; background: #07070d; display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
     header h1 { font-size: 14px; margin: 0 12px 0 0; color: #f4f4f4; }
+    #documentIdentity { min-width: 0; margin-right: auto; line-height: 1.25; }
+    #documentName { display: block; max-width: 260px; overflow: hidden; color: #f4f4f4; text-overflow: ellipsis; white-space: nowrap; }
+    .document-subline { display: flex; min-width: 0; align-items: center; gap: 6px; }
+    #documentMeta { min-width: 0; overflow: hidden; color: #566c86; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .primary-action { color: #07070d; background: #38b764; border-color: #38b764; }
+    .primary-action:hover { background: #58cc7b; }
     #toolbar {
       min-height: 42px; padding: 6px 12px; background: #0b0e20;
       border-top: 1px solid #171d3c; border-bottom: 1px solid #33447f;
-      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+      display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; overflow-x: auto;
     }
     #toolbar .group { display: flex; align-items: center; gap: 4px; }
     #toolbar .icon-tool {
@@ -27,6 +38,7 @@
       stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
     }
     #toolbar .separator { width: 1px; height: 24px; margin: 0 5px; background: #33447f; }
+    #toolbar .spacer { flex: 1 1 auto; min-width: 12px; }
     #toolbar label { display: flex; align-items: center; gap: 3px; margin: 0; }
     #toolbar .mode-toggle {
       height: 30px; padding: 4px 7px; border: 1px solid #33447f; border-radius: 4px;
@@ -37,6 +49,7 @@
     #gridZoomPercent { width: 72px; text-align: right; }
     #brushSize { width: 58px; text-align: right; }
     main { flex: 1; display: flex; min-height: 0; }
+    body.hide-left-panel #side-left, body.hide-right-panel #side-right { display: none; }
     #side-left, #side-right { width: 260px; background: #101430; flex-shrink: 0; }
     #side-left {
       padding: 0; overflow: hidden; display: flex; flex-direction: column;
@@ -53,16 +66,24 @@
       padding: 0; overflow: hidden; display: flex; flex-direction: column;
     }
     #persistent-preview {
-      flex: 0 0 auto; max-height: 56%; overflow-y: auto; padding: 10px;
+      flex: 0 0 auto; max-height: 56%; min-height: 0; overflow: hidden; padding: 10px;
+      display: flex; flex-direction: column; box-sizing: border-box;
       background: #101430; border-bottom: 1px solid #33447f;
     }
+    #persistent-preview > :not(#previewViewport) { flex: 0 0 auto; }
     #right-workspace-scroll {
       flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px;
     }
     /* The composite preview renders at the game's on-screen scale (8px
        per world pixel), which needs more room than a sheet thumbnail. */
     #side-right.wide { width: 452px; }
-    #center { flex: 1; overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 20px; background: #07070d; }
+    #center { flex: 1; overflow: auto; padding: 20px; background: #07070d; }
+    body.space-pan #center, body.space-pan #grid { cursor: grab !important; }
+    body.space-panning #center, body.space-panning #grid { cursor: grabbing !important; user-select: none; }
+    /* The stage is at least as wide as the viewport, so a small canvas keeps
+       the original centered layout. Its max-content width grows with a
+       zoomed canvas, giving the scroll container a real, reachable left edge. */
+    #canvasStage { min-width: 100%; width: max-content; display: flex; justify-content: center; align-items: flex-start; }
     canvas { image-rendering: pixelated; }
     #grid { cursor: crosshair; border: 1px solid #33447f; }
     #grid.selecting { cursor: cell; }
@@ -80,6 +101,7 @@
     #grid.selection-transforming.selection-movable { cursor: move; }
     #grid.picking { cursor: copy; }
     #grid.soft-tool { cursor: none; }
+    #grid.anchor-placing { cursor: crosshair !important; }
     #brushCursor {
       position: fixed; display: none; pointer-events: none; z-index: 100;
       border: 2px dashed #ffcd75; border-radius: 50%;
@@ -119,6 +141,7 @@
     .command-menu-panel button:hover { background: #1f2a57; }
     .command-menu-panel button:disabled { color: #566c86; cursor: default; }
     .command-menu-panel kbd { color: #94b0c2; font: inherit; white-space: nowrap; }
+    .command-menu-heading { padding: 5px 8px 2px; color: #566c86; font-size: 10px; text-transform: uppercase; }
     .command-menu-separator { height: 1px; margin: 5px 3px; background: #33447f; }
     dialog {
       width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto;
@@ -156,6 +179,7 @@
     .panel-tabs button.active {
       color: #ffcd75; background: #1f2a57; border-color: #33447f;
     }
+    .panel-tabs button:focus-visible { outline-offset: -2px; }
     .panel-page[hidden] { display: none; }
     .panel-group { margin: 0 0 12px; }
     .panel-row { display: flex; gap: 4px; align-items: center; margin-bottom: 6px; }
@@ -182,7 +206,17 @@
       border: 2px solid #ffcd75; border-radius: 3px; background: #1f2a57;
       pointer-events: auto; cursor: ew-resize;
     }
-    #previewStage { position: relative; line-height: 0; max-width: 100%; }
+    #previewZoomPercent { width: 62px; text-align: right; }
+    #previewZoomFit.active { background: #38b764; color: #07070d; border-color: #38b764; }
+    #previewViewport {
+      flex: 1 1 auto; min-height: 0; width: 100%; overflow: auto;
+      margin-bottom: 10px;
+    }
+    #previewCanvasStage {
+      min-width: 100%; width: max-content; display: flex;
+      justify-content: center; align-items: flex-start;
+    }
+    #previewStage { position: relative; line-height: 0; width: max-content; }
     #combatHitboxOverlay {
       position: absolute; z-index: 3; border: 2px solid #ffcd75;
       background: rgba(86, 108, 134, .08); cursor: move; line-height: normal;
@@ -205,6 +239,10 @@
     }
     button:hover { background: #33447f; }
     button.active { background: #38b764; color: #07070d; border-color: #38b764; }
+    button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible {
+      outline: 2px solid #68c6ff; outline-offset: 2px;
+    }
+    button:disabled { opacity: .48; cursor: not-allowed; }
     #palette {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(26px, 1fr));
@@ -286,9 +324,9 @@
     .layer-row .layer-tag { min-width: 0; font-size: 10px; padding: 3px; }
     .layer-row .layer-toggle.off { color: #566c86; background: #11162b; }
     .layer-row .layer-toggle.on { color: #ffcd75; }
-    #preview { border: 1px solid #33447f; background: #0a0c1c; max-width: 100%; height: auto; }
+    #preview { display: block; border: 1px solid #33447f; background: #0a0c1c; max-width: none; height: auto; }
     #status {
-      position: fixed; top: 12px; right: 12px; z-index: 200;
+      position: fixed; left: 50%; bottom: 38px; z-index: 200; transform: translateX(-50%);
       max-width: min(420px, calc(100vw - 24px)); padding: 7px 10px;
       color: #38b764; background: rgba(7, 7, 13, 0.94);
       border: 1px solid #38b764; border-radius: 5px;
@@ -296,10 +334,50 @@
       pointer-events: none;
     }
     #status:empty { display: none; }
-    #bridgeStatus { color: #566c86; }
+    #bridgeStatus {
+      flex: 0 0 auto; padding: 0 5px; color: #718ca6; background: #11162b;
+      border: 1px solid #263563; border-radius: 999px; font-size: 9px;
+      line-height: 14px; white-space: nowrap; cursor: help;
+    }
+    #bridgeStatus::before {
+      content: ''; display: inline-block; width: 5px; height: 5px; margin-right: 4px;
+      border-radius: 50%; background: currentColor; vertical-align: 1px;
+    }
     #bridgeStatus.connected { color: #38b764; }
     #bridgeStatus.dirty { color: #ffcd75; }
-    #bridgeStatus.conflict { color: #ef7d57; }
+    #bridgeStatus.conflict { color: #ef7d57; cursor: pointer; }
+    #btnToggleLeftPanel.active, #btnToggleRightPanel.active {
+      color: #ffcd75; background: #1f2a57; border-color: #33447f;
+    }
+    #workspaceStatusbar {
+      min-height: 26px; padding: 4px 10px; display: grid;
+      grid-template-columns: minmax(180px, 1fr) auto auto auto; gap: 14px; align-items: center;
+      color: #718ca6; background: #07070d; border-top: 1px solid #33447f; font-size: 11px;
+    }
+    #workspaceStatusbar > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #workspaceToolStatus { color: #b9c9d5; }
+    #workspaceCursorStatus { min-width: 88px; text-align: right; }
+    #workspaceDocumentStatus { color: #ffcd75; }
+    #shortcutsDialog { width: min(720px, calc(100vw - 32px)); }
+    .shortcut-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 24px; margin: 14px 0; }
+    .shortcut-group { border-top: 1px solid #33447f; }
+    .shortcut-row { display: grid; grid-template-columns: minmax(145px, auto) 1fr; gap: 12px; padding: 5px 0; }
+    .shortcut-row kbd { justify-self: start; padding: 1px 5px; color: #f4f4f4; background: #1f2a57; border: 1px solid #33447f; border-radius: 3px; }
+    @media (max-width: 980px) {
+      #side-left { width: 220px; }
+      #side-right, #side-right.wide { width: 320px; }
+      #workspaceStatusbar { grid-template-columns: minmax(120px, 1fr) auto auto; }
+      #workspaceCursorStatus { display: none; }
+    }
+    @media (max-width: 720px) {
+      header h1, #selectionStatus { display: none; }
+      #documentIdentity { order: 10; flex-basis: 100%; }
+      main { position: relative; }
+      #side-left, #side-right, #side-right.wide { width: min(78vw, 320px); }
+      #workspaceStatusbar { grid-template-columns: minmax(100px, 1fr) auto; }
+      #workspaceFrameStatus { display: none; }
+      .shortcut-columns { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -308,27 +386,47 @@
     <details id="editMenu" class="command-menu">
       <summary aria-haspopup="menu">Menu</summary>
       <div class="command-menu-panel" role="menu">
+        <div class="command-menu-heading">edit</div>
         <button id="btnUndo" title="Undo (Ctrl+Z)" role="menuitem" disabled><span>undo</span><kbd>Ctrl+Z</kbd></button>
         <button id="btnRedo" title="Redo (Ctrl+Y)" role="menuitem" disabled><span>redo</span><kbd>Ctrl+Y</kbd></button>
         <button id="btnCut" title="Cut selected pixels (Ctrl+X)" role="menuitem" disabled><span>cut</span><kbd>Ctrl+X</kbd></button>
         <button id="btnCopy" title="Copy selected pixels (Ctrl+C)" role="menuitem" disabled><span>copy</span><kbd>Ctrl+C</kbd></button>
         <button id="btnPaste" title="Paste pixels at the selection (Ctrl+V)" role="menuitem"><span>paste</span><kbd>Ctrl+V</kbd></button>
         <div class="command-menu-separator" role="separator"></div>
+        <div class="command-menu-heading">select</div>
+        <button id="btnSelectAll" title="Select the whole canvas" role="menuitem"><span>select all</span><kbd>Ctrl+A</kbd></button>
+        <button id="btnDeselect" title="Clear the current selection" role="menuitem" disabled><span>deselect</span><kbd>Ctrl+D</kbd></button>
+        <div class="command-menu-separator" role="separator"></div>
+        <div class="command-menu-heading">workspace</div>
+        <button id="btnTogglePanels" title="Show or hide both side panels" role="menuitem"><span>toggle panels</span><kbd>Tab</kbd></button>
+        <button id="btnResetWorkspace" title="Restore the default panel and zoom layout" role="menuitem"><span>reset workspace</span></button>
         <button id="btnOpenLayerTags" title="Manage shared layer tags and their render order" role="menuitem"><span>edit layer tags</span></button>
         <button id="btnOpenData" title="Open the sprite JSON workspace" role="menuitem"><span>sprite data</span></button>
+        <div class="command-menu-separator" role="separator"></div>
+        <button id="btnOpenShortcuts" title="Show keyboard shortcuts" role="menuitem"><span>keyboard shortcuts</span><kbd>?</kbd></button>
       </div>
     </details>
     <select id="selectSprite" style="background:#1f2a57; color:#f4f4f4; border:1px solid #33447f; border-radius:4px; padding:4px;">
       <option value="">-- load existing sprite --</option>
     </select>
     <button id="btnLoad" title="Open a .json sprite file">load local file...</button>
-    <button id="btnSaveRepo" title="Save all modified sprites to the repository" disabled>save all</button>
+    <div id="documentIdentity" aria-live="polite">
+      <span id="documentName">new sprite.json</span>
+      <div class="document-subline">
+        <span id="documentMeta">not saved to repository</span>
+        <span id="bridgeStatus" title="Live local agent bridge">connecting</span>
+      </div>
+    </div>
+    <button id="btnSaveRepo" class="primary-action" title="Save all modified sprites to the repository (Ctrl+S)" disabled>save all</button>
     <button id="btnSave" title="Download the current sprite as .json">download</button>
     <input type="file" id="fileInput" accept=".json,application/json" style="display:none">
-    <span id="bridgeStatus" title="Live local agent bridge">bridge: connecting</span>
     <span id="status"></span>
   </header>
   <div id="toolbar" role="toolbar" aria-label="sprite editing tools">
+    <div id="activeToolContext" class="visually-hidden" aria-live="polite">
+      <span id="activeToolName">Pencil</span>
+      <span id="activeToolHint">Click or drag to paint one pixel at a time.</span>
+    </div>
     <div class="group" aria-label="paint tools">
       <button id="btnToolDraw" class="active icon-tool" title="Pencil (P)" aria-label="Pencil (P)">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 17l1-4L14.5 2.5a1.8 1.8 0 012.5 0l.5.5a1.8 1.8 0 010 2.5L7 16z"/><path d="M12.5 4.5l3 3M4 13l3 3"/></svg>
@@ -365,6 +463,15 @@
       <label>zoom <input id="gridZoomPercent" type="number" min="100" max="6400" step="100" value="2400">%</label>
       <button id="btnGridZoomIn" title="Zoom in" aria-label="Zoom in">+</button>
       <button id="btnFitGrid" title="Fit canvas to workspace">fit</button>
+    </div>
+    <span class="spacer" aria-hidden="true"></span>
+    <div class="group" aria-label="workspace panels">
+      <button id="btnToggleLeftPanel" class="icon-tool active" title="Toggle palette and tool panels" aria-label="Toggle left panel" aria-pressed="true">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3" width="15" height="14" rx="1"/><path d="M7 3v14"/></svg>
+      </button>
+      <button id="btnToggleRightPanel" class="icon-tool active" title="Toggle preview and property panels" aria-label="Toggle right panel" aria-pressed="true">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3" width="15" height="14" rx="1"/><path d="M13 3v14"/></svg>
+      </button>
     </div>
   </div>
   <main>
@@ -486,7 +593,7 @@
     </div>
 
     <div id="center">
-      <canvas id="grid"></canvas>
+      <div id="canvasStage"><canvas id="grid" tabindex="0" aria-label="Editable sprite canvas"></canvas></div>
       <div id="brushCursor" aria-hidden="true"></div>
     </div>
 
@@ -500,11 +607,19 @@
           <label style="display:inline"><input type="checkbox" id="hd" checked> hd</label>
         </h2>
         <div id="previewContext" class="hint" style="margin:-2px 0 6px">sprite preview</div>
-        <div style="display:flex; justify-content:center; margin-bottom:10px;">
-          <div id="previewStage">
-            <canvas id="preview" width="200" height="80"></canvas>
-            <div id="combatHitboxOverlay" hidden title="Drag to move the attack region; drag the corner to resize">
-              <span class="combat-resize-handle" data-combat-handle="resize"></span>
+        <div class="panel-row" role="group" aria-label="preview zoom" style="align-items:center; margin-bottom:6px">
+          <button id="previewZoomOut" type="button" title="Zoom preview out" aria-label="Zoom preview out">&minus;</button>
+          <label style="display:flex; align-items:center; gap:3px; flex:0 0 auto">zoom <input id="previewZoomPercent" type="number" min="10" max="800" step="25" value="100">%</label>
+          <button id="previewZoomIn" type="button" title="Zoom preview in" aria-label="Zoom preview in">+</button>
+          <button id="previewZoomFit" class="active" type="button" title="Fit preview to panel" aria-label="Fit preview to panel" aria-pressed="true">fit</button>
+        </div>
+        <div id="previewViewport">
+          <div id="previewCanvasStage">
+            <div id="previewStage">
+              <canvas id="preview" width="200" height="80"></canvas>
+              <div id="combatHitboxOverlay" hidden title="Drag to move the attack region; drag the corner to resize">
+                <span class="combat-resize-handle" data-combat-handle="resize"></span>
+              </div>
             </div>
           </div>
         </div>
@@ -523,6 +638,7 @@
       <div style="display:flex; gap:4px; margin-bottom:6px">
         <button id="btnAddAnim" style="flex:1">+ anim</button>
         <button id="btnRenameAnim" style="flex:1">rename</button>
+        <button id="btnMaterializeAnim" style="flex:1" disabled>unlink</button>
         <button id="btnDelAnim" style="flex:1">del</button>
       </div>
       <div class="panel-row" style="margin-bottom:10px">
@@ -650,8 +766,9 @@
       <div style="display:flex; gap:6px; align-items:center; margin-bottom:4px">
         <label style="margin:0">x <input id="anchorX" type="number" step="0.25" style="width:58px"></label>
         <label style="margin:0">y <input id="anchorY" type="number" step="0.25" style="width:58px"></label>
+        <button id="btnPlaceAnchor" type="button" aria-pressed="false" title="Place the selected anchor by clicking the canvas">place</button>
       </div>
-      <p class="hint" style="margin:0 0 8px">Shift+Alt-click the grid to place the selected anchor. For a right-facing knight, frontHand is the knight's right/weapon hand, on the left side of the image.</p>
+      <p class="hint" style="margin:0 0 8px">Select place, then click the grid. Choosing another canvas tool exits anchor placement. For a right-facing knight, frontHand is the knight's right/weapon hand, on the left side of the image.</p>
 
       <h2>attachment slots</h2>
       <div style="display:flex; gap:4px; margin:5px 0">
@@ -682,6 +799,12 @@
       </div>
     </div>
   </main>
+  <footer id="workspaceStatusbar" aria-live="polite">
+    <span id="workspaceToolStatus">Pencil</span>
+    <span id="workspaceCursorStatus">x -- &nbsp; y --</span>
+    <span id="workspaceFrameStatus">idle &middot; frame 1/1 &middot; base</span>
+    <span id="workspaceDocumentStatus">12&times;14 &middot; 2400%</span>
+  </footer>
   <dialog id="renderTagsDialog" aria-labelledby="renderTagsTitle">
     <div class="dialog-heading">
       <h2 id="renderTagsTitle">layer tags</h2>
@@ -698,6 +821,50 @@
     <div class="panel-row" style="margin:0">
       <button id="btnAddRenderTag" type="button">+ tag</button>
       <button id="btnDoneRenderTags" type="button">done</button>
+    </div>
+  </dialog>
+  <dialog id="shortcutsDialog" aria-labelledby="shortcutsTitle">
+    <div class="dialog-heading">
+      <h2 id="shortcutsTitle">keyboard shortcuts</h2>
+      <button id="btnCloseShortcuts" type="button" title="Close keyboard shortcuts" aria-label="Close keyboard shortcuts">&times;</button>
+    </div>
+    <p class="hint">The editor follows familiar image-editor conventions. Shortcuts are ignored while typing in a field.</p>
+    <div class="shortcut-columns">
+      <section class="shortcut-group">
+        <h2>tools</h2>
+        <div class="shortcut-row"><kbd>P</kbd><span>pencil</span></div>
+        <div class="shortcut-row"><kbd>B</kbd><span>soft brush</span></div>
+        <div class="shortcut-row"><kbd>U</kbd><span>blur</span></div>
+        <div class="shortcut-row"><kbd>G</kbd><span>fill</span></div>
+        <div class="shortcut-row"><kbd>M / W</kbd><span>rectangle / magic selection</span></div>
+        <div class="shortcut-row"><kbd>Alt</kbd><span>temporarily pick color</span></div>
+      </section>
+      <section class="shortcut-group">
+        <h2>selection</h2>
+        <div class="shortcut-row"><kbd>Shift / Alt</kbd><span>add / subtract selection</span></div>
+        <div class="shortcut-row"><kbd>Ctrl+A</kbd><span>select all</span></div>
+        <div class="shortcut-row"><kbd>Ctrl+D / Esc</kbd><span>deselect</span></div>
+        <div class="shortcut-row"><kbd>V</kbd><span>toggle transform mode</span></div>
+        <div class="shortcut-row"><kbd>Delete</kbd><span>clear selected pixels</span></div>
+      </section>
+      <section class="shortcut-group">
+        <h2>canvas</h2>
+        <div class="shortcut-row"><kbd>Space + drag</kbd><span>pan canvas</span></div>
+        <div class="shortcut-row"><kbd>Ctrl++ / Ctrl+-</kbd><span>zoom in / out</span></div>
+        <div class="shortcut-row"><kbd>Ctrl+0</kbd><span>fit canvas</span></div>
+        <div class="shortcut-row"><kbd>Tab</kbd><span>hide / show panels</span></div>
+      </section>
+      <section class="shortcut-group">
+        <h2>document</h2>
+        <div class="shortcut-row"><kbd>Ctrl+Z</kbd><span>undo</span></div>
+        <div class="shortcut-row"><kbd>Ctrl+Shift+Z</kbd><span>redo</span></div>
+        <div class="shortcut-row"><kbd>Ctrl+X/C/V</kbd><span>cut / copy / paste</span></div>
+        <div class="shortcut-row"><kbd>Ctrl+S</kbd><span>save all</span></div>
+        <div class="shortcut-row"><kbd>?</kbd><span>show this guide</span></div>
+      </section>
+    </div>
+    <div class="panel-row" style="justify-content:flex-end; margin:0">
+      <button id="btnDoneShortcuts" type="button">done</button>
     </div>
   </dialog>
   <script type="module" src="/tools/src/sprite-editor.ts"></script>

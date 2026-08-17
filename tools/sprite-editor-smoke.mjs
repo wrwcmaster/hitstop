@@ -1,0 +1,241 @@
+import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { chromium } from 'playwright';
+
+const baseUrl = process.env.SPRITE_EDITOR_URL ?? 'http://127.0.0.1:5175';
+const installedChrome = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
+  ?? (existsSync(installedChrome) ? installedChrome : undefined);
+const browser = await chromium.launch({ headless: true, executablePath });
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+const errors = [];
+page.on('pageerror', (error) => errors.push(error.message));
+page.on('console', (message) => {
+  if (message.type() === 'error') errors.push(message.text());
+});
+
+const fixture = () => ({
+  hd: true,
+  palette: { '.': null, A: '#ffffff', B: '#111111' },
+  anims: { idle: { fps: 4, frameCount: 2 }, air: 'idle' },
+  layers: [
+    {
+      id: 'base', name: 'Base', tag: 'body', tracks: {
+        idle: [['A.'], ['.A']],
+      },
+    },
+    {
+      id: 'hand', name: 'Hand', tag: 'front-hand', tracks: {
+        idle: [['.B'], ['B.']],
+      },
+    },
+  ],
+  anchors: {
+    grip: {
+      idle: [{ x: 0, y: 0 }, { x: 1, y: 0 }],
+      air: [{ x: 10, y: 0 }, { x: 11, y: 0 }],
+    },
+  },
+  attachmentSlots: { weapon: { anchor: 'grip' } },
+});
+
+try {
+  await page.goto(`${baseUrl}/tools/sprite-editor.html?sprite=knight-v2.json`, {
+    // The editor intentionally keeps its bridge EventSource open, so the
+    // page never reaches Playwright's network-idle state.
+    waitUntil: 'domcontentloaded',
+  });
+  await page.waitForFunction(() => Boolean(window.__editor));
+
+  // A malformed inactive draft used to crash module initialization while
+  // rebuilding the cross-sprite workspace. It must be ignored without
+  // deleting it (the author may still recover its raw JSON manually).
+  await page.evaluate(() => localStorage.setItem(
+    `hitstop.sprite-editor.draft:${encodeURIComponent('broken.json')}`,
+    JSON.stringify({
+      v: 1,
+      path: 'broken.json',
+      baseFile: '',
+      updatedAt: Date.now(),
+      file: { anims: { idle: { fps: 4, frames: [['A'], ['AA']] } } },
+    }),
+  ));
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__editor));
+  assert.ok(await page.evaluate(() => localStorage.getItem(
+    `hitstop.sprite-editor.draft:${encodeURIComponent('broken.json')}`,
+  )));
+  await page.evaluate(() => localStorage.removeItem(
+    `hitstop.sprite-editor.draft:${encodeURIComponent('broken.json')}`,
+  ));
+
+  assert.equal(await page.locator('#workspaceStatusbar').isVisible(), true);
+  assert.equal(await page.locator('#documentIdentity > .document-subline > #bridgeStatus').count(), 1);
+  assert.doesNotMatch((await page.locator('#bridgeStatus').textContent()) ?? '', /bridge:|\.json|\//);
+  assert.deepEqual(await page.locator('#activeToolContext').evaluate((element) => {
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return { position: style.position, width: rect.width, height: rect.height };
+  }), { position: 'absolute', width: 1, height: 1 });
+  assert.equal(await page.locator('#activeToolName').textContent(), 'Pencil');
+  const toolStripX = (await page.locator('#btnToolDraw').boundingBox())?.x;
+  await page.click('#btnToolBrush');
+  assert.equal(await page.locator('#activeToolName').textContent(), 'Soft brush');
+  assert.equal((await page.locator('#btnToolDraw').boundingBox())?.x, toolStripX);
+  assert.equal(await page.locator('#brushSizeConfig').isVisible(), true);
+  await page.locator('[data-panel-target="left-tool"]').focus();
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await page.locator('[data-panel-target="left-reference"]').getAttribute('aria-selected'), 'true');
+  await page.evaluate(() => document.body.dispatchEvent(new KeyboardEvent('keydown', {
+    key: '?', shiftKey: true, bubbles: true, cancelable: true,
+  })));
+  assert.equal(await page.locator('#shortcutsDialog').getAttribute('open'), '');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#shortcutsDialog').getAttribute('open'), null);
+
+  await page.locator('#grid').focus();
+  await page.keyboard.press('Tab');
+  assert.equal(await page.locator('#side-left').isVisible(), false);
+  assert.equal(await page.locator('#side-right').isVisible(), false);
+  await page.locator('#grid').focus();
+  await page.keyboard.press('Tab');
+  assert.equal(await page.locator('#side-left').isVisible(), true);
+  assert.equal(await page.locator('#side-right').isVisible(), true);
+  await page.keyboard.down('Space');
+  assert.equal(await page.locator('body').evaluate((body) => body.classList.contains('space-pan')), true);
+  await page.keyboard.up('Space');
+  assert.equal(await page.locator('body').evaluate((body) => body.classList.contains('space-pan')), false);
+
+  await page.locator('#gridZoomPercent').evaluate((input) => {
+    input.value = '6400';
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await page.locator('#btnFitGrid').focus();
+  await page.locator('#center').evaluate((center) => {
+    center.scrollLeft = 0;
+    center.scrollTop = 0;
+  });
+  const centerBox = await page.locator('#center').boundingBox();
+  assert.ok(centerBox);
+  await page.keyboard.down('Space');
+  await page.mouse.move(centerBox.x + centerBox.width / 2, centerBox.y + centerBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(centerBox.x + centerBox.width / 2 - 120, centerBox.y + centerBox.height / 2 - 80);
+  await page.mouse.up();
+  await page.keyboard.up('Space');
+  assert.ok(await page.locator('#center').evaluate((center) => center.scrollLeft > 0 && center.scrollTop > 0));
+  await page.click('#btnFitGrid');
+
+  if (process.env.SPRITE_EDITOR_SCREENSHOT) {
+    await page.screenshot({ path: process.env.SPRITE_EDITOR_SCREENSHOT, fullPage: true });
+  }
+
+  await page.evaluate((file) => window.__editor.replace(file, null), fixture());
+  await page.keyboard.press('Control+A');
+  assert.deepEqual(await page.evaluate(() => {
+    const { x, y, w, h } = window.__editor.selection;
+    return { x, y, w, h };
+  }), { x: 0, y: 0, w: 2, h: 1 });
+  await page.keyboard.press('Control+D');
+  assert.equal(await page.evaluate(() => window.__editor.selection), null);
+  await page.click('#btnToolDraw');
+  const gridBox = await page.locator('#grid').boundingBox();
+  assert.ok(gridBox);
+  await page.mouse.move(gridBox.x + 2, gridBox.y + 2);
+  await page.mouse.down({ button: 'right' });
+  assert.equal(await page.evaluate(() => window.__editor.file.layers[0].tracks.idle[0][0]), '..');
+  await page.keyboard.press('Control+Z');
+  await page.mouse.up({ button: 'right' });
+  assert.equal(
+    await page.evaluate(() => window.__editor.file.layers[0].tracks.idle[0][0]),
+    'A.',
+    'undo during a live stroke must commit then undo exactly that gesture',
+  );
+  await page.click('#btnDupFrame');
+  let state = await page.evaluate(() => ({
+    file: structuredClone(window.__editor.file),
+    frameIdx: window.__editor.frameIdx,
+  }));
+  assert.equal(state.file.anims.idle.frameCount, 3);
+  assert.equal(state.file.layers[0].tracks.idle.length, 3);
+  assert.equal(state.file.layers[1].tracks.idle.length, 3);
+  assert.equal(state.file.anchors.grip.idle.length, 3);
+  assert.equal(state.file.anchors.grip.air.length, 3);
+  assert.equal(state.frameIdx, 1);
+
+  await page.click('#btnFrameRight');
+  state = await page.evaluate(() => ({
+    file: structuredClone(window.__editor.file),
+    frameIdx: window.__editor.frameIdx,
+  }));
+  assert.equal(state.frameIdx, 2);
+  assert.deepEqual(state.file.anchors.grip.idle.map((point) => point.x), [0, 1, 0]);
+
+  await page.click('#btnDelFrame');
+  state = await page.evaluate(() => ({
+    file: structuredClone(window.__editor.file),
+    frameIdx: window.__editor.frameIdx,
+  }));
+  assert.equal(state.file.anims.idle.frameCount, 2);
+  assert.equal(state.file.layers[0].tracks.idle.length, 2);
+  assert.equal(state.file.anchors.grip.idle.length, 2);
+  assert.equal(state.frameIdx, 1);
+
+  await page.evaluate(() => window.__editor.setPixels({
+    anim: 'idle', frame: 0, layerId: 'base', pixels: [{ x: 0, y: 0, char: 'B' }],
+  }));
+  assert.equal(await page.evaluate(() => window.__editor.file.layers[0].tracks.idle[0][0]), 'B.');
+  await page.keyboard.press('Control+Z');
+  assert.equal(await page.evaluate(() => window.__editor.file.layers[0].tracks.idle[0][0]), 'A.');
+
+  const beforeInvalidReplace = await page.evaluate(() => JSON.stringify(window.__editor.file));
+  const invalidError = await page.evaluate((file) => {
+    file.layers[1].tracks.idle.pop();
+    try {
+      window.__editor.replace(file, null);
+      return '';
+    } catch (error) {
+      return String(error);
+    }
+  }, fixture());
+  assert.match(invalidError, /expected 2 frames/);
+  assert.equal(await page.evaluate(() => JSON.stringify(window.__editor.file)), beforeInvalidReplace);
+
+  await page.evaluate((file) => window.__editor.replace(file, 'first.json'), fixture());
+  await page.evaluate(() => window.__editor.setPixels({
+    anim: 'idle', frame: 0, layerId: 'base', pixels: [{ x: 0, y: 0, char: 'B' }],
+  }));
+  assert.equal(await page.locator('#btnUndo').isDisabled(), false);
+  await page.evaluate((file) => window.__editor.replace(file, 'second.json'), fixture());
+  assert.equal(await page.locator('#btnUndo').isDisabled(), true, 'history must not cross sprite paths');
+
+  // Run alias materialization last: the bridge may asynchronously echo an
+  // earlier document revision, and no later smoke assertion should depend on
+  // this deliberately transient undo state.
+  await page.evaluate((file) => window.__editor.replace(file, null), fixture());
+  await page.locator('#anims button').filter({ hasText: 'air' }).click();
+  assert.equal(await page.locator('#btnMaterializeAnim').isEnabled(), true);
+  assert.match((await page.locator('#btnMaterializeAnim').getAttribute('title')) ?? '', /independent from "idle"/);
+  await page.click('#btnMaterializeAnim');
+  assert.deepEqual(await page.evaluate(() => ({
+    animation: window.__editor.animName,
+    air: structuredClone(window.__editor.file.anims.air),
+    baseAir: structuredClone(window.__editor.file.layers[0].tracks.air),
+    baseIdle: structuredClone(window.__editor.file.layers[0].tracks.idle),
+    anchor: structuredClone(window.__editor.file.anchors.grip.air),
+  })), {
+    animation: 'air',
+    air: { fps: 4, frameCount: 2 },
+    baseAir: [['A.'], ['.A']],
+    baseIdle: [['A.'], ['.A']],
+    anchor: [{ x: 10, y: 0 }, { x: 11, y: 0 }],
+  });
+  assert.equal(await page.locator('#btnMaterializeAnim').isDisabled(), true);
+  await page.keyboard.press('Control+Z');
+  assert.equal(await page.evaluate(() => window.__editor.file.anims.air), 'idle');
+
+  assert.deepEqual(errors, []);
+  console.log('sprite-editor UI smoke tests: ok');
+} finally {
+  await browser.close();
+}

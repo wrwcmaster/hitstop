@@ -1,7 +1,11 @@
 import { promises as fs } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
+import type { SpriteFile } from '../src/engine/gfx/spritefile';
+import { validateSpriteEditorDocument } from './src/sprite-editor-document';
+import { validateRenderTagDefs, validateWeaponCombatTuning } from './src/sprite-editor-workspace';
 
 const API = '/__sprite-editor';
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
@@ -89,200 +93,7 @@ export function spriteEditorBridge(root: string): Plugin {
 
   const validateSprite = (candidate: unknown): void => {
     if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) throw new Error('file must be a SpriteFile object');
-    const anims = (candidate as { anims?: unknown }).anims;
-    if (!anims || typeof anims !== 'object' || Array.isArray(anims) || !Object.keys(anims).length) {
-      throw new Error('sprite needs at least one animation');
-    }
-    const renderTag = (candidate as { renderTag?: unknown }).renderTag;
-    if (renderTag !== undefined && (typeof renderTag !== 'string' || !renderTag.trim())) {
-      throw new Error('sprite renderTag must be non-empty');
-    }
-    const layers = (candidate as { layers?: unknown }).layers;
-    const layered = Array.isArray(layers);
-    const concreteCounts = new Map<string, number>();
-    for (const [name, value] of Object.entries(anims)) {
-      if (typeof value === 'string') continue;
-      if (!value || typeof value !== 'object') throw new Error(`animation "${name}" needs timing data or an alias`);
-      if (layered) {
-        const count = (value as { frameCount?: unknown }).frameCount;
-        if (!Number.isInteger(count) || Number(count) < 1) {
-          throw new Error(`layered animation "${name}" needs a positive frameCount`);
-        }
-        concreteCounts.set(name, Number(count));
-        continue;
-      }
-      if (!Array.isArray((value as { frames?: unknown }).frames)) {
-        throw new Error(`animation "${name}" needs frames or an alias`);
-      }
-      const frames = (value as { frames: unknown[] }).frames;
-      if (!frames.length) throw new Error(`animation "${name}" has no frames`);
-      concreteCounts.set(name, frames.length);
-      for (const frame of frames) {
-        if (!Array.isArray(frame) || !frame.length || !frame.every((row) => typeof row === 'string')) {
-          throw new Error(`animation "${name}" has an invalid frame`);
-        }
-        const width = (frame[0] as string).length;
-        if (!width || !frame.every((row) => (row as string).length === width)) {
-          throw new Error(`animation "${name}" frames must be rectangular`);
-        }
-      }
-    }
-    if (layered) {
-      if (!layers.length) throw new Error('layered sprite needs at least one layer');
-      const ids = new Set<string>();
-      for (const rawLayer of layers) {
-        if (!rawLayer || typeof rawLayer !== 'object' || Array.isArray(rawLayer)) throw new Error('sprite layer must be an object');
-        const layer = rawLayer as { id?: unknown; name?: unknown; tag?: unknown; tracks?: unknown };
-        if (typeof layer.id !== 'string' || !layer.id.trim() || ids.has(layer.id)) throw new Error('sprite layers need unique ids');
-        if (typeof layer.name !== 'string' || !layer.name.trim()) throw new Error(`layer "${layer.id}" needs a name`);
-        if (typeof layer.tag !== 'string' || !layer.tag.trim()) throw new Error(`layer "${layer.id}" needs a render tag`);
-        if (!layer.tracks || typeof layer.tracks !== 'object' || Array.isArray(layer.tracks)) {
-          throw new Error(`layer "${layer.id}" needs tracks`);
-        }
-        ids.add(layer.id);
-        const tracks = layer.tracks as Record<string, unknown>;
-        for (const [name, count] of concreteCounts) {
-          const frames = tracks[name];
-          if (!Array.isArray(frames) || frames.length !== count) {
-            throw new Error(`layer "${layer.id}.${name}" needs ${count} frames`);
-          }
-          for (const frame of frames) {
-            if (!Array.isArray(frame) || !frame.length || !frame.every((row) => typeof row === 'string')) {
-              throw new Error(`layer "${layer.id}.${name}" has an invalid frame`);
-            }
-            const width = (frame[0] as string).length;
-            if (!width || !frame.every((row) => (row as string).length === width)) {
-              throw new Error(`layer "${layer.id}.${name}" frames must be rectangular`);
-            }
-          }
-        }
-      }
-    }
-    const anchors = (candidate as { anchors?: unknown }).anchors;
-    if (anchors !== undefined) {
-      if (!anchors || typeof anchors !== 'object' || Array.isArray(anchors)) throw new Error('sprite anchors must be an object');
-      for (const [pointName, groups] of Object.entries(anchors)) {
-        if (!groups || typeof groups !== 'object' || Array.isArray(groups)) throw new Error(`anchor "${pointName}" must contain animations`);
-        for (const [animName, points] of Object.entries(groups)) {
-          if (!Array.isArray(points)) throw new Error(`anchor "${pointName}.${animName}" must be an array`);
-          const seen = new Set<string>();
-          let resolvedName = animName;
-          let resolved = (anims as Record<string, unknown>)[resolvedName];
-          while (typeof resolved === 'string') {
-            if (seen.has(resolvedName)) throw new Error(`animation alias cycle at "${animName}"`);
-            seen.add(resolvedName);
-            resolvedName = resolved;
-            resolved = (anims as Record<string, unknown>)[resolvedName];
-          }
-          if (!resolved || typeof resolved !== 'object') {
-            throw new Error(`anchor "${pointName}.${animName}" refers to an unknown animation`);
-          }
-          const frameCount = layered
-            ? Number((resolved as { frameCount?: unknown }).frameCount)
-            : Array.isArray((resolved as { frames?: unknown }).frames)
-              ? (resolved as { frames: unknown[] }).frames.length
-              : 0;
-          if (!frameCount) throw new Error(`anchor "${pointName}.${animName}" refers to an invalid animation`);
-          if (points.length !== frameCount) {
-            throw new Error(`anchor "${pointName}.${animName}" needs ${frameCount} points, got ${points.length}`);
-          }
-          for (const point of points) {
-            const p = point as { x?: unknown; y?: unknown; angle?: unknown };
-            if (!point || typeof point !== 'object' || !Number.isFinite(p.x) || !Number.isFinite(p.y)
-              || (p.angle !== undefined && !Number.isFinite(p.angle))) {
-              throw new Error(`anchor "${pointName}.${animName}" needs finite x/y/angle values`);
-            }
-          }
-        }
-      }
-    }
-    const slots = (candidate as { attachmentSlots?: unknown }).attachmentSlots;
-    if (slots !== undefined) {
-      if (!slots || typeof slots !== 'object' || Array.isArray(slots)) {
-        throw new Error('sprite attachmentSlots must be an object');
-      }
-      for (const [slotName, rawSlot] of Object.entries(slots)) {
-        const slot = rawSlot as { anchor?: unknown };
-        if (!slotName.trim() || !rawSlot || typeof rawSlot !== 'object' || Array.isArray(rawSlot)
-          || typeof slot.anchor !== 'string' || !slot.anchor.trim()) {
-          throw new Error('sprite attachment slots need names and anchors');
-        }
-        if (!anchors || typeof anchors !== 'object' || !(slot.anchor in anchors)) {
-          throw new Error(`attachment slot "${slotName}" uses unknown anchor "${slot.anchor}"`);
-        }
-      }
-    }
-  };
-
-  const validateRenderTags = (candidate: unknown): asserts candidate is { id: string; label: string }[] => {
-    if (!Array.isArray(candidate) || !candidate.length) throw new Error('render tags need a non-empty array');
-    const ids = new Set<string>();
-    for (const raw of candidate) {
-      const tag = raw as { id?: unknown; label?: unknown };
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)
-        || typeof tag.id !== 'string' || !/^[a-z][a-z0-9-]*$/.test(tag.id)
-        || typeof tag.label !== 'string' || !tag.label.trim() || ids.has(tag.id)) {
-        throw new Error('render tags need unique lowercase ids and non-empty labels');
-      }
-      ids.add(tag.id);
-    }
-  };
-
-  const validateWeaponCombat = (candidate: unknown): void => {
-    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-      throw new Error('weapon combat tuning must be an object');
-    }
-    const movePattern = /^(combo\d+|aerial|plunge|upper|dashAttack)$/;
-    for (const [typeId, rawProfile] of Object.entries(candidate)) {
-      if (!/^[a-z][a-z0-9-]*$/.test(typeId)
-        || !rawProfile || typeof rawProfile !== 'object' || Array.isArray(rawProfile)) {
-        throw new Error('weapon combat tuning needs lowercase weapon-type ids');
-      }
-      const profile = rawProfile as { fps?: unknown; moves?: unknown };
-      if (typeof profile.fps !== 'number' || !Number.isFinite(profile.fps) || profile.fps <= 0) {
-        throw new Error(`weapon combat tuning "${typeId}" needs a positive shared fps`);
-      }
-      if (!profile.moves || typeof profile.moves !== 'object' || Array.isArray(profile.moves)) {
-        throw new Error(`weapon combat tuning "${typeId}" needs a moves object`);
-      }
-      const rawMoves = profile.moves as Record<string, unknown>;
-      for (const [moveId, rawEntry] of Object.entries(rawMoves)) {
-        if (!movePattern.test(moveId)
-          || !rawEntry || typeof rawEntry !== 'object' || Array.isArray(rawEntry)) {
-          throw new Error(`weapon combat tuning has invalid move "${typeId}.${moveId}"`);
-        }
-        const entry = rawEntry as {
-          frameCount?: unknown;
-          activeFrames?: unknown;
-          hitbox?: unknown;
-        };
-        if (!Number.isInteger(entry.frameCount) || Number(entry.frameCount) < 1) {
-          throw new Error(`weapon combat tuning "${typeId}.${moveId}" needs a positive frameCount`);
-        }
-        if (!Array.isArray(entry.activeFrames) || entry.activeFrames.length !== 2
-          || entry.activeFrames.some((value) => !Number.isInteger(value))) {
-          throw new Error(`weapon combat tuning "${typeId}.${moveId}" needs activeFrames [start, end]`);
-        }
-        const [start, end] = entry.activeFrames as number[];
-        if (start < 1 || start > end || end > Number(entry.frameCount)) {
-          throw new Error(
-            `weapon combat tuning "${typeId}.${moveId}" needs 1 <= active start <= active end <= frameCount`,
-          );
-        }
-        if (!entry.hitbox || typeof entry.hitbox !== 'object' || Array.isArray(entry.hitbox)) {
-          throw new Error(`weapon combat tuning "${typeId}.${moveId}" needs a hitbox`);
-        }
-        const hitbox = entry.hitbox as Record<string, unknown>;
-        for (const field of ['forward', 'y', 'w', 'h']) {
-          if (typeof hitbox[field] !== 'number' || !Number.isFinite(hitbox[field])) {
-            throw new Error(`weapon combat tuning "${typeId}.${moveId}" hitbox.${field} must be finite`);
-          }
-        }
-        if ((hitbox.w as number) <= 0 || (hitbox.h as number) <= 0) {
-          throw new Error(`weapon combat tuning "${typeId}.${moveId}" hitbox size must be positive`);
-        }
-      }
-    }
+    validateSpriteEditorDocument(candidate as SpriteFile);
   };
 
   const matchesRepository = async (relative: string | null, candidate: unknown): Promise<boolean> => {
@@ -380,7 +191,7 @@ export function spriteEditorBridge(root: string): Plugin {
 
           if (req.method === 'GET' && url.pathname === `${API}/render-tags`) {
             const renderTags = JSON.parse(await fs.readFile(renderTagsPath, 'utf8')) as unknown;
-            validateRenderTags(renderTags);
+            validateRenderTagDefs(renderTags);
             return send(res, 200, { renderTags });
           }
 
@@ -543,11 +354,11 @@ export function spriteEditorBridge(root: string): Plugin {
             });
             const renderTags = body.renderTags;
             if (renderTags !== undefined) {
-              validateRenderTags(renderTags);
+              validateRenderTagDefs(renderTags);
               await validateSpriteRenderTagReferences(renderTags, documents);
             }
             const weaponCombat = body.weaponCombat;
-            if (weaponCombat !== undefined) validateWeaponCombat(weaponCombat);
+            if (weaponCombat !== undefined) validateWeaponCombatTuning(weaponCombat);
 
             const activeDocument = active
               ? documents.find((document) => document.target.relative === active!.path)
@@ -562,21 +373,36 @@ export function spriteEditorBridge(root: string): Plugin {
               return send(res, 409, { error: 'revision conflict', state: active });
             }
 
-            for (const document of documents) {
-              const text = `${JSON.stringify(document.file, null, 2)}\n`;
-              const temporary = `${document.target.absolute}.tmp`;
-              await fs.writeFile(temporary, text, 'utf8');
-              await fs.rename(temporary, document.target.absolute);
-            }
-            if (renderTags !== undefined) {
-              const temporary = `${renderTagsPath}.tmp`;
-              await fs.writeFile(temporary, `${JSON.stringify(renderTags, null, 2)}\n`, 'utf8');
-              await fs.rename(temporary, renderTagsPath);
-            }
-            if (weaponCombat !== undefined) {
-              const temporary = `${weaponCombatPath}.tmp`;
-              await fs.writeFile(temporary, `${JSON.stringify(weaponCombat, null, 2)}\n`, 'utf8');
-              await fs.rename(temporary, weaponCombatPath);
+            const writeBatch = [
+              ...documents.map((document) => ({
+                target: document.target.absolute,
+                text: `${JSON.stringify(document.file, null, 2)}\n`,
+              })),
+              ...(renderTags === undefined ? [] : [{
+                target: renderTagsPath,
+                text: `${JSON.stringify(renderTags, null, 2)}\n`,
+              }]),
+              ...(weaponCombat === undefined ? [] : [{
+                target: weaponCombatPath,
+                text: `${JSON.stringify(weaponCombat, null, 2)}\n`,
+              }]),
+            ].map((write) => ({
+              ...write,
+              temporary: `${write.target}.tmp-${randomUUID()}`,
+            }));
+            // Stage every byte before replacing any repository file. Disk or
+            // permission failures during staging therefore leave the entire
+            // workspace untouched instead of saving an arbitrary prefix.
+            try {
+              const staged = await Promise.allSettled(
+                writeBatch.map((write) => fs.writeFile(write.temporary, write.text, 'utf8')),
+              );
+              const failed = staged.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+              if (failed) throw failed.reason;
+              for (const write of writeBatch) await fs.rename(write.temporary, write.target);
+            } catch (error) {
+              await Promise.allSettled(writeBatch.map((write) => fs.rm(write.temporary, { force: true })));
+              throw error;
             }
 
             if (active && activeDocument) {
