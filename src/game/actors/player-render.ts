@@ -11,7 +11,7 @@ import {
 import { orderedPlayerRenderTags } from '../content/render-tags';
 import { PLAYER_TUNING } from './player-tuning';
 import type { Player } from './player';
-import { shouldSuppressHeldWeapon } from './player-render-policy';
+import { facingHitboxX, shouldSuppressHeldWeapon } from './player-render-policy';
 
 /**
  * How the knight is drawn — the whole picture, from body English to the
@@ -118,7 +118,8 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
   // its draw origin onto that box, allowing transparent overhangs without
   // changing physics.
   const poseHitbox = baseKnight.hitboxFor(anim);
-  const cx = p.x - poseHitbox.x + baseKnight.w / 2;
+  const poseHitboxX = facingHitboxX(baseKnight.w, poseHitbox.x, poseHitbox.w, p.facing);
+  const cx = p.x - poseHitboxX + baseKnight.w / 2;
   const by = p.y - poseHitbox.y + baseKnight.h;
   const dh = baseKnight.h;
   const dw = baseKnight.w;

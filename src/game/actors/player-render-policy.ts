@@ -9,3 +9,13 @@ export function shouldSuppressHeldWeapon(
 ): boolean {
   return Boolean(embeddedHeldObject && bodyHasAuthoredAttack);
 }
+
+/** Resolve an authored right-facing hitbox offset for the rendered facing. */
+export function facingHitboxX(
+  spriteWidth: number,
+  hitboxX: number,
+  hitboxWidth: number,
+  facing: 1 | -1,
+): number {
+  return facing === 1 ? hitboxX : spriteWidth - hitboxX - hitboxWidth;
+}

@@ -23,6 +23,9 @@ try {
   assert.equal(renderPolicy.shouldSuppressHeldWeapon(true, false), false);
   assert.equal(renderPolicy.shouldSuppressHeldWeapon(false, true), false);
   assert.equal(renderPolicy.shouldSuppressHeldWeapon(undefined, true), false);
+  assert.equal(renderPolicy.facingHitboxX(40, 13.75, 8.5, 1), 13.75);
+  assert.equal(renderPolicy.facingHitboxX(40, 13.75, 8.5, -1), 17.75);
+  assert.equal(renderPolicy.facingHitboxX(40, 15.75, 8.5, -1), 15.75);
 
   assert.deepEqual(selectionGeometry.analyzeSelectionGeometry({
     x: 10, y: 20, w: 5, h: 3,
