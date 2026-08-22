@@ -1,0 +1,52 @@
+{
+  "id": "rusty-sword-arc",
+  "description": "Approved Knight V2 blue slash-arc to rusty-sword warm slash-arc material mapping. Colors are RGBA values, not palette characters.",
+  "approvedReference": {
+    "bodySprite": "knight-v2.json",
+    "equipmentSprite": "equipment/rusty-sword.json",
+    "animation": "attack2",
+    "frame": 3,
+    "bodyLayer": "base",
+    "equipmentLayer": "layer-2"
+  },
+  "interior": {
+    "#96a6af": "#cc8a64",
+    "#9dbace": "#d9a27c",
+    "#557697": "#885850",
+    "#4e5b71": "#8c4525",
+    "#bacccf": "#f0b088",
+    "#8992a0": "#c87850",
+    "#71899e": "#a87050",
+    "#e7f5f7": "#ffe0a8",
+    "#b5e2ee": "#f0c8a0",
+    "#4a686a": "#885018",
+    "#6c90ca": "#a87878",
+    "#92a2cf": "#d08880",
+    "#aed4e1": "#eab992",
+    "#7dc8e1": "#b8b090",
+    "#73b6d9": "#a89890",
+    "#5a85c1": "#906878",
+    "#3e545a": "#76381a",
+    "#435d63": "#773c1e",
+    "#37494a": "#703000",
+    "#696ea9": "#a05060",
+    "#3e3f3f": "#782800",
+    "#5c74be": "#986070"
+  },
+  "edgeRamps": {
+    "#96a6af": ["#d08868c8", "#d0886888", "#d0886870", "#d0886858"],
+    "#9dbace": ["#d8a080c8", "#d8a08088"],
+    "#557697": ["#88585040", "#88585030"],
+    "#4e5b71": ["#90482808"],
+    "#8992a0": ["#c87850c8", "#c8785088", "#c8785070"],
+    "#71899e": ["#a8705080", "#a8705070", "#a8705060", "#a8705038"]
+  },
+  "application": {
+    "destinationLayer": "layer-2",
+    "destinationLayerName": "Slash",
+    "preserveSourceSilhouette": true,
+    "excludeEmbeddedWeaponSelection": true,
+    "renderAboveSwordLayer": true,
+    "edgeRule": "Use the interior color away from transparency. On the outer boundary, use the listed variants from highest to lower alpha as transparent-neighbor count increases. Do not expand or redraw the source silhouette."
+  }
+}

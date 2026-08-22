@@ -87,6 +87,53 @@ npm run agent-play     # HTTP bridge for turn-based (LLM-agent) play — headles
     placed entity by marking its definition `persistent`. See "A tile that
     breaks (and stays broken)" in docs/adding-content.md.
 
+## Evidence and factuality
+
+Do not turn a plausible idea into a claim about the current repository. Keep
+these categories separate in reasoning and in user-facing reports:
+
+- **Existing** means the identifier, field, behavior, or rule is present in
+  code, data, documentation, or authoritative live state.
+- **Observed** means a tool result or rendered output directly demonstrated it.
+- **Proposed** means it does not exist yet. Label it as a proposal.
+- **Inferred** means evidence suggests it but does not prove it. State the
+  inference and the evidence rather than presenting it as fact.
+
+Before naming a current field, layer, anchor, API, schema concept, content id,
+or workflow rule, locate its exact source or use the literal identifier from
+the authoritative live data. If it cannot be located, do not invent a helpful-
+sounding name. Ask when the missing semantic choice changes the result;
+otherwise label the idea explicitly as a proposal.
+
+Verification must test the property being claimed. Compilation does not prove
+runtime behavior, alignment does not prove color fidelity, JSON validity does
+not prove rendered correctness, and a composite screenshot does not prove
+which layer owns a pixel. Report what was actually checked and what remains
+unknown. Do not report completion until every required property has direct
+evidence.
+
+Treat a user correction as new authoritative information: invalidate the
+contradicted assumption, re-read affected live state when relevant, and do not
+reuse the rejected model later. When evidence conflicts, stop and reconcile it
+instead of selecting the interpretation that makes the current attempt appear
+successful.
+
+### Time and direction guardrail
+
+Before starting an operation or exploratory approach expected to take longer
+than one minute, ask the human to confirm the approach. The same applies when a
+task appears to require more than three sequential exploratory tool calls or
+trial-and-error iterations before producing a verifiable intermediate result.
+Long duration is evidence that the direction, abstraction, or available API may
+be wrong; do not silently spend more time compensating for it.
+
+If work expected to be short unexpectedly reaches that boundary, stop at the
+next safe point. Report the actions already taken, the concrete blocker, and the
+faster alternative or missing semantic operation, then wait for direction.
+Do not continue merely because time has already been spent. Routine commands
+whose cost and purpose the human has explicitly approved are exempt for that
+approved run only.
+
 ## Save compatibility (demo phase)
 
 **Status: demo.** Nothing has shipped to players who could lose a run
@@ -392,6 +439,67 @@ host's world); the guest predicts its own spells and waves, so a cast
 briefly draws twice (once predicted, once from the snapshot). When touching
 multiplayer-adjacent code, keep the single-player path byte-identical —
 `nearestPlayer()` and `isLocal` are the seams that keep both true.
+
+## Sprite-art agent workflow
+
+When editing sprite art through the live sprite editor, follow
+`docs/sprite-editor-agent.md` and the frame-patching procedure in
+`docs/sprite-art-pipeline.md`. These are requirements, not optional guidance:
+
+- Read the live document and revision first; mutate it only through a
+  revision-checked semantic transaction. Never overwrite a dirty or stale
+  shared document.
+- Reuse the approved source silhouette and the complete approved material
+  palette/alpha ramp. Do not invent a reduced color map from dominant colors.
+- Dry-run the complete transaction, apply it once, then fetch and inspect the
+  post-edit composite preview from that accepted revision.
+- Validate geometry, palette coverage, alpha structure, layer order, and
+  reference-color leakage. Alignment alone is not completion.
+- Do not report success until the rendered preview passes every applicable
+  check. If it does not, revert or correct the single edit before continuing.
+
+Prefer one deterministic API operation over sequential browser manipulation or
+ad-hoc visual reverse engineering. If the documented workflow lacks a needed
+semantic operation, add that operation and its regression test instead of
+working around the API manually.
+
+### Visible browser handoff
+
+Opening or changing a page through browser automation is not complete until it
+is visible to the human. A tab object returned by automation, a successful
+navigation call, or a rendered bridge preview proves only that automation can
+reach the page; it does not prove that the Codex Browser pane contains or shows
+that tab.
+
+When the human asks to open or show a tool:
+
+1. Create a real tab with the browser tab API, then navigate that returned tab.
+   Do not pass a URL to an unverified tab-creation signature and do not treat an
+   automation-only page handle as a visible tab. Use this sequence:
+
+   ```js
+   const tab = await browser.tabs.new();
+   await tab.goto(url);
+   // Finish any requested navigation or UI setup before delivering it.
+   await tab.markDeliverable();
+   ```
+
+2. `await tab.markDeliverable()` is the required operation for a page the human
+   explicitly asked to open or see. Call it last, after the requested page,
+   sprite, animation, and frame are selected. `markHandoff()` is different: it
+   only preserves an unfinished agent-controlled tab for later work and must
+   not be used or described as the operation that exposes a requested page.
+3. An automation tab list or screenshot is not evidence that the human can see
+   the tab. Never say "opened", "visible", or "shown" before calling
+   `markDeliverable()` on the final tab, and phrase the immediate report as a
+   delivery attempt until ambient UI state confirms the exact URL.
+4. If the next ambient UI state does not show the handed-off URL, treat the
+   delivery as failed. Read the documented browser API semantics before trying
+   a different operation; do not repeat the same call, guess that persistence
+   implies visibility, or claim success without ambient confirmation.
+5. Do not close, replace, or repurpose the human's existing tab merely to fetch
+   a preview. Use the semantic preview endpoint for verification, and open a
+   separate tab only when the human explicitly asks to see a page.
 
 ## Verification playbook
 

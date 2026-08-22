@@ -60,6 +60,16 @@ export interface SpriteAgentTransform {
   scaleY?: number;
 }
 
+export interface SpriteAgentPoint {
+  x: number;
+  y: number;
+}
+
+export interface SpriteAgentAxis {
+  start: SpriteAgentPoint;
+  end: SpriteAgentPoint;
+}
+
 export interface SpriteAgentFrameQuery extends SpriteAgentFrameRef {
   components?: boolean;
   /** Defaults to true; disable when only geometry is needed to reduce output. */
@@ -110,6 +120,21 @@ export type SpriteAgentCommand =
     /** Fail rather than silently degrade colors by default. */
     paletteOverflow?: 'error' | 'nearest';
     /** Exact source-color -> destination-color replacements applied during copy. */
+    colorMap?: Record<string, string | null>;
+  }
+  | {
+    op: 'frame.copyAligned';
+    from: SpriteAgentFrameRef;
+    to: SpriteAgentFrameRef;
+    region?: SpriteAgentRegion;
+    /** Source-frame pixel coordinates. The extracted clip is rotated/scaled around its center. */
+    sourceAxis: SpriteAgentAxis;
+    /** Destination-frame pixel coordinates. Both endpoints are aligned by one uniform transform. */
+    targetAxis: SpriteAgentAxis;
+    /** Defaults to 0.75px, the maximum error introduced by integer-grid placement. */
+    maxEndpointError?: number;
+    mode?: 'over' | 'replace';
+    paletteOverflow?: 'error' | 'nearest';
     colorMap?: Record<string, string | null>;
   }
   | {
@@ -227,6 +252,7 @@ export const SPRITE_AGENT_OPERATIONS = [
   'frame.move',
   'frame.clear',
   'frame.copy',
+  'frame.copyAligned',
   'frame.remapColors',
   'pixel.set',
   'anchor.set',
@@ -268,6 +294,14 @@ const SPRITE_AGENT_COMMAND_REFERENCE = {
     required: ['from.animation', 'from.frame', 'to.animation', 'to.frame', 'to.x', 'to.y'],
     optional: ['from.path', 'from.layerId', 'to.layerId', 'region', 'transform', 'mode', 'paletteOverflow', 'colorMap'],
     effect: 'Copy exact-color pixels from an active or repository document, applying scale/mirror/rotation once.',
+  },
+  'frame.copyAligned': {
+    required: [
+      'from.animation', 'from.frame', 'to.animation', 'to.frame',
+      'sourceAxis.start', 'sourceAxis.end', 'targetAxis.start', 'targetAxis.end',
+    ],
+    optional: ['from.path', 'from.layerId', 'to.layerId', 'region', 'maxEndpointError', 'mode', 'paletteOverflow', 'colorMap'],
+    effect: 'Copy pixels with uniform scale, rotation, and placement derived from two source and target control points.',
   },
   'frame.remapColors': {
     required: ['target.animation', 'target.frame', 'colors'],
@@ -312,7 +346,7 @@ export const SPRITE_AGENT_CAPABILITIES = {
     maxInspections: SPRITE_AGENT_MAX_INSPECTIONS,
   },
   regions: ['rect', 'componentAt', 'opaqueBounds'],
-  transforms: ['rotate', 'scaleX', 'scaleY', 'negative scale mirrors'],
+  transforms: ['rotate', 'scaleX', 'scaleY', 'negative scale mirrors', 'two-point uniform alignment'],
   transformPlacement: 'scale/mirror/rotation use the extracted region center; to.x/to.y place the transformed output bounding box top-left',
   operations: SPRITE_AGENT_OPERATIONS,
   commandReference: SPRITE_AGENT_COMMAND_REFERENCE,
@@ -546,7 +580,21 @@ function extractClip(frame: ResolvedFrame, region?: SpriteAgentRegion): PixelCli
   };
 }
 
-function transformClip(clip: PixelClip, transform: SpriteAgentTransform = {}): PixelClip {
+interface ClipTransformGeometry {
+  angle: number;
+  scaleX: number;
+  scaleY: number;
+  cos: number;
+  sin: number;
+  minX: number;
+  minY: number;
+  outW: number;
+  outH: number;
+  sourceW: number;
+  sourceH: number;
+}
+
+function clipTransformGeometry(clip: PixelClip, transform: SpriteAgentTransform = {}): ClipTransformGeometry {
   const angle = finite(transform.rotate ?? 0, 'transform.rotate') * Math.PI / 180;
   const scaleX = finite(transform.scaleX ?? 1, 'transform.scaleX');
   const scaleY = finite(transform.scaleY ?? transform.scaleX ?? 1, 'transform.scaleY');
@@ -571,6 +619,36 @@ function transformClip(clip: PixelClip, transform: SpriteAgentTransform = {}): P
   const outW = Math.max(1, Math.ceil(maxX - minX - 1e-9));
   const outH = Math.max(1, Math.ceil(maxY - minY - 1e-9));
   if (outW * outH > 1_000_000) throw new Error(`transformed copy is too large (${outW}x${outH})`);
+  return { angle, scaleX, scaleY, cos, sin, minX, minY, outW, outH, sourceW, sourceH };
+}
+
+function transformClipPoint(
+  clip: PixelClip,
+  geometry: ClipTransformGeometry,
+  point: SpriteAgentPoint,
+  label: string,
+): SpriteAgentPoint {
+  const absoluteX = finite(point.x, `${label}.x`);
+  const absoluteY = finite(point.y, `${label}.y`);
+  if (
+    absoluteX < clip.bounds.x || absoluteX > clip.bounds.x + clip.bounds.w
+    || absoluteY < clip.bounds.y || absoluteY > clip.bounds.y + clip.bounds.h
+  ) {
+    throw new Error(`${label} ${absoluteX},${absoluteY} is outside extracted source bounds ${clip.bounds.x},${clip.bounds.y} ${clip.bounds.w}x${clip.bounds.h}`);
+  }
+  const localX = absoluteX - clip.bounds.x - geometry.sourceW / 2;
+  const localY = absoluteY - clip.bounds.y - geometry.sourceH / 2;
+  return {
+    x: localX * geometry.scaleX * geometry.cos - localY * geometry.scaleY * geometry.sin - geometry.minX,
+    y: localX * geometry.scaleX * geometry.sin + localY * geometry.scaleY * geometry.cos - geometry.minY,
+  };
+}
+
+function transformClip(clip: PixelClip, transform: SpriteAgentTransform = {}): PixelClip {
+  const geometry = clipTransformGeometry(clip, transform);
+  const {
+    cos, sin, scaleX, scaleY, minX, minY, outW, outH, sourceW, sourceH,
+  } = geometry;
   const rows = Array.from({ length: outH }, () => Array(outW).fill('.'));
   const mask = Array.from({ length: outH }, () => Array(outW).fill('.'));
 
@@ -954,6 +1032,78 @@ function executeCommand(workspace: SpriteAgentWorkspace, command: SpriteAgentCom
       };
     }
 
+    case 'frame.copyAligned': {
+      const source = resolveFrame(workspace, command.from);
+      const target = resolveFrame(workspace, command.to, true);
+      const sourceClip = extractClip(source, command.region);
+      const sourceStart = {
+        x: finite(command.sourceAxis.start.x, 'sourceAxis.start.x'),
+        y: finite(command.sourceAxis.start.y, 'sourceAxis.start.y'),
+      };
+      const sourceEnd = {
+        x: finite(command.sourceAxis.end.x, 'sourceAxis.end.x'),
+        y: finite(command.sourceAxis.end.y, 'sourceAxis.end.y'),
+      };
+      const targetStart = {
+        x: finite(command.targetAxis.start.x, 'targetAxis.start.x'),
+        y: finite(command.targetAxis.start.y, 'targetAxis.start.y'),
+      };
+      const targetEnd = {
+        x: finite(command.targetAxis.end.x, 'targetAxis.end.x'),
+        y: finite(command.targetAxis.end.y, 'targetAxis.end.y'),
+      };
+      const sourceDx = sourceEnd.x - sourceStart.x;
+      const sourceDy = sourceEnd.y - sourceStart.y;
+      const targetDx = targetEnd.x - targetStart.x;
+      const targetDy = targetEnd.y - targetStart.y;
+      const sourceLength = Math.hypot(sourceDx, sourceDy);
+      const targetLength = Math.hypot(targetDx, targetDy);
+      if (sourceLength <= 1e-6) throw new Error('sourceAxis endpoints must be distinct');
+      if (targetLength <= 1e-6) throw new Error('targetAxis endpoints must be distinct');
+      const scale = targetLength / sourceLength;
+      const rotate = (Math.atan2(targetDy, targetDx) - Math.atan2(sourceDy, sourceDx)) * 180 / Math.PI;
+      const transform = { rotate, scaleX: scale, scaleY: scale };
+      const geometry = clipTransformGeometry(sourceClip, transform);
+      const transformedStart = transformClipPoint(sourceClip, geometry, sourceStart, 'sourceAxis.start');
+      const transformedEnd = transformClipPoint(sourceClip, geometry, sourceEnd, 'sourceAxis.end');
+      const clip = transformClip(sourceClip, transform);
+      const idealX = targetStart.x - transformedStart.x;
+      const idealY = targetStart.y - transformedStart.y;
+      const x = Math.round(idealX);
+      const y = Math.round(idealY);
+      const mappedStart = { x: x + transformedStart.x, y: y + transformedStart.y };
+      const mappedEnd = { x: x + transformedEnd.x, y: y + transformedEnd.y };
+      const startError = Math.hypot(mappedStart.x - targetStart.x, mappedStart.y - targetStart.y);
+      const endError = Math.hypot(mappedEnd.x - targetEnd.x, mappedEnd.y - targetEnd.y);
+      const endpointError = Math.max(startError, endError);
+      const maxEndpointError = finite(command.maxEndpointError ?? 0.75, 'maxEndpointError');
+      if (maxEndpointError < 0) throw new Error('maxEndpointError cannot be negative');
+      if (endpointError > maxEndpointError + 1e-9) {
+        throw new Error(`aligned endpoint error ${endpointError.toFixed(4)}px exceeds ${maxEndpointError}px`);
+      }
+      const pasted = pasteClip(
+        target, clip, x, y,
+        command.mode ?? 'over', command.paletteOverflow ?? 'error', command.colorMap,
+      );
+      return {
+        result: {
+          op: command.op,
+          changed: pasted.changedPixels > 0,
+          detail: {
+            sourceBounds: sourceClip.bounds,
+            transform,
+            placement: { x, y, idealX, idealY },
+            sourceAxis: command.sourceAxis,
+            targetAxis: command.targetAxis,
+            mappedAxis: { start: mappedStart, end: mappedEnd },
+            endpointError: { start: startError, end: endError, max: endpointError },
+            ...pasted,
+          },
+        },
+        cursor: { animation: command.to.animation, frame: command.to.frame, layerId: command.to.layerId },
+      };
+    }
+
     case 'frame.remapColors': {
       const target = resolveFrame(workspace, command.target, true);
       const palette = resolvedPalette(target.file);
@@ -1102,7 +1252,9 @@ export function spriteAgentSourcePaths(commands: readonly unknown[]): string[] {
   const paths = new Set<string>();
   for (const command of commands) {
     validateCommandEnvelope(command);
-    if (command.op === 'frame.copy' && command.from?.path) paths.add(command.from.path);
+    if ((command.op === 'frame.copy' || command.op === 'frame.copyAligned') && command.from?.path) {
+      paths.add(command.from.path);
+    }
   }
   return [...paths];
 }

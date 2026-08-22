@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createServer } from 'vite';
 
 const server = await createServer({
@@ -15,12 +15,30 @@ try {
   const model = await server.ssrLoadModule('/tools/src/sprite-editor-document.ts');
   const agent = await server.ssrLoadModule('/tools/src/sprite-editor-agent.ts');
   const workspace = await server.ssrLoadModule('/tools/src/sprite-editor-workspace.ts');
+  const selectionGeometry = await server.ssrLoadModule('/tools/src/sprite-editor-selection.ts');
   const renderPolicy = await server.ssrLoadModule('/src/game/actors/player-render-policy.ts');
+  const spritefile = await server.ssrLoadModule('/src/engine/gfx/spritefile.ts');
 
   assert.equal(renderPolicy.shouldSuppressHeldWeapon(true, true), true);
   assert.equal(renderPolicy.shouldSuppressHeldWeapon(true, false), false);
   assert.equal(renderPolicy.shouldSuppressHeldWeapon(false, true), false);
   assert.equal(renderPolicy.shouldSuppressHeldWeapon(undefined, true), false);
+
+  assert.deepEqual(selectionGeometry.analyzeSelectionGeometry({
+    x: 10, y: 20, w: 5, h: 3,
+    mask: ['1....', '.111.', '....1'],
+  }), {
+    pixelCount: 5,
+    centroid: { x: 12.5, y: 21.5 },
+    principalAxis: {
+      angleDegrees: 22.5,
+      start: { x: 10.4393, y: 20.6464 },
+      end: { x: 14.5607, y: 22.3536 },
+      length: 4.4609,
+      orthogonalRms: 0.262,
+      elongation: 33.9706,
+    },
+  });
 
   const layered = () => ({
     hd: true,
@@ -65,6 +83,22 @@ try {
       () => model.validateSpriteEditorDocument(file),
       /unknown composition "mystery"/,
     );
+  }
+
+  {
+    const file = layered();
+    file.hitbox = { x: 5, y: 9.5, w: 10, h: 18 };
+    file.animationHitboxOffsets = { idle: { x: 4, y: 8 } };
+    const base = spritefile.resolveSpriteGeometry(file, 20, 24).hitbox;
+    assert.deepEqual(spritefile.resolveSpriteHitbox(file, 'idle', base), { x: 4, y: 8, w: 10, h: 18 });
+    assert.deepEqual(spritefile.resolveSpriteHitbox(file, 'air', base), { x: 4, y: 8, w: 10, h: 18 });
+    assert.deepEqual(spritefile.resolveSpriteHitbox(file, 'run', base), { x: 5, y: 9.5, w: 10, h: 18 });
+
+    model.materializeSpriteAnimationAlias(file, 'air');
+    assert.deepEqual(file.animationHitboxOffsets.air, { x: 4, y: 8 });
+    file.animationHitboxOffsets.air.x = 3;
+    assert.equal(file.animationHitboxOffsets.idle.x, 4);
+    model.validateSpriteEditorDocument(file);
   }
 
   {
@@ -139,11 +173,18 @@ try {
 
   {
     const file = layered();
+    file.animationHitboxOffsets = {
+      idle: { x: 2, y: 3 },
+      air: { x: 4, y: 5 },
+      fall: { x: 6, y: 7 },
+      run: { x: 8, y: 9 },
+    };
     const next = model.deleteSpriteAnimation(file, 'idle');
     assert.equal(next, 'run');
     assert.deepEqual(Object.keys(file.anims), ['run']);
     assert.equal('idle' in file.layers[0].tracks, false);
     assert.equal('idle' in file.anchors.grip, false);
+    assert.deepEqual(file.animationHitboxOffsets, { run: { x: 8, y: 9 } });
   }
 
   {
@@ -241,7 +282,7 @@ try {
   {
     const trackedSprites = execFileSync('git', [
       'ls-files', '--', 'src/game/content/sprites/*.json',
-    ], { encoding: 'utf8' }).trim().split(/\r?\n/).filter(Boolean);
+    ], { encoding: 'utf8' }).trim().split(/\r?\n/).filter((path) => path && existsSync(path));
     assert.ok(trackedSprites.length > 0, 'expected tracked sprite fixtures');
     for (const path of trackedSprites) {
       const file = JSON.parse(readFileSync(path, 'utf8'));
@@ -369,6 +410,61 @@ try {
     assert.equal(result.file.anchors.grip.attack[2].x, 2.5);
     assert.equal(source.layers[0].tracks.attack2[0][1], '.ZZ.....', 'source document must stay untouched');
     assert.equal(target.layers[0].tracks.attack[2][1], '........', 'active input must stay untouched');
+
+    const aligned = agent.applySpriteAgentTransaction({
+      activePath: 'target.json',
+      active: target,
+      documents: new Map([['approved.json', source]]),
+    }, {
+      commands: [{
+        op: 'frame.copyAligned',
+        from: { path: 'approved.json', animation: 'attack2', frame: 0, layerId: 'sword' },
+        to: { animation: 'attack', frame: 2, layerId: 'sword' },
+        region: { componentAt: { x: 1, y: 1, connectivity: 8 } },
+        sourceAxis: { start: { x: 1, y: 1.5 }, end: { x: 3, y: 1.5 } },
+        targetAxis: { start: { x: 4, y: 0 }, end: { x: 4, y: 4 } },
+      }],
+      inspect: [{ animation: 'attack', frame: 2, layerId: 'sword', components: true }],
+    });
+    const alignedDetail = aligned.results[0].detail;
+    assert.equal(alignedDetail.transform.rotate, 90);
+    assert.equal(alignedDetail.transform.scaleX, 2);
+    assert.deepEqual(alignedDetail.placement, { x: 1, y: 0, idealX: 1, idealY: 0 });
+    assert.deepEqual(alignedDetail.mappedAxis, alignedDetail.targetAxis);
+    assert.equal(alignedDetail.endpointError.max, 0);
+    assert.equal(aligned.inspection.frames[0].pixelCount, 20);
+    assert.deepEqual(agent.spriteAgentSourcePaths([{
+      op: 'frame.copyAligned',
+      from: { path: 'approved.json' },
+    }]), ['approved.json']);
+
+    assert.throws(() => agent.applySpriteAgentTransaction({
+      activePath: 'target.json', active: target,
+      documents: new Map([['approved.json', source]]),
+    }, {
+      commands: [{
+        op: 'frame.copyAligned',
+        from: { path: 'approved.json', animation: 'attack2', frame: 0, layerId: 'sword' },
+        to: { animation: 'attack', frame: 2, layerId: 'sword' },
+        sourceAxis: { start: { x: 1, y: 1 }, end: { x: 1, y: 1 } },
+        targetAxis: { start: { x: 2, y: 2 }, end: { x: 3, y: 2 } },
+      }],
+    }), /sourceAxis endpoints must be distinct/);
+
+    assert.throws(() => agent.applySpriteAgentTransaction({
+      activePath: 'target.json', active: target,
+      documents: new Map([['approved.json', source]]),
+    }, {
+      commands: [{
+        op: 'frame.copyAligned',
+        from: { path: 'approved.json', animation: 'attack2', frame: 0, layerId: 'sword' },
+        to: { animation: 'attack', frame: 2, layerId: 'sword' },
+        region: { componentAt: { x: 1, y: 1 } },
+        sourceAxis: { start: { x: 1, y: 1.5 }, end: { x: 3, y: 1.5 } },
+        targetAxis: { start: { x: 4.5, y: 0.5 }, end: { x: 4.5, y: 4.5 } },
+        maxEndpointError: 0.1,
+      }],
+    }), /aligned endpoint error .* exceeds 0.1px/);
 
     const beforeFailure = JSON.stringify(result.file);
     assert.throws(() => agent.applySpriteAgentTransaction({

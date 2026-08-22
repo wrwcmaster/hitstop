@@ -38,6 +38,36 @@ forms, and the required/optional fields for every command. The API uses
 zero-based frame indexes. The CLI's `inspect` range uses the one-based frame
 numbers displayed by the editor.
 
+### Persistent named selections
+
+Reusable pixel masks belong in the bridge's named-selection library, not in an
+agent's conversation state or a single transient `/selection` slot. The
+library is stored in `tools/sprite-editor-selections.json` so a selection can
+be applied after a server restart and by another collaborator.
+
+```text
+GET    /__sprite-editor/named-selections
+GET    /__sprite-editor/named-selections/:name
+PUT    /__sprite-editor/named-selections/:name
+POST   /__sprite-editor/named-selections/:name/apply
+DELETE /__sprite-editor/named-selections/:name
+```
+
+`GET /selection` and `GET /named-selections/:name` also return a computed
+`geometry` object beside the raw selection. It includes pixel count, centroid,
+and a deterministic principal axis (`start`, `end`, clockwise angle, length,
+orthogonal RMS, and elongation). Use this instead of reparsing mask strings in
+shell scripts. The axis is deliberately semantic-free: determine which end is
+the grip from authoritative art or anchor data rather than assuming `start` is
+always a grip.
+
+`PUT` saves the current live selection when its body is empty, or accepts an
+explicit `{ "selection": ... }` payload. `POST .../apply` accepts the target
+`path`, animation, zero-based `frame`, `layerId`, and optional `x`/`y`; omitted
+coordinates retain the saved mask's origin. Applying changes only the live
+selection and publishes it to the editor. It never changes sprite pixels or
+advances the document revision.
+
 The bridge is development-only, loopback-only, same-origin checked, and
 confined to `src/game/content/sprites/**/*.json`.
 
@@ -62,6 +92,59 @@ A revision conflict is a stop signal. Re-read the live state and reconcile the
 human's current edit; never retry by forcing an older full document over it.
 Assertion-only or otherwise no-op transactions do not advance the revision or
 invalidate an existing preview.
+
+### Mandatory visual-calculation guard
+
+Before calculating a visual transform, pause or step the editor to the target
+frame and download `GET /__sprite-editor/preview.png`. Verify its
+`X-Sprite-Revision` against the live state and inspect the PNG itself. Do not
+reconstruct the rendered composite from JSON, anchors, bounds, or component
+statistics while this endpoint is available. A human-supplied screenshot of
+the current editor is also ground truth and must be considered alongside the
+published preview.
+
+Write down the requested measurement before doing arithmetic:
+
+- **absolute angle** describes one axis;
+- **rotation delta** is `targetAngle - sourceAngle`;
+- in the editor's downward-positive canvas coordinates, a positive rotation
+  is clockwise;
+- rotation-only work keeps scale exactly `1`.
+
+Identify source and target landmarks on the same rendered image and label them
+before calculating. After one revision-safe mutation, retrieve and inspect the
+new preview. If the post-edit PNG does not visually match, revert that
+transaction before continuing. Never report success from endpoint math,
+anchors, or a valid document without inspecting the rendered artifact for the
+same revision.
+
+### Non-mutating alignment comparison
+
+Before publishing a difficult weapon transform, use the editor's **compose →
+alignment comparison** panel. It turns the existing reference overlay into a
+measured dry-run view:
+
+- choose a reference sprite, animation, displayed frame, and individual source
+  layer;
+- independently isolate the target layer;
+- switch among source-only, target-only, and ghosted overlay views;
+- enter grip/tip (or other corresponding) source and target axes;
+- inspect the derived uniform scale, clockwise rotation, and translation.
+
+The comparison matrix is applied only while drawing. It never pastes or
+resamples pixels into the active document, never changes the shared revision,
+and therefore cannot damage the pristine source. **Export comparison PNG**
+downloads the grid view. The editor also publishes the same artifact at
+`GET /__sprite-editor/comparison.png`; the CLI command
+`agent-sprite comparison <output.png>` retrieves it for agent-side visual
+inspection. A comparison PNG is revision checked just like `preview.png`.
+
+Browser automation may configure the view through
+`window.__editor.comparison.configure(...)`. The source and target axes use
+logical sprite-pixel coordinates and the source frame is the one-based number
+shown in the editor (`0` follows the active frame). The returned state includes
+the exact alignment matrix. This is a view API, not a second document mutation
+path: accepted art still goes through an atomic command transaction.
 
 ## Inspection
 
@@ -91,13 +174,13 @@ Commands currently cover the complete recurring workflow:
 | Family | Operations |
 | --- | --- |
 | Structure | `layer.ensure`, `animation.materialize`, `frame.insert`, `frame.remove`, `frame.move` |
-| Pixels | `frame.clear`, `frame.copy`, `frame.remapColors`, `pixel.set` |
+| Pixels | `frame.clear`, `frame.copy`, `frame.copyAligned`, `frame.remapColors`, `pixel.set` |
 | Rig | `anchor.set` |
 | Verification | `assert.frame`, `assert.anchor` |
 
 Frame references are `{ animation, frame, layerId?, path? }`. An edit target
-must be the active document; a `frame.copy` source or inspection may name
-another repository sprite with `path`. Layered edit targets require
+must be the active document; a `frame.copy` / `frame.copyAligned` source or
+inspection may name another repository sprite with `path`. Layered edit targets require
 `layerId`. Use `layerId: "*"` only with `frame.clear` to clear every layer in
 one frame.
 
@@ -121,6 +204,46 @@ center is the pivot. `to.x` and `to.y` place the **top-left of the transformed
 output bounding box**, not its opaque bounds, grip, or pivot. Calculate scale
 from the target/source axis-length ratio, rotation from their axis-angle
 difference, then calculate translation separately.
+
+For that recurring calculation, prefer `frame.copyAligned`. Give it two
+control points in source-frame pixel coordinates and the two corresponding
+points in destination-frame pixel coordinates:
+
+```json
+{
+  "op": "frame.copyAligned",
+  "from": {
+    "path": "equipment/rusty-sword.json",
+    "animation": "attack2",
+    "frame": 0,
+    "layerId": "sword"
+  },
+  "to": {
+    "animation": "attack",
+    "frame": 2,
+    "layerId": "sword"
+  },
+  "region": { "componentAt": { "x": 74, "y": 56, "connectivity": 8 } },
+  "sourceAxis": {
+    "start": { "x": 72, "y": 63 },
+    "end": { "x": 104, "y": 63 }
+  },
+  "targetAxis": {
+    "start": { "x": 96, "y": 70 },
+    "end": { "x": 117, "y": 92 }
+  }
+}
+```
+
+The operation derives one uniform scale (so pose-dependent sword length is
+handled), clockwise rotation, and integer-grid placement. Both source points
+must lie inside the extracted region. The result reports the derived transform,
+ideal and raster placements, mapped endpoints, and endpoint error. It aborts
+atomically when integer placement exceeds `maxEndpointError` (default 0.75px),
+so a bounding-box origin can no longer be mistaken for the grip without being
+visible in the command evidence. This proves the control-point alignment; the
+real composite preview remains the final check for silhouettes, occlusion, and
+incorrectly chosen points.
 
 Colors are `#RRGGBB` or `#RRGGBBAA`; `null` is transparent. Cross-document
 copy allocates exact destination palette entries by default. A full palette is
@@ -213,6 +336,7 @@ agent-sprite state [--full]
 agent-sprite inspect [animation] [display-frame|range] [layer-id]
 agent-sprite run <transaction.json> [--dry-run] [--full]
 agent-sprite preview <output.png>
+agent-sprite comparison <output.png>
 agent-sprite save [sprite.json]
 ```
 

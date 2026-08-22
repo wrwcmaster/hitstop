@@ -101,6 +101,12 @@ export function materializeSpriteAnimationAlias(file: SpriteFile, animation: str
     const source = group[animation] ?? group[target];
     if (source) group[animation] = source.map((point) => ({ ...point }));
   }
+  const hitboxOffset = file.animationHitboxOffsets?.[animation]
+    ?? file.animationHitboxOffsets?.[target];
+  if (hitboxOffset) {
+    file.animationHitboxOffsets ??= {};
+    file.animationHitboxOffsets[animation] = { ...hitboxOffset };
+  }
 
   validateSpriteEditorDocument(file);
   return target;
@@ -161,11 +167,22 @@ export function validateSpriteEditorDocument(file: SpriteFile): void {
       throw new Error('sprite hitbox needs finite coordinates and positive width/height');
     }
   }
+  if (file.animationHitboxOffsets !== undefined
+    && (!file.animationHitboxOffsets || typeof file.animationHitboxOffsets !== 'object'
+      || Array.isArray(file.animationHitboxOffsets))) {
+    throw new Error('sprite animationHitboxOffsets must be an object');
+  }
   const names = Object.keys(file.anims);
   if (!names.length) throw new Error('sprite needs at least one animation');
   const concrete = concreteAnimationNames(file);
   if (!concrete.length) throw new Error('sprite needs at least one concrete animation');
   for (const name of names) resolveAnimName(file, name);
+  for (const [name, offset] of Object.entries(file.animationHitboxOffsets ?? {})) {
+    if (!(name in file.anims)) throw new Error(`animation hitbox offset uses unknown animation "${name}"`);
+    if (!offset || !Number.isFinite(offset.x) || !Number.isFinite(offset.y)) {
+      throw new Error(`animation hitbox offset "${name}" needs finite x/y`);
+    }
+  }
   if (isLayeredSpriteFile(file)) validateLayeredSpriteFile(file);
 
   if (file.anchors !== undefined && (!file.anchors || typeof file.anchors !== 'object' || Array.isArray(file.anchors))) {
@@ -394,6 +411,10 @@ export function deleteSpriteAnimation(file: SpriteFile, animation: string): stri
   }
   for (const group of Object.values(file.anchors ?? {})) {
     for (const name of removed) delete group[name];
+  }
+  for (const name of removed) delete file.animationHitboxOffsets?.[name];
+  if (file.animationHitboxOffsets && !Object.keys(file.animationHitboxOffsets).length) {
+    delete file.animationHitboxOffsets;
   }
   const next = Object.keys(file.anims)[0];
   validateSpriteEditorDocument(file);

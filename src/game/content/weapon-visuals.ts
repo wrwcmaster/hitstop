@@ -17,7 +17,6 @@ import { drawArrowSprite } from './ballistics';
 import { normalizedItemIcon } from './item-icon';
 import greatSwordJson from './sprites/equipment/great-sword.json';
 import rustySwordJson from './sprites/equipment/rusty-sword.json';
-import slashCrescentJson from './sprites/slash-crescent.json';
 import type { WeaponAttackDef } from './weapons';
 
 export interface WeaponAttackPose {
@@ -629,23 +628,6 @@ defineWeaponVisual('unarmed', {
   renderTags: [],
   drawHeld() {},
   drawTrail: drawSlashTrail,
-});
-
-const load = (file: unknown) => loadSprite(file as SpriteFile, PAL);
-
-// The plunge crescent, authored as pixel art. Its geometry was baked
-// from the procedural arc it replaces (same radius, angles and taper),
-// so it drops in without re-tuning — and being ordinary sprite rows, it
-// can now be hand-edited frame by frame like any other art in the repo.
-const slashCrescent = withFacing(load(slashCrescentJson).animSet());
-defineSlashVisual('crescent', {
-  frames: {
-    right: slashCrescent.right.slash.frames,
-    left: slashCrescent.left.slash.frames,
-  },
-  // Arc pivot: 12.5 px across the 26px sheet, 4 px ABOVE its top edge —
-  // the band hangs below the pivot, which is where the hand is.
-  origin: { x: 12.5, y: -4 },
 });
 
 /**

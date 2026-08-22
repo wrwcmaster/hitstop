@@ -55,6 +55,12 @@ export interface SpriteGeometry {
     w?: number;
     h?: number;
   };
+  /**
+   * Per-animation draw-origin overrides for the collision box. Width and
+   * height stay global so changing pose art cannot resize the physics body.
+   * Aliases inherit their concrete animation's offset unless they define one.
+   */
+  animationHitboxOffsets?: Record<string, { x: number; y: number }>;
 }
 
 /** A named attachment point in logical pixels from the sprite's top-left. */
@@ -366,6 +372,8 @@ export interface LoadedSprite {
   h: number;
   /** Collision hitbox relative to drawing origin. */
   hitbox: Rect;
+  /** Collision box with the selected animation's draw-origin offset. */
+  hitboxFor(anim: string): Rect;
   /** Resolve a named point, following animation aliases like frame art. */
   anchor?(name: string, anim: string, frame?: number): SpriteAnchor | undefined;
   /** Resolve a semantic attachment socket to its anchor name. */
@@ -420,6 +428,18 @@ export function resolveSpriteGeometry(
   };
 }
 
+/** Resolve a pose-specific collision offset without changing body size. */
+export function resolveSpriteHitbox(file: SpriteFile, animation: string, base: Rect): Rect {
+  const target = resolveAnimName(file, animation);
+  const offset = file.animationHitboxOffsets?.[animation]
+    ?? file.animationHitboxOffsets?.[target];
+  if (!offset) return { ...base };
+  if (!Number.isFinite(offset.x) || !Number.isFinite(offset.y)) {
+    throw new Error(`sprite animationHitboxOffsets.${animation} must contain finite x/y`);
+  }
+  return { ...base, x: offset.x, y: offset.y };
+}
+
 /** Bake a SpriteFile into lazily cached canvases. */
 export function loadSprite(file: SpriteFile, base: Palette = {}): LoadedSprite {
   if (file.renderTag !== undefined && !file.renderTag.trim()) {
@@ -452,6 +472,14 @@ export function loadSprite(file: SpriteFile, base: Palette = {}): LoadedSprite {
   const cellW = Math.max(1, ...firstFrame.map((row) => row.length));
   const density = file.hd === false ? 4 : 1;
   const geometry = resolveSpriteGeometry(file, cellW / density, cellH / density);
+  for (const [animation, offset] of Object.entries(file.animationHitboxOffsets ?? {})) {
+    if (!(animation in file.anims)) {
+      throw new Error(`sprite animationHitboxOffsets: unknown animation "${animation}"`);
+    }
+    if (!offset || !Number.isFinite(offset.x) || !Number.isFinite(offset.y)) {
+      throw new Error(`sprite animationHitboxOffsets.${animation} must contain finite x/y`);
+    }
+  }
 
   // Aliases cache under their target, so borrowed animations cost no bake.
   const cache = new Map<string, HTMLCanvasElement[]>();
@@ -504,6 +532,7 @@ export function loadSprite(file: SpriteFile, base: Palette = {}): LoadedSprite {
 
   return {
     ...geometry,
+    hitboxFor: (name) => resolveSpriteHitbox(file, name, geometry.hitbox),
     anchor: anchorOf,
     slot: (name) => file.attachmentSlots?.[name],
     frame: (name, i = 0) => framesOf(name)[i],

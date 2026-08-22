@@ -153,6 +153,23 @@ switch (command) {
     break;
   }
 
+  case 'comparison': {
+    const destination = path.resolve(args[0] ?? 'sprite-comparison.png');
+    const deadline = Date.now() + 3000;
+    let bytes;
+    while (!bytes) {
+      try {
+        bytes = await request('/comparison.png');
+      } catch (error) {
+        if (Date.now() >= deadline || !/^Error: 404 /.test(String(error))) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 75));
+      }
+    }
+    await fs.writeFile(destination, Buffer.from(bytes));
+    console.log(destination);
+    break;
+  }
+
   case 'apply': {
     const sourceFile = args[0];
     if (!sourceFile) throw new Error('usage: agent-sprite apply <sprite.json> [repo-path]');
@@ -190,6 +207,7 @@ usage:
   npm run agent-sprite -- inspect [animation] [display-frame|range] [layer-id] [--no-colors] [--no-components]
   npm run agent-sprite -- run transaction.json [--dry-run] [--full]
   npm run agent-sprite -- preview sprite-preview.png
+  npm run agent-sprite -- comparison sprite-comparison.png
   npm run agent-sprite -- apply edited.json [repo-path]
   npm run agent-sprite -- save [repo-path]
 

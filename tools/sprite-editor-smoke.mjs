@@ -329,6 +329,67 @@ try {
   await page.waitForTimeout(500);
   assert.equal(await page.evaluate(async () => (await fetch('/__sprite-editor/preview.png')).status), 200);
 
+  // Named selections persist reusable sparse masks independently of the one
+  // transient collaboration selection. Applying one selects the requested
+  // live frame/layer without changing the sprite document revision.
+  const namedSelectionCheck = await page.evaluate(async () => {
+    const before = await fetch('/__sprite-editor/state').then((response) => response.json());
+    const live = {
+      path: before.path,
+      anim: 'idle',
+      frame: 1,
+      layerId: 'hand',
+      x: 0,
+      y: 0,
+      w: 2,
+      h: 1,
+      rows: ['BA'],
+      mask: ['.1'],
+      source: 'sprite-editor-smoke-selection',
+      updatedAt: Date.now(),
+    };
+    const putLive = await fetch('/__sprite-editor/selection', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selection: live }),
+    });
+    const save = await fetch('/__sprite-editor/named-selections/smoke-selection', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    await fetch('/__sprite-editor/selection', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selection: null }),
+    });
+    const apply = await fetch('/__sprite-editor/named-selections/smoke-selection/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ anim: 'idle', frame: 1, layerId: 'hand' }),
+    });
+    const applied = await apply.json();
+    const after = await fetch('/__sprite-editor/state').then((response) => response.json());
+    const list = await fetch('/__sprite-editor/named-selections').then((response) => response.json());
+    const read = await fetch('/__sprite-editor/named-selections/smoke-selection').then((response) => response.json());
+    const remove = await fetch('/__sprite-editor/named-selections/smoke-selection', { method: 'DELETE' });
+    return {
+      putLive: putLive.status,
+      save: save.status,
+      apply: apply.status,
+      remove: remove.status,
+      beforeRevision: before.revision,
+      afterRevision: after.revision,
+      applied,
+      listed: list.selections.some((entry) => entry.name === 'smoke-selection' && entry.pixelCount === 1),
+      readMask: read.selection.mask,
+    };
+  });
+  assert.equal(namedSelectionCheck.putLive, 200, JSON.stringify(namedSelectionCheck));
+  assert.ok([200, 201].includes(namedSelectionCheck.save), JSON.stringify(namedSelectionCheck));
+  assert.equal(namedSelectionCheck.apply, 200, JSON.stringify(namedSelectionCheck));
+  assert.equal(namedSelectionCheck.remove, 200, JSON.stringify(namedSelectionCheck));
+  assert.equal(namedSelectionCheck.beforeRevision, namedSelectionCheck.afterRevision);
+  assert.equal(namedSelectionCheck.applied.selection.source, 'named:smoke-selection');
+  assert.deepEqual(namedSelectionCheck.applied.selection.mask, ['.1']);
+  assert.equal(namedSelectionCheck.listed, true);
+  assert.deepEqual(namedSelectionCheck.readMask, ['.1']);
+  await page.waitForFunction(() => window.__editor.selection?.mask?.[0] === '.1');
+
   const protocolChecks = await page.evaluate(async () => {
     const capabilities = await fetch('/__sprite-editor/capabilities').then((response) => response.json());
     const before = await fetch('/__sprite-editor/state').then((response) => response.json());
@@ -358,6 +419,7 @@ try {
   assert.equal(protocolChecks.capabilities.protocolVersion, 1);
   assert.equal(protocolChecks.capabilities.transaction.atomic, true);
   assert.ok(protocolChecks.capabilities.operations.includes('frame.copy'));
+  assert.ok(protocolChecks.capabilities.operations.includes('frame.copyAligned'));
   assert.equal(protocolChecks.noOpStatus, 200);
   assert.equal(protocolChecks.noOp.changed, false);
   assert.equal(protocolChecks.noOp.state.file, undefined, 'command responses are compact by default');
@@ -372,8 +434,54 @@ try {
   assert.equal(realOpen, true);
   await page.waitForFunction(() => {
     const frame = window.__editor.file.layers?.[0]?.tracks?.attack?.[0];
-    return frame?.length === 128 && frame[0]?.length === 160;
+    return frame?.length === 128 && frame[0]?.length === 160
+      && window.__editor.currentRepoPath === 'equipment/rusty-sword.json'
+      && window.__editor.bridge.connected
+      && window.__editor.bridge.revision > 0;
   });
+  // Alignment comparison is a view-only workflow: isolate one source and
+  // target layer, derive a two-point transform, and publish a PNG without
+  // advancing or dirtying the shared sprite revision.
+  const comparisonCheck = await page.evaluate(async () => {
+    const before = await fetch('/__sprite-editor/state').then((response) => response.json());
+    window.__editor.comparison.configure({
+      enabled: true,
+      referencePath: 'equipment/rusty-sword.json',
+      animation: 'attack2',
+      sourceLayer: 'base',
+      targetLayer: 'base',
+      sourceFrame: 1,
+      view: 'overlay',
+      opacity: 50,
+      sourceAxis: { start: { x: 20, y: 50 }, end: { x: 70, y: 50 } },
+      targetAxis: { start: { x: 30, y: 55 }, end: { x: 65, y: 75 } },
+    });
+    // Canvas.toBlob plus the debounced bridge upload has variable latency in
+    // headless Chrome. Wait for the observable upload result instead of using
+    // a fixed delay that can pass or fail with machine load.
+    const deadline = Date.now() + 5000;
+    while (!window.__editor.comparison.state.uploadStatus.startsWith('ready') && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    const comparison = await fetch('/__sprite-editor/comparison.png');
+    const after = await fetch('/__sprite-editor/state').then((response) => response.json());
+    return {
+      state: window.__editor.comparison.state,
+      report: document.querySelector('#compareReport').textContent,
+      comparisonStatus: comparison.status,
+      comparisonBytes: (await comparison.arrayBuffer()).byteLength,
+      beforeRevision: before.revision,
+      afterRevision: after.revision,
+      dirty: after.dirty,
+    };
+  });
+  assert.equal(comparisonCheck.comparisonStatus, 200, JSON.stringify(comparisonCheck));
+  assert.ok(comparisonCheck.comparisonBytes > 100);
+  assert.equal(comparisonCheck.beforeRevision, comparisonCheck.afterRevision);
+  assert.equal(comparisonCheck.dirty, false);
+  assert.equal(comparisonCheck.state.alignment.scale.toFixed(4), '0.8062');
+  assert.match(comparisonCheck.report, /rotate 29\.74°/);
+  await page.evaluate(() => window.__editor.comparison.configure({ enabled: false }));
   const realAgentResult = await page.evaluate(async (transaction) => {
     const before = await fetch('/__sprite-editor/state').then((response) => response.json());
     const dryRunResponse = await fetch('/__sprite-editor/commands', {

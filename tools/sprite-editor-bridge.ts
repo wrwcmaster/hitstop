@@ -3,9 +3,14 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
-import type { SpriteFile } from '../src/engine/gfx/spritefile';
+import {
+  isLayeredSpriteFile,
+  resolveAnimName,
+  type SpriteFile,
+} from '../src/engine/gfx/spritefile';
 import { validateSpriteEditorDocument } from './src/sprite-editor-document';
 import { validateRenderTagDefs, validateWeaponCombatTuning } from './src/sprite-editor-workspace';
+import { analyzeSelectionGeometry } from './src/sprite-editor-selection';
 import {
   applySpriteAgentTransaction,
   inspectSpriteAgentDocument,
@@ -50,6 +55,16 @@ interface ActiveSelection {
   updatedAt: number;
 }
 
+interface NamedSelection extends ActiveSelection {
+  name: string;
+  createdAt: number;
+}
+
+interface NamedSelectionLibrary {
+  version: 1;
+  selections: Record<string, NamedSelection>;
+}
+
 /**
  * Development-only bridge between the browser sprite editor and local agents.
  * The browser and the agent exchange one revisioned document; repository writes
@@ -59,15 +74,23 @@ export function spriteEditorBridge(root: string): Plugin {
   const spriteRoot = path.resolve(root, 'src/game/content/sprites');
   const renderTagsPath = path.resolve(root, 'src/game/content/render-tags.json');
   const weaponCombatPath = path.resolve(root, 'src/game/content/weapon-combat.json');
+  const namedSelectionsPath = path.resolve(root, 'tools/sprite-editor-selections.json');
   let active: ActiveSprite | null = null;
   let selection: ActiveSelection | null = null;
   let preview: Buffer | null = null;
   let previewRevision = 0;
+  let comparison: Buffer | null = null;
+  let comparisonRevision = 0;
   const listeners = new Set<ServerResponse>();
 
   const publish = (): void => {
     if (!active) return;
     const message = `event: state\ndata: ${JSON.stringify(active)}\n\n`;
+    for (const listener of listeners) listener.write(message);
+  };
+
+  const publishSelection = (): void => {
+    const message = `event: selection\ndata: ${JSON.stringify({ selection })}\n\n`;
     for (const listener of listeners) listener.write(message);
   };
 
@@ -104,6 +127,107 @@ export function spriteEditorBridge(root: string): Plugin {
     const parsed = JSON.parse(body.toString('utf8')) as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('JSON body must be an object');
     return parsed as Record<string, unknown>;
+  };
+
+  const selectionName = (raw: unknown): string => {
+    const name = decodeURIComponent(String(raw ?? '')).trim();
+    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(name)) {
+      throw new Error('selection name must use 1-64 letters, numbers, dots, underscores, or hyphens');
+    }
+    return name;
+  };
+
+  const normalizedSelection = (raw: unknown, fallbackSource = 'api'): ActiveSelection => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new Error('selection must be an object');
+    }
+    const value = raw as Record<string, unknown>;
+    const rows = value.rows;
+    const mask = value.mask;
+    const numbers = ['frame', 'x', 'y', 'w', 'h'] as const;
+    if (numbers.some((key) => !Number.isInteger(value[key]))
+      || Number(value.frame) < 0
+      || Number(value.x) < 0 || Number(value.y) < 0 || Number(value.w) < 1 || Number(value.h) < 1
+      || typeof value.anim !== 'string' || !value.anim
+      || !Array.isArray(rows) || !rows.every((row) => typeof row === 'string')
+      || rows.length !== Number(value.h) || rows.some((row) => row.length !== Number(value.w))) {
+      throw new Error('selection needs a zero-based frame, integer bounds, animation, and matching pixel rows');
+    }
+    if (mask !== undefined && (!Array.isArray(mask) || mask.length !== Number(value.h)
+      || !mask.every((row) => typeof row === 'string' && row.length === Number(value.w) && /^[1.]+$/.test(row)))) {
+      throw new Error('selection mask must match the selection bounds');
+    }
+    return {
+      path: value.path == null ? null : String(value.path),
+      anim: value.anim,
+      frame: Number(value.frame),
+      layerId: value.layerId == null ? undefined : String(value.layerId),
+      x: Number(value.x),
+      y: Number(value.y),
+      w: Number(value.w),
+      h: Number(value.h),
+      rows: (rows as string[]).slice(),
+      mask: mask === undefined ? undefined : (mask as string[]).slice(),
+      source: String(value.source ?? fallbackSource),
+      updatedAt: Number(value.updatedAt) || Date.now(),
+    };
+  };
+
+  const selectionResponse = (value: ActiveSelection | NamedSelection | null): Record<string, unknown> => ({
+    selection: value,
+    geometry: value ? analyzeSelectionGeometry(value) : null,
+  });
+
+  const readNamedSelections = async (): Promise<NamedSelectionLibrary> => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await fs.readFile(namedSelectionsPath, 'utf8')) as unknown;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, selections: {} };
+      throw error;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('named selection library must be an object');
+    }
+    const value = parsed as { version?: unknown; selections?: unknown };
+    if (value.version !== 1 || !value.selections || typeof value.selections !== 'object' || Array.isArray(value.selections)) {
+      throw new Error('named selection library must use version 1 and contain selections');
+    }
+    const selections: Record<string, NamedSelection> = {};
+    for (const [rawName, rawSelection] of Object.entries(value.selections)) {
+      const name = selectionName(rawName);
+      const normalized = normalizedSelection(rawSelection, `named:${name}`);
+      const createdAt = Number((rawSelection as Record<string, unknown>).createdAt);
+      selections[name] = { ...normalized, name, createdAt: createdAt || normalized.updatedAt };
+    }
+    return { version: 1, selections };
+  };
+
+  const writeNamedSelections = async (library: NamedSelectionLibrary): Promise<void> => {
+    const selections = Object.fromEntries(Object.entries(library.selections).sort(([a], [b]) => a.localeCompare(b)));
+    await fs.writeFile(namedSelectionsPath, `${JSON.stringify({ version: 1, selections }, null, 2)}\n`, 'utf8');
+  };
+
+  const frameRows = (
+    file: SpriteFile,
+    anim: string,
+    frame: number,
+    layerId?: string,
+  ): { rows: string[]; layerId?: string } => {
+    if (!(anim in file.anims)) throw new Error(`unknown animation "${anim}"`);
+    const concrete = resolveAnimName(file, anim);
+    if (isLayeredSpriteFile(file)) {
+      const resolvedLayerId = layerId ?? file.layers[0]?.id;
+      const layer = file.layers.find((candidate) => candidate.id === resolvedLayerId);
+      if (!layer) throw new Error(`unknown layer "${resolvedLayerId ?? ''}"`);
+      const rows = layer.tracks[concrete]?.[frame];
+      if (!rows) throw new Error(`frame ${frame} is outside animation "${anim}"`);
+      return { rows, layerId: layer.id };
+    }
+    const entry = file.anims[concrete];
+    const rows = typeof entry === 'string' ? undefined : entry.frames[frame];
+    if (!rows) throw new Error(`frame ${frame} is outside animation "${anim}"`);
+    return { rows };
   };
 
   const validateSprite = (candidate: unknown): void => {
@@ -167,7 +291,7 @@ export function spriteEditorBridge(root: string): Plugin {
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Sprite-Revision');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   };
 
   const send = (res: ServerResponse, status: number, value: unknown): void => {
@@ -210,7 +334,19 @@ export function spriteEditorBridge(root: string): Plugin {
           }
 
           if (req.method === 'GET' && url.pathname === `${API}/capabilities`) {
-            return send(res, 200, SPRITE_AGENT_CAPABILITIES);
+            return send(res, 200, {
+              ...SPRITE_AGENT_CAPABILITIES,
+              namedSelections: {
+                persistent: true,
+                routes: {
+                  list: `GET ${API}/named-selections`,
+                  read: `GET ${API}/named-selections/:name`,
+                  save: `PUT ${API}/named-selections/:name`,
+                  apply: `POST ${API}/named-selections/:name/apply`,
+                  delete: `DELETE ${API}/named-selections/:name`,
+                },
+              },
+            });
           }
 
           if (req.method === 'GET' && url.pathname === `${API}/render-tags`) {
@@ -224,7 +360,109 @@ export function spriteEditorBridge(root: string): Plugin {
           }
 
           if (req.method === 'GET' && url.pathname === `${API}/selection`) {
-            return send(res, 200, { selection });
+            return send(res, 200, selectionResponse(selection));
+          }
+
+          if (req.method === 'GET' && url.pathname === `${API}/named-selections`) {
+            const library = await readNamedSelections();
+            const selections = Object.values(library.selections).map((saved) => ({
+              name: saved.name,
+              path: saved.path,
+              anim: saved.anim,
+              frame: saved.frame,
+              layerId: saved.layerId,
+              x: saved.x,
+              y: saved.y,
+              w: saved.w,
+              h: saved.h,
+              pixelCount: saved.mask
+                ? saved.mask.reduce((count, row) => count + [...row].filter((cell) => cell === '1').length, 0)
+                : saved.w * saved.h,
+              createdAt: saved.createdAt,
+              updatedAt: saved.updatedAt,
+            }));
+            return send(res, 200, { version: library.version, selections });
+          }
+
+          const namedSelectionRoute = url.pathname.match(new RegExp(`^${API}/named-selections/([^/]+?)(/apply)?$`));
+          if (namedSelectionRoute) {
+            const name = selectionName(namedSelectionRoute[1]);
+            const applying = namedSelectionRoute[2] === '/apply';
+            const library = await readNamedSelections();
+
+            if (req.method === 'GET' && !applying) {
+              const saved = library.selections[name];
+              return saved
+                ? send(res, 200, selectionResponse(saved))
+                : send(res, 404, { error: `unknown named selection "${name}"` });
+            }
+
+            if (req.method === 'PUT' && !applying) {
+              const body = await jsonBody(req);
+              const candidate = body.selection === undefined ? selection : normalizedSelection(body.selection);
+              if (!candidate) return send(res, 409, { error: 'there is no live selection to save' });
+              const now = Date.now();
+              const previous = library.selections[name];
+              const saved: NamedSelection = {
+                ...candidate,
+                name,
+                createdAt: previous?.createdAt ?? now,
+                updatedAt: now,
+              };
+              library.selections[name] = saved;
+              await writeNamedSelections(library);
+              return send(res, previous ? 200 : 201, { selection: saved });
+            }
+
+            if (req.method === 'DELETE' && !applying) {
+              if (!library.selections[name]) return send(res, 404, { error: `unknown named selection "${name}"` });
+              delete library.selections[name];
+              await writeNamedSelections(library);
+              return send(res, 200, { deleted: name });
+            }
+
+            if (req.method === 'POST' && applying) {
+              const saved = library.selections[name];
+              if (!saved) return send(res, 404, { error: `unknown named selection "${name}"` });
+              if (!active) return send(res, 404, { error: 'no sprite is open' });
+              const body = await jsonBody(req);
+              const targetPath = body.path == null ? active.path : spritePath(body.path).relative;
+              if (targetPath !== active.path) {
+                return send(res, 409, { error: `open "${targetPath}" before applying the named selection`, state: active });
+              }
+              const anim = String(body.anim ?? active.cursor?.animation ?? saved.anim);
+              const frame = Number(body.frame ?? active.cursor?.frame ?? saved.frame);
+              if (!Number.isInteger(frame) || frame < 0) throw new Error('target frame must be a zero-based integer');
+              const requestedLayer = body.layerId == null
+                ? active.cursor?.layerId ?? saved.layerId
+                : String(body.layerId);
+              const x = Number(body.x ?? saved.x);
+              const y = Number(body.y ?? saved.y);
+              if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0) {
+                throw new Error('target x and y must be non-negative integers');
+              }
+              const target = frameRows(active.file as SpriteFile, anim, frame, requestedLayer);
+              const width = target.rows[0]?.length ?? 0;
+              if (y + saved.h > target.rows.length || x + saved.w > width) {
+                throw new Error(`named selection "${name}" does not fit the target frame at ${x},${y}`);
+              }
+              selection = {
+                path: active.path,
+                anim,
+                frame,
+                layerId: target.layerId,
+                x,
+                y,
+                w: saved.w,
+                h: saved.h,
+                rows: target.rows.slice(y, y + saved.h).map((row) => row.slice(x, x + saved.w)),
+                mask: saved.mask?.slice(),
+                source: `named:${name}`,
+                updatedAt: Date.now(),
+              };
+              publishSelection();
+              return send(res, 200, { name, selection });
+            }
           }
 
           if (req.method === 'POST' && url.pathname === `${API}/inspect`) {
@@ -269,36 +507,11 @@ export function spriteEditorBridge(root: string): Plugin {
             const body = await jsonBody(req);
             if (body.selection == null) {
               selection = null;
+              publishSelection();
               return send(res, 200, { selection });
             }
-            const value = body.selection as Record<string, unknown>;
-            const rows = value.rows;
-            const mask = value.mask;
-            const numbers = ['frame', 'x', 'y', 'w', 'h'] as const;
-            if (numbers.some((key) => !Number.isInteger(value[key]))
-              || Number(value.x) < 0 || Number(value.y) < 0 || Number(value.w) < 1 || Number(value.h) < 1
-              || typeof value.anim !== 'string' || !Array.isArray(rows) || !rows.every((row) => typeof row === 'string')
-              || rows.length !== Number(value.h) || rows.some((row) => row.length !== Number(value.w))) {
-              return send(res, 400, { error: 'selection needs integer bounds and matching pixel rows' });
-            }
-            if (mask !== undefined && (!Array.isArray(mask) || mask.length !== Number(value.h)
-              || !mask.every((row) => typeof row === 'string' && row.length === Number(value.w) && /^[1.]+$/.test(row)))) {
-              return send(res, 400, { error: 'selection mask must match the selection bounds' });
-            }
-            selection = {
-              path: value.path == null ? null : String(value.path),
-              anim: value.anim,
-              frame: Number(value.frame),
-              layerId: value.layerId == null ? undefined : String(value.layerId),
-              x: Number(value.x),
-              y: Number(value.y),
-              w: Number(value.w),
-              h: Number(value.h),
-              rows: rows as string[],
-              mask: mask as string[] | undefined,
-              source: String(value.source ?? 'browser'),
-              updatedAt: Number(value.updatedAt) || Date.now(),
-            };
+            selection = normalizedSelection(body.selection, 'browser');
+            publishSelection();
             return send(res, 200, { selection });
           }
 
@@ -383,13 +596,13 @@ export function spriteEditorBridge(root: string): Plugin {
             spriteAgentSourcePaths(body.commands); // Validate envelopes before reading nested fields.
             const commands = structuredClone(body.commands) as SpriteAgentCommand[];
             for (const command of commands) {
-              if (command.op === 'frame.copy' && command.from.path) {
+              if ((command.op === 'frame.copy' || command.op === 'frame.copyAligned') && command.from.path) {
                 command.from.path = spritePath(command.from.path).relative;
               }
               if ('target' in command && command.target && 'path' in command.target && command.target.path) {
                 command.target.path = spritePath(command.target.path).relative;
               }
-              if (command.op === 'frame.copy' && command.to.path) {
+              if ((command.op === 'frame.copy' || command.op === 'frame.copyAligned') && command.to.path) {
                 command.to.path = spritePath(command.to.path).relative;
               }
             }
@@ -615,6 +828,25 @@ export function spriteEditorBridge(root: string): Plugin {
             return res.end(preview);
           }
 
+          if (req.method === 'POST' && url.pathname === `${API}/comparison`) {
+            if (!active) return send(res, 404, { error: 'no sprite is open' });
+            const revision = Number(req.headers['x-sprite-revision'] ?? 0);
+            if (revision !== active.revision) return send(res, 409, { error: 'comparison revision is stale', state: active });
+            comparison = await readBody(req, MAX_PREVIEW_BYTES);
+            comparisonRevision = revision;
+            return send(res, 200, { revision, bytes: comparison.length });
+          }
+
+          if (req.method === 'GET' && url.pathname === `${API}/comparison.png`) {
+            if (!comparison || !active || comparisonRevision !== active.revision) {
+              return send(res, 404, { error: 'no comparison for the active revision' });
+            }
+            headers(res, 'image/png');
+            res.setHeader('X-Sprite-Revision', String(comparisonRevision));
+            res.statusCode = 200;
+            return res.end(comparison);
+          }
+
           if (req.method === 'GET' && url.pathname === `${API}/events`) {
             headers(res, 'text/event-stream');
             res.setHeader('Connection', 'keep-alive');
@@ -622,6 +854,7 @@ export function spriteEditorBridge(root: string): Plugin {
             listeners.add(res);
             res.write(': connected\n\n');
             if (active) res.write(`event: state\ndata: ${JSON.stringify(active)}\n\n`);
+            res.write(`event: selection\ndata: ${JSON.stringify({ selection })}\n\n`);
             req.on('close', () => listeners.delete(res));
             return;
           }

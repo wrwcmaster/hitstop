@@ -440,7 +440,7 @@ const contextuals = (p: { reach: number; arc: number; heft: number }) => ({
     // as long as the attack can actually pogo something.
     trail: {
       startAngle: 0.45, endAngle: 2.69, radius: p.reach * 0.8, thickness: 5,
-      bias: 0.5, glow: 1.8, sweep: 0.16, sprite: 'crescent',
+      bias: 0.5, glow: 1.8, sweep: 0.16,
     },
     movementKeep: 0.35,
     bodyWeight: 1.1,
@@ -521,7 +521,7 @@ defineWeaponType('sword', {
       animation: 'attack3',
       duration: 0.25, active: [0.22, 0.62], damageScale: 2, strength: 0.8, lunge: 110,
       hitbox: { forward: -2, y: -1, w: 26, h: 20 },
-      trail: { startAngle: -1.35, endAngle: 1.35, radius: 17, thickness: 5 },
+      trail: { startAngle: -1.35, endAngle: 1.35, radius: 17, thickness: 5, overlay: false },
       bodyWeight: 1.35,
       lift: 3,
       movementKeep: 0.0005,

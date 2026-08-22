@@ -117,8 +117,9 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
   // Entity coordinates describe the collision box. Sprite geometry maps
   // its draw origin onto that box, allowing transparent overhangs without
   // changing physics.
-  const cx = p.x - baseKnight.hitbox.x + baseKnight.w / 2;
-  const by = p.y - baseKnight.hitbox.y + baseKnight.h;
+  const poseHitbox = baseKnight.hitboxFor(anim);
+  const cx = p.x - poseHitbox.x + baseKnight.w / 2;
+  const by = p.y - poseHitbox.y + baseKnight.h;
   const dh = baseKnight.h;
   const dw = baseKnight.w;
 
