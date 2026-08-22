@@ -45,6 +45,7 @@ export {
   isLayeredSpriteFile,
   validateLayeredSpriteFile,
   resolveSpriteGeometry,
+  resolveSpriteHitbox,
   type SpriteFile,
   type FlatSpriteFile,
   type LayeredSpriteFile,

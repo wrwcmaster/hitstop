@@ -5,8 +5,10 @@ import {
   whiteOf,
   withFacing,
   type FacingAnimSet,
+  type LayeredSpriteFile,
   type LoadedSprite,
   type SpriteFile,
+  isLayeredSpriteFile,
 } from '@engine/index';
 import { COLORS, PAL } from './palette';
 import { orderedPlayerRenderTags, validatePlayerRenderTags } from './render-tags';
@@ -15,7 +17,6 @@ import { drawArrowSprite } from './ballistics';
 import { normalizedItemIcon } from './item-icon';
 import greatSwordJson from './sprites/equipment/great-sword.json';
 import rustySwordJson from './sprites/equipment/rusty-sword.json';
-import slashCrescentJson from './sprites/slash-crescent.json';
 import type { WeaponAttackDef } from './weapons';
 
 export interface WeaponAttackPose {
@@ -75,6 +76,8 @@ export interface WeaponVisual {
   drawHeld(g: CanvasRenderingContext2D, ctx: HeldWeaponCtx): void;
   /** Draw one authored band without flattening the whole weapon. */
   drawHeldTag?(g: CanvasRenderingContext2D, ctx: HeldWeaponCtx, tag: string): void;
+  /** Draw only decoration layers that survive body-authored held-object art. */
+  drawEmbeddedHeldTag?(g: CanvasRenderingContext2D, ctx: HeldWeaponCtx, tag: string): void;
   drawTrail?(g: CanvasRenderingContext2D, ctx: WeaponTrailCtx): void;
 }
 
@@ -142,6 +145,22 @@ export function drawHeldWeaponTag(
   const visual = weaponVisuals.get(id);
   if (visual.drawHeldTag) visual.drawHeldTag(g, ctx, tag);
   else if (visual.renderTags.includes(tag)) visual.drawHeld(g, ctx);
+}
+
+/**
+ * Draw item-specific decoration over a body-authored held object. The body
+ * supplies the shared weapon silhouette and pose; only layers explicitly
+ * authored as composition overlays survive. Procedural and legacy weapons
+ * contribute nothing here, so replacement is deterministic and data-driven.
+ */
+export function drawEmbeddedHeldWeaponTag(
+  g: CanvasRenderingContext2D,
+  id: string | null,
+  ctx: HeldWeaponCtx,
+  tag: string,
+): void {
+  if (!id) return;
+  weaponVisuals.get(id).drawEmbeddedHeldTag?.(g, ctx, tag);
 }
 
 export function heldWeaponHands(id: string | null, charging: boolean): ('front' | 'rear')[] {
@@ -237,6 +256,8 @@ export interface SpriteWeaponConfig {
   anims: FacingAnimSet;
   /** Layer-preserving source used for shared render-tag composition. */
   sprite?: LoadedSprite;
+  /** Decoration-only view used when the body animation owns the weapon pose. */
+  embeddedOverlaySprite?: LoadedSprite;
   /** Character attachment slot; defaults to the primary weapon hand. */
   attachmentSlot?: string;
   /** Legacy feet origin, used by animations that do not yet author a grip. */
@@ -262,7 +283,19 @@ export function spriteWeapon(config: SpriteWeaponConfig): WeaponVisual {
       taggedVisuals.set(authoredTag, spriteWeapon({
         ...config,
         sprite: undefined,
+        embeddedOverlaySprite: undefined,
         anims: withFacing(config.sprite.tagAnimSet(authoredTag)),
+      }));
+    }
+  }
+  const embeddedTaggedVisuals = new Map<string, WeaponVisual>();
+  if (config.embeddedOverlaySprite) {
+    for (const authoredTag of config.embeddedOverlaySprite.tags()) {
+      embeddedTaggedVisuals.set(authoredTag, spriteWeapon({
+        ...config,
+        sprite: undefined,
+        embeddedOverlaySprite: undefined,
+        anims: withFacing(config.embeddedOverlaySprite.tagAnimSet(authoredTag)),
       }));
     }
   }
@@ -274,6 +307,9 @@ export function spriteWeapon(config: SpriteWeaponConfig): WeaponVisual {
     renderTags,
     drawHeldTag(g, ctx, tag) {
       taggedVisuals.get(tag)?.drawHeld(g, ctx);
+    },
+    drawEmbeddedHeldTag(g, ctx, tag) {
+      embeddedTaggedVisuals.get(tag)?.drawHeld(g, ctx);
     },
     drawHeld(g, ctx) {
       const set = ctx.facing === 1 ? config.anims.right : config.anims.left;
@@ -594,23 +630,6 @@ defineWeaponVisual('unarmed', {
   drawTrail: drawSlashTrail,
 });
 
-const load = (file: unknown) => loadSprite(file as SpriteFile, PAL);
-
-// The plunge crescent, authored as pixel art. Its geometry was baked
-// from the procedural arc it replaces (same radius, angles and taper),
-// so it drops in without re-tuning — and being ordinary sprite rows, it
-// can now be hand-edited frame by frame like any other art in the repo.
-const slashCrescent = withFacing(load(slashCrescentJson).animSet());
-defineSlashVisual('crescent', {
-  frames: {
-    right: slashCrescent.right.slash.frames,
-    left: slashCrescent.left.slash.frames,
-  },
-  // Arc pivot: 12.5 px across the 26px sheet, 4 px ABOVE its top edge —
-  // the band hangs below the pivot, which is where the hand is.
-  origin: { x: 12.5, y: -4 },
-});
-
 /**
  * Sprite-backed weapons register through here so their non-art config
  * (origins, anchors, trail flag) is kept, which is what lets the sprite
@@ -624,9 +643,15 @@ const spriteWeaponConfigs = new Map<string, SpriteWeaponRegistrationConfig>();
 function weaponFromSprite(file: SpriteFile, config: SpriteWeaponRegistrationConfig): WeaponVisual {
   validatePlayerRenderTags(file);
   const loaded = loadSprite(file, PAL);
+  const overlayFile: LayeredSpriteFile | undefined = isLayeredSpriteFile(file)
+    && file.layers.some((layer) => layer.composition === 'overlay')
+    ? { ...file, layers: file.layers.filter((layer) => layer.composition === 'overlay') }
+    : undefined;
+  const embeddedOverlaySprite = overlayFile ? loadSprite(overlayFile, PAL) : undefined;
   return spriteWeapon({
     ...config,
     sprite: loaded,
+    embeddedOverlaySprite,
     anims: withFacing(loaded.animSet()),
     grip: (anim, frame) => loaded.anchor?.('grip', anim, frame),
   });

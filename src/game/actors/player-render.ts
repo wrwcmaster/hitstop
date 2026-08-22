@@ -4,14 +4,14 @@ import { gearLayers, DEBUG_ANCHORS } from '../content/gear-visuals';
 import { COLORS } from '../content/palette';
 import { IMPACT_DROP_PLUNGE } from '../content/weapons';
 import {
-  drawHeldWeaponTag, drawWeaponTrail, drawNeutralTrail, heldWeaponAttachmentSlot,
+  drawHeldWeaponTag, drawEmbeddedHeldWeaponTag, drawWeaponTrail, drawNeutralTrail, heldWeaponAttachmentSlot,
   heldWeaponGripRenderTag, heldWeaponHands,
   type HeldWeaponCtx,
 } from '../content/weapon-visuals';
 import { orderedPlayerRenderTags } from '../content/render-tags';
 import { PLAYER_TUNING } from './player-tuning';
 import type { Player } from './player';
-import { shouldSuppressHeldWeapon } from './player-render-policy';
+import { facingHitboxX, shouldSuppressHeldWeapon } from './player-render-policy';
 
 /**
  * How the knight is drawn — the whole picture, from body English to the
@@ -117,8 +117,10 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
   // Entity coordinates describe the collision box. Sprite geometry maps
   // its draw origin onto that box, allowing transparent overhangs without
   // changing physics.
-  const cx = p.x - baseKnight.hitbox.x + baseKnight.w / 2;
-  const by = p.y - baseKnight.hitbox.y + baseKnight.h;
+  const poseHitbox = baseKnight.hitboxFor(anim);
+  const poseHitboxX = facingHitboxX(baseKnight.w, poseHitbox.x, poseHitbox.w, p.facing);
+  const cx = p.x - poseHitboxX + baseKnight.w / 2;
+  const by = p.y - poseHitbox.y + baseKnight.h;
   const dh = baseKnight.h;
   const dw = baseKnight.w;
 
@@ -269,8 +271,9 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
       }
       if (p.flashT <= 0 && p.equipment.get('charm')) renderCharm(g, dh);
     }
-    if (p.flashT <= 0 && !embeddedHeldObject) {
-      drawHeldWeaponTag(g, weapon.visual, weaponCtx, tag);
+    if (p.flashT <= 0) {
+      if (embeddedHeldObject) drawEmbeddedHeldWeaponTag(g, weapon.visual, weaponCtx, tag);
+      else drawHeldWeaponTag(g, weapon.visual, weaponCtx, tag);
     }
     if (p.flashT <= 0 && !embeddedHeldObject && tag === gripRenderTag) {
       for (const hand of heldWeaponHands(weapon.visual, p.fsm.is('draw'))) {

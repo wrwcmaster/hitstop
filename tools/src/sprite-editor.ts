@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 import {
-  resolveSpriteGeometry, resolveAnim, resolveAnimName, resolveAnimTiming,
+  resolveSpriteGeometry, resolveSpriteHitbox, resolveAnim, resolveAnimName, resolveAnimTiming,
   compositeSpriteFrame, compositeSpriteFrameByTags, isLayeredSpriteFile, validateLayeredSpriteFile,
   rasterizeSpriteFrame,
   type Palette, type SpriteFile, type FlatSpriteFile, type LayeredSpriteFile,
@@ -19,6 +19,7 @@ import repositoryRenderTagDefs from '@game/content/render-tags.json';
 // game draws. The weapon anchors and the trail are code, not sprites;
 // no sprite-only overlay could show this truthfully.
 import {
+  drawEmbeddedHeldWeaponTag,
   drawHeldWeaponTag,
   drawWeaponTrail,
   weaponVisuals,
@@ -90,7 +91,6 @@ let previewStepFrame = 0;
 let previewStepping = false;
 let previewDisplayedFrame = 0;
 let previewZoom = 1;
-let previewZoomFit = true;
 let currentChar = firstPaintChar();
 let painting = false;
 let erasing = false;
@@ -176,6 +176,20 @@ let selectionMove: SelectionMove | null = null;
 let selectionHandleTransform: SelectionHandleTransform | null = null;
 let pixelClipboard: PixelClipboard | null = null;
 let refFile: SpriteFile | null = null;
+let comparisonUploadTimer = 0;
+let comparisonUploadStatus = 'idle';
+interface ComparisonAxis { start: { x: number; y: number }; end: { x: number; y: number } }
+interface ComparisonAlignment {
+  sourceAxis: ComparisonAxis;
+  targetAxis: ComparisonAxis;
+  sourceLength: number;
+  targetLength: number;
+  sourceAngle: number;
+  targetAngle: number;
+  rotate: number;
+  scale: number;
+  matrix: { a: number; b: number; c: number; d: number; e: number; f: number };
+}
 let currentFileName = 'new sprite.json';
 let currentRepoPath: string | null = null;
 let selectedAnchorName = '';
@@ -205,6 +219,7 @@ interface BridgeState {
   source: string;
   updatedAt: number;
   dirty: boolean;
+  cursor?: { animation: string; frame: number; layerId?: string };
 }
 
 /** Editor-only content metadata. The engine ignores it; tools use it to
@@ -640,10 +655,14 @@ function gridSize(rows: string[]): { w: number; h: number } {
   };
 }
 
-function geometryOf(spriteFile: SpriteFile, rows: string[]) {
+function geometryOf(spriteFile: SpriteFile, rows: string[], animation = animName) {
   const grid = gridSize(rows);
   const density = spriteFile.hd === false ? 4 : 1;
-  return resolveSpriteGeometry(spriteFile, grid.w / density, grid.h / density);
+  const geometry = resolveSpriteGeometry(spriteFile, grid.w / density, grid.h / density);
+  return {
+    ...geometry,
+    hitbox: resolveSpriteHitbox(spriteFile, animation, geometry.hitbox),
+  };
 }
 
 /* ---------------- dom ---------------- */
@@ -909,7 +928,7 @@ interface EditorViewState {
   leftPanel?: string;
   rightPanel?: string;
   panels?: { left: boolean; right: boolean };
-  preview: { playing: boolean; stepping: boolean; frame: number; zoom?: number; fit?: boolean };
+  preview: { playing: boolean; stepping: boolean; frame: number; zoom?: number };
   composite: {
     weapon: string;
     move: string;
@@ -925,6 +944,16 @@ interface EditorViewState {
     showHitbox: boolean;
   };
   referencePath: string;
+  comparison?: {
+    animation: string;
+    sourceLayer: string;
+    targetLayer: string;
+    sourceFrame: number;
+    view: string;
+    opacity: number;
+    alignAxes: boolean;
+    axes: string[];
+  };
 }
 
 function activePanel(group: 'left' | 'right'): string | undefined {
@@ -958,7 +987,6 @@ function captureEditorViewState(): EditorViewState {
       stepping: previewStepping,
       frame: previewStepFrame,
       zoom: previewZoom,
-      fit: previewZoomFit,
     },
     composite: {
       weapon: ($('compWeapon') as HTMLSelectElement).value,
@@ -975,6 +1003,19 @@ function captureEditorViewState(): EditorViewState {
       showHitbox: ($('showHitbox') as HTMLInputElement).checked,
     },
     referencePath: ($('selectRefSprite') as HTMLSelectElement).value,
+    comparison: {
+      animation: ($('compareRefAnim') as HTMLSelectElement).value,
+      sourceLayer: ($('compareRefLayer') as HTMLSelectElement).value,
+      targetLayer: ($('compareTargetLayer') as HTMLSelectElement).value,
+      sourceFrame: ($('compareRefFrame') as HTMLInputElement).valueAsNumber || 0,
+      view: ($('compareView') as HTMLSelectElement).value,
+      opacity: Number(($('compareOpacity') as HTMLInputElement).value),
+      alignAxes: ($('compareAlignAxes') as HTMLInputElement).checked,
+      axes: [
+        'compareSourceX1', 'compareSourceY1', 'compareSourceX2', 'compareSourceY2',
+        'compareTargetX1', 'compareTargetY1', 'compareTargetX2', 'compareTargetY2',
+      ].map((id) => ($(id) as HTMLInputElement).value),
+    },
   };
 }
 
@@ -1015,7 +1056,6 @@ function restoreEditorViewState(saved?: EditorViewState): void {
     previewStepping = state.preview.stepping;
     previewStepFrame = state.preview.frame;
     previewZoom = Math.max(0.1, Math.min(8, state.preview.zoom ?? previewZoom));
-    previewZoomFit = state.preview.fit ?? previewZoomFit;
 
     const weapon = $('compWeapon') as HTMLSelectElement;
     if ([...weapon.options].some((option) => option.value === state.composite.weapon)) {
@@ -1040,6 +1080,26 @@ function restoreEditorViewState(saved?: EditorViewState): void {
     if (state.referencePath && existingSprites.has(state.referencePath)) {
       reference.value = state.referencePath;
       refFile = existingSprite(state.referencePath);
+    }
+    rebuildComparisonSelectors();
+    if (state.comparison) {
+      const comparison = state.comparison;
+      const sourceAnim = $('compareRefAnim') as HTMLSelectElement;
+      if ([...sourceAnim.options].some((option) => option.value === comparison.animation)) sourceAnim.value = comparison.animation;
+      const sourceLayer = $('compareRefLayer') as HTMLSelectElement;
+      if ([...sourceLayer.options].some((option) => option.value === comparison.sourceLayer)) sourceLayer.value = comparison.sourceLayer;
+      const targetLayer = $('compareTargetLayer') as HTMLSelectElement;
+      if ([...targetLayer.options].some((option) => option.value === comparison.targetLayer)) targetLayer.value = comparison.targetLayer;
+      ($('compareRefFrame') as HTMLInputElement).value = String(comparison.sourceFrame);
+      ($('compareView') as HTMLSelectElement).value = comparison.view;
+      ($('compareOpacity') as HTMLInputElement).value = String(comparison.opacity);
+      ($('compareOpacityValue') as HTMLOutputElement).value = `${comparison.opacity}%`;
+      ($('compareAlignAxes') as HTMLInputElement).checked = comparison.alignAxes;
+      $('compareAxes').hidden = !comparison.alignAxes;
+      [
+        'compareSourceX1', 'compareSourceY1', 'compareSourceX2', 'compareSourceY2',
+        'compareTargetX1', 'compareTargetY1', 'compareTargetX2', 'compareTargetY2',
+      ].forEach((id, index) => { ($(id) as HTMLInputElement).value = comparison.axes[index] ?? ''; });
     }
 
     refreshUI();
@@ -1090,8 +1150,7 @@ $('btnResetWorkspace').addEventListener('click', () => {
   setPanelVisibility('right', true, false);
   activatePanel('left', 'left-tool');
   activatePanel('right', 'right-animate');
-  previewZoomFit = true;
-  applyPreviewZoom();
+  fitPreview();
   fitGrid();
   persistEditorViewState();
   flash('workspace reset');
@@ -1247,6 +1306,26 @@ function updateBridgeMeta(state: BridgeState): void {
   pendingBridgeState = null;
   updateBridgeStatus();
   schedulePreviewUpload();
+  scheduleComparisonUpload();
+}
+
+/** Apply an agent's semantic frame target after accepting its document. */
+function applyBridgeCursor(state: BridgeState): boolean {
+  if (!state.cursor) return false;
+  const next = reconcileSpriteDocumentCursor(file, {
+    animation: state.cursor.animation,
+    frame: state.cursor.frame,
+    layerId: state.cursor.layerId ?? activeLayerId,
+  }, activeLayerId);
+  const changed = animName !== next.animation || frameIdx !== next.frame
+    || (isLayeredSpriteFile(file) && activeLayerId !== next.layerId);
+  animName = next.animation;
+  frameIdx = next.frame;
+  if (isLayeredSpriteFile(file)) {
+    activeLayerId = next.layerId;
+    rememberActiveLayer();
+  }
+  return changed;
 }
 
 function applyBridgeState(state: BridgeState, force = false): void {
@@ -1290,6 +1369,7 @@ function applyBridgeState(state: BridgeState, force = false): void {
     else reconcileLayerState();
     if (!file.anims[animName]) animName = Object.keys(file.anims)[0];
     frameIdx = Math.min(frameIdx, anim().frames.length - 1);
+    applyBridgeCursor(state);
     currentChar = firstPaintChar();
     editVersion++;
     refreshUI();
@@ -1300,8 +1380,12 @@ function applyBridgeState(state: BridgeState, force = false): void {
     clearHistory();
     resetDocumentInteractionState(true);
     restoreActiveLayer(state.path, file);
+    applyBridgeCursor(state);
     refreshUI();
     fitGrid();
+  } else if (applyBridgeCursor(state)) {
+    resetDocumentInteractionState(false);
+    refreshUI();
   }
   updateBridgeMeta(state);
   if (switchedSprite && state.path) configureCompositeForPath(state.path);
@@ -1576,6 +1660,8 @@ function connectBridgeEvents(): void {
   events.onopen = () => {
     bridgeConnected = true;
     updateBridgeStatus();
+    schedulePreviewUpload();
+    scheduleComparisonUpload();
   };
   events.onerror = () => {
     bridgeConnected = false;
@@ -1584,6 +1670,16 @@ function connectBridgeEvents(): void {
   events.addEventListener('state', (event) => {
     const state = JSON.parse((event as MessageEvent<string>).data) as BridgeState;
     applyBridgeState(state);
+  });
+  events.addEventListener('selection', (event) => {
+    const shared = (JSON.parse((event as MessageEvent<string>).data) as { selection: SharedSelection | null }).selection;
+    if (!shared || shared.source === bridgeClientId) return;
+    if (shared.path !== currentRepoPath
+      || shared.anim !== concreteAnimName()
+      || shared.frame !== frameIdx
+      || (isLayeredSpriteFile(file) && shared.layerId !== activeLayerId)) return;
+    if (shared.x < 0 || shared.y < 0 || shared.x + shared.w > W() || shared.y + shared.h > H()) return;
+    setSelection({ x: shared.x, y: shared.y, w: shared.w, h: shared.h, mask: shared.mask?.slice() });
   });
 }
 
@@ -2218,6 +2314,24 @@ function buildLayers(): void {
       }, { refresh: 'all' });
     };
 
+    const composition = document.createElement('select');
+    composition.className = 'layer-composition';
+    composition.title = 'Base art is replaced by an embedded attachment; overlays remain visible';
+    for (const [value, label] of [['base', 'base'], ['overlay', 'overlay']] as const) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      composition.appendChild(option);
+    }
+    composition.value = layer.composition ?? 'base';
+    composition.disabled = !isLayeredSpriteFile(file);
+    composition.onchange = () => {
+      if (!isLayeredSpriteFile(file) || (layer.composition ?? 'base') === composition.value) return;
+      commitDocumentEdit(() => {
+        layer.composition = composition.value as 'base' | 'overlay';
+      }, { refresh: 'all' });
+    };
+
     const lock = document.createElement('button');
     lock.textContent = lockedLayerIds.has(layer.id) ? '◆' : '◇';
     lock.className = `layer-toggle ${lockedLayerIds.has(layer.id) ? 'on' : ''}`;
@@ -2229,7 +2343,7 @@ function buildLayers(): void {
       buildLayers();
     };
 
-    row.append(eye, solo, name, tag, lock);
+    row.append(eye, solo, name, tag, composition, lock);
     host.appendChild(row);
   }
 
@@ -2243,14 +2357,23 @@ function buildLayers(): void {
   const renderIndex = layerFile
     ? layersInRenderOrder(layerFile).findIndex((layer) => layer.id === activeLayerId)
     : -1;
+  const mergeTarget = layerFile && renderIndex > 0
+    ? layersInRenderOrder(layerFile)[renderIndex - 1]
+    : undefined;
   const canMoveUp = tagIndex >= 0 && tagIndex < tagLayers.length - 1;
   const canMoveDown = tagIndex > 0;
-  const canMergeDown = renderIndex > 0;
+  const canMergeDown = Boolean(active && mergeTarget
+    && active.tag === mergeTarget.tag
+    && (active.composition ?? 'base') === (mergeTarget.composition ?? 'base'));
   $('layerStatus').textContent = layerFile ? `${layerFile.layers.length} layers` : 'flat sprite';
   ($('btnDupLayer') as HTMLButtonElement).disabled = !layered;
   ($('btnLayerUp') as HTMLButtonElement).disabled = !canMoveUp;
   ($('btnLayerDown') as HTMLButtonElement).disabled = !canMoveDown;
-  ($('btnMergeLayer') as HTMLButtonElement).disabled = !canMergeDown;
+  const mergeButton = $('btnMergeLayer') as HTMLButtonElement;
+  mergeButton.disabled = !canMergeDown;
+  mergeButton.title = canMergeDown
+    ? 'Merge active layer into the layer below'
+    : 'Merge requires adjacent layers with the same render tag and composition role';
   ($('btnDelLayer') as HTMLButtonElement).disabled = !layerFile || layerFile.layers.length <= 1;
   ($('btnFlattenLayers') as HTMLButtonElement).disabled = !layered;
   buildLayerExtractionControls();
@@ -2589,6 +2712,10 @@ $('btnRenameAnim').onclick = () => {
         anchors[name] = anchors[animName];
         delete anchors[animName];
       }
+    }
+    if (file.animationHitboxOffsets?.[animName]) {
+      file.animationHitboxOffsets[name] = file.animationHitboxOffsets[animName];
+      delete file.animationHitboxOffsets[animName];
     }
     animName = name;
   }, { refresh: 'all' });
@@ -3834,6 +3961,187 @@ $('btnResize').onclick = () => {
   commitDocumentEdit(() => resizeSpriteDocument(file, w, h), { refresh: 'all' });
 };
 
+function isolateComparisonLayer(sprite: SpriteFile, layerId: string): SpriteFile {
+  if (!layerId || !isLayeredSpriteFile(sprite)) return sprite;
+  const layer = sprite.layers.find((candidate) => candidate.id === layerId);
+  return layer ? { ...sprite, layers: [layer] } : sprite;
+}
+
+function rebuildComparisonSelectors(): void {
+  const sourceAnim = $('compareRefAnim') as HTMLSelectElement;
+  const sourceLayer = $('compareRefLayer') as HTMLSelectElement;
+  const targetLayer = $('compareTargetLayer') as HTMLSelectElement;
+  const previousAnim = sourceAnim.value;
+  const previousSourceLayer = sourceLayer.value;
+  const previousTargetLayer = targetLayer.value;
+
+  sourceAnim.replaceChildren(new Option('animation: auto', ''));
+  for (const name of Object.keys(refFile?.anims ?? {})) sourceAnim.append(new Option(`animation: ${name}`, name));
+  sourceAnim.value = [...sourceAnim.options].some((option) => option.value === previousAnim) ? previousAnim : '';
+
+  sourceLayer.replaceChildren(new Option('layer: composite', ''));
+  if (refFile && isLayeredSpriteFile(refFile)) {
+    for (const layer of refFile.layers) sourceLayer.append(new Option(`layer: ${layer.name}`, layer.id));
+  }
+  sourceLayer.value = [...sourceLayer.options].some((option) => option.value === previousSourceLayer)
+    ? previousSourceLayer
+    : '';
+
+  targetLayer.replaceChildren(new Option('target: composite', ''));
+  if (isLayeredSpriteFile(file)) {
+    for (const layer of file.layers) targetLayer.append(new Option(`target: ${layer.name}`, layer.id));
+  }
+  targetLayer.value = [...targetLayer.options].some((option) => option.value === previousTargetLayer)
+    ? previousTargetLayer
+    : '';
+}
+
+function comparisonReference(): { file: SpriteFile; animation: string; frame: number; image: CanvasImageSource } | null {
+  if (!refFile) return null;
+  const requestedAnimation = ($('compareRefAnim') as HTMLSelectElement).value;
+  const animation = requestedAnimation && requestedAnimation in refFile.anims
+    ? requestedAnimation
+    : animName in refFile.anims ? animName : Object.keys(refFile.anims)[0];
+  const resolved = resolveAnim(refFile, animation);
+  if (!resolved?.frames.length) return null;
+  const requestedFrame = ($('compareRefFrame') as HTMLInputElement).valueAsNumber;
+  const frame = Number.isFinite(requestedFrame) && requestedFrame > 0
+    ? Math.min(resolved.frames.length - 1, Math.floor(requestedFrame) - 1)
+    : frameIdx % resolved.frames.length;
+  const source = isolateComparisonLayer(refFile, ($('compareRefLayer') as HTMLSelectElement).value);
+  const image = rasterizeSpriteFrame(source, animation, frame, PAL, { upscale: false });
+  return image ? { file: source, animation, frame, image } : null;
+}
+
+function numericComparisonPoint(prefix: string, point: '1' | '2'): { x: number; y: number } | null {
+  const x = ($(`compare${prefix}X${point}`) as HTMLInputElement).valueAsNumber;
+  const y = ($(`compare${prefix}Y${point}`) as HTMLInputElement).valueAsNumber;
+  return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+}
+
+function comparisonAlignment(): ComparisonAlignment | null {
+  if (!(($('compareAlignAxes') as HTMLInputElement).checked)) return null;
+  const sourceStart = numericComparisonPoint('Source', '1');
+  const sourceEnd = numericComparisonPoint('Source', '2');
+  const targetStart = numericComparisonPoint('Target', '1');
+  const targetEnd = numericComparisonPoint('Target', '2');
+  if (!sourceStart || !sourceEnd || !targetStart || !targetEnd) return null;
+  const sourceDx = sourceEnd.x - sourceStart.x;
+  const sourceDy = sourceEnd.y - sourceStart.y;
+  const targetDx = targetEnd.x - targetStart.x;
+  const targetDy = targetEnd.y - targetStart.y;
+  const sourceLength = Math.hypot(sourceDx, sourceDy);
+  const targetLength = Math.hypot(targetDx, targetDy);
+  if (sourceLength <= 1e-6 || targetLength <= 1e-6) return null;
+  const sourceAngle = Math.atan2(sourceDy, sourceDx) * 180 / Math.PI;
+  const targetAngle = Math.atan2(targetDy, targetDx) * 180 / Math.PI;
+  const rotate = targetAngle - sourceAngle;
+  const scale = targetLength / sourceLength;
+  const radians = rotate * Math.PI / 180;
+  const a = Math.cos(radians) * scale;
+  const b = Math.sin(radians) * scale;
+  const c = -Math.sin(radians) * scale;
+  const d = Math.cos(radians) * scale;
+  const e = targetStart.x - a * sourceStart.x - c * sourceStart.y;
+  const f = targetStart.y - b * sourceStart.x - d * sourceStart.y;
+  return {
+    sourceAxis: { start: sourceStart, end: sourceEnd },
+    targetAxis: { start: targetStart, end: targetEnd },
+    sourceLength, targetLength, sourceAngle, targetAngle, rotate, scale,
+    matrix: { a, b, c, d, e, f },
+  };
+}
+
+function updateComparisonReport(alignment = comparisonAlignment()): void {
+  const report = $('compareReport');
+  if (!refFile) {
+    report.textContent = 'Choose a reference to compare without modifying the sprite.';
+    return;
+  }
+  if (!(($('compareAlignAxes') as HTMLInputElement).checked)) {
+    report.textContent = 'Unaligned ghost overlay. Enable axis alignment to measure scale, rotation, and translation.';
+    return;
+  }
+  report.textContent = alignment
+    ? `scale ${alignment.scale.toFixed(4)} · rotate ${alignment.rotate.toFixed(2)}° · translate ${alignment.matrix.e.toFixed(2)}, ${alignment.matrix.f.toFixed(2)} px`
+    : 'Enter two distinct source points and their two target points.';
+}
+
+function drawComparisonSource(
+  ctx: CanvasRenderingContext2D,
+  image: CanvasImageSource,
+  pixelScale: number,
+  originX = 0,
+  originY = 0,
+): void {
+  const opacity = Number(($('compareOpacity') as HTMLInputElement).value) / 100;
+  const alignment = comparisonAlignment();
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, Math.min(1, opacity));
+  if (alignment) {
+    const { a, b, c, d, e, f } = alignment.matrix;
+    ctx.setTransform(
+      pixelScale * a, pixelScale * b,
+      pixelScale * c, pixelScale * d,
+      originX + pixelScale * e, originY + pixelScale * f,
+    );
+    ctx.drawImage(image, 0, 0);
+  } else {
+    const width = Number((image as { width?: number }).width ?? W());
+    const height = Number((image as { height?: number }).height ?? H());
+    ctx.drawImage(image, originX, originY, width * pixelScale, height * pixelScale);
+  }
+  ctx.restore();
+}
+
+function drawComparisonAxis(ctx: CanvasRenderingContext2D, alignment: ComparisonAlignment, pixelScale: number): void {
+  const { start, end } = alignment.targetAxis;
+  ctx.save();
+  ctx.strokeStyle = '#ffcd75';
+  ctx.fillStyle = '#ffcd75';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(start.x * pixelScale, start.y * pixelScale);
+  ctx.lineTo(end.x * pixelScale, end.y * pixelScale);
+  ctx.stroke();
+  for (const point of [start, end]) {
+    ctx.beginPath();
+    ctx.arc(point.x * pixelScale, point.y * pixelScale, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function comparisonTargetImage(): CanvasImageSource | null {
+  const target = isolateComparisonLayer(file, ($('compareTargetLayer') as HTMLSelectElement).value);
+  return rasterizeSpriteFrame(target, animName, frameIdx, PAL, { upscale: false }) ?? null;
+}
+
+function scheduleComparisonUpload(): void {
+  window.clearTimeout(comparisonUploadTimer);
+  if (!bridgeConnected || !bridgeRevision || !refFile || !(($('showRef') as HTMLInputElement).checked)) {
+    comparisonUploadStatus = 'idle';
+    return;
+  }
+  comparisonUploadStatus = 'scheduled';
+  comparisonUploadTimer = window.setTimeout(() => {
+    grid.toBlob((blob) => {
+      if (!blob) {
+        comparisonUploadStatus = 'canvas export failed';
+        return;
+      }
+      comparisonUploadStatus = 'uploading';
+      void fetch(`${BRIDGE}/comparison`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'image/png', 'X-Sprite-Revision': String(bridgeRevision) },
+        body: blob,
+      }).then((response) => {
+        comparisonUploadStatus = response.ok ? `ready r${bridgeRevision}` : `upload failed ${response.status}`;
+      }).catch(() => { comparisonUploadStatus = 'upload failed'; });
+    }, 'image/png');
+  }, 180);
+}
+
 function redraw(): void {
   grid.width = W() * cellSize;
   grid.height = H() * cellSize;
@@ -3843,26 +4151,18 @@ function redraw(): void {
   // cellSize, so zooming the sprite never turns checker tiles into pixels.
   drawTransparencyChecker(gctx, grid.width, grid.height);
 
-  // 3. Draw reference sprite if enabled
+  // 2. Draw a non-mutating comparison source. Its optional two-point matrix
+  // maps source sprite coordinates directly into target coordinates, so the
+  // ghost never needs to be pasted into (or rasterized through) the document.
   const showRef = ($('showRef') as HTMLInputElement)?.checked ?? true;
-  if (refFile && showRef) {
-    const refAnimName = animName in refFile.anims ? animName : Object.keys(refFile.anims)[0];
-    const refAnim = resolveAnim(refFile, refAnimName);
-    if (refAnim) {
-      const refFrameIndex = frameIdx % refAnim.frames.length;
-      const refImage = rasterizeSpriteFrame(refFile, refAnimName, refFrameIndex, PAL, { upscale: false });
-      if (refImage) {
-        gctx.save();
-        gctx.globalAlpha = 0.3;
-        gctx.drawImage(refImage, 0, 0, refImage.width * cellSize, refImage.height * cellSize);
-        gctx.restore();
-      }
-    }
-  }
+  const comparing = Boolean(refFile && showRef);
+  const comparisonView = ($('compareView') as HTMLSelectElement).value;
+  const reference = comparing ? comparisonReference() : null;
+  if (reference && comparisonView !== 'target') drawComparisonSource(gctx, reference.image, cellSize);
 
-  // 4. Draw onion skin if enabled
+  // 3. Draw onion skin if enabled
   const onion = ($('onionSkin') as HTMLInputElement)?.checked ?? false;
-  if (onion && frameIdx > 0) {
+  if ((!comparing || comparisonView !== 'source') && onion && frameIdx > 0) {
     const previousImage = rasterizedCur(frameIdx - 1, false);
     if (previousImage) {
       gctx.save();
@@ -3872,12 +4172,14 @@ function redraw(): void {
     }
   }
 
-  // 5. Draw visible layers bottom-to-top. Rasterizing each layer separately
+  // 4. Draw visible target layers bottom-to-top. Rasterizing each layer separately
   // preserves source-over alpha instead of replacing the lower palette cell.
-  const visibleImage = rasterizedCur(frameIdx, false);
-  if (visibleImage) gctx.drawImage(visibleImage, 0, 0, grid.width, grid.height);
+  const visibleImage = comparing ? comparisonTargetImage() : rasterizedCur(frameIdx, false);
+  if ((!comparing || comparisonView !== 'source') && visibleImage) {
+    gctx.drawImage(visibleImage, 0, 0, grid.width, grid.height);
+  }
 
-  // 6. Grid lines
+  // 5. Grid lines
   gctx.strokeStyle = 'rgba(35, 40, 48, 0.18)';
   for (let x = 0; x <= W(); x++) {
     gctx.beginPath();
@@ -3891,6 +4193,10 @@ function redraw(): void {
     gctx.lineTo(W() * cellSize, y * cellSize);
     gctx.stroke();
   }
+  const alignment = comparing ? comparisonAlignment() : null;
+  if (alignment) drawComparisonAxis(gctx, alignment, cellSize);
+  updateComparisonReport(alignment);
+  scheduleComparisonUpload();
 
   if (selection) {
     const x = selection.x * cellSize;
@@ -4620,7 +4926,7 @@ function renderComposite(t: number, pausedFrame?: number): boolean {
   frame = Math.min(sharedFrame, bodyAnim.frames.length - 1);
   if (compositePreviewFrame === null) compositePreviewFrame = sharedFrame;
   const rows = bodyAnim.frames[frame] ?? [];
-  const bodyGeometry = geometryOf(bodyFile, rows);
+  const bodyGeometry = geometryOf(bodyFile, rows, requestedBodyAnim);
   dw = bodyGeometry.w;
   dh = bodyGeometry.h;
   if (atkDef) {
@@ -4694,11 +5000,10 @@ function renderComposite(t: number, pausedFrame?: number): boolean {
     if (bodyImg) {
       pctx.drawImage(bodyImg, -dw / 2, -dh, dw, dh);
     }
-    if (!embeddedHeldObject) {
-      try {
-        drawHeldWeaponTag(pctx, wdef!.visual, weaponContext, tag);
-      } catch { /* a half-painted sheet mid-edit; next frame will catch up */ }
-    }
+    try {
+      if (embeddedHeldObject) drawEmbeddedHeldWeaponTag(pctx, wdef!.visual, weaponContext, tag);
+      else drawHeldWeaponTag(pctx, wdef!.visual, weaponContext, tag);
+    } catch { /* a half-painted sheet mid-edit; next frame will catch up */ }
   }
   pctx.restore();
 
@@ -4769,6 +5074,20 @@ function updateCombatHitboxOverlay(): void {
 
 const PREVIEW_ZOOMS = [0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8];
 
+/** Calculate a two-dimensional "fit in viewport" zoom for every editor surface. */
+function fittedZoom(
+  viewport: HTMLElement,
+  contentWidth: number,
+  contentHeight: number,
+  insetX: number,
+  insetY: number,
+): number {
+  if (contentWidth <= 0 || contentHeight <= 0) return 1;
+  const availableW = Math.max(1, viewport.clientWidth - insetX);
+  const availableH = Math.max(1, viewport.clientHeight - insetY);
+  return Math.min(availableW / contentWidth, availableH / contentHeight);
+}
+
 /** Keep the same content point beneath the visible viewport center while zooming. */
 function updateZoomPreservingViewport(
   viewport: HTMLElement,
@@ -4793,31 +5112,28 @@ function updateZoomPreservingViewport(
 
 function fittedPreviewZoom(): number {
   const viewport = $('previewViewport');
-  if (!preview.width || !viewport.clientWidth) return 1;
-  // Fit preserves the editor's old behaviour: shrink oversized previews,
-  // but do not enlarge small sprites unless the author explicitly zooms in.
-  return Math.min(1, Math.max(0.1, (viewport.clientWidth - 2) / preview.width));
-}
-
-function activePreviewZoom(): number {
-  return previewZoomFit ? fittedPreviewZoom() : previewZoom;
+  const fitted = fittedZoom(viewport, preview.width, preview.height, 2, 2);
+  return Math.max(PREVIEW_ZOOMS[0], Math.min(PREVIEW_ZOOMS.at(-1)!, fitted));
 }
 
 function applyPreviewZoom(preserveViewport = false): void {
   updateZoomPreservingViewport($('previewViewport'), preview, () => {
-    const scale = activePreviewZoom();
-    preview.style.width = `${preview.width * scale}px`;
-    preview.style.height = `${preview.height * scale}px`;
-    ($('previewZoomPercent') as HTMLInputElement).value = String(Math.round(scale * 100));
-    $('previewZoomFit').classList.toggle('active', previewZoomFit);
-    $('previewZoomFit').setAttribute('aria-pressed', String(previewZoomFit));
+    preview.style.width = `${preview.width * previewZoom}px`;
+    preview.style.height = `${preview.height * previewZoom}px`;
+    ($('previewZoomPercent') as HTMLInputElement).value = String(Math.round(previewZoom * 100));
   }, preserveViewport);
 }
 
-function setPreviewZoom(value: number): void {
-  previewZoomFit = false;
+function setPreviewZoom(value: number, preserveViewport = true): void {
   previewZoom = Math.max(PREVIEW_ZOOMS[0], Math.min(PREVIEW_ZOOMS.at(-1)!, value));
-  applyPreviewZoom(true);
+  applyPreviewZoom(preserveViewport);
+}
+
+function fitPreview(): void {
+  setPreviewZoom(fittedPreviewZoom(), false);
+  const viewport = $('previewViewport');
+  viewport.scrollLeft = 0;
+  viewport.scrollTop = 0;
 }
 
 interface CombatHitboxDrag {
@@ -4970,36 +5286,16 @@ function renderPreview(): void {
   const x = 8;
   const y = 20;
 
-  // Draw reference sprite behind current frame if enabled
+  // Draw the same comparison ghost used by the editable canvas. Comparison
+  // controls remain view-only; previewing them never changes frame data.
   const showRef = ($('showRef') as HTMLInputElement)?.checked ?? true;
-  if (refFile && showRef) {
-    const refAnim = resolveAnim(refFile, animName in refFile.anims ? animName : Object.keys(refFile.anims)[0]);
-    if (refAnim) {
-      const refIdx = refAnim.frames.length
-        ? previewPlaying
-          ? Math.floor(t * (refAnim.fps || 1)) % refAnim.frames.length
-          : Math.min(displayedFrame, refAnim.frames.length - 1)
-        : 0;
-      const refRows = refAnim.frames[refIdx] ?? [];
-
-      const refGeometry = geometryOf(refFile, refRows);
-      const refIsHighRes = refFile.hd === false;
-      const refName = animName in refFile.anims ? animName : Object.keys(refFile.anims)[0];
-      const refImg = rasterizeSpriteFrame(refFile, refName, refIdx, PAL, {
-        upscale: !(refIsHighRes || !hd),
-      });
-
-      if (refImg) {
-        pctx.save();
-        pctx.globalAlpha = 0.3;
-        pctx.drawImage(refImg, x, y, refGeometry.w * 8, refGeometry.h * 8);
-        pctx.restore();
-      }
-    }
-  }
+  const comparing = Boolean(refFile && showRef);
+  const comparisonView = ($('compareView') as HTMLSelectElement).value;
+  const reference = comparing ? comparisonReference() : null;
+  if (reference && comparisonView !== 'target') drawComparisonSource(pctx, reference.image, 8, x, y);
 
   // Draw active sprite frame
-  if (img) pctx.drawImage(img, x, y, w * 8, h * 8);
+  if ((!comparing || comparisonView !== 'source') && img) pctx.drawImage(img, x, y, w * 8, h * 8);
 
   // Draw hitbox border (if enabled)
   if (($('showHitbox') as HTMLInputElement).checked) {
@@ -5169,7 +5465,8 @@ function normalize(raw: unknown): SpriteFile {
       }
     }
     validateSpriteEditorDocument(normalized);
-    geometryOf(normalized, resolveAnim(normalized, Object.keys(normalized.anims)[0])?.frames[0] ?? []);
+    const firstAnimation = Object.keys(normalized.anims)[0];
+    geometryOf(normalized, resolveAnim(normalized, firstAnimation)?.frames[0] ?? [], firstAnimation);
     return normalized;
   }
   if (r && Array.isArray(r.frames)) {
@@ -5766,9 +6063,7 @@ function setGridZoom(value: number, preserveViewport = true): void {
 
 function fitGrid(): void {
   const center = $('center');
-  const availableW = Math.max(1, center.clientWidth - 40);
-  const availableH = Math.max(1, center.clientHeight - 40);
-  const ideal = Math.floor(Math.min(availableW / W(), availableH / H()));
+  const ideal = Math.floor(fittedZoom(center, W(), H(), 40, 40));
   setGridZoom([...GRID_ZOOMS].reverse().find((size) => size <= ideal) ?? GRID_ZOOMS[0], false);
   center.scrollLeft = 0;
   center.scrollTop = 0;
@@ -5794,6 +6089,7 @@ $('btnLoadRef').onclick = () => ($('refFileInput') as HTMLInputElement).click();
   reader.onload = () => {
     try {
       refFile = normalize(JSON.parse(String(reader.result)));
+      rebuildComparisonSelectors();
       redraw();
       schedulePreviewUpload();
       flash(`loaded reference: ${f.name}`);
@@ -5810,12 +6106,14 @@ $('selectRefSprite').onchange = (e) => {
   const val = (e.target as HTMLSelectElement).value;
   if (!val) {
     refFile = null;
+    rebuildComparisonSelectors();
     redraw();
     schedulePreviewUpload();
     return;
   }
   try {
     refFile = existingSprite(val);
+    rebuildComparisonSelectors();
     redraw();
     schedulePreviewUpload();
     flash(`loaded reference: ${val}`);
@@ -5827,6 +6125,35 @@ $('selectRefSprite').onchange = (e) => {
 ($('showRef') as HTMLInputElement).onchange = () => {
   redraw();
   schedulePreviewUpload();
+};
+const comparisonControlIds = [
+  'compareRefAnim', 'compareRefLayer', 'compareTargetLayer', 'compareRefFrame', 'compareView',
+  'compareOpacity', 'compareAlignAxes',
+  'compareSourceX1', 'compareSourceY1', 'compareSourceX2', 'compareSourceY2',
+  'compareTargetX1', 'compareTargetY1', 'compareTargetX2', 'compareTargetY2',
+];
+for (const id of comparisonControlIds) {
+  const control = $(id) as HTMLInputElement | HTMLSelectElement;
+  control.addEventListener('input', () => {
+    if (id === 'compareOpacity') {
+      ($('compareOpacityValue') as HTMLOutputElement).value = `${(control as HTMLInputElement).value}%`;
+    }
+    if (id === 'compareAlignAxes') $('compareAxes').hidden = !(control as HTMLInputElement).checked;
+    redraw();
+    schedulePreviewUpload();
+  });
+}
+$('btnExportComparison').onclick = () => {
+  if (!refFile || !(($('showRef') as HTMLInputElement).checked)) {
+    flash('choose and enable a comparison reference first');
+    return;
+  }
+  const link = document.createElement('a');
+  const sourceFrame = comparisonReference()?.frame ?? frameIdx;
+  link.download = `sprite-comparison-${animName}-${frameIdx + 1}-from-${sourceFrame + 1}.png`;
+  link.href = grid.toDataURL('image/png');
+  link.click();
+  flash('exported non-mutating comparison PNG');
 };
 ($('onionSkin') as HTMLInputElement).onchange = () => redraw();
 
@@ -6306,7 +6633,7 @@ function onPhysChange(): void {
 ($('physW') as HTMLInputElement).onchange = onPhysChange;
 ($('physH') as HTMLInputElement).onchange = onPhysChange;
 
-// Hitbox inputs → write to file.hitbox
+// Hitbox x/y belong to the selected animation; w/h remain global physics size.
 function onHitboxChange(): void {
   const bx = ($('boxX') as HTMLInputElement).valueAsNumber;
   const by = ($('boxY') as HTMLInputElement).valueAsNumber;
@@ -6317,13 +6644,28 @@ function onHitboxChange(): void {
     syncIO();
     return;
   }
-  const { w, h } = geometryOf(file, cur());
+  const grid = gridSize(cur());
+  const densityValue = file.hd === false ? 4 : 1;
+  const baseGeometry = resolveSpriteGeometry(file, grid.w / densityValue, grid.h / densityValue);
+  const { w, h } = baseGeometry;
   commitDocumentEdit(() => {
-    // Only store hitbox if it differs from the full physical size at origin
-    if (bx === 0 && by === 0 && bw === w && bh === h) {
+    const defaultX = file.hitbox?.x ?? 0;
+    const defaultY = file.hitbox?.y ?? 0;
+    if (bx === defaultX && by === defaultY) {
+      delete file.animationHitboxOffsets?.[animName];
+      if (file.animationHitboxOffsets && !Object.keys(file.animationHitboxOffsets).length) {
+        delete file.animationHitboxOffsets;
+      }
+    } else {
+      file.animationHitboxOffsets ??= {};
+      file.animationHitboxOffsets[animName] = { x: bx, y: by };
+    }
+
+    // The collision dimensions remain global and stable across poses.
+    if (defaultX === 0 && defaultY === 0 && bw === w && bh === h) {
       delete file.hitbox;
     } else {
-      file.hitbox = { x: bx, y: by, w: bw, h: bh };
+      file.hitbox = { x: defaultX, y: defaultY, w: bw, h: bh };
     }
   }, { refresh: 'all' });
 }
@@ -6336,6 +6678,7 @@ function onHitboxChange(): void {
 
 function refreshUI(): void {
   reconcileLayerState();
+  rebuildComparisonSelectors();
   buildPalette();
   buildLayers();
   buildAnims();
@@ -6362,6 +6705,7 @@ Object.defineProperty(window, '__editor', {
     get currentRepoPath() { return currentRepoPath; },
     get animName() { return animName; },
     get frameIdx() { return frameIdx; },
+    get activeLayerId() { return activeLayerId; },
     get editVersion() { return editVersion; },
     get rebuiltVersion() { return rebuiltVersion; },
     get selection() { return selectionSnapshot(); },
@@ -6373,6 +6717,77 @@ Object.defineProperty(window, '__editor', {
         conflict: bridgeConflict,
         clientId: bridgeClientId,
       };
+    },
+    comparison: {
+      get state() {
+        return {
+          enabled: ($('showRef') as HTMLInputElement).checked,
+          referencePath: ($('selectRefSprite') as HTMLSelectElement).value,
+          animation: ($('compareRefAnim') as HTMLSelectElement).value,
+          sourceLayer: ($('compareRefLayer') as HTMLSelectElement).value,
+          targetLayer: ($('compareTargetLayer') as HTMLSelectElement).value,
+          sourceFrame: ($('compareRefFrame') as HTMLInputElement).valueAsNumber || 0,
+          view: ($('compareView') as HTMLSelectElement).value,
+          opacity: Number(($('compareOpacity') as HTMLInputElement).value),
+          alignAxes: ($('compareAlignAxes') as HTMLInputElement).checked,
+          alignment: comparisonAlignment(),
+          uploadStatus: comparisonUploadStatus,
+        };
+      },
+      configure(changes: {
+        enabled?: boolean;
+        referencePath?: string;
+        animation?: string;
+        sourceLayer?: string;
+        targetLayer?: string;
+        sourceFrame?: number;
+        view?: 'overlay' | 'source' | 'target';
+        opacity?: number;
+        sourceAxis?: ComparisonAxis;
+        targetAxis?: ComparisonAxis;
+      }) {
+        if (changes.referencePath !== undefined) {
+          const reference = $('selectRefSprite') as HTMLSelectElement;
+          if (changes.referencePath && !existingSprites.has(changes.referencePath)) {
+            throw new Error(`unknown comparison reference "${changes.referencePath}"`);
+          }
+          reference.value = changes.referencePath;
+          refFile = changes.referencePath ? existingSprite(changes.referencePath) : null;
+          rebuildComparisonSelectors();
+        }
+        const setSelect = (id: string, value: string | undefined): void => {
+          if (value === undefined) return;
+          const select = $(id) as HTMLSelectElement;
+          if (![...select.options].some((option) => option.value === value)) throw new Error(`invalid ${id} value "${value}"`);
+          select.value = value;
+        };
+        setSelect('compareRefAnim', changes.animation);
+        setSelect('compareRefLayer', changes.sourceLayer);
+        setSelect('compareTargetLayer', changes.targetLayer);
+        setSelect('compareView', changes.view);
+        if (changes.enabled !== undefined) ($('showRef') as HTMLInputElement).checked = changes.enabled;
+        if (changes.sourceFrame !== undefined) ($('compareRefFrame') as HTMLInputElement).value = String(changes.sourceFrame);
+        if (changes.opacity !== undefined) {
+          const opacity = Math.max(0, Math.min(100, changes.opacity));
+          ($('compareOpacity') as HTMLInputElement).value = String(opacity);
+          ($('compareOpacityValue') as HTMLOutputElement).value = `${opacity}%`;
+        }
+        const axisEntries: Array<[string, number | undefined]> = [
+          ['compareSourceX1', changes.sourceAxis?.start.x], ['compareSourceY1', changes.sourceAxis?.start.y],
+          ['compareSourceX2', changes.sourceAxis?.end.x], ['compareSourceY2', changes.sourceAxis?.end.y],
+          ['compareTargetX1', changes.targetAxis?.start.x], ['compareTargetY1', changes.targetAxis?.start.y],
+          ['compareTargetX2', changes.targetAxis?.end.x], ['compareTargetY2', changes.targetAxis?.end.y],
+        ];
+        for (const [id, value] of axisEntries) if (value !== undefined) ($(id) as HTMLInputElement).value = String(value);
+        if (changes.sourceAxis || changes.targetAxis) {
+          ($('compareAlignAxes') as HTMLInputElement).checked = true;
+          $('compareAxes').hidden = false;
+        }
+        redraw();
+        schedulePreviewUpload();
+        return this.state;
+      },
+      png() { return grid.toDataURL('image/png'); },
     },
     open(path: string) { return openSharedSprite(path); },
     replace(next: SpriteFile, path: string | null = currentRepoPath) {
@@ -6465,22 +6880,14 @@ $('previewNext').onclick = () => stepPreview(1);
   setPreviewZoom(Number((event.target as HTMLInputElement).value) / 100);
 };
 $('previewZoomOut').onclick = () => {
-  const current = activePreviewZoom();
+  const current = previewZoom;
   setPreviewZoom([...PREVIEW_ZOOMS].reverse().find((zoom) => zoom < current - 0.001) ?? PREVIEW_ZOOMS[0]);
 };
 $('previewZoomIn').onclick = () => {
-  const current = activePreviewZoom();
+  const current = previewZoom;
   setPreviewZoom(PREVIEW_ZOOMS.find((zoom) => zoom > current + 0.001) ?? PREVIEW_ZOOMS.at(-1)!);
 };
-$('previewZoomFit').onclick = () => {
-  previewZoomFit = true;
-  applyPreviewZoom();
-  $('previewViewport').scrollLeft = 0;
-  $('previewViewport').scrollTop = 0;
-};
-window.addEventListener('resize', () => {
-  if (previewZoomFit) applyPreviewZoom();
-});
+$('previewZoomFit').onclick = () => fitPreview();
 ($('previewPlay') as HTMLInputElement).addEventListener('change', () => {
   if (($('previewPlay') as HTMLInputElement).checked) previewStepping = false;
 });

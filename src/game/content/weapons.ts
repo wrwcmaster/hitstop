@@ -440,7 +440,7 @@ const contextuals = (p: { reach: number; arc: number; heft: number }) => ({
     // as long as the attack can actually pogo something.
     trail: {
       startAngle: 0.45, endAngle: 2.69, radius: p.reach * 0.8, thickness: 5,
-      bias: 0.5, glow: 1.8, sweep: 0.16, sprite: 'crescent',
+      bias: 0.5, glow: 1.8, sweep: 0.16,
     },
     movementKeep: 0.35,
     bodyWeight: 1.1,
@@ -500,10 +500,11 @@ defineWeaponType('sword', {
     attack({
       duration: 0.16, active: [0.15, 0.56], damageScale: 1, strength: 0.42, lunge: 45,
       hitbox: { forward: -2, y: 0, w: 20, h: 16 },
-      // Attack 1's slash is authored directly in the sword frames. Keep
-      // this geometry for pose timing, but do not stack a generated arc
-      // over the baked pixels.
+      // This move's complete body, blade, hand, and arc are authored on one
+      // timeline in the knight's own layered sprite. Weapon-specific overlay
+      // layers can still tint or decorate the embedded blade.
       trail: { startAngle: -1.3, endAngle: 1.3, radius: 13, thickness: 3.5, overlay: false },
+      embeddedHeldObject: true,
     }),
     attack({
       animation: 'attack2',
@@ -520,7 +521,8 @@ defineWeaponType('sword', {
       animation: 'attack3',
       duration: 0.25, active: [0.22, 0.62], damageScale: 2, strength: 0.8, lunge: 110,
       hitbox: { forward: -2, y: -1, w: 26, h: 20 },
-      trail: { startAngle: -1.35, endAngle: 1.35, radius: 17, thickness: 5 },
+      trail: { startAngle: -1.35, endAngle: 1.35, radius: 17, thickness: 5, overlay: false },
+      embeddedHeldObject: true,
       bodyWeight: 1.35,
       lift: 3,
       movementKeep: 0.0005,

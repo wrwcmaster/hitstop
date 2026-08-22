@@ -226,6 +226,48 @@ The editor render is the source of truth. Inspect three views:
 
 Compare silhouette, proportions, material ramps, origin/seams, attachment points, transparent fringe, and the feature that communicates gameplay. For characters, zoom into the eyes and hands. For weapons, inspect the grip and active edge. For effects, inspect the focal point and contrast. For tiles, repeat the pattern and test every neighbor seam. For icons, judge at final UI size.
 
+### Agent visual-alignment protocol
+
+The collaboration bridge already publishes the editor's rendered preview at
+`GET /__sprite-editor/preview.png`; `npm run agent-sprite -- preview <file>`
+downloads the same image. An agent doing visual work **must inspect that PNG**.
+Document JSON, opaque bounds, anchors, and component statistics support the
+decision, but none of them substitutes for the rendered composite.
+
+For every alignment or transform task:
+
+1. Pause or step the preview to the requested animation frame. Read the live
+   document revision, download `preview.png`, and confirm its
+   `X-Sprite-Revision` matches. A missing or stale preview is a stop condition,
+   not permission to infer the target from serialized pixels alone.
+2. Inspect the downloaded image itself. If the human supplied a screenshot of
+   the current editor, treat it as additional ground truth; do not discard
+   visible evidence merely because raw grid data is available.
+3. Mark corresponding landmarks on the same rendered view—for a weapon,
+   normally source grip/tip and target grip/tip. Record which points belong to
+   the overlay and which belong to the reference before calculating anything.
+4. Name the requested quantity before reporting it. The source's absolute
+   angle is `atan2(sourceTipY - sourceGripY, sourceTipX - sourceGripX)`. The
+   transform is the normalized delta `targetAngle - sourceAngle`. Because the
+   canvas uses a downward-positive Y axis, a positive visual rotation is
+   clockwise. Never return an absolute angle when the task asks how far to
+   rotate.
+5. Apply only the requested degrees of freedom. A rotation request uses scale
+   `1`; do not infer length correction. Calculate scale separately only when
+   the human or approved reference explicitly requires a sword-length change.
+6. Make one revision-safe edit, then download and inspect the new rendered
+   preview. Compare the overlay against the visible reference at the grip,
+   tip, and along the full edge—not just by anchors or bounding boxes. If it is
+   wrong, revert that transaction before trying another value.
+7. Do not report an alignment as complete unless the inspected preview belongs
+   to the post-edit revision. JSON validity, zero endpoint error, and a
+   successful bridge response are necessary checks, not visual approval.
+
+This order is deliberately strict: **rendered evidence first, calculation
+second, mutation third, rendered verification last**. Searching implementation
+code or reconstructing a preview from document data is unnecessary while the
+live preview endpoint is available.
+
 ## 6. Pixel-polish with small controlled variants
 
 Change one feature at a time through the shared revision, render again, and compare it to the source. When a choice is uncertain, render two or three tiny variants rather than guessing.
@@ -233,6 +275,85 @@ Change one feature at a time through the shared revision, render again, and comp
 The `knight-v2` eye is one reference example: automatic conversion retained the dark iris but collapsed the white sclera, making the eye read as a black mark. Three variants were rendered in the editor. The accepted version uses one white sclera column, one dark iris column, a teal lower-iris pixel, and a continuous upper lash. The wider version looked correct while zoomed but became a white rectangle at game scale. Apply the same method to a sword tip, boss eye, spell core, tile corner, or any other feature whose meaning depends on a few pixels.
 
 Do not silently replace a dirty shared document. Read its revision, merge only the intended pixels, and leave repository saving explicit until the human accepts the result.
+
+### Patch an embedded weapon one frame at a time
+
+An attack frame may already contain a generic weapon and slash effect while an
+equipment sprite supplies item-specific art. Treat the equipment art as a
+small, layered patch over the approved body frame. Do not regenerate or
+re-normalize the complete character merely to change the weapon.
+
+Use this order for each frame:
+
+1. Open the body and equipment sprites on the same animation and frame number.
+2. Clear only the target equipment frame's `Sword` and `Slash` layers. Confirm
+   that no stale overlay remains before copying anything.
+3. Copy the pristine normalized weapon from its approved source frame. Always
+   restart from this untouched source; rotating an already transformed copy a
+   second time compounds rasterization damage and softens the pixel clusters.
+4. Measure the source and target weapon axes from two visible points, normally
+   grip center to blade tip. Use the sprite-agent bridge's
+   `frame.copyAligned` operation so uniform scale (including pose-dependent
+   sword-length changes), rotation, and translation are derived together from
+   those endpoints and applied to the untouched source in one resampling pass.
+   Inspect its mapped endpoints and endpoint error; do not infer the transformed
+   grip from the output bounding-box origin. Prefer uniform scaling unless the
+   approved reference clearly requires a width change.
+5. Align the rendered weapon to the embedded reference in the live composite.
+   The opaque-pixel bounding box is not the transform box: transparent pixels,
+   the selection rectangle, and its pivot all affect placement. Use the live
+   selection bounds and transform state, not an inferred five-pixel component
+   box or stale serialized coordinates. Before publishing, use the sprite
+   editor's alignment comparison to isolate the pristine source and target
+   layers, ghost them with the measured grip-to-tip axes, and export the
+   non-mutating comparison PNG. The reported scale/rotation/translation and
+   the visible overlay must agree.
+6. After the art is visually correct, update both attachment endpoints for the
+   frame: the body's hand anchor and the weapon's grip anchor. Anchors describe
+   the accepted placement; they must not be used to justify a visibly wrong
+   placement when the existing anchor metadata is itself inaccurate.
+7. Add small detached weapon details, such as a pommel cap, as part of the
+   weapon overlay and verify them against the live frame. Preserve the full
+   selection rectangle and pivot when moving these details, even if only a few
+   pixels inside that rectangle are opaque.
+8. Put the slash effect on its own `Slash` overlay. Extract the exact connected
+   effect shape from the approved body frame, excluding the embedded blade,
+   then transfer the material colors from an already approved slash frame.
+   Preserve the source shape and alpha structure; color matching must not
+   redraw its silhouette.
+9. Inspect the editor grid and the body-plus-equipment preview on the same
+   frame. Save only after the overlay covers the embedded reference, the grip
+   is stable, the detached details are aligned, and no original effect color
+   leaks around the patch.
+
+The editor's live document is authoritative during this workflow. Before an
+agent edit, require a synced bridge revision. If the editor reports a conflict,
+stop: do not calculate from or write through the stale bridge state. Reconcile
+the live browser edit first, especially after a human has manually corrected a
+transform. Make one deterministic change, render it, and visually verify it
+before reporting success. A JSON-valid result or a mathematically aligned
+anchor is not evidence that the pixels are aligned.
+
+For repeatable frames, encode the clear/copy/one-pass transform/color
+remap/anchor/assert sequence as one semantic transaction and dry-run it before
+publication. The command and coordinate contract is documented in
+[Sprite editor agent protocol](sprite-editor-agent.md); it includes a frames
+3–5 example and deliberately keeps repository saving outside the transaction.
+
+### Reuse the approved rusty-sword arc palette
+
+The accepted blue-to-warm material transfer for rusty-sword slash arcs is
+stored as RGBA data in
+[`art/rusty-sword-arc-color-map.json`](art/rusty-sword-arc-color-map.json).
+Use that file directly for later rusty-sword frames; do not rediscover the
+mapping from screenshots or reduce it to a newly guessed dominant-color map.
+
+The mapping records both opaque interior colors and the approved translucent
+edge ramps. Apply it only to the exact slash silhouette taken from the matching
+Knight V2 frame, exclude the embedded-weapon selection, and write the result to
+the rusty sword's `layer-2` (`Slash`) layer above `base` (`Sword`). Geometry is
+still frame-specific, but the material mapping is shared across rusty-sword
+attack frames.
 
 ## 7. Approval gates
 

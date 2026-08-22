@@ -66,7 +66,10 @@
       padding: 0; overflow: hidden; display: flex; flex-direction: column;
     }
     #persistent-preview {
-      flex: 0 0 auto; max-height: 56%; min-height: 0; overflow: hidden; padding: 10px;
+      /* A dock must not derive its size from the artwork inside it. Otherwise
+         Fit shrinks the canvas, the dock follows, and the next Fit shrinks it
+         again. A stable dock makes fitting an idempotent viewport operation. */
+      flex: 0 0 56%; max-height: 56%; min-height: 0; overflow: hidden; padding: 10px;
       display: flex; flex-direction: column; box-sizing: border-box;
       background: #101430; border-bottom: 1px solid #33447f;
     }
@@ -207,7 +210,6 @@
       pointer-events: auto; cursor: ew-resize;
     }
     #previewZoomPercent { width: 62px; text-align: right; }
-    #previewZoomFit.active { background: #38b764; color: #07070d; border-color: #38b764; }
     #previewViewport {
       flex: 1 1 auto; min-height: 0; width: 100%; overflow: auto;
       margin-bottom: 10px;
@@ -250,7 +252,10 @@
       padding: 3px;
       margin-bottom: 8px;
     }
-    .palette-cell {
+    /* Palette cells own their visual surface. The #palette scope deliberately
+       outranks generic button states, so hover/active/focus cannot tint RGBA
+       colors underneath their translucent fill. */
+    #palette .palette-cell {
       min-width: 0;
       width: 100%;
       aspect-ratio: 1;
@@ -264,9 +269,6 @@
     }
     .palette-cell .palette-color { position: absolute; inset: 0; pointer-events: none; }
     .palette-cell:hover { transform: scale(1.08); position: relative; z-index: 1; }
-    .palette-cell.none {
-      background: repeating-conic-gradient(#f0f0f0 0 25%, #b8b8b8 0 50%) 0 0 / 12px 12px;
-    }
     #palette .palette-cell.active {
       border-color: #f4f4f4;
       box-shadow: 0 0 0 2px #07070d, 0 0 0 4px #ffcd75;
@@ -313,7 +315,7 @@
     #frames button { margin-right: 4px; }
     #layers { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
     .layer-row {
-      display: grid; grid-template-columns: 28px 28px minmax(0, 1fr) minmax(82px, .8fr) 28px;
+      display: grid; grid-template-columns: 28px 28px minmax(0, 1fr) minmax(76px, .8fr) minmax(64px, .65fr) 28px;
       align-items: center; gap: 3px; padding: 3px;
       border: 1px solid #263563; border-radius: 4px; background: #0b0e20;
     }
@@ -322,6 +324,7 @@
     .layer-row .layer-name { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .layer-row input.layer-name { min-width: 0; width: 100%; box-sizing: border-box; }
     .layer-row .layer-tag { min-width: 0; font-size: 10px; padding: 3px; }
+    .layer-row .layer-composition { min-width: 0; font-size: 10px; padding: 3px; }
     .layer-row .layer-toggle.off { color: #566c86; background: #11162b; }
     .layer-row .layer-toggle.on { color: #ffcd75; }
     #preview { display: block; border: 1px solid #33447f; background: #0a0c1c; max-width: none; height: auto; }
@@ -358,6 +361,16 @@
     #workspaceToolStatus { color: #b9c9d5; }
     #workspaceCursorStatus { min-width: 88px; text-align: right; }
     #workspaceDocumentStatus { color: #ffcd75; }
+    .comparison-axis-row {
+      display: grid;
+      grid-template-columns: 42px repeat(2, minmax(0, 1fr));
+      gap: 4px;
+      align-items: center;
+      margin-top: 4px;
+    }
+    .comparison-axis-row > span { grid-row: span 2; }
+    .comparison-axis-row label { min-width: 0; }
+    .comparison-axis-row input { box-sizing: border-box; width: 100%; }
     #shortcutsDialog { width: min(720px, calc(100vw - 32px)); }
     .shortcut-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 24px; margin: 14px 0; }
     .shortcut-group { border-top: 1px solid #33447f; }
@@ -576,17 +589,53 @@
         </div>
 
         <div class="panel-group">
-        <h2>reference overlay</h2>
+        <h2>alignment comparison</h2>
         <div style="display:flex; flex-direction:column; gap:4px">
           <select id="selectRefSprite" style="background:#1f2a57; color:#f4f4f4; border:1px solid #33447f; border-radius:4px; padding:4px;">
             <option value="">-- select reference --</option>
           </select>
           <button id="btnLoadRef">load local ref...</button>
+          <div class="panel-row">
+            <select id="compareRefAnim" title="Reference animation"><option value="">animation: auto</option></select>
+            <select id="compareRefLayer" title="Reference layer"><option value="">layer: composite</option></select>
+          </div>
+          <select id="compareTargetLayer" title="Target layer"><option value="">target: composite</option></select>
+          <div class="panel-row">
+            <label>source frame <input id="compareRefFrame" type="number" min="0" value="0" title="0 follows the current frame; positive values use the displayed 1-based frame number"></label>
+            <select id="compareView" title="Choose which comparison subjects are visible">
+              <option value="overlay">overlay</option>
+              <option value="source">source only</option>
+              <option value="target">target only</option>
+            </select>
+          </div>
         </div>
         <input type="file" id="refFileInput" accept=".json,application/json" style="display:none">
-        <label style="display:block; margin-top:6px">
-          <input type="checkbox" id="showRef" checked> show reference (30% opacity)
-        </label>
+        <div class="panel-row" style="margin-top:6px">
+          <label><input type="checkbox" id="showRef" checked> compare</label>
+          <label style="flex:1">opacity <input id="compareOpacity" type="range" min="0" max="100" value="45" style="width:100%"></label>
+          <output id="compareOpacityValue" for="compareOpacity">45%</output>
+        </div>
+        <label style="display:block; margin-top:6px"><input type="checkbox" id="compareAlignAxes"> align measured axes</label>
+        <div id="compareAxes" hidden>
+          <div class="comparison-axis-row">
+            <span style="width:42px">source</span>
+            <label>x1 <input id="compareSourceX1" type="number" step="0.25"></label>
+            <label>y1 <input id="compareSourceY1" type="number" step="0.25"></label>
+            <label>x2 <input id="compareSourceX2" type="number" step="0.25"></label>
+            <label>y2 <input id="compareSourceY2" type="number" step="0.25"></label>
+          </div>
+          <div class="comparison-axis-row">
+            <span style="width:42px">target</span>
+            <label>x1 <input id="compareTargetX1" type="number" step="0.25"></label>
+            <label>y1 <input id="compareTargetY1" type="number" step="0.25"></label>
+            <label>x2 <input id="compareTargetX2" type="number" step="0.25"></label>
+            <label>y2 <input id="compareTargetY2" type="number" step="0.25"></label>
+          </div>
+        </div>
+        <div class="panel-row" style="margin-top:6px">
+          <button id="btnExportComparison" title="Download the current non-mutating comparison canvas">export comparison PNG</button>
+        </div>
+        <p id="compareReport" class="hint" style="margin:6px 0 0">Choose a reference to compare without modifying the sprite.</p>
         </div>
       </section>
       </div>
@@ -611,7 +660,7 @@
           <button id="previewZoomOut" type="button" title="Zoom preview out" aria-label="Zoom preview out">&minus;</button>
           <label style="display:flex; align-items:center; gap:3px; flex:0 0 auto">zoom <input id="previewZoomPercent" type="number" min="10" max="800" step="25" value="100">%</label>
           <button id="previewZoomIn" type="button" title="Zoom preview in" aria-label="Zoom preview in">+</button>
-          <button id="previewZoomFit" class="active" type="button" title="Fit preview to panel" aria-label="Fit preview to panel" aria-pressed="true">fit</button>
+          <button id="previewZoomFit" type="button" title="Fit preview to panel" aria-label="Fit preview to panel">fit</button>
         </div>
         <div id="previewViewport">
           <div id="previewCanvasStage">
@@ -711,7 +760,7 @@
             <button id="btnDelLayer" title="Delete active layer">delete</button>
             <button id="btnFlattenLayers" title="Flatten all layers back to a single-layer sprite">flatten</button>
           </div>
-          <p class="hint" style="margin:0">Render tags set cross-sprite order. Arrows only reorder layers within the same tag; eye, solo, and lock are editor-only.</p>
+          <p class="hint" style="margin:0">Render tags set cross-sprite order. Base layers are replaced by body-embedded attachment art; overlay layers remain as item-specific decoration. Eye, solo, and lock are editor-only.</p>
         </div>
         <div class="panel-group">
           <h2>extract through frames</h2>
@@ -746,6 +795,7 @@
       </div>
 
       <h2 style="display:inline">hitbox</h2> <label style="font-size:12px"><input id="showHitbox" type="checkbox" checked> show</label>
+      <p class="hint" style="margin:3px 0 5px">x/y apply to the selected animation; w/h are shared physics size.</p>
       <div style="display:flex; flex-direction:column; gap:4px; margin-bottom:6px">
         <div style="display:flex; gap:6px; align-items:center">
           <label style="margin:0">x <input id="boxX" type="number" step="0.25" style="width:50px"></label>

@@ -105,6 +105,14 @@ export function loadSheet(image: CanvasImageSource, desc: SheetDescriptor): Load
 
   return {
     ...geometry,
+    hitboxFor: (name) => {
+      const offset = desc.animationHitboxOffsets?.[name];
+      if (!offset) return { ...geometry.hitbox };
+      if (!Number.isFinite(offset.x) || !Number.isFinite(offset.y)) {
+        throw new Error(`sprite sheet animationHitboxOffsets.${name} must contain finite x/y`);
+      }
+      return { ...geometry.hitbox, x: offset.x, y: offset.y };
+    },
     frame: (name, i = 0) => framesOf(name)[i],
     frames: framesOf,
     names: () => Object.keys(desc.anims),

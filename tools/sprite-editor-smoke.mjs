@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 
 const baseUrl = process.env.SPRITE_EDITOR_URL ?? 'http://127.0.0.1:5175';
@@ -9,9 +9,16 @@ const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
 const browser = await chromium.launch({ headless: true, executablePath });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const errors = [];
+const productionTransaction = JSON.parse(readFileSync(
+  new URL('./examples/rusty-sword-agent-frame3-5.json', import.meta.url),
+  'utf8',
+));
 page.on('pageerror', (error) => errors.push(error.message));
+page.on('response', (response) => {
+  if (response.status() >= 400) errors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+});
 page.on('console', (message) => {
-  if (message.type() === 'error') errors.push(message.text());
+  if (message.type() === 'error' && !message.text().startsWith('Failed to load resource:')) errors.push(message.text());
 });
 
 const fixture = () => ({
@@ -25,7 +32,7 @@ const fixture = () => ({
       },
     },
     {
-      id: 'hand', name: 'Hand', tag: 'front-hand', tracks: {
+      id: 'hand', name: 'Hand', tag: 'front-hand', composition: 'overlay', tracks: {
         idle: [['.B'], ['B.']],
       },
     },
@@ -72,6 +79,37 @@ try {
   assert.equal(await page.locator('#workspaceStatusbar').isVisible(), true);
   assert.equal(await page.locator('#documentIdentity > .document-subline > #bridgeStatus').count(), 1);
   assert.doesNotMatch((await page.locator('#bridgeStatus').textContent()) ?? '', /bridge:|\.json|\//);
+  await page.click('#previewZoomFit');
+  const previewFit = await page.evaluate(() => {
+    const canvas = document.querySelector('#preview');
+    const viewport = document.querySelector('#previewViewport');
+    const actual = parseFloat(canvas.style.width) / canvas.width;
+    const expected = Math.max(0.1, Math.min(8, Math.min(
+      (viewport.clientWidth - 2) / canvas.width,
+      (viewport.clientHeight - 2) / canvas.height,
+    )));
+    return {
+      actual,
+      expected,
+      fitsWidth: canvas.getBoundingClientRect().width <= viewport.clientWidth,
+      fitsHeight: canvas.getBoundingClientRect().height <= viewport.clientHeight,
+    };
+  });
+  assert.ok(
+    Math.abs(previewFit.actual - previewFit.expected) < 0.02,
+    `preview fit mismatch: ${JSON.stringify(previewFit)}`,
+  );
+  assert.equal(previewFit.fitsWidth, true);
+  assert.equal(previewFit.fitsHeight, true);
+  assert.equal(await page.locator('#previewZoomFit').getAttribute('aria-pressed'), null);
+  const firstPreviewFit = await page.locator('#previewZoomPercent').inputValue();
+  await page.click('#previewZoomFit');
+  await page.click('#previewZoomFit');
+  assert.equal(
+    await page.locator('#previewZoomPercent').inputValue(),
+    firstPreviewFit,
+    'repeated preview Fit commands must be idempotent',
+  );
   assert.deepEqual(await page.locator('#activeToolContext').evaluate((element) => {
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
@@ -131,6 +169,20 @@ try {
   }
 
   await page.evaluate((file) => window.__editor.replace(file, null), fixture());
+  assert.deepEqual(
+    await page.locator('.layer-composition').evaluateAll((selects) => (
+      selects.map((select) => select.value)
+    )),
+    ['overlay', 'base'],
+    'layer composition roles must be visible and survive document loading',
+  );
+  await page.locator('.layer-composition').first().evaluate((select) => {
+    select.value = 'base';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  assert.equal(await page.evaluate(() => window.__editor.file.layers[1].composition), 'base');
+  await page.keyboard.press('Control+Z');
+  assert.equal(await page.evaluate(() => window.__editor.file.layers[1].composition), 'overlay');
   await page.keyboard.press('Control+A');
   assert.deepEqual(await page.evaluate(() => {
     const { x, y, w, h } = window.__editor.selection;
@@ -233,6 +285,253 @@ try {
   assert.equal(await page.locator('#btnMaterializeAnim').isDisabled(), true);
   await page.keyboard.press('Control+Z');
   assert.equal(await page.evaluate(() => window.__editor.file.anims.air), 'idle');
+
+  // Agent commands use the same revisioned live document as the canvas. A
+  // semantic command must update pixels atomically, focus its target frame and
+  // layer, and publish a preview for the accepted revision without browser
+  // coordinate automation.
+  await page.evaluate((file) => window.__editor.replace(file, null), fixture());
+  await page.waitForFunction(() => window.__editor.bridge.connected && window.__editor.bridge.revision > 0);
+  await page.waitForTimeout(250);
+  const agentResult = await page.evaluate(async () => {
+    const current = await fetch('/__sprite-editor/state').then((response) => response.json());
+    const response = await fetch('/__sprite-editor/commands', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        baseRevision: current.revision,
+        source: 'sprite-editor-smoke-agent',
+        commands: [
+          {
+            op: 'pixel.set',
+            target: { animation: 'idle', frame: 1, layerId: 'hand' },
+            pixels: [{ x: 1, y: 0, color: '#ffffff' }],
+          },
+          {
+            op: 'assert.frame',
+            target: { animation: 'idle', frame: 1, layerId: 'hand' },
+            expected: { pixelCount: 2, bounds: { x: 0, y: 0, w: 2, h: 1 } },
+          },
+        ],
+        inspect: [{ animation: 'idle', frame: 1, layerId: 'hand', components: true }],
+      }),
+    });
+    return { status: response.status, body: await response.json() };
+  });
+  assert.equal(agentResult.status, 200, JSON.stringify(agentResult.body));
+  assert.equal(agentResult.body.inspection.frames[0].pixelCount, 2);
+  await page.waitForFunction(() => (
+    window.__editor.frameIdx === 1
+    && window.__editor.file.layers[1].tracks.idle[1][0][1] === 'A'
+  ));
+  assert.equal(await page.evaluate(() => window.__editor.animName), 'idle');
+  assert.equal(await page.evaluate(() => window.__editor.activeLayerId), 'hand');
+  await page.waitForTimeout(500);
+  assert.equal(await page.evaluate(async () => (await fetch('/__sprite-editor/preview.png')).status), 200);
+
+  // Named selections persist reusable sparse masks independently of the one
+  // transient collaboration selection. Applying one selects the requested
+  // live frame/layer without changing the sprite document revision.
+  const namedSelectionCheck = await page.evaluate(async () => {
+    const before = await fetch('/__sprite-editor/state').then((response) => response.json());
+    const live = {
+      path: before.path,
+      anim: 'idle',
+      frame: 1,
+      layerId: 'hand',
+      x: 0,
+      y: 0,
+      w: 2,
+      h: 1,
+      rows: ['BA'],
+      mask: ['.1'],
+      source: 'sprite-editor-smoke-selection',
+      updatedAt: Date.now(),
+    };
+    const putLive = await fetch('/__sprite-editor/selection', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selection: live }),
+    });
+    const save = await fetch('/__sprite-editor/named-selections/smoke-selection', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    await fetch('/__sprite-editor/selection', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selection: null }),
+    });
+    const apply = await fetch('/__sprite-editor/named-selections/smoke-selection/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ anim: 'idle', frame: 1, layerId: 'hand' }),
+    });
+    const applied = await apply.json();
+    const after = await fetch('/__sprite-editor/state').then((response) => response.json());
+    const list = await fetch('/__sprite-editor/named-selections').then((response) => response.json());
+    const read = await fetch('/__sprite-editor/named-selections/smoke-selection').then((response) => response.json());
+    const remove = await fetch('/__sprite-editor/named-selections/smoke-selection', { method: 'DELETE' });
+    return {
+      putLive: putLive.status,
+      save: save.status,
+      apply: apply.status,
+      remove: remove.status,
+      beforeRevision: before.revision,
+      afterRevision: after.revision,
+      applied,
+      listed: list.selections.some((entry) => entry.name === 'smoke-selection' && entry.pixelCount === 1),
+      readMask: read.selection.mask,
+    };
+  });
+  assert.equal(namedSelectionCheck.putLive, 200, JSON.stringify(namedSelectionCheck));
+  assert.ok([200, 201].includes(namedSelectionCheck.save), JSON.stringify(namedSelectionCheck));
+  assert.equal(namedSelectionCheck.apply, 200, JSON.stringify(namedSelectionCheck));
+  assert.equal(namedSelectionCheck.remove, 200, JSON.stringify(namedSelectionCheck));
+  assert.equal(namedSelectionCheck.beforeRevision, namedSelectionCheck.afterRevision);
+  assert.equal(namedSelectionCheck.applied.selection.source, 'named:smoke-selection');
+  assert.deepEqual(namedSelectionCheck.applied.selection.mask, ['.1']);
+  assert.equal(namedSelectionCheck.listed, true);
+  assert.deepEqual(namedSelectionCheck.readMask, ['.1']);
+  await page.waitForFunction(() => window.__editor.selection?.mask?.[0] === '.1');
+
+  const protocolChecks = await page.evaluate(async () => {
+    const capabilities = await fetch('/__sprite-editor/capabilities').then((response) => response.json());
+    const before = await fetch('/__sprite-editor/state').then((response) => response.json());
+    const noOpResponse = await fetch('/__sprite-editor/commands', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        protocolVersion: capabilities.protocolVersion,
+        baseRevision: before.revision,
+        commands: [{
+          op: 'assert.frame',
+          target: { animation: 'idle', frame: 1, layerId: 'hand' },
+          expected: { pixelCount: 2 },
+        }],
+      }),
+    });
+    const noOp = await noOpResponse.json();
+    const after = await fetch('/__sprite-editor/state').then((response) => response.json());
+    return {
+      capabilities,
+      beforeRevision: before.revision,
+      noOpStatus: noOpResponse.status,
+      noOp,
+      afterRevision: after.revision,
+    };
+  });
+  assert.equal(protocolChecks.capabilities.protocolVersion, 1);
+  assert.equal(protocolChecks.capabilities.transaction.atomic, true);
+  assert.ok(protocolChecks.capabilities.operations.includes('frame.copy'));
+  assert.ok(protocolChecks.capabilities.operations.includes('frame.copyAligned'));
+  assert.equal(protocolChecks.noOpStatus, 200);
+  assert.equal(protocolChecks.noOp.changed, false);
+  assert.equal(protocolChecks.noOp.state.file, undefined, 'command responses are compact by default');
+  assert.equal(protocolChecks.afterRevision, protocolChecks.beforeRevision, 'assertion-only batches do not advance revisions');
+  assert.equal(await page.evaluate(async () => (await fetch('/__sprite-editor/preview.png')).status), 200);
+
+  // Exercise the same protocol on the real 160x128 rusty-sword document and
+  // displayed frames 3-5. Publish only to this temporary bridge, wait for the
+  // browser to render the semantic cursor, then reopen the repository copy;
+  // this proves the live path without writing art to disk.
+  const realOpen = await page.evaluate(() => window.__editor.open('equipment/rusty-sword.json'));
+  assert.equal(realOpen, true);
+  await page.waitForFunction(() => {
+    const frame = window.__editor.file.layers?.[0]?.tracks?.attack?.[0];
+    return frame?.length === 128 && frame[0]?.length === 160
+      && window.__editor.currentRepoPath === 'equipment/rusty-sword.json'
+      && window.__editor.bridge.connected
+      && window.__editor.bridge.revision > 0;
+  });
+  // Alignment comparison is a view-only workflow: isolate one source and
+  // target layer, derive a two-point transform, and publish a PNG without
+  // advancing or dirtying the shared sprite revision.
+  const comparisonCheck = await page.evaluate(async () => {
+    const before = await fetch('/__sprite-editor/state').then((response) => response.json());
+    window.__editor.comparison.configure({
+      enabled: true,
+      referencePath: 'equipment/rusty-sword.json',
+      animation: 'attack2',
+      sourceLayer: 'base',
+      targetLayer: 'base',
+      sourceFrame: 1,
+      view: 'overlay',
+      opacity: 50,
+      sourceAxis: { start: { x: 20, y: 50 }, end: { x: 70, y: 50 } },
+      targetAxis: { start: { x: 30, y: 55 }, end: { x: 65, y: 75 } },
+    });
+    // Canvas.toBlob plus the debounced bridge upload has variable latency in
+    // headless Chrome. Wait for the observable upload result instead of using
+    // a fixed delay that can pass or fail with machine load.
+    const deadline = Date.now() + 5000;
+    while (!window.__editor.comparison.state.uploadStatus.startsWith('ready') && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    const comparison = await fetch('/__sprite-editor/comparison.png');
+    const after = await fetch('/__sprite-editor/state').then((response) => response.json());
+    return {
+      state: window.__editor.comparison.state,
+      report: document.querySelector('#compareReport').textContent,
+      comparisonStatus: comparison.status,
+      comparisonBytes: (await comparison.arrayBuffer()).byteLength,
+      beforeRevision: before.revision,
+      afterRevision: after.revision,
+      dirty: after.dirty,
+    };
+  });
+  assert.equal(comparisonCheck.comparisonStatus, 200, JSON.stringify(comparisonCheck));
+  assert.ok(comparisonCheck.comparisonBytes > 100);
+  assert.equal(comparisonCheck.beforeRevision, comparisonCheck.afterRevision);
+  assert.equal(comparisonCheck.dirty, false);
+  assert.equal(comparisonCheck.state.alignment.scale.toFixed(4), '0.8062');
+  assert.match(comparisonCheck.report, /rotate 29\.74°/);
+  await page.evaluate(() => window.__editor.comparison.configure({ enabled: false }));
+  const realAgentResult = await page.evaluate(async (transaction) => {
+    const before = await fetch('/__sprite-editor/state').then((response) => response.json());
+    const dryRunResponse = await fetch('/__sprite-editor/commands', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...transaction, baseRevision: before.revision, source: 'sprite-editor-production-smoke' }),
+    });
+    const dryRun = await dryRunResponse.json();
+    const afterDryRun = await fetch('/__sprite-editor/state').then((response) => response.json());
+    const applyResponse = await fetch('/__sprite-editor/commands', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...transaction,
+        dryRun: false,
+        baseRevision: afterDryRun.revision,
+        source: 'sprite-editor-production-smoke',
+      }),
+    });
+    return {
+      beforeRevision: before.revision,
+      dryRunStatus: dryRunResponse.status,
+      dryRun,
+      afterDryRunRevision: afterDryRun.revision,
+      applyStatus: applyResponse.status,
+      applied: await applyResponse.json(),
+    };
+  }, productionTransaction);
+  assert.equal(realAgentResult.dryRunStatus, 200, JSON.stringify(realAgentResult.dryRun));
+  assert.equal(realAgentResult.afterDryRunRevision, realAgentResult.beforeRevision);
+  assert.deepEqual(realAgentResult.dryRun.inspection.frames.slice(0, 3).map((frame) => frame.pixelCount), [272, 272, 174]);
+  assert.equal(realAgentResult.applyStatus, 200, JSON.stringify(realAgentResult.applied));
+  assert.equal(realAgentResult.applied.state.revision, realAgentResult.beforeRevision + 1);
+  await page.waitForFunction(() => (
+    window.__editor.frameIdx === 4
+    && window.__editor.activeLayerId === 'base'
+    && window.__editor.file.layers[0].tracks.attack[4][14][28] !== '.'
+  ));
+  await page.waitForTimeout(500);
+  assert.equal(await page.evaluate(async () => (await fetch('/__sprite-editor/preview.png')).status), 200);
+  const cleanup = await page.evaluate(async () => {
+    const response = await fetch('/__sprite-editor/open', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: 'equipment/rusty-sword.json', source: 'sprite-editor-production-smoke-cleanup', force: true }),
+    });
+    return { status: response.status, body: await response.json() };
+  });
+  assert.equal(cleanup.status, 200, JSON.stringify(cleanup.body));
+  assert.equal(cleanup.body.dirty, false);
 
   assert.deepEqual(errors, []);
   console.log('sprite-editor UI smoke tests: ok');

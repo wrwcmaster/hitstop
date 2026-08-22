@@ -156,12 +156,15 @@ The useful endpoints are:
 
 | Endpoint | Purpose |
 | --- | --- |
+| `GET /__sprite-editor/capabilities` | Discover the semantic command protocol, limits, operations, and field reference |
 | `GET /__sprite-editor/sprites` | List editable repository sprite paths |
 | `POST /__sprite-editor/open` `{ path, source, force? }` | Open a repository sprite; refuses to discard a dirty shared document unless explicitly forced |
 | `GET /__sprite-editor/state` | Read `{ path, file, revision, source, dirty }` |
 | `PUT /__sprite-editor/state` `{ path, file, baseRevision, source }` | Replace the live document without saving it |
 | `GET /__sprite-editor/selection` | Read the active pixel selection and its rows |
 | `PUT /__sprite-editor/selection` `{ selection }` | Share or clear transient selection metadata without editing the document |
+| `POST /__sprite-editor/inspect` `{ path?, frames }` | Inspect animations, layers, exact colors, bounds, components, and anchors without editing |
+| `POST /__sprite-editor/commands` `{ protocolVersion, baseRevision, commands, inspect?, dryRun? }` | Atomically execute semantic, assertion-guarded sprite edits against the live revision |
 | `GET /__sprite-editor/events` | Subscribe to live `state` events |
 | `GET /__sprite-editor/preview.png` | Inspect the active visual preview |
 | `POST /__sprite-editor/save` `{ path?, baseRevision, source }` | Explicitly write the active revision to the repo |
@@ -169,7 +172,17 @@ The useful endpoints are:
 
 Browser automation can use `window.__editor`: `open(path)`, `replace(file, path)`, `setPixels(...)`, and `save()` are the mutation seam; the existing file, selection, edit-version, and bridge getters expose observation. The HTTP API is preferable for an agent that does not need to drive the UI.
 
-`npm run agent-sprite -- <command>` is a thin CLI over that HTTP API. It supports `list`, `open`, `state`, `selection`, `preview`, `apply`, and `save`. The `selection` command is the handoff seam for requests such as "fix this eye": it gives the agent unambiguous frame coordinates and the selected pixel rows. `open` refuses to throw away unsaved shared work; pass `--force` only after deliberately deciding to discard it. Set `SPRITE_EDITOR_URL` when Vite uses a port other than 5173; for example, in PowerShell: `$env:SPRITE_EDITOR_URL='http://127.0.0.1:5174'`.
+`npm run agent-sprite -- <command>` is a thin CLI over that HTTP API. It
+supports `capabilities`, compact `state`, structured `inspect`, atomic `run`,
+`list`, `open`, `selection`, `preview`, `apply`, and `save`. The `selection`
+command is the handoff seam for requests such as "fix this eye": it gives the
+agent unambiguous frame coordinates and the selected pixel rows. `open` refuses
+to throw away unsaved shared work; pass `--force` only after deliberately
+deciding to discard it. Set `SPRITE_EDITOR_URL` when Vite uses a port other than
+5173; for example, in PowerShell:
+`$env:SPRITE_EDITOR_URL='http://127.0.0.1:5174'`. The complete protocol,
+transaction examples, and extension rules are in
+[Sprite editor agent protocol](sprite-editor-agent.md).
 
 For the end-to-end workflow from generated concept to approved animation-ready JSON, including comparison gates and pixel-polish rules, see [Sprite art pipeline](sprite-art-pipeline.md).
 
