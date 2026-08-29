@@ -138,6 +138,14 @@ export interface RangedDef {
  */
 export interface WeaponTypeDef {
   comboWindow: number;
+  /**
+   * Optional body-art replacements for ordinary animation states. Attacks
+   * already select their body art through WeaponAttackDef.animation; this
+   * map gives a weapon family the same control over idle/run/air poses.
+   * Equipment overlays continue to use the logical state name, so one
+   * `run` patch can follow a body's weapon-specific `sword-run` animation.
+   */
+  bodyAnimations?: Readonly<Record<string, string | WeaponBodyAnimationDef>>;
   attacks: readonly WeaponAttackDef[];
   aerial?: WeaponAttackDef;
   plunge?: WeaponAttackDef;
@@ -237,10 +245,26 @@ export function allAttacks(type: WeaponTypeDef): WeaponAttackDef[] {
   ];
 }
 
+export interface WeaponBodyAnimationDef {
+  animation: string;
+  /** The authored body pose already contains the generic held object. */
+  embeddedHeldObject?: boolean;
+}
+
 export function defineWeaponType(id: string, def: WeaponTypeDef): void {
   def = tuneWeaponType(def, (repositoryWeaponCombat as unknown as WeaponCombatTuning)[id]);
   if (!Number.isFinite(def.comboWindow) || def.comboWindow < 0) {
     throw new Error(`weapon type "${id}".comboWindow: expected a non-negative finite number`);
+  }
+  for (const [logical, authored] of Object.entries(def.bodyAnimations ?? {})) {
+    const animation = typeof authored === 'string' ? authored : authored.animation;
+    if (!logical.trim() || typeof animation !== 'string' || !animation.trim()) {
+      throw new Error(`weapon type "${id}".bodyAnimations: expected non-empty animation names`);
+    }
+    if (typeof authored !== 'string' && authored.embeddedHeldObject !== undefined
+      && typeof authored.embeddedHeldObject !== 'boolean') {
+      throw new Error(`weapon type "${id}".bodyAnimations.${logical}.embeddedHeldObject: expected a boolean`);
+    }
   }
   if (def.ranged) {
     const r = def.ranged;
@@ -495,6 +519,10 @@ defineWeaponType('unarmed', {
 
 defineWeaponType('sword', {
   comboWindow: 0.24,
+  bodyAnimations: {
+    idle: 'sword-idle',
+    run: { animation: 'sword-run', embeddedHeldObject: true },
+  },
   ...contextuals({ reach: 20, arc: 16, heft: 1 }),
   attacks: [
     attack({

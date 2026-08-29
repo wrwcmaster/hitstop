@@ -26,6 +26,62 @@ try {
   assert.equal(renderPolicy.facingHitboxX(40, 13.75, 8.5, 1), 13.75);
   assert.equal(renderPolicy.facingHitboxX(40, 13.75, 8.5, -1), 17.75);
   assert.equal(renderPolicy.facingHitboxX(40, 15.75, 8.5, -1), 15.75);
+  assert.deepEqual(
+    renderPolicy.snapAttachmentOriginToBodyGrid(
+      { x: -20.5, y: -28.375 },
+      { x: -20, y: -27.5 },
+      4,
+    ),
+    { x: -20.5, y: -28.5 },
+  );
+  assert.deepEqual(
+    renderPolicy.snapAttachmentOriginToBodyGrid(
+      { x: 3.25, y: 7.75 },
+      { x: -19.5, y: -27.5 },
+      4,
+    ),
+    { x: 3.25, y: 7.75 },
+  );
+  const gripAtHalf = renderPolicy.snapAttachmentOriginToBodyGrid(
+    { x: 0, y: 16 - 16.5 },
+    { x: 0, y: 0 },
+    4,
+  );
+  const gripAtThreeQuarters = renderPolicy.snapAttachmentOriginToBodyGrid(
+    { x: 0, y: 16 - 16.75 },
+    { x: 0, y: 0 },
+    4,
+  );
+  assert.equal(gripAtHalf.y, -0.5);
+  assert.equal(gripAtThreeQuarters.y, -0.75);
+  assert.equal(gripAtThreeQuarters.y - gripAtHalf.y, -0.25);
+  assert.equal(
+    renderPolicy.snapAttachmentOriginToBodyGrid({ x: 0.625, y: 0 }, { x: 0, y: 0 }, 4).x,
+    0.75,
+  );
+  assert.equal(
+    renderPolicy.snapAttachmentOriginToBodyGrid({ x: -0.625, y: 0 }, { x: 0, y: 0 }, 4).x,
+    -0.75,
+  );
+  assert.deepEqual(
+    renderPolicy.snappedBodyOffsetForAttachment(
+      { x: 17.5, y: 15.75 },
+      { x: 18, y: 16.625 },
+      4,
+    ),
+    { x: 0.5, y: 1 },
+  );
+  const swordBodyProfile = { comboWindow: 0, attacks: [], bodyAnimations: { idle: 'sword-idle', run: 'sword-run' } };
+  assert.equal(renderPolicy.resolveWeaponBodyAnimation(swordBodyProfile, 'run', (name) => name === 'sword-run'), 'sword-run');
+  assert.equal(renderPolicy.resolveWeaponBodyAnimation(swordBodyProfile, 'run', () => false), 'run');
+  assert.equal(renderPolicy.resolveWeaponBodyAnimation(swordBodyProfile, 'air', () => true), 'air');
+  assert.equal(renderPolicy.logicalAnimationForResolvedBodyAnimation(swordBodyProfile, 'sword-run'), 'run');
+  assert.equal(renderPolicy.logicalAnimationForResolvedBodyAnimation(swordBodyProfile, 'sword-idle'), 'idle');
+  assert.equal(renderPolicy.logicalAnimationForResolvedBodyAnimation(swordBodyProfile, 'air'), 'air');
+  const embeddedRunProfile = { bodyAnimations: { run: { animation: 'sword-run', embeddedHeldObject: true } } };
+  assert.equal(renderPolicy.resolveWeaponBodyAnimation(embeddedRunProfile, 'run', () => true), 'sword-run');
+  assert.equal(renderPolicy.bodyAnimationEmbedsHeldObject(embeddedRunProfile, 'run', 'sword-run'), true);
+  assert.equal(renderPolicy.bodyAnimationEmbedsHeldObject(embeddedRunProfile, 'run', 'run'), false);
 
   assert.deepEqual(selectionGeometry.analyzeSelectionGeometry({
     x: 10, y: 20, w: 5, h: 3,
@@ -433,6 +489,7 @@ try {
     assert.equal(alignedDetail.transform.rotate, 90);
     assert.equal(alignedDetail.transform.scaleX, 2);
     assert.deepEqual(alignedDetail.placement, { x: 1, y: 0, idealX: 1, idealY: 0 });
+    assert.deepEqual(alignedDetail.samplingPhase, { x: 0, y: 0 });
     assert.deepEqual(alignedDetail.mappedAxis, alignedDetail.targetAxis);
     assert.equal(alignedDetail.endpointError.max, 0);
     assert.equal(aligned.inspection.frames[0].pixelCount, 20);
@@ -440,6 +497,75 @@ try {
       op: 'frame.copyAligned',
       from: { path: 'approved.json' },
     }]), ['approved.json']);
+
+    const masked = agent.applySpriteAgentTransaction({
+      activePath: 'target.json',
+      active: target,
+      documents: new Map([['approved.json', source]]),
+    }, {
+      commands: [{
+        op: 'frame.copy',
+        from: { path: 'approved.json', animation: 'attack2', frame: 0, layerId: 'sword' },
+        to: { animation: 'attack', frame: 2, layerId: 'sword', x: 1, y: 1 },
+        region: { mask: { x: 1, y: 1, rows: ['1.1', '.1.'] } },
+      }],
+      inspect: [{ animation: 'attack', frame: 2, layerId: 'sword', components: true }],
+    });
+    assert.equal(masked.inspection.frames[0].pixelCount, 2, 'arbitrary mask must copy only selected opaque pixels');
+    assert.deepEqual(masked.inspection.frames[0].bounds, { x: 1, y: 1, w: 2, h: 2 });
+    assert.notEqual(masked.file.layers[0].tracks.attack[2][1][1], '.');
+    assert.equal(masked.file.layers[0].tracks.attack[2][1][2], '.');
+    assert.notEqual(masked.file.layers[0].tracks.attack[2][2][2], '.');
+
+    const maskRows = empty();
+    maskRows[2] = '..AAA...';
+    maskRows[3] = '..A.A...';
+    const projectionTarget = structuredClone(target);
+    projectionTarget.layers[0].tracks.attack[0] = maskRows;
+    const textureRows = empty();
+    textureRows[1] = '.RGB....';
+    textureRows[2] = '.BGR....';
+    const textureSource = {
+      hd: false,
+      palette: { '.': null, R: '#aa0000', G: '#00aa00', B: '#0000aa' },
+      anims: { attack2: { fps: 12, frameCount: 1 } },
+      layers: [{ id: 'sword', name: 'Sword', tag: 'held', tracks: { attack2: [textureRows] } }],
+    };
+    const projected = agent.applySpriteAgentTransaction({
+      activePath: 'target.json',
+      active: projectionTarget,
+      documents: new Map([['texture.json', textureSource]]),
+    }, {
+      commands: [{
+        op: 'frame.projectAligned',
+        from: { path: 'texture.json', animation: 'attack2', frame: 0, layerId: 'sword' },
+        to: { animation: 'attack', frame: 0, layerId: 'sword' },
+        sourceAxis: { start: { x: 1, y: 1.5 }, end: { x: 3, y: 1.5 } },
+        targetAxis: { start: { x: 2, y: 2.5 }, end: { x: 4, y: 2.5 } },
+      }],
+      inspect: [{ animation: 'attack', frame: 0, layerId: 'sword', components: true }],
+    });
+    assert.equal(projected.inspection.frames[0].pixelCount, 5, 'projection must preserve target pixel count');
+    assert.deepEqual(projected.inspection.frames[0].bounds, { x: 2, y: 2, w: 3, h: 2 });
+    const projectedRows = projected.file.layers[0].tracks.attack[0];
+    const projectedOpaque = projectedRows.flatMap((row, y) => [...row].flatMap((ch, x) => ch === '.' ? [] : [`${x},${y}`]));
+    assert.deepEqual(projectedOpaque, ['2,2', '3,2', '4,2', '2,3', '4,3']);
+    assert.equal(projected.results[0].detail.targetPixels, 5);
+    assert.equal(projected.results[0].detail.directSamples + projected.results[0].detail.nearestSamples, 5);
+    assert.deepEqual(agent.spriteAgentSourcePaths([{
+      op: 'frame.projectAligned',
+      from: { path: 'texture.json' },
+    }]), ['texture.json']);
+
+    const translated = agent.applySpriteAgentTransaction({
+      activePath: 'target.json', active: projectionTarget,
+    }, {
+      commands: [{ op: 'frame.translate', animation: 'attack', frame: 0, dx: -1, dy: 1 }],
+      inspect: [{ animation: 'attack', frame: 0, layerId: 'sword', components: true }],
+    });
+    assert.deepEqual(translated.inspection.frames[0].bounds, { x: 1, y: 3, w: 3, h: 2 });
+    assert.deepEqual(translated.file.anchors.grip.attack[0], { x: -0.25, y: 0.25 });
+    assert.equal(translated.results[0].detail.movedAnchors, 1);
 
     assert.throws(() => agent.applySpriteAgentTransaction({
       activePath: 'target.json', active: target,
@@ -454,7 +580,7 @@ try {
       }],
     }), /sourceAxis endpoints must be distinct/);
 
-    assert.throws(() => agent.applySpriteAgentTransaction({
+    const fractionalAligned = agent.applySpriteAgentTransaction({
       activePath: 'target.json', active: target,
       documents: new Map([['approved.json', source]]),
     }, {
@@ -464,10 +590,14 @@ try {
         to: { animation: 'attack', frame: 2, layerId: 'sword' },
         region: { componentAt: { x: 1, y: 1 } },
         sourceAxis: { start: { x: 1, y: 1.5 }, end: { x: 3, y: 1.5 } },
-        targetAxis: { start: { x: 4.5, y: 0.5 }, end: { x: 4.5, y: 4.5 } },
+        targetAxis: { start: { x: 4.5, y: 1.5 }, end: { x: 4.5, y: 3.5 } },
         maxEndpointError: 0.1,
       }],
-    }), /aligned endpoint error .* exceeds 0.1px/);
+    });
+    const fractionalDetail = fractionalAligned.results[0].detail;
+    assert.deepEqual(fractionalDetail.samplingPhase, { x: 0, y: 0.5 });
+    assert.deepEqual(fractionalDetail.mappedAxis, fractionalDetail.targetAxis);
+    assert.equal(fractionalDetail.endpointError.max, 0);
 
     const beforeFailure = JSON.stringify(result.file);
     assert.throws(() => agent.applySpriteAgentTransaction({

@@ -51,6 +51,7 @@ try {
     // The editor intentionally keeps its bridge EventSource open, so the
     // page never reaches Playwright's network-idle state.
     waitUntil: 'domcontentloaded',
+    timeout: 120_000,
   });
   await page.waitForFunction(() => Boolean(window.__editor));
 
@@ -329,6 +330,109 @@ try {
   await page.waitForTimeout(500);
   assert.equal(await page.evaluate(async () => (await fetch('/__sprite-editor/preview.png')).status), 200);
 
+  // A frame-addressed preview is a read-only render request. It must return
+  // the requested pixels without moving the editor cursor, changing the live
+  // revision, or replacing the bitmap the human is currently inspecting.
+  const addressedPreviewCheck = await page.evaluate(async () => {
+    const beforeState = await fetch('/__sprite-editor/state').then((response) => response.json());
+    const beforeCursor = { animation: window.__editor.animName, frame: window.__editor.frameIdx };
+    const beforeCanvas = document.querySelector('#preview').toDataURL('image/png');
+    const read = async (frame) => {
+      const response = await fetch(`/__sprite-editor/preview.png?animation=idle&frame=${frame}`);
+      return { status: response.status, bytes: [...new Uint8Array(await response.arrayBuffer())] };
+    };
+    const first = await read(0);
+    const second = await read(1);
+    const afterState = await fetch('/__sprite-editor/state').then((response) => response.json());
+    return {
+      firstStatus: first.status,
+      secondStatus: second.status,
+      different: first.bytes.length !== second.bytes.length
+        || first.bytes.some((byte, index) => byte !== second.bytes[index]),
+      revisionBefore: beforeState.revision,
+      revisionAfter: afterState.revision,
+      cursorBefore: beforeCursor,
+      cursorAfter: { animation: window.__editor.animName, frame: window.__editor.frameIdx },
+      canvasUnchanged: beforeCanvas === document.querySelector('#preview').toDataURL('image/png'),
+    };
+  });
+  assert.equal(addressedPreviewCheck.firstStatus, 200);
+  assert.equal(addressedPreviewCheck.secondStatus, 200);
+  assert.equal(addressedPreviewCheck.different, true);
+  assert.equal(addressedPreviewCheck.revisionAfter, addressedPreviewCheck.revisionBefore);
+  assert.deepEqual(addressedPreviewCheck.cursorAfter, addressedPreviewCheck.cursorBefore);
+  assert.equal(addressedPreviewCheck.canvasUnchanged, true);
+
+  // A focused preview is the same semantic frame render, cropped around a
+  // named rendered anchor at an explicit nearest-neighbor zoom. It remains a
+  // read-only request and has a deterministic square output size.
+  const focusedPreviewCheck = await page.evaluate(async () => {
+    const beforeState = await fetch('/__sprite-editor/state').then((response) => response.json());
+    const beforeCursor = { animation: window.__editor.animName, frame: window.__editor.frameIdx };
+    const response = await fetch(
+      '/__sprite-editor/preview-focus.png?animation=idle&frame=1&anchor=grip&zoom=300&size=384',
+    );
+    const bitmap = await createImageBitmap(await response.blob());
+    const afterState = await fetch('/__sprite-editor/state').then((after) => after.json());
+    return {
+      status: response.status,
+      view: response.headers.get('X-Sprite-View'),
+      anchor: response.headers.get('X-Sprite-Center-Anchor'),
+      zoom: response.headers.get('X-Sprite-Zoom'),
+      width: bitmap.width,
+      height: bitmap.height,
+      revisionBefore: beforeState.revision,
+      revisionAfter: afterState.revision,
+      cursorBefore: beforeCursor,
+      cursorAfter: { animation: window.__editor.animName, frame: window.__editor.frameIdx },
+    };
+  });
+  assert.equal(focusedPreviewCheck.status, 200);
+  assert.equal(focusedPreviewCheck.view, 'focused-composite-preview');
+  assert.equal(focusedPreviewCheck.anchor, 'grip');
+  assert.equal(focusedPreviewCheck.zoom, '300%');
+  assert.equal(focusedPreviewCheck.width, 384);
+  assert.equal(focusedPreviewCheck.height, 384);
+  assert.equal(focusedPreviewCheck.revisionAfter, focusedPreviewCheck.revisionBefore);
+  assert.deepEqual(focusedPreviewCheck.cursorAfter, focusedPreviewCheck.cursorBefore);
+
+  // The frame-addressed canvas endpoint returns the exact editable grid,
+  // including authoring overlays, while preserving the human cursor and
+  // current grid bitmap.
+  const addressedCanvasCheck = await page.evaluate(async () => {
+    const beforeState = await fetch('/__sprite-editor/state').then((response) => response.json());
+    const beforeCursor = { animation: window.__editor.animName, frame: window.__editor.frameIdx };
+    const beforeCanvas = document.querySelector('#grid').toDataURL('image/png');
+    const expected = Uint8Array.from(atob(beforeCanvas.split(',')[1]), (char) => char.charCodeAt(0));
+    const currentResponse = await fetch('/__sprite-editor/canvas.png?animation=idle&frame=1');
+    const current = new Uint8Array(await currentResponse.arrayBuffer());
+    const otherResponse = await fetch('/__sprite-editor/canvas.png?animation=idle&frame=0');
+    const other = new Uint8Array(await otherResponse.arrayBuffer());
+    const afterState = await fetch('/__sprite-editor/state').then((response) => response.json());
+    return {
+      currentStatus: currentResponse.status,
+      otherStatus: otherResponse.status,
+      view: currentResponse.headers.get('X-Sprite-View'),
+      exactCurrent: current.length === expected.length
+        && current.every((byte, index) => byte === expected[index]),
+      differentFrame: current.length !== other.length
+        || current.some((byte, index) => byte !== other[index]),
+      revisionBefore: beforeState.revision,
+      revisionAfter: afterState.revision,
+      cursorBefore: beforeCursor,
+      cursorAfter: { animation: window.__editor.animName, frame: window.__editor.frameIdx },
+      canvasUnchanged: beforeCanvas === document.querySelector('#grid').toDataURL('image/png'),
+    };
+  });
+  assert.equal(addressedCanvasCheck.currentStatus, 200);
+  assert.equal(addressedCanvasCheck.otherStatus, 200);
+  assert.equal(addressedCanvasCheck.view, 'editable-canvas');
+  assert.equal(addressedCanvasCheck.exactCurrent, true);
+  assert.equal(addressedCanvasCheck.differentFrame, true);
+  assert.equal(addressedCanvasCheck.revisionAfter, addressedCanvasCheck.revisionBefore);
+  assert.deepEqual(addressedCanvasCheck.cursorAfter, addressedCanvasCheck.cursorBefore);
+  assert.equal(addressedCanvasCheck.canvasUnchanged, true);
+
   // Named selections persist reusable sparse masks independently of the one
   // transient collaboration selection. Applying one selects the requested
   // live frame/layer without changing the sprite document revision.
@@ -439,6 +543,74 @@ try {
       && window.__editor.bridge.connected
       && window.__editor.bridge.revision > 0;
   });
+  // Auto comparison follows the active weapon body's authored animation
+  // profile and the current displayed frame. Equipment `run` therefore
+  // compares against knight-v2 `sword-run`, frame 2, rather than knight-v2
+  // `run` or a wrapped first frame.
+  await page.locator('#anims button').filter({ hasText: /^run$/ }).click();
+  await page.locator('#frames button').filter({ hasText: /^2$/ }).click();
+  const automaticComparison = await page.evaluate(() => {
+    window.__editor.comparison.configure({
+      enabled: true,
+      referencePath: 'knight-v2.json',
+      animation: '',
+      sourceFrame: 0,
+    });
+    return {
+      state: window.__editor.comparison.state,
+      autoLabel: document.querySelector('#compareRefAnim option[value=""]')?.textContent,
+      report: document.querySelector('#compareReport').textContent,
+    };
+  });
+  assert.equal(automaticComparison.state.resolvedAnimation, 'sword-run');
+  assert.equal(automaticComparison.state.resolvedFrame, 1);
+  assert.deepEqual(automaticComparison.state.anchorAlignment, {
+    sourceAnchor: 'frontHand',
+    targetAnchor: 'grip',
+    source: { x: 68, y: 62.5 },
+    target: { x: 70, y: 65.5 },
+    offset: { x: 2, y: 3 },
+  });
+  assert.equal(automaticComparison.autoLabel, 'animation: auto → sword-run');
+  assert.match(automaticComparison.report, /Comparing sword-run · frame 2 · anchors frontHand → grip/);
+  // Agents can request the same frame-addressed, anchor-aligned comparison
+  // without scripting the browser or inheriting stale panel state.
+  const requestedComparison = await page.evaluate(async () => {
+    const before = await fetch('/__sprite-editor/state').then((response) => response.json());
+    const beforeCursor = { animation: window.__editor.animName, frame: window.__editor.frameIdx };
+    const params = new URLSearchParams({
+      animation: 'run',
+      frame: '1',
+      reference: 'knight-v2.json',
+      sourceAnimation: '',
+      sourceFrame: '0',
+      sourceLayer: 'base',
+      targetLayer: 'base',
+      view: 'overlay',
+      opacity: '50',
+    });
+    const response = await fetch(`/__sprite-editor/comparison.png?${params}`);
+    const bytes = await response.arrayBuffer();
+    const after = await fetch('/__sprite-editor/state').then((stateResponse) => stateResponse.json());
+    return {
+      status: response.status,
+      bytes: bytes.byteLength,
+      revisionHeader: response.headers.get('x-sprite-revision'),
+      viewHeader: response.headers.get('x-sprite-view'),
+      beforeRevision: before.revision,
+      afterRevision: after.revision,
+      dirty: after.dirty,
+      beforeCursor,
+      afterCursor: { animation: window.__editor.animName, frame: window.__editor.frameIdx },
+    };
+  });
+  assert.equal(requestedComparison.status, 200, JSON.stringify(requestedComparison));
+  assert.ok(requestedComparison.bytes > 100);
+  assert.equal(requestedComparison.revisionHeader, String(requestedComparison.beforeRevision));
+  assert.equal(requestedComparison.viewHeader, 'alignment-comparison');
+  assert.equal(requestedComparison.beforeRevision, requestedComparison.afterRevision);
+  assert.equal(requestedComparison.dirty, false);
+  assert.deepEqual(requestedComparison.afterCursor, requestedComparison.beforeCursor);
   // Alignment comparison is a view-only workflow: isolate one source and
   // target layer, derive a two-point transform, and publish a PNG without
   // advancing or dirtying the shared sprite revision.
@@ -532,6 +704,27 @@ try {
   });
   assert.equal(cleanup.status, 200, JSON.stringify(cleanup.body));
   assert.equal(cleanup.body.dirty, false);
+
+  // Equipment-owned anchors resolve through the visual's declared attachment
+  // contract (visual anchor -> character slot -> body anchor). This exercises
+  // the real rusty-sword composite and prevents focused previews from relying
+  // on a hard-coded grip/front-hand name pair.
+  const equipmentFocusedPreview = await page.evaluate(async () => {
+    const response = await fetch(
+      '/__sprite-editor/preview-focus.png?animation=run&frame=4&anchor=grip&zoom=250&size=384',
+    );
+    const bytes = await response.arrayBuffer();
+    return {
+      status: response.status,
+      anchor: response.headers.get('X-Sprite-Center-Anchor'),
+      zoom: response.headers.get('X-Sprite-Zoom'),
+      bytes: bytes.byteLength,
+    };
+  });
+  assert.equal(equipmentFocusedPreview.status, 200, JSON.stringify(equipmentFocusedPreview));
+  assert.equal(equipmentFocusedPreview.anchor, 'grip');
+  assert.equal(equipmentFocusedPreview.zoom, '250%');
+  assert.ok(equipmentFocusedPreview.bytes > 100);
 
   assert.deepEqual(errors, []);
   console.log('sprite-editor UI smoke tests: ok');

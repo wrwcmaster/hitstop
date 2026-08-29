@@ -65,6 +65,24 @@ interface NamedSelectionLibrary {
   selections: Record<string, NamedSelection>;
 }
 
+interface PendingPreviewRequest {
+  revision: number;
+  resolve: (value: Buffer) => void;
+  timer: NodeJS.Timeout;
+}
+
+interface ComparisonRenderRequest {
+  animation: string;
+  frame: number;
+  referencePath: string;
+  sourceAnimation: string;
+  sourceFrame: number;
+  sourceLayer: string;
+  targetLayer: string;
+  view: 'overlay' | 'source' | 'target';
+  opacity: number;
+}
+
 /**
  * Development-only bridge between the browser sprite editor and local agents.
  * The browser and the agent exchange one revisioned document; repository writes
@@ -81,6 +99,9 @@ export function spriteEditorBridge(root: string): Plugin {
   let previewRevision = 0;
   let comparison: Buffer | null = null;
   let comparisonRevision = 0;
+  const pendingPreviewRequests = new Map<string, PendingPreviewRequest>();
+  const pendingCanvasRequests = new Map<string, PendingPreviewRequest>();
+  const pendingComparisonRequests = new Map<string, PendingPreviewRequest>();
   const listeners = new Set<ServerResponse>();
 
   const publish = (): void => {
@@ -92,6 +113,98 @@ export function spriteEditorBridge(root: string): Plugin {
   const publishSelection = (): void => {
     const message = `event: selection\ndata: ${JSON.stringify({ selection })}\n\n`;
     for (const listener of listeners) listener.write(message);
+  };
+
+  interface PreviewFocusRequest {
+    anchor: string;
+    zoomPercent: number;
+    size: number;
+  }
+
+  const requestFramePreview = async (
+    animation: string,
+    frame: number,
+    focus?: PreviewFocusRequest,
+  ): Promise<Buffer> => {
+    if (!active) throw new Error('no sprite is open');
+    // Reuse the semantic inspector for cursor validation so preview and edit
+    // routes cannot disagree about aliases or frame bounds.
+    inspectSpriteAgentDocument(
+      { activePath: active.path, active: active.file as SpriteFile },
+      [{ animation, frame, colors: false }],
+    );
+    if (!listeners.size) throw new Error('no sprite editor is connected');
+    const id = randomUUID();
+    const revision = active.revision;
+    const result = new Promise<Buffer>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pendingPreviewRequests.delete(id);
+        reject(new Error('frame preview timed out'));
+      }, 3000);
+      pendingPreviewRequests.set(id, { revision, resolve, timer });
+    });
+    const message = `event: preview-request\ndata: ${JSON.stringify({
+      id,
+      animation,
+      frame,
+      revision,
+      focus,
+    })}\n\n`;
+    for (const listener of listeners) listener.write(message);
+    return result;
+  };
+
+  const requestFrameCanvas = async (
+    animation: string,
+    frame: number,
+    showAnchorLabels: boolean,
+  ): Promise<Buffer> => {
+    if (!active) throw new Error('no sprite is open');
+    inspectSpriteAgentDocument(
+      { activePath: active.path, active: active.file as SpriteFile },
+      [{ animation, frame, colors: false }],
+    );
+    if (!listeners.size) throw new Error('no sprite editor is connected');
+    const id = randomUUID();
+    const revision = active.revision;
+    const result = new Promise<Buffer>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pendingCanvasRequests.delete(id);
+        reject(new Error('frame canvas timed out'));
+      }, 3000);
+      pendingCanvasRequests.set(id, { revision, resolve, timer });
+    });
+    const message = `event: canvas-request\ndata: ${JSON.stringify({
+      id,
+      animation,
+      frame,
+      revision,
+      showAnchorLabels,
+    })}\n\n`;
+    for (const listener of listeners) listener.write(message);
+    return result;
+  };
+
+  const requestFrameComparison = async (request: ComparisonRenderRequest): Promise<Buffer> => {
+    if (!active) throw new Error('no sprite is open');
+    inspectSpriteAgentDocument(
+      { activePath: active.path, active: active.file as SpriteFile },
+      [{ animation: request.animation, frame: request.frame, colors: false }],
+    );
+    spritePath(request.referencePath);
+    if (!listeners.size) throw new Error('no sprite editor is connected');
+    const id = randomUUID();
+    const revision = active.revision;
+    const result = new Promise<Buffer>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pendingComparisonRequests.delete(id);
+        reject(new Error('frame comparison timed out'));
+      }, 3000);
+      pendingComparisonRequests.set(id, { revision, resolve, timer });
+    });
+    const message = `event: comparison-request\ndata: ${JSON.stringify({ id, revision, ...request })}\n\n`;
+    for (const listener of listeners) listener.write(message);
+    return result;
   };
 
   const spritePath = (raw: unknown): { relative: string; absolute: string } => {
@@ -818,7 +931,38 @@ export function spriteEditorBridge(root: string): Plugin {
             return send(res, 200, { revision, bytes: preview.length });
           }
 
+          const previewResponseRoute = url.pathname.match(new RegExp(`^${API}/preview-requests/([^/]+)$`));
+          if (req.method === 'POST' && previewResponseRoute) {
+            const id = previewResponseRoute[1];
+            const pending = pendingPreviewRequests.get(id);
+            if (!pending) return send(res, 404, { error: 'unknown or expired preview request' });
+            const revision = Number(req.headers['x-sprite-revision'] ?? 0);
+            if (!active || revision !== pending.revision || revision !== active.revision) {
+              return send(res, 409, { error: 'preview request revision is stale', state: active });
+            }
+            const bytes = await readBody(req, MAX_PREVIEW_BYTES);
+            clearTimeout(pending.timer);
+            pendingPreviewRequests.delete(id);
+            pending.resolve(bytes);
+            return send(res, 200, { revision, bytes: bytes.length });
+          }
+
           if (req.method === 'GET' && url.pathname === `${API}/preview.png`) {
+            const requestedAnimation = url.searchParams.get('animation');
+            const requestedFrame = url.searchParams.get('frame');
+            if (requestedAnimation !== null || requestedFrame !== null) {
+              if (!requestedAnimation || requestedFrame === null || !/^\d+$/.test(requestedFrame)) {
+                return send(res, 400, { error: 'frame preview requires animation and a zero-based frame' });
+              }
+              const revision = active?.revision ?? 0;
+              const bytes = await requestFramePreview(requestedAnimation, Number(requestedFrame));
+              headers(res, 'image/png');
+              res.setHeader('X-Sprite-Revision', String(revision));
+              res.setHeader('X-Sprite-Animation', requestedAnimation);
+              res.setHeader('X-Sprite-Frame', requestedFrame);
+              res.statusCode = 200;
+              return res.end(bytes);
+            }
             if (!preview || !active || previewRevision !== active.revision) {
               return send(res, 404, { error: 'no preview for the active revision' });
             }
@@ -826,6 +970,79 @@ export function spriteEditorBridge(root: string): Plugin {
             res.setHeader('X-Sprite-Revision', String(previewRevision));
             res.statusCode = 200;
             return res.end(preview);
+          }
+
+          if (req.method === 'GET' && url.pathname === `${API}/preview-focus.png`) {
+            const requestedAnimation = url.searchParams.get('animation');
+            const requestedFrame = url.searchParams.get('frame');
+            const anchor = url.searchParams.get('anchor')?.trim();
+            const zoom = url.searchParams.get('zoom') ?? '300';
+            const size = url.searchParams.get('size') ?? '384';
+            if (!requestedAnimation || requestedFrame === null || !/^\d+$/.test(requestedFrame) || !anchor) {
+              return send(res, 400, {
+                error: 'focused preview requires animation, a zero-based frame, and anchor',
+              });
+            }
+            if (!/^\d+$/.test(zoom) || Number(zoom) < 100 || Number(zoom) > 800) {
+              return send(res, 400, { error: 'focused preview zoom must be an integer from 100 to 800 percent' });
+            }
+            if (!/^\d+$/.test(size) || Number(size) < 128 || Number(size) > 1024) {
+              return send(res, 400, { error: 'focused preview size must be an integer from 128 to 1024 pixels' });
+            }
+            const revision = active?.revision ?? 0;
+            const bytes = await requestFramePreview(requestedAnimation, Number(requestedFrame), {
+              anchor,
+              zoomPercent: Number(zoom),
+              size: Number(size),
+            });
+            headers(res, 'image/png');
+            res.setHeader('X-Sprite-Revision', String(revision));
+            res.setHeader('X-Sprite-Animation', requestedAnimation);
+            res.setHeader('X-Sprite-Frame', requestedFrame);
+            res.setHeader('X-Sprite-View', 'focused-composite-preview');
+            res.setHeader('X-Sprite-Center-Anchor', anchor);
+            res.setHeader('X-Sprite-Zoom', `${zoom}%`);
+            res.statusCode = 200;
+            return res.end(bytes);
+          }
+
+          const canvasResponseRoute = url.pathname.match(new RegExp(`^${API}/canvas-requests/([^/]+)$`));
+          if (req.method === 'POST' && canvasResponseRoute) {
+            const id = canvasResponseRoute[1];
+            const pending = pendingCanvasRequests.get(id);
+            if (!pending) return send(res, 404, { error: 'unknown or expired canvas request' });
+            const revision = Number(req.headers['x-sprite-revision'] ?? 0);
+            if (!active || revision !== pending.revision || revision !== active.revision) {
+              return send(res, 409, { error: 'canvas request revision is stale', state: active });
+            }
+            const bytes = await readBody(req, MAX_PREVIEW_BYTES);
+            clearTimeout(pending.timer);
+            pendingCanvasRequests.delete(id);
+            pending.resolve(bytes);
+            return send(res, 200, { revision, bytes: bytes.length });
+          }
+
+          if (req.method === 'GET' && url.pathname === `${API}/canvas.png`) {
+            const requestedAnimation = url.searchParams.get('animation');
+            const requestedFrame = url.searchParams.get('frame');
+            const showAnchorLabels = url.searchParams.get('anchorLabels') !== '0';
+            if (!requestedAnimation || requestedFrame === null || !/^\d+$/.test(requestedFrame)) {
+              return send(res, 400, { error: 'frame canvas requires animation and a zero-based frame' });
+            }
+            const revision = active?.revision ?? 0;
+            const bytes = await requestFrameCanvas(
+              requestedAnimation,
+              Number(requestedFrame),
+              showAnchorLabels,
+            );
+            headers(res, 'image/png');
+            res.setHeader('X-Sprite-Revision', String(revision));
+            res.setHeader('X-Sprite-Animation', requestedAnimation);
+            res.setHeader('X-Sprite-Frame', requestedFrame);
+            res.setHeader('X-Sprite-View', 'editable-canvas');
+            res.setHeader('X-Sprite-Anchor-Labels', showAnchorLabels ? 'visible' : 'hidden');
+            res.statusCode = 200;
+            return res.end(bytes);
           }
 
           if (req.method === 'POST' && url.pathname === `${API}/comparison`) {
@@ -837,7 +1054,65 @@ export function spriteEditorBridge(root: string): Plugin {
             return send(res, 200, { revision, bytes: comparison.length });
           }
 
+          const comparisonResponseRoute = url.pathname.match(new RegExp(`^${API}/comparison-requests/([^/]+)$`));
+          if (req.method === 'POST' && comparisonResponseRoute) {
+            const id = comparisonResponseRoute[1];
+            const pending = pendingComparisonRequests.get(id);
+            if (!pending) return send(res, 404, { error: 'unknown or expired comparison request' });
+            const revision = Number(req.headers['x-sprite-revision'] ?? 0);
+            if (!active || revision !== pending.revision || revision !== active.revision) {
+              return send(res, 409, { error: 'comparison request revision is stale', state: active });
+            }
+            const bytes = await readBody(req, MAX_PREVIEW_BYTES);
+            clearTimeout(pending.timer);
+            pendingComparisonRequests.delete(id);
+            pending.resolve(bytes);
+            return send(res, 200, { revision, bytes: bytes.length });
+          }
+
           if (req.method === 'GET' && url.pathname === `${API}/comparison.png`) {
+            const animation = url.searchParams.get('animation');
+            const requestedFrame = url.searchParams.get('frame');
+            const referencePath = url.searchParams.get('reference');
+            if (animation !== null || requestedFrame !== null || referencePath !== null) {
+              if (!animation || requestedFrame === null || !/^\d+$/.test(requestedFrame) || !referencePath) {
+                return send(res, 400, {
+                  error: 'frame comparison requires animation, a zero-based frame, and reference',
+                });
+              }
+              const sourceFrame = url.searchParams.get('sourceFrame') ?? '0';
+              const opacity = url.searchParams.get('opacity') ?? '50';
+              const view = url.searchParams.get('view') ?? 'overlay';
+              if (!/^\d+$/.test(sourceFrame)) {
+                return send(res, 400, { error: 'comparison sourceFrame must be a non-negative integer' });
+              }
+              if (!/^\d+$/.test(opacity) || Number(opacity) < 0 || Number(opacity) > 100) {
+                return send(res, 400, { error: 'comparison opacity must be an integer from 0 to 100' });
+              }
+              if (!['overlay', 'source', 'target'].includes(view)) {
+                return send(res, 400, { error: 'comparison view must be overlay, source, or target' });
+              }
+              const revision = active?.revision ?? 0;
+              const bytes = await requestFrameComparison({
+                animation,
+                frame: Number(requestedFrame),
+                referencePath,
+                sourceAnimation: url.searchParams.get('sourceAnimation') ?? '',
+                sourceFrame: Number(sourceFrame),
+                sourceLayer: url.searchParams.get('sourceLayer') ?? 'base',
+                targetLayer: url.searchParams.get('targetLayer') ?? 'base',
+                view: view as ComparisonRenderRequest['view'],
+                opacity: Number(opacity),
+              });
+              headers(res, 'image/png');
+              res.setHeader('X-Sprite-Revision', String(revision));
+              res.setHeader('X-Sprite-Animation', animation);
+              res.setHeader('X-Sprite-Frame', requestedFrame);
+              res.setHeader('X-Sprite-Reference', referencePath);
+              res.setHeader('X-Sprite-View', 'alignment-comparison');
+              res.statusCode = 200;
+              return res.end(bytes);
+            }
             if (!comparison || !active || comparisonRevision !== active.revision) {
               return send(res, 404, { error: 'no comparison for the active revision' });
             }
