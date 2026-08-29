@@ -42,6 +42,18 @@ import {
   rebuildKnightSprite,
 } from '@game/content/sprites';
 import { rebuildGearVisual } from '@game/content/gear-visuals';
+import {
+  batchPixel,
+  brushStrength,
+  commitPixelBatchRows,
+  createPixelBatch,
+  pastePixels,
+  rotateSelectionRows,
+  scaleSelectionRows,
+  setBatchPixel,
+  type PixelBatch,
+  type PixelClipboard,
+} from './sprite-editor-pixel-kernels';
 // The "player (full)" body drives a REAL Player — body-english, gear
 // layers, held weapon and trail all come from Player.render, posed via
 // its poseAttack seam. Content self-registers on import (the game's
@@ -113,11 +125,29 @@ let hoverPointer: { x: number; y: number } | null = null;
 let hoverCell: { x: number; y: number } | null = null;
 let strokePaletteChanged = false;
 let strokePaletteLookup: StrokePaletteLookup | null = null;
+const strokeBrushBlendCache = new Map<string, string>();
 let scheduledRedrawFrame = 0;
 let scheduledSelectionUiFrame = 0;
 const editorPerformanceStats = {
   redraws: 0,
+  redrawTotalMs: 0,
+  redrawMaxMs: 0,
+  redrawSetupMaxMs: 0,
+  redrawCheckerMaxMs: 0,
+  redrawReferenceMaxMs: 0,
+  redrawRasterMaxMs: 0,
+  redrawImageMaxMs: 0,
+  redrawGridMaxMs: 0,
+  redrawOverlayMaxMs: 0,
+  paintEvents: 0,
+  paintTotalMs: 0,
+  paintMaxMs: 0,
+  selectionTransforms: 0,
+  selectionTransformTotalMs: 0,
+  selectionTransformMaxMs: 0,
   previewHeavyRenders: 0,
+  previewHeavyTotalMs: 0,
+  previewHeavyMaxMs: 0,
   previewSkippedFrames: 0,
 };
 let panelsBeforeTabToggle: { left: boolean; right: boolean } | null = null;
@@ -139,7 +169,6 @@ interface ContinuousDocumentEdit {
 let continuousEdit: ContinuousDocumentEdit | null = null;
 interface PixelRect { x: number; y: number; w: number; h: number }
 interface PixelSelection extends PixelRect { mask?: string[] }
-interface PixelClipboard { w: number; h: number; rows: string[]; mask?: string[]; palette?: Palette }
 interface SelectionMove {
   start: { x: number; y: number };
   original: PixelSelection;
@@ -161,6 +190,11 @@ interface SelectionHandleTransform {
   moved: boolean;
   flipX: boolean;
   flipY: boolean;
+}
+interface SelectionTransformPointer {
+  clientX: number;
+  clientY: number;
+  shiftKey: boolean;
 }
 interface SharedSelection extends PixelRect {
   path: string | null;
@@ -190,6 +224,8 @@ let selectionStart: SelectionDrag | null = null;
 let magicSelectionDrag: MagicSelectionDrag | null = null;
 let selectionMove: SelectionMove | null = null;
 let selectionHandleTransform: SelectionHandleTransform | null = null;
+let pendingSelectionTransformPointer: SelectionTransformPointer | null = null;
+let scheduledSelectionTransformFrame = 0;
 let pixelClipboard: PixelClipboard | null = null;
 let refFile: SpriteFile | null = null;
 let comparisonUploadTimer = 0;
@@ -568,6 +604,76 @@ const compositeCur = (index = frameIdx): string[] => {
     ? compositeSpriteFrameByTags(file, animName, index, renderTagIds(), PAL, visibleLayer)
     : compositeSpriteFrame(file, animName, index, PAL, visibleLayer)) ?? cur();
 };
+
+/**
+ * Rasterize the editor's native-resolution canvas with one ImageData upload.
+ * The engine's general sprite baker issues one fillStyle/fillRect pair per
+ * opaque pixel; that is fine for one-time game assets but caused 50–80 ms
+ * stalls when an edited 160×110 frame invalidated on every brush sample.
+ */
+function rasterizeEditorFrame(index: number): HTMLCanvasElement | undefined {
+  if (!(animName in file.anims)) return undefined;
+  const target = resolveAnimName(file, animName);
+  const palette = { ...PAL, ...(file.palette ?? {}) };
+  const colors = new Map<string, Rgba | null>();
+  for (const [ch, value] of Object.entries(palette)) colors.set(ch, parseRgba(value));
+
+  let layerRows: string[][];
+  if (isLayeredSpriteFile(file)) {
+    const layered = file;
+    const timeline = layered.anims[target];
+    if (!timeline || typeof timeline === 'string' || index < 0 || index >= timeline.frameCount) return undefined;
+    const orderedLayers = renderTagIds().flatMap((tag) => layered.layers.filter((layer) => layer.tag === tag));
+    layerRows = orderedLayers
+      .filter(visibleLayer)
+      .map((layer) => layer.tracks[target]?.[index])
+      .filter((rows): rows is string[] => Boolean(rows));
+  } else {
+    const entry = file.anims[target];
+    const rows = typeof entry === 'string' ? undefined : entry?.frames[index];
+    if (!rows) return undefined;
+    layerRows = [rows];
+  }
+  const first = layerRows[0] ?? cur();
+  const width = first[0]?.length ?? 0;
+  const height = first.length;
+  if (!width || !height) return undefined;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d')!;
+  const image = context.createImageData(width, height);
+  const pixels = image.data;
+
+  for (const rows of layerRows) {
+    for (let y = 0; y < height; y++) {
+      const row = rows[y];
+      for (let x = 0; x < width; x++) {
+        const color = colors.get(row[x]);
+        if (!color || color.a <= 0) continue;
+        const offset = (y * width + x) * 4;
+        const destinationAlpha = pixels[offset + 3];
+        if (color.a >= 255 || destinationAlpha === 0) {
+          pixels[offset] = color.r;
+          pixels[offset + 1] = color.g;
+          pixels[offset + 2] = color.b;
+          pixels[offset + 3] = color.a;
+          continue;
+        }
+        const inverseAlpha = 255 - color.a;
+        const outputAlpha = color.a + destinationAlpha * inverseAlpha / 255;
+        const destinationWeight = destinationAlpha * inverseAlpha / 255;
+        pixels[offset] = Math.round((color.r * color.a + pixels[offset] * destinationWeight) / outputAlpha);
+        pixels[offset + 1] = Math.round((color.g * color.a + pixels[offset + 1] * destinationWeight) / outputAlpha);
+        pixels[offset + 2] = Math.round((color.b * color.a + pixels[offset + 2] * destinationWeight) / outputAlpha);
+        pixels[offset + 3] = Math.round(outputAlpha);
+      }
+    }
+  }
+  context.putImageData(image, 0, 0);
+  return canvas;
+}
+
 let rasterCacheVersion = -1;
 const rasterCache = new Map<string, HTMLCanvasElement | undefined>();
 const rasterizedCur = (index = frameIdx, upscale = false): HTMLCanvasElement | undefined => {
@@ -584,11 +690,13 @@ const rasterizedCur = (index = frameIdx, upscale = false): HTMLCanvasElement | u
     isLayeredSpriteFile(file) ? renderTagIds().join(',') : '',
   ].join('|');
   if (rasterCache.has(key)) return rasterCache.get(key);
-  const image = rasterizeSpriteFrame(file, animName, index, PAL, {
-    tagOrder: isLayeredSpriteFile(file) ? renderTagIds() : undefined,
-    include: visibleLayer,
-    upscale,
-  });
+  const image = upscale
+    ? rasterizeSpriteFrame(file, animName, index, PAL, {
+      tagOrder: isLayeredSpriteFile(file) ? renderTagIds() : undefined,
+      include: visibleLayer,
+      upscale: true,
+    })
+    : rasterizeEditorFrame(index);
   rasterCache.set(key, image);
   return image;
 };
@@ -1304,6 +1412,7 @@ function clearHistory(): void {
 /** Drop pointer/tool state that cannot be valid in another document. */
 function resetDocumentInteractionState(resetRigSelection = true): void {
   cancelContinuousDocumentEdit();
+  cancelScheduledSelectionTransform();
   painting = false;
   erasing = false;
   picking = false;
@@ -3010,38 +3119,16 @@ interface StrokePaletteLookup {
   byChar: Map<string, Rgba>;
 }
 
-interface PixelBatch {
-  frame: string[];
-  rows: Map<number, string[]>;
-  changed: boolean;
+function createCurrentPixelBatch(): PixelBatch {
+  return createPixelBatch(cur());
 }
 
-function createPixelBatch(): PixelBatch {
-  return { frame: cur(), rows: new Map(), changed: false };
-}
-
-function batchPixel(batch: PixelBatch, x: number, y: number): string {
-  return batch.rows.get(y)?.[x] ?? batch.frame[y][x];
-}
-
-function setBatchPixel(batch: PixelBatch, x: number, y: number, ch: string): void {
-  if (x < 0 || y < 0 || x >= W() || y >= H() || batchPixel(batch, x, y) === ch) return;
-  let row = batch.rows.get(y);
-  if (!row) {
-    row = [...batch.frame[y]];
-    batch.rows.set(y, row);
-  }
-  row[x] = ch;
-  batch.changed = true;
-}
-
-function commitPixelBatch(batch: PixelBatch): boolean {
-  if (!batch.changed) return false;
-  for (const [y, row] of batch.rows) batch.frame[y] = row.join('');
+function commitPixelBatch(batch: PixelBatch, invalidate = true): boolean {
+  if (!commitPixelBatchRows(batch)) return false;
   // One stamp/interpolated segment is one render invalidation, regardless of
   // how many pixels it touched. The old per-pixel increment forced caches to
   // churn hundreds of times for a single soft-brush event.
-  editVersion++;
+  if (invalidate) editVersion++;
   return true;
 }
 
@@ -3100,7 +3187,10 @@ function createStrokePaletteLookup(): StrokePaletteLookup {
   for (const [ch, value] of Object.entries(pal())) {
     const rgba = parseRgba(value);
     if (!rgba) continue;
-    lookup.exact.set(rgbaHex(rgba), ch);
+    const hex = rgbaHex(rgba);
+    // Preserve the pre-cache behavior: duplicate colors resolve to the first
+    // palette key rather than whichever duplicate happened to be visited last.
+    if (!lookup.exact.has(hex)) lookup.exact.set(hex, ch);
     lookup.colors.push({ ch, rgba });
     lookup.byChar.set(ch, rgba);
   }
@@ -3255,41 +3345,79 @@ function brushSize(): number {
   return Math.max(1, Math.min(32, value));
 }
 
-function brushStrength(dx: number, dy: number, size = brushSize()): number {
-  const distance = Math.hypot(dx, dy);
-  const outer = (size + 1) / 2;
-  if (distance >= outer) return 0;
-  const core = Math.max(0.55, outer * 0.55);
-  if (distance <= core) return 1;
-  return (outer - distance) / Math.max(0.001, outer - core);
+interface BrushStampContext {
+  erase: boolean;
+  selected: Rgba | null;
+  offsets: Array<{ dx: number; dy: number; strength: number }>;
 }
 
-function paintBrush(centerX: number, centerY: number, erase: boolean, targetBatch?: PixelBatch): void {
-  const batch = targetBatch ?? createPixelBatch();
+function createBrushStampContext(requestedErase: boolean): BrushStampContext {
   const selected = paletteRgba(currentChar);
-  if (!erase && (!selected || currentChar === '.' || selected.a <= 0)) erase = true;
-  const extent = Math.ceil((brushSize() + 1) / 2);
-  for (let dy = -extent; dy <= extent; dy++) {
-    for (let dx = -extent; dx <= extent; dx++) {
-      const strength = brushStrength(dx, dy);
-      if (strength <= 0) continue;
+  const erase = requestedErase || !selected || currentChar === '.' || selected.a <= 0;
+  const size = brushSize();
+  const extent = Math.ceil((size + 1) / 2);
+  const offsets: BrushStampContext['offsets'] = [];
+  for (let dy = -extent; dy <= extent; dy++) for (let dx = -extent; dx <= extent; dx++) {
+    const strength = brushStrength(dx, dy, size);
+    if (strength > 0) offsets.push({ dx, dy, strength });
+  }
+  return { erase, selected, offsets };
+}
+
+function brushBlendChar(
+  oldChar: string,
+  old: Rgba,
+  stamp: BrushStampContext,
+  strength: number,
+): string {
+  const cacheKey = `${Number(stamp.erase)}\0${oldChar}\0${currentChar}\0${Math.round(strength * 1024)}`;
+  const cached = strokeBrushBlendCache.get(cacheKey);
+  if (cached) return cached;
+  const result = stamp.erase
+    ? (() => {
+      const alpha = old.a * (1 - strength);
+      return alpha <= 0.5 ? '.' : paletteCharFor({ ...old, a: alpha });
+    })()
+    : strength >= 0.995
+      ? currentChar
+      : paletteCharFor(mixRgba(old, stamp.selected!, strength));
+  strokeBrushBlendCache.set(cacheKey, result);
+  return result;
+}
+
+function paintBrush(
+  centerX: number,
+  centerY: number,
+  erase: boolean,
+  targetBatch?: PixelBatch,
+  preparedStamp?: BrushStampContext,
+): void {
+  const batch = targetBatch ?? createCurrentPixelBatch();
+  const stamp = preparedStamp ?? createBrushStampContext(erase);
+  for (const { dx, dy, strength } of stamp.offsets) {
       const x = centerX + dx;
       const y = centerY + dy;
-      if (x < 0 || y < 0 || x >= W() || y >= H()) continue;
+      if (x < 0 || y < 0 || x >= batch.width || y >= batch.height) continue;
       const oldChar = batchPixel(batch, x, y);
       const old = paletteRgba(oldChar);
-      if (erase) {
+      if (stamp.erase) {
         if (!old) continue;
-        const alpha = old.a * (1 - strength);
-        setBatchPixel(batch, x, y, alpha <= 0.5 ? '.' : paletteCharFor({ ...old, a: alpha }));
-      } else if (strength >= 0.995) {
-        setBatchPixel(batch, x, y, currentChar);
+        setBatchPixel(batch, x, y, brushBlendChar(oldChar, old, stamp, strength));
       } else if (old) {
-        setBatchPixel(batch, x, y, paletteCharFor(mixRgba(old, selected!, strength)));
+        setBatchPixel(batch, x, y, brushBlendChar(oldChar, old, stamp, strength));
+      } else if (strength >= 0.995) {
+        // The solid core must preserve the explicitly selected palette key,
+        // even when another key happens to contain the same RGBA value.
+        setBatchPixel(batch, x, y, currentChar);
       } else {
-        setBatchPixel(batch, x, y, paletteCharFor({ ...selected!, a: selected!.a * strength }));
+        const emptyKey = `0\0.\0${currentChar}\0${Math.round(strength * 1024)}`;
+        let blended = strokeBrushBlendCache.get(emptyKey);
+        if (!blended) {
+          blended = paletteCharFor({ ...stamp.selected!, a: stamp.selected!.a * strength });
+          strokeBrushBlendCache.set(emptyKey, blended);
+        }
+        setBatchPixel(batch, x, y, blended);
       }
-    }
   }
   if (!targetBatch) commitPixelBatch(batch);
 }
@@ -3300,7 +3428,7 @@ function blurBrush(centerX: number, centerY: number, erase: boolean): void {
     return;
   }
   const source = cur().slice();
-  const batch = createPixelBatch();
+  const batch = createCurrentPixelBatch();
   const size = brushSize();
   const extent = Math.ceil((size + 1) / 2);
   const sampleRadius = Math.max(1, Math.floor(size / 2));
@@ -3447,6 +3575,7 @@ grid.addEventListener('mousedown', (e) => {
   strokePaletteLookup = currentTool === 'brush' || currentTool === 'blur'
     ? createStrokePaletteLookup()
     : null;
+  strokeBrushBlendCache.clear();
   erasing = e.button === 2;
   painting = true;
   lastPaintCell = null;
@@ -3470,7 +3599,7 @@ grid.addEventListener('mousemove', (e) => {
     return;
   }
   if (selectionHandleTransform) {
-    updateSelectionHandleTransform(e);
+    scheduleSelectionHandleTransform(e);
     return;
   }
   if (selectionStart) {
@@ -3518,6 +3647,10 @@ window.addEventListener('mouseup', () => {
     selectionMove = null;
   }
   if (selectionHandleTransform) {
+    // Commit the newest pointer sample before closing the gesture. Raw mouse
+    // events are coalesced to one expensive raster transform per animation
+    // frame, but mouseup must never drop the final position.
+    flushSelectionHandleTransform();
     const completedTransform = selectionHandleTransform;
     const moved = completedTransform.moved;
     const handle = completedTransform.handle;
@@ -3850,32 +3983,6 @@ function clearSelectionPixels(rows: string[], value: PixelSelection): void {
   }
 }
 
-function pastePixels(
-  rows: string[],
-  clip: PixelClipboard,
-  x: number,
-  y: number,
-  ignoreTransparent = false,
-): void {
-  const pastedW = Math.min(clip.w, rows[0].length - x);
-  const pastedH = Math.min(clip.h, rows.length - y);
-  for (let dy = 0; dy < pastedH; dy++) {
-    if (!ignoreTransparent) {
-      rows[y + dy] = rows[y + dy].slice(0, x)
-        + clip.rows[dy].slice(0, pastedW)
-        + rows[y + dy].slice(x + pastedW);
-      continue;
-    }
-    const destination = [...rows[y + dy]];
-    for (let dx = 0; dx < pastedW; dx++) {
-      if (clip.mask && clip.mask[dy]?.[dx] !== '1') continue;
-      const pixel = clip.rows[dy][dx];
-      if (pixel !== '.') destination[x + dx] = pixel;
-    }
-    rows[y + dy] = destination.join('');
-  }
-}
-
 function beginSelectionMove(point: { x: number; y: number }): void {
   if (!requireEditableLayer()) return;
   if (!selection) return;
@@ -3916,7 +4023,7 @@ function moveSelectionDrag(point: { x: number; y: number }): void {
   });
 }
 
-function gridPointer(e: MouseEvent): { x: number; y: number } {
+function gridPointer(e: Pick<MouseEvent, 'clientX' | 'clientY'>): { x: number; y: number } {
   const bounds = grid.getBoundingClientRect();
   return {
     x: (e.clientX - bounds.left) / cellSize,
@@ -4046,7 +4153,22 @@ function applyLiveSelectionTransform(
   setSelectionDuringGesture({ x, y, w: clip.w, h: clip.h, mask: clip.mask?.slice() });
 }
 
-function updateSelectionHandleTransform(e: MouseEvent): void {
+function updateSelectionHandleTransform(e: SelectionTransformPointer): void {
+  const startedAt = performance.now();
+  try {
+    updateSelectionHandleTransformNow(e);
+  } finally {
+    const elapsed = performance.now() - startedAt;
+    editorPerformanceStats.selectionTransforms++;
+    editorPerformanceStats.selectionTransformTotalMs += elapsed;
+    editorPerformanceStats.selectionTransformMaxMs = Math.max(
+      editorPerformanceStats.selectionTransformMaxMs,
+      elapsed,
+    );
+  }
+}
+
+function updateSelectionHandleTransformNow(e: SelectionTransformPointer): void {
   const transform = selectionHandleTransform;
   if (!transform) return;
   const pointer = gridPointer(e);
@@ -4121,6 +4243,37 @@ function updateSelectionHandleTransform(e: MouseEvent): void {
   );
 }
 
+function scheduleSelectionHandleTransform(e: MouseEvent): void {
+  pendingSelectionTransformPointer = {
+    clientX: e.clientX,
+    clientY: e.clientY,
+    shiftKey: e.shiftKey,
+  };
+  if (scheduledSelectionTransformFrame) return;
+  scheduledSelectionTransformFrame = requestAnimationFrame(() => {
+    scheduledSelectionTransformFrame = 0;
+    const pointer = pendingSelectionTransformPointer;
+    pendingSelectionTransformPointer = null;
+    if (pointer && selectionHandleTransform) updateSelectionHandleTransform(pointer);
+  });
+}
+
+function flushSelectionHandleTransform(): void {
+  if (scheduledSelectionTransformFrame) {
+    cancelAnimationFrame(scheduledSelectionTransformFrame);
+    scheduledSelectionTransformFrame = 0;
+  }
+  const pointer = pendingSelectionTransformPointer;
+  pendingSelectionTransformPointer = null;
+  if (pointer && selectionHandleTransform) updateSelectionHandleTransform(pointer);
+}
+
+function cancelScheduledSelectionTransform(): void {
+  if (scheduledSelectionTransformFrame) cancelAnimationFrame(scheduledSelectionTransformFrame);
+  scheduledSelectionTransformFrame = 0;
+  pendingSelectionTransformPointer = null;
+}
+
 function updateSelectionReadout(): void {
   ($('btnCut') as HTMLButtonElement).disabled = !selection;
   ($('btnCopy') as HTMLButtonElement).disabled = !selection;
@@ -4174,6 +4327,7 @@ function clearSelection(publish = true): void {
   selectionStart = null;
   magicSelectionDrag = null;
   selectionMove = null;
+  cancelScheduledSelectionTransform();
   selectionHandleTransform = null;
   grid.classList.remove('selection-movable');
   grid.style.cursor = '';
@@ -4227,6 +4381,7 @@ $('center').addEventListener('pointerdown', (event) => {
 });
 
 function paint(e: MouseEvent): void {
+  const startedAt = performance.now();
   const r = grid.getBoundingClientRect();
   const x = Math.floor((e.clientX - r.left) / cellSize);
   const y = Math.floor((e.clientY - r.top) / cellSize);
@@ -4239,13 +4394,19 @@ function paint(e: MouseEvent): void {
   } else if (currentTool === 'brush' || currentTool === 'blur') {
     const previous = lastPaintCell;
     if (previous?.x === x && previous.y === y) return;
-    const steps = previous ? Math.max(Math.abs(x - previous.x), Math.abs(y - previous.y)) : 0;
-    const brushBatch = currentTool === 'brush' ? createPixelBatch() : null;
+    const size = brushSize();
+    // A soft circular dab overlaps safely at 25% diameter. Pixel-by-pixel
+    // center spacing did 4–8× redundant blending work on fast pointer moves.
+    const spacing = Math.max(1, Math.floor(size / 4));
+    const distance = previous ? Math.hypot(x - previous.x, y - previous.y) : 0;
+    const steps = previous ? Math.max(1, Math.ceil(distance / spacing)) : 0;
+    const brushBatch = currentTool === 'brush' ? createCurrentPixelBatch() : null;
+    const brushStamp = currentTool === 'brush' ? createBrushStampContext(erasing) : null;
     for (let step = 0; step <= steps; step++) {
       const amount = steps ? step / steps : 1;
       const stampX = previous ? Math.round(previous.x + (x - previous.x) * amount) : x;
       const stampY = previous ? Math.round(previous.y + (y - previous.y) * amount) : y;
-      if (currentTool === 'brush') paintBrush(stampX, stampY, erasing, brushBatch!);
+      if (currentTool === 'brush') paintBrush(stampX, stampY, erasing, brushBatch!, brushStamp!);
       else blurBrush(stampX, stampY, erasing);
     }
     if (brushBatch) commitPixelBatch(brushBatch);
@@ -4255,6 +4416,10 @@ function paint(e: MouseEvent): void {
   // Coalesce their canvas work into one paint per animation frame while the
   // document still records every sampled pixel.
   scheduleRedraw();
+  const elapsed = performance.now() - startedAt;
+  editorPerformanceStats.paintEvents++;
+  editorPerformanceStats.paintTotalMs += elapsed;
+  editorPerformanceStats.paintMaxMs = Math.max(editorPerformanceStats.paintMaxMs, elapsed);
 }
 
 /* ---------------- frames ---------------- */
@@ -4641,6 +4806,15 @@ function flushScheduledRedraw(): void {
 }
 
 function redraw(): void {
+  const startedAt = performance.now();
+  redrawNow();
+  const elapsed = performance.now() - startedAt;
+  editorPerformanceStats.redrawTotalMs += elapsed;
+  editorPerformanceStats.redrawMaxMs = Math.max(editorPerformanceStats.redrawMaxMs, elapsed);
+}
+
+function redrawNow(): void {
+  let stageStartedAt = performance.now();
   editorPerformanceStats.redraws++;
   if (scheduledRedrawFrame) {
     cancelAnimationFrame(scheduledRedrawFrame);
@@ -4651,10 +4825,19 @@ function redraw(): void {
   if (grid.width !== width) grid.width = width;
   if (grid.height !== height) grid.height = height;
   gctx.imageSmoothingEnabled = false;
+  editorPerformanceStats.redrawSetupMaxMs = Math.max(
+    editorPerformanceStats.redrawSetupMaxMs,
+    performance.now() - stageStartedAt,
+  );
 
   // 1. Transparency is a fixed view-space checker. It deliberately ignores
   // cellSize, so zooming the sprite never turns checker tiles into pixels.
+  stageStartedAt = performance.now();
   drawTransparencyChecker(gctx, grid.width, grid.height);
+  editorPerformanceStats.redrawCheckerMaxMs = Math.max(
+    editorPerformanceStats.redrawCheckerMaxMs,
+    performance.now() - stageStartedAt,
+  );
 
   // 2. Draw a non-mutating comparison source. Its optional two-point matrix
   // maps source sprite coordinates directly into target coordinates, so the
@@ -4662,6 +4845,7 @@ function redraw(): void {
   const showRef = ($('showRef') as HTMLInputElement)?.checked ?? true;
   const comparing = Boolean(refFile && showRef);
   const comparisonView = ($('compareView') as HTMLSelectElement).value;
+  stageStartedAt = performance.now();
   const reference = comparing ? comparisonReference() : null;
   if (reference && comparisonView !== 'target') drawComparisonSource(gctx, reference, cellSize);
 
@@ -4676,15 +4860,30 @@ function redraw(): void {
       gctx.restore();
     }
   }
+  editorPerformanceStats.redrawReferenceMaxMs = Math.max(
+    editorPerformanceStats.redrawReferenceMaxMs,
+    performance.now() - stageStartedAt,
+  );
 
   // 4. Draw visible target layers bottom-to-top. Rasterizing each layer separately
   // preserves source-over alpha instead of replacing the lower palette cell.
+  stageStartedAt = performance.now();
   const visibleImage = comparing ? comparisonTargetImage() : rasterizedCur(frameIdx, false);
+  editorPerformanceStats.redrawRasterMaxMs = Math.max(
+    editorPerformanceStats.redrawRasterMaxMs,
+    performance.now() - stageStartedAt,
+  );
+  stageStartedAt = performance.now();
   if ((!comparing || comparisonView !== 'source') && visibleImage) {
     gctx.drawImage(visibleImage, 0, 0, grid.width, grid.height);
   }
+  editorPerformanceStats.redrawImageMaxMs = Math.max(
+    editorPerformanceStats.redrawImageMaxMs,
+    performance.now() - stageStartedAt,
+  );
 
   // 5. Grid lines
+  stageStartedAt = performance.now();
   gctx.strokeStyle = 'rgba(35, 40, 48, 0.18)';
   gctx.beginPath();
   for (let x = 0; x <= W(); x++) {
@@ -4700,6 +4899,11 @@ function redraw(): void {
   if (alignment) drawComparisonAxis(gctx, alignment, cellSize);
   updateComparisonReport(alignment);
   scheduleComparisonUpload();
+  editorPerformanceStats.redrawGridMaxMs = Math.max(
+    editorPerformanceStats.redrawGridMaxMs,
+    performance.now() - stageStartedAt,
+  );
+  stageStartedAt = performance.now();
 
   if (selection) {
     const x = selection.x * cellSize;
@@ -4827,6 +5031,10 @@ function redraw(): void {
       gctx.restore();
     }
   }
+  editorPerformanceStats.redrawOverlayMaxMs = Math.max(
+    editorPerformanceStats.redrawOverlayMaxMs,
+    performance.now() - stageStartedAt,
+  );
 }
 
 /* ---------------- composite preview ---------------- */
@@ -5824,9 +6032,19 @@ $('combatHitboxOverlay').addEventListener('pointerup', finishCombatHitboxDrag);
 $('combatHitboxOverlay').addEventListener('pointercancel', finishCombatHitboxDrag);
 
 let lastPreviewRenderKey = '';
-let lastPreviewHeavyRenderAt = 0;
 
 function renderPreview(scheduleNext = true): void {
+  const heavyRendersBefore = editorPerformanceStats.previewHeavyRenders;
+  const startedAt = performance.now();
+  renderPreviewNow(scheduleNext);
+  if (editorPerformanceStats.previewHeavyRenders > heavyRendersBefore) {
+    const elapsed = performance.now() - startedAt;
+    editorPerformanceStats.previewHeavyTotalMs += elapsed;
+    editorPerformanceStats.previewHeavyMaxMs = Math.max(editorPerformanceStats.previewHeavyMaxMs, elapsed);
+  }
+}
+
+function renderPreviewNow(scheduleNext = true): void {
   const now = performance.now();
   const hd = ($('hd') as HTMLInputElement).checked;
   // Editing is frame-oriented: the game-scale preview must show the frame
@@ -5848,14 +6066,19 @@ function renderPreview(scheduleNext = true): void {
     previewPlaying ? Math.floor(now / 33) : 'paused',
     Number(hd),
   ].join('|');
-  const interactiveThrottle = continuousEdit && now - lastPreviewHeavyRenderAt < 80;
-  if (renderKey === lastPreviewRenderKey || interactiveThrottle) {
+  // The main canvas is the authoritative live feedback during a gesture.
+  // Composite preview construction can involve the full Player renderer and
+  // was taking 60–110 ms per pass, so never run it inside a stroke/transform;
+  // the next animation frame after mouse-up renders the accepted result once.
+  const interactionActive = Boolean(
+    continuousEdit || painting || selectionMove || selectionHandleTransform,
+  );
+  if (renderKey === lastPreviewRenderKey || interactionActive) {
     editorPerformanceStats.previewSkippedFrames++;
     if (scheduleNext) requestAnimationFrame(() => renderPreview());
     return;
   }
   lastPreviewRenderKey = renderKey;
-  lastPreviewHeavyRenderAt = now;
   editorPerformanceStats.previewHeavyRenders++;
 
   maybeRebakeEditedEquipment();
@@ -6661,37 +6884,6 @@ function moveSelectionBy(dx: number, dy: number): void {
   commitSelectionPixels(pixelsInSelection(selection), x, y, `moved selection to ${x},${y}`);
 }
 
-function scaleSelectionRows(
-  source: PixelClipboard,
-  w: number,
-  h: number,
-  flipX = false,
-  flipY = false,
-): PixelClipboard {
-  return {
-    w,
-    h,
-    rows: Array.from({ length: h }, (_, y) => {
-      const scaledY = Math.min(source.h - 1, Math.floor(y * source.h / h));
-      const sourceY = flipY ? source.h - 1 - scaledY : scaledY;
-      return Array.from({ length: w }, (_, x) => {
-        const scaledX = Math.min(source.w - 1, Math.floor(x * source.w / w));
-        const sourceX = flipX ? source.w - 1 - scaledX : scaledX;
-        return source.rows[sourceY][sourceX];
-      }).join('');
-    }),
-    mask: source.mask && Array.from({ length: h }, (_, y) => {
-      const scaledY = Math.min(source.h - 1, Math.floor(y * source.h / h));
-      const sourceY = flipY ? source.h - 1 - scaledY : scaledY;
-      return Array.from({ length: w }, (_, x) => {
-        const scaledX = Math.min(source.w - 1, Math.floor(x * source.w / w));
-        const sourceX = flipX ? source.w - 1 - scaledX : scaledX;
-        return source.mask![sourceY][sourceX];
-      }).join('');
-    }),
-  };
-}
-
 function resizeSelection(): void {
   if (!transformMode) return;
   if (!requireEditableLayer()) return;
@@ -6714,75 +6906,6 @@ function resizeSelection(): void {
   const y = Math.max(0, Math.min(H() - requestedH,
     Math.round(selection.y + (selection.h - requestedH) / 2)));
   commitSelectionPixels(scaled, x, y, `resized selection to ${requestedW}x${requestedH}`);
-}
-
-function rotateSelectionQuarter(source: PixelClipboard, clockwise: boolean): PixelClipboard {
-  return {
-    w: source.h,
-    h: source.w,
-    rows: Array.from({ length: source.w }, (_, y) =>
-      Array.from({ length: source.h }, (_, x) => clockwise
-        ? source.rows[source.h - 1 - x][y]
-        : source.rows[x][source.w - 1 - y],
-      ).join(''),
-    ),
-    mask: source.mask && Array.from({ length: source.w }, (_, y) =>
-      Array.from({ length: source.h }, (_, x) => clockwise
-        ? source.mask![source.h - 1 - x][y]
-        : source.mask![x][source.w - 1 - y],
-      ).join(''),
-    ),
-  };
-}
-
-/**
- * Rotates indexed sprite pixels without creating gaps. Each destination
- * pixel is mapped back into the original selection and samples its nearest
- * source pixel. Quarter turns stay lossless; arbitrary angles necessarily
- * rasterize onto a new axis-aligned pixel grid.
- */
-function rotateSelectionRows(source: PixelClipboard, degrees: number): PixelClipboard {
-  const normalized = ((degrees % 360) + 360) % 360;
-  const quarterTurns = Math.round(normalized / 90) % 4;
-  const quarterAngle = quarterTurns * 90;
-  if (Math.abs(normalized - quarterAngle) < 0.0001 || Math.abs(normalized - 360) < 0.0001) {
-    let result = source;
-    for (let turn = 0; turn < quarterTurns; turn++) result = rotateSelectionQuarter(result, true);
-    return result;
-  }
-
-  const radians = degrees * Math.PI / 180;
-  const cosine = Math.cos(radians);
-  const sine = Math.sin(radians);
-  const width = Math.max(1, Math.ceil(
-    Math.abs(source.w * cosine) + Math.abs(source.h * sine) - 1e-9,
-  ));
-  const height = Math.max(1, Math.ceil(
-    Math.abs(source.w * sine) + Math.abs(source.h * cosine) - 1e-9,
-  ));
-  const rows: string[] = [];
-  const mask: string[] | undefined = source.mask ? [] : undefined;
-  for (let y = 0; y < height; y++) {
-    const destinationY = y + 0.5 - height / 2;
-    const row: string[] = [];
-    const maskRow: string[] | undefined = mask ? [] : undefined;
-    for (let x = 0; x < width; x++) {
-      const destinationX = x + 0.5 - width / 2;
-      const sampleX = Math.floor(cosine * destinationX + sine * destinationY + source.w / 2);
-      const sampleY = Math.floor(-sine * destinationX + cosine * destinationY + source.h / 2);
-      const inside = sampleX >= 0 && sampleX < source.w && sampleY >= 0 && sampleY < source.h;
-      row.push(inside ? source.rows[sampleY][sampleX] : '.');
-      if (maskRow) maskRow.push(inside ? source.mask![sampleY][sampleX] : '.');
-    }
-    rows.push(row.join(''));
-    if (maskRow) mask!.push(maskRow.join(''));
-  }
-  return {
-    w: width,
-    h: height,
-    rows,
-    mask,
-  };
 }
 
 function rotateSelectionBy(degrees: number, message?: string): void {
@@ -7386,6 +7509,7 @@ window.addEventListener('blur', () => {
   magicSelectionDrag = null;
   selectionStart = null;
   selectionMove = null;
+  cancelScheduledSelectionTransform();
   selectionHandleTransform = null;
   painting = false;
   lastPaintCell = null;
@@ -7463,6 +7587,98 @@ function onHitboxChange(): void {
 
 /* ---------------- boot ---------------- */
 
+interface KernelBenchmarkMeasurement {
+  operations: number;
+  totalMs: number;
+  msPerOperation: number;
+  checksum: number;
+}
+
+interface EditorKernelBenchmark {
+  iterations: number;
+  brush: KernelBenchmarkMeasurement;
+  rotation: KernelBenchmarkMeasurement;
+  transform: KernelBenchmarkMeasurement;
+  documentUnchanged: boolean;
+}
+
+function benchmarkKernel(
+  operations: number,
+  run: (index: number) => number,
+): KernelBenchmarkMeasurement {
+  let checksum = 0;
+  const startedAt = performance.now();
+  for (let index = 0; index < operations; index++) checksum += run(index);
+  const totalMs = performance.now() - startedAt;
+  return {
+    operations,
+    totalMs: Math.round(totalMs * 1000) / 1000,
+    msPerOperation: Math.round(totalMs / operations * 10000) / 10000,
+    checksum,
+  };
+}
+
+/**
+ * Runs the real pixel kernels against local synthetic rows. It deliberately
+ * avoids editor state, history, bridge publication, redraws, and previews so
+ * performance can be measured without touching a human's open sprite.
+ */
+function runEditorKernelBenchmark(requestedIterations = 120): EditorKernelBenchmark {
+  const iterations = Math.max(10, Math.min(1000, Math.round(requestedIterations)));
+  const versionBefore = editVersion;
+  const width = MAX_GRID_SIZE;
+  const height = MAX_GRID_SIZE;
+  const frame = Array.from({ length: height }, (_, y) =>
+    Array.from({ length: width }, (_, x) => ((x + y) & 1) ? 'A' : 'B').join(''));
+  const source: PixelClipboard = {
+    w: 64,
+    h: 80,
+    rows: Array.from({ length: 80 }, (_, y) =>
+      Array.from({ length: 64 }, (_, x) => ((x * 3 + y * 5) % 7) ? 'A' : '.').join('')),
+    mask: Array.from({ length: 80 }, (_, y) =>
+      Array.from({ length: 64 }, (_, x) => ((x + y) % 5) ? '1' : '.').join('')),
+  };
+
+  const brush = benchmarkKernel(iterations * 4, (index) => {
+    const size = 16;
+    const extent = Math.ceil((size + 1) / 2);
+    const centerX = 20 + (index * 7) % (width - 40);
+    const centerY = 20 + (index * 11) % (height - 40);
+    const batch = createPixelBatch(frame);
+    const ch = (index & 1) ? 'C' : 'D';
+    let touched = 0;
+    for (let dy = -extent; dy <= extent; dy++) for (let dx = -extent; dx <= extent; dx++) {
+      if (brushStrength(dx, dy, size) <= 0) continue;
+      setBatchPixel(batch, centerX + dx, centerY + dy, ch);
+      touched++;
+    }
+    commitPixelBatch(batch, false);
+    return touched + batch.rows.size;
+  });
+
+  const rotation = benchmarkKernel(iterations, (index) => {
+    const rotated = rotateSelectionRows(source, 3 + (index * 17) % 174);
+    return rotated.w * 31 + rotated.h * 17 + (rotated.mask?.length ?? 0);
+  });
+
+  const transform = benchmarkKernel(iterations * 2, (index) => {
+    const targetW = 40 + index % 72;
+    const targetH = 44 + (index * 3) % 84;
+    const scaled = scaleSelectionRows(source, targetW, targetH, Boolean(index & 1), Boolean(index & 2));
+    const rows = frame.slice();
+    pastePixels(rows, scaled, (index * 5) % (width - targetW + 1), (index * 7) % (height - targetH + 1), true);
+    return scaled.w * 13 + scaled.h * 7 + rows.length;
+  });
+
+  return {
+    iterations,
+    brush,
+    rotation,
+    transform,
+    documentUnchanged: editVersion === versionBefore,
+  };
+}
+
 function refreshUI(): void {
   reconcileLayerState();
   rebuildComparisonSelectors();
@@ -7498,9 +7714,27 @@ Object.defineProperty(window, '__editor', {
     get selection() { return selectionSnapshot(); },
     performance: {
       get snapshot() { return { ...editorPerformanceStats }; },
+      benchmark(iterations = 120) { return runEditorKernelBenchmark(iterations); },
       reset() {
         editorPerformanceStats.redraws = 0;
+        editorPerformanceStats.redrawTotalMs = 0;
+        editorPerformanceStats.redrawMaxMs = 0;
+        editorPerformanceStats.redrawSetupMaxMs = 0;
+        editorPerformanceStats.redrawCheckerMaxMs = 0;
+        editorPerformanceStats.redrawReferenceMaxMs = 0;
+        editorPerformanceStats.redrawRasterMaxMs = 0;
+        editorPerformanceStats.redrawImageMaxMs = 0;
+        editorPerformanceStats.redrawGridMaxMs = 0;
+        editorPerformanceStats.redrawOverlayMaxMs = 0;
+        editorPerformanceStats.paintEvents = 0;
+        editorPerformanceStats.paintTotalMs = 0;
+        editorPerformanceStats.paintMaxMs = 0;
+        editorPerformanceStats.selectionTransforms = 0;
+        editorPerformanceStats.selectionTransformTotalMs = 0;
+        editorPerformanceStats.selectionTransformMaxMs = 0;
         editorPerformanceStats.previewHeavyRenders = 0;
+        editorPerformanceStats.previewHeavyTotalMs = 0;
+        editorPerformanceStats.previewHeavyMaxMs = 0;
         editorPerformanceStats.previewSkippedFrames = 0;
       },
     },
