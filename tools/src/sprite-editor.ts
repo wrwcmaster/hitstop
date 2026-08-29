@@ -112,6 +112,14 @@ let lastPaintCell: { x: number; y: number } | null = null;
 let hoverPointer: { x: number; y: number } | null = null;
 let hoverCell: { x: number; y: number } | null = null;
 let strokePaletteChanged = false;
+let strokePaletteLookup: StrokePaletteLookup | null = null;
+let scheduledRedrawFrame = 0;
+let scheduledSelectionUiFrame = 0;
+const editorPerformanceStats = {
+  redraws: 0,
+  previewHeavyRenders: 0,
+  previewSkippedFrames: 0,
+};
 let panelsBeforeTabToggle: { left: boolean; right: boolean } | null = null;
 let spacePanActive = false;
 let canvasPan: {
@@ -263,6 +271,7 @@ let bridgePublishing = false;
 let lastSharedFile = '';
 let lastRepositoryFile = '';
 let previewTimer = 0;
+let previewRenderVersion = 0;
 const DRAFT_PREFIX = 'hitstop.sprite-editor.draft:';
 const RENDER_TAG_DRAFT_KEY = 'hitstop.sprite-editor.render-tags.draft';
 const WEAPON_COMBAT_DRAFT_KEY = 'hitstop.sprite-editor.weapon-combat.draft.v2';
@@ -559,20 +568,29 @@ const compositeCur = (index = frameIdx): string[] => {
     ? compositeSpriteFrameByTags(file, animName, index, renderTagIds(), PAL, visibleLayer)
     : compositeSpriteFrame(file, animName, index, PAL, visibleLayer)) ?? cur();
 };
-const rasterizedCur = (index = frameIdx, upscale = false): HTMLCanvasElement | undefined => (
-  rasterizeSpriteFrame(file, animName, index, PAL, {
+let rasterCacheVersion = -1;
+const rasterCache = new Map<string, HTMLCanvasElement | undefined>();
+const rasterizedCur = (index = frameIdx, upscale = false): HTMLCanvasElement | undefined => {
+  if (rasterCacheVersion !== editVersion) {
+    rasterCacheVersion = editVersion;
+    rasterCache.clear();
+  }
+  const key = [
+    animName,
+    index,
+    Number(upscale),
+    soloLayerId ?? '',
+    [...hiddenLayerIds].sort().join(','),
+    isLayeredSpriteFile(file) ? renderTagIds().join(',') : '',
+  ].join('|');
+  if (rasterCache.has(key)) return rasterCache.get(key);
+  const image = rasterizeSpriteFrame(file, animName, index, PAL, {
     tagOrder: isLayeredSpriteFile(file) ? renderTagIds() : undefined,
     include: visibleLayer,
     upscale,
-  })
-);
-const visibleAnim = (): SpriteAnimData => {
-  const timing = resolveAnimTiming(file, animName)!;
-  return {
-    fps: timing.fps,
-    loop: timing.loop,
-    frames: Array.from({ length: timing.frameCount }, (_, index) => compositeCur(index)),
-  };
+  });
+  rasterCache.set(key, image);
+  return image;
 };
 const W = () => cur()[0].length;
 const H = () => cur().length;
@@ -695,6 +713,7 @@ const brushCursor = $('brushCursor');
 const preview = $('preview') as HTMLCanvasElement;
 const pctx = preview.getContext('2d')!;
 const TRANSPARENCY_CHECKER_SIZE = 12;
+const transparencyPatterns = new WeakMap<CanvasRenderingContext2D, CanvasPattern>();
 
 /** Photoshop-style transparency is a view-space aid, not sprite pixels. */
 function drawTransparencyChecker(
@@ -703,15 +722,22 @@ function drawTransparencyChecker(
   height: number,
   size = TRANSPARENCY_CHECKER_SIZE,
 ): void {
-  context.fillStyle = '#f0f0f0';
-  context.fillRect(0, 0, width, height);
-  context.fillStyle = '#b8b8b8';
-  for (let y = 0; y < height; y += size) {
-    for (let x = 0; x < width; x += size) {
-      if (((x / size) + (y / size)) % 2 === 0) continue;
-      context.fillRect(x, y, Math.min(size, width - x), Math.min(size, height - y));
-    }
+  let pattern = transparencyPatterns.get(context);
+  if (!pattern) {
+    const tile = document.createElement('canvas');
+    tile.width = size * 2;
+    tile.height = size * 2;
+    const tileContext = tile.getContext('2d')!;
+    tileContext.fillStyle = '#f0f0f0';
+    tileContext.fillRect(0, 0, tile.width, tile.height);
+    tileContext.fillStyle = '#b8b8b8';
+    tileContext.fillRect(size, 0, size, size);
+    tileContext.fillRect(0, size, size, size);
+    pattern = context.createPattern(tile, 'repeat')!;
+    transparencyPatterns.set(context, pattern);
   }
+  context.fillStyle = pattern;
+  context.fillRect(0, 0, width, height);
 }
 
 const SPRITE_ROOT = '/src/game/content/sprites/';
@@ -930,6 +956,12 @@ function updateWorkspaceChrome(): void {
       : `${currentRepoPath} · saved`
     : `${currentFileName} · local document`;
   $('btnDeselect').toggleAttribute('disabled', !selection);
+}
+
+function updateWorkspaceCursorStatus(): void {
+  const value = hoverCell ? `x ${hoverCell.x}  y ${hoverCell.y}` : 'x --  y --';
+  const status = $('workspaceCursorStatus');
+  if (status.textContent !== value) status.textContent = value;
 }
 
 const VIEW_STATE_KEY = 'hitstop.sprite-editor.view';
@@ -1662,6 +1694,10 @@ async function saveWorkspaceSprites(): Promise<void> {
 }
 
 function schedulePreviewUpload(): void {
+  // The visible preview renderer also uses this nonce. It lets view-only
+  // controls invalidate a paused preview without forcing a continuous 60fps
+  // rebuild when nothing on screen changed.
+  previewRenderVersion++;
   window.clearTimeout(previewTimer);
   if (!bridgeConnected || !bridgeRevision) return;
   previewTimer = window.setTimeout(() => {
@@ -2968,6 +3004,46 @@ function setPixel(x: number, y: number, ch: string): void {
 }
 
 interface Rgba { r: number; g: number; b: number; a: number }
+interface StrokePaletteLookup {
+  exact: Map<string, string>;
+  colors: Array<{ ch: string; rgba: Rgba }>;
+  byChar: Map<string, Rgba>;
+}
+
+interface PixelBatch {
+  frame: string[];
+  rows: Map<number, string[]>;
+  changed: boolean;
+}
+
+function createPixelBatch(): PixelBatch {
+  return { frame: cur(), rows: new Map(), changed: false };
+}
+
+function batchPixel(batch: PixelBatch, x: number, y: number): string {
+  return batch.rows.get(y)?.[x] ?? batch.frame[y][x];
+}
+
+function setBatchPixel(batch: PixelBatch, x: number, y: number, ch: string): void {
+  if (x < 0 || y < 0 || x >= W() || y >= H() || batchPixel(batch, x, y) === ch) return;
+  let row = batch.rows.get(y);
+  if (!row) {
+    row = [...batch.frame[y]];
+    batch.rows.set(y, row);
+  }
+  row[x] = ch;
+  batch.changed = true;
+}
+
+function commitPixelBatch(batch: PixelBatch): boolean {
+  if (!batch.changed) return false;
+  for (const [y, row] of batch.rows) batch.frame[y] = row.join('');
+  // One stamp/interpolated segment is one render invalidation, regardless of
+  // how many pixels it touched. The old per-pixel increment forced caches to
+  // churn hundreds of times for a single soft-brush event.
+  editVersion++;
+  return true;
+}
 
 // Sprite files address colors with one-character palette keys. Soft tools
 // therefore bake their result into real palette entries rather than hiding
@@ -3013,6 +3089,39 @@ function rgbaHex(color: Rgba): string {
     .toString(16).padStart(2, '0');
   const rgb = `#${byte(color.r)}${byte(color.g)}${byte(color.b)}`;
   return color.a >= 254.5 ? rgb : `${rgb}${byte(color.a)}`;
+}
+
+function createStrokePaletteLookup(): StrokePaletteLookup {
+  const lookup: StrokePaletteLookup = {
+    exact: new Map(),
+    colors: [],
+    byChar: new Map(),
+  };
+  for (const [ch, value] of Object.entries(pal())) {
+    const rgba = parseRgba(value);
+    if (!rgba) continue;
+    lookup.exact.set(rgbaHex(rgba), ch);
+    lookup.colors.push({ ch, rgba });
+    lookup.byChar.set(ch, rgba);
+  }
+  return lookup;
+}
+
+function paletteRgba(ch: string): Rgba | null {
+  return strokePaletteLookup?.byChar.get(ch) ?? parseRgba(pal()[ch]);
+}
+
+function updateStrokePaletteLookup(ch: string, rgba: Rgba): void {
+  const lookup = strokePaletteLookup;
+  if (!lookup) return;
+  const index = lookup.colors.findIndex((entry) => entry.ch === ch);
+  if (index >= 0) {
+    lookup.exact.delete(rgbaHex(lookup.colors[index].rgba));
+    lookup.colors[index] = { ch, rgba };
+  }
+  else lookup.colors.push({ ch, rgba });
+  lookup.byChar.set(ch, rgba);
+  lookup.exact.set(rgbaHex(rgba), ch);
 }
 
 function mixRgba(from: Rgba, to: Rgba, amount: number): Rgba {
@@ -3105,12 +3214,16 @@ function paletteCharFor(color: Rgba): string {
   };
   if (quantized.a <= 0) return '.';
   const hex = rgbaHex(quantized);
+  const exact = strokePaletteLookup?.exact.get(hex);
+  if (exact) return exact;
   let nearest = '';
   let nearestDistance = Number.POSITIVE_INFINITY;
-  for (const [ch, value] of Object.entries(pal())) {
-    const rgba = parseRgba(value);
-    if (!rgba) continue;
-    if (rgbaHex(rgba) === hex) return ch;
+  const entries = strokePaletteLookup?.colors
+    ?? Object.entries(pal()).flatMap(([ch, value]) => {
+      const rgba = parseRgba(value);
+      return rgba ? [{ ch, rgba }] : [];
+    });
+  for (const { ch, rgba } of entries) {
     const distance = colorDistance(quantized, rgba);
     if (distance < nearestDistance) {
       nearest = ch;
@@ -3131,6 +3244,7 @@ function paletteCharFor(color: Rgba): string {
   );
   if (!recyclable) return nearest || currentChar;
   (file.palette ??= {})[recyclable] = hex;
+  updateStrokePaletteLookup(recyclable, quantized);
   strokePaletteChanged = true;
   return recyclable;
 }
@@ -3150,8 +3264,9 @@ function brushStrength(dx: number, dy: number, size = brushSize()): number {
   return (outer - distance) / Math.max(0.001, outer - core);
 }
 
-function paintBrush(centerX: number, centerY: number, erase: boolean): void {
-  const selected = parseRgba(pal()[currentChar]);
+function paintBrush(centerX: number, centerY: number, erase: boolean, targetBatch?: PixelBatch): void {
+  const batch = targetBatch ?? createPixelBatch();
+  const selected = paletteRgba(currentChar);
   if (!erase && (!selected || currentChar === '.' || selected.a <= 0)) erase = true;
   const extent = Math.ceil((brushSize() + 1) / 2);
   for (let dy = -extent; dy <= extent; dy++) {
@@ -3161,21 +3276,22 @@ function paintBrush(centerX: number, centerY: number, erase: boolean): void {
       const x = centerX + dx;
       const y = centerY + dy;
       if (x < 0 || y < 0 || x >= W() || y >= H()) continue;
-      const oldChar = cur()[y][x];
-      const old = parseRgba(pal()[oldChar]);
+      const oldChar = batchPixel(batch, x, y);
+      const old = paletteRgba(oldChar);
       if (erase) {
         if (!old) continue;
         const alpha = old.a * (1 - strength);
-        setPixel(x, y, alpha <= 0.5 ? '.' : paletteCharFor({ ...old, a: alpha }));
+        setBatchPixel(batch, x, y, alpha <= 0.5 ? '.' : paletteCharFor({ ...old, a: alpha }));
       } else if (strength >= 0.995) {
-        setPixel(x, y, currentChar);
+        setBatchPixel(batch, x, y, currentChar);
       } else if (old) {
-        setPixel(x, y, paletteCharFor(mixRgba(old, selected!, strength)));
+        setBatchPixel(batch, x, y, paletteCharFor(mixRgba(old, selected!, strength)));
       } else {
-        setPixel(x, y, paletteCharFor({ ...selected!, a: selected!.a * strength }));
+        setBatchPixel(batch, x, y, paletteCharFor({ ...selected!, a: selected!.a * strength }));
       }
     }
   }
+  if (!targetBatch) commitPixelBatch(batch);
 }
 
 function blurBrush(centerX: number, centerY: number, erase: boolean): void {
@@ -3184,6 +3300,7 @@ function blurBrush(centerX: number, centerY: number, erase: boolean): void {
     return;
   }
   const source = cur().slice();
+  const batch = createPixelBatch();
   const size = brushSize();
   const extent = Math.ceil((size + 1) / 2);
   const sampleRadius = Math.max(1, Math.floor(size / 2));
@@ -3194,7 +3311,7 @@ function blurBrush(centerX: number, centerY: number, erase: boolean): void {
       const x = centerX + dx;
       const y = centerY + dy;
       if (x < 0 || y < 0 || x >= W() || y >= H()) continue;
-      const original = parseRgba(pal()[source[y][x]]);
+      const original = paletteRgba(source[y][x]);
       if (!original) continue; // blur color, but never grow the silhouette
       let premultipliedR = 0;
       let premultipliedG = 0;
@@ -3204,7 +3321,7 @@ function blurBrush(centerX: number, centerY: number, erase: boolean): void {
       for (let sy = -sampleRadius; sy <= sampleRadius; sy++) {
         for (let sx = -sampleRadius; sx <= sampleRadius; sx++) {
           if (Math.hypot(sx, sy) > sampleRadius + 0.25) continue;
-          const sample = parseRgba(pal()[source[y + sy]?.[x + sx]]);
+          const sample = paletteRgba(source[y + sy]?.[x + sx]);
           const sampleAlpha = (sample?.a ?? 0) / 255;
           premultipliedR += (sample?.r ?? 0) * sampleAlpha;
           premultipliedG += (sample?.g ?? 0) * sampleAlpha;
@@ -3222,9 +3339,10 @@ function blurBrush(centerX: number, centerY: number, erase: boolean): void {
         b: alphaWeight ? premultipliedB / alphaWeight : original.b,
         a: averageAlpha,
       };
-      setPixel(x, y, paletteCharFor(mixRgba(original, average, strength)));
+      setBatchPixel(batch, x, y, paletteCharFor(mixRgba(original, average, strength)));
     }
   }
+  commitPixelBatch(batch);
 }
 
 function floodFill(startX: number, startY: number, fillChar: string): void {
@@ -3326,6 +3444,9 @@ grid.addEventListener('mousedown', (e) => {
   }
   if (!requireEditableLayer()) return;
   continuousEdit = beginContinuousDocumentEdit();
+  strokePaletteLookup = currentTool === 'brush' || currentTool === 'blur'
+    ? createStrokePaletteLookup()
+    : null;
   erasing = e.button === 2;
   painting = true;
   lastPaintCell = null;
@@ -3334,7 +3455,10 @@ grid.addEventListener('mousedown', (e) => {
 grid.addEventListener('mousemove', (e) => {
   hoverPointer = { x: e.clientX, y: e.clientY };
   hoverCell = gridCell(e);
-  updateWorkspaceChrome();
+  // Pointer motion changes only the coordinate readout. Rebuilding the full
+  // workspace chrome here used to scan and parse every local draft on every
+  // mouse event, which made drawing and transforms stall as projects grew.
+  updateWorkspaceCursorStatus();
   updateBrushCursor();
   updateSelectionModifierCursor(e);
   if (picking) {
@@ -3366,9 +3490,10 @@ grid.addEventListener('mouseleave', () => {
   grid.classList.remove('selection-movable');
   if (!selectionHandleTransform) grid.style.cursor = '';
   updateBrushCursor();
-  updateWorkspaceChrome();
+  updateWorkspaceCursorStatus();
 });
 window.addEventListener('mouseup', () => {
+  let selectionGestureFinished = false;
   picking = false;
   if (magicSelectionDrag) {
     const mode = magicSelectionDrag.initialMode;
@@ -3389,6 +3514,7 @@ window.addEventListener('mouseup', () => {
     flash(count ? `selected ${count} pixels (${mode})` : 'selection cleared');
   }
   if (selectionMove) {
+    selectionGestureFinished = selectionMove.moved;
     selectionMove = null;
   }
   if (selectionHandleTransform) {
@@ -3396,6 +3522,7 @@ window.addEventListener('mouseup', () => {
     const moved = completedTransform.moved;
     const handle = completedTransform.handle;
     selectionHandleTransform = null;
+    selectionGestureFinished ||= moved;
     if (moved) {
       const flipped = [
         completedTransform.flipX ? 'horizontal' : '',
@@ -3408,6 +3535,7 @@ window.addEventListener('mouseup', () => {
     ($('selectionAngle') as HTMLInputElement).value = '0';
     grid.style.cursor = transformMode ? 'default' : currentTool === 'select' ? 'cell' : '';
   }
+  if (selectionGestureFinished) flushGestureSelectionUi();
   if (painting) {
     painting = false;
     lastPaintCell = null;
@@ -3419,6 +3547,8 @@ window.addEventListener('mouseup', () => {
       buildPalette();
     }
     strokePaletteChanged = false;
+    strokePaletteLookup = null;
+    flushScheduledRedraw();
   }
   finishContinuousDocumentEdit();
 });
@@ -3777,7 +3907,13 @@ function moveSelectionDrag(point: { x: number; y: number }): void {
   pastePixels(rows, selectionMove.source, x, y, true);
   anim().frames[frameIdx] = rows;
   editVersion++;
-  setSelection({ x, y, w: selectionMove.original.w, h: selectionMove.original.h, mask: selectionMove.source.mask?.slice() });
+  setSelectionDuringGesture({
+    x,
+    y,
+    w: selectionMove.original.w,
+    h: selectionMove.original.h,
+    mask: selectionMove.source.mask?.slice(),
+  });
 }
 
 function gridPointer(e: MouseEvent): { x: number; y: number } {
@@ -3907,7 +4043,7 @@ function applyLiveSelectionTransform(
   pastePixels(rows, clip, x, y, true);
   anim().frames[frameIdx] = rows;
   editVersion++;
-  setSelection({ x, y, w: clip.w, h: clip.h, mask: clip.mask?.slice() });
+  setSelectionDuringGesture({ x, y, w: clip.w, h: clip.h, mask: clip.mask?.slice() });
 }
 
 function updateSelectionHandleTransform(e: MouseEvent): void {
@@ -3985,13 +4121,7 @@ function updateSelectionHandleTransform(e: MouseEvent): void {
   );
 }
 
-function setSelection(next: PixelSelection | null): void {
-  if (next && !transformMode && (currentTool === 'select' || currentTool === 'magic')) {
-    selectionTool = currentTool;
-  }
-  selection = next;
-  const transformEnded = !selection && transformMode;
-  if (transformEnded) transformMode = false;
+function updateSelectionReadout(): void {
   ($('btnCut') as HTMLButtonElement).disabled = !selection;
   ($('btnCopy') as HTMLButtonElement).disabled = !selection;
   updateSelectionTransformControls();
@@ -4004,6 +4134,34 @@ function setSelection(next: PixelSelection | null): void {
   $('selectionStatus').textContent = selection
     ? `selection: ${selectionPixelCount(selection)} px in ${selection.w}x${selection.h} at ${selection.x},${selection.y} · shared with agent`
     : 'selection: none';
+}
+
+function setSelectionDuringGesture(next: PixelSelection): void {
+  selection = next;
+  if (scheduledSelectionUiFrame) return;
+  scheduledSelectionUiFrame = requestAnimationFrame(() => {
+    scheduledSelectionUiFrame = 0;
+    updateSelectionReadout();
+    scheduleRedraw();
+  });
+}
+
+function flushGestureSelectionUi(): void {
+  if (scheduledSelectionUiFrame) {
+    cancelAnimationFrame(scheduledSelectionUiFrame);
+    scheduledSelectionUiFrame = 0;
+  }
+  if (selection) setSelection(selection);
+}
+
+function setSelection(next: PixelSelection | null): void {
+  if (next && !transformMode && (currentTool === 'select' || currentTool === 'magic')) {
+    selectionTool = currentTool;
+  }
+  selection = next;
+  const transformEnded = !selection && transformMode;
+  if (transformEnded) transformMode = false;
+  updateSelectionReadout();
   buildLayerExtractionControls();
   updateWorkspaceChrome();
   // Selection is an independent canvas state. Keep its originating selection
@@ -4082,16 +4240,21 @@ function paint(e: MouseEvent): void {
     const previous = lastPaintCell;
     if (previous?.x === x && previous.y === y) return;
     const steps = previous ? Math.max(Math.abs(x - previous.x), Math.abs(y - previous.y)) : 0;
+    const brushBatch = currentTool === 'brush' ? createPixelBatch() : null;
     for (let step = 0; step <= steps; step++) {
       const amount = steps ? step / steps : 1;
       const stampX = previous ? Math.round(previous.x + (x - previous.x) * amount) : x;
       const stampY = previous ? Math.round(previous.y + (y - previous.y) * amount) : y;
-      if (currentTool === 'brush') paintBrush(stampX, stampY, erasing);
+      if (currentTool === 'brush') paintBrush(stampX, stampY, erasing, brushBatch!);
       else blurBrush(stampX, stampY, erasing);
     }
+    if (brushBatch) commitPixelBatch(brushBatch);
     lastPaintCell = { x, y };
   }
-  redraw();
+  // Pointer events can arrive much faster than the display refresh rate.
+  // Coalesce their canvas work into one paint per animation frame while the
+  // document still records every sampled pixel.
+  scheduleRedraw();
 }
 
 /* ---------------- frames ---------------- */
@@ -4462,9 +4625,31 @@ function scheduleComparisonUpload(): void {
   }, 180);
 }
 
+function scheduleRedraw(): void {
+  if (scheduledRedrawFrame) return;
+  scheduledRedrawFrame = requestAnimationFrame(() => {
+    scheduledRedrawFrame = 0;
+    redraw();
+  });
+}
+
+function flushScheduledRedraw(): void {
+  if (!scheduledRedrawFrame) return;
+  cancelAnimationFrame(scheduledRedrawFrame);
+  scheduledRedrawFrame = 0;
+  redraw();
+}
+
 function redraw(): void {
-  grid.width = W() * cellSize;
-  grid.height = H() * cellSize;
+  editorPerformanceStats.redraws++;
+  if (scheduledRedrawFrame) {
+    cancelAnimationFrame(scheduledRedrawFrame);
+    scheduledRedrawFrame = 0;
+  }
+  const width = W() * cellSize;
+  const height = H() * cellSize;
+  if (grid.width !== width) grid.width = width;
+  if (grid.height !== height) grid.height = height;
   gctx.imageSmoothingEnabled = false;
 
   // 1. Transparency is a fixed view-space checker. It deliberately ignores
@@ -4501,18 +4686,16 @@ function redraw(): void {
 
   // 5. Grid lines
   gctx.strokeStyle = 'rgba(35, 40, 48, 0.18)';
+  gctx.beginPath();
   for (let x = 0; x <= W(); x++) {
-    gctx.beginPath();
     gctx.moveTo(x * cellSize + 0.5, 0);
     gctx.lineTo(x * cellSize + 0.5, H() * cellSize);
-    gctx.stroke();
   }
   for (let y = 0; y <= H(); y++) {
-    gctx.beginPath();
     gctx.moveTo(0, y * cellSize + 0.5);
     gctx.lineTo(W() * cellSize, y * cellSize);
-    gctx.stroke();
   }
+  gctx.stroke();
   const alignment = comparing ? comparisonAlignment() : null;
   if (alignment) drawComparisonAxis(gctx, alignment, cellSize);
   updateComparisonReport(alignment);
@@ -5640,10 +5823,12 @@ function finishCombatHitboxDrag(event: Event): void {
 $('combatHitboxOverlay').addEventListener('pointerup', finishCombatHitboxDrag);
 $('combatHitboxOverlay').addEventListener('pointercancel', finishCombatHitboxDrag);
 
+let lastPreviewRenderKey = '';
+let lastPreviewHeavyRenderAt = 0;
+
 function renderPreview(scheduleNext = true): void {
-  maybeRebakeEditedEquipment();
+  const now = performance.now();
   const hd = ($('hd') as HTMLInputElement).checked;
-  const a = visibleAnim();
   // Editing is frame-oriented: the game-scale preview must show the frame
   // selected in the grid unless the author explicitly asks to play the
   // animation. Previously the preview always ran on wall-clock time, so its
@@ -5653,7 +5838,27 @@ function renderPreview(scheduleNext = true): void {
   const pausedFrame = previewStepping
     ? ((previewStepFrame % timing.frameCount) + timing.frameCount) % timing.frameCount
     : Math.min(frameIdx, timing.frameCount - 1);
-  const t = previewPlaying ? performance.now() / 1000 : pausedFrame / timing.fps;
+  const t = previewPlaying ? now / 1000 : pausedFrame / timing.fps;
+  const estimatedFrame = previewPlaying ? previewFrameAt(t, timing) : pausedFrame;
+  const renderKey = [
+    editVersion,
+    previewRenderVersion,
+    animName,
+    estimatedFrame,
+    previewPlaying ? Math.floor(now / 33) : 'paused',
+    Number(hd),
+  ].join('|');
+  const interactiveThrottle = continuousEdit && now - lastPreviewHeavyRenderAt < 80;
+  if (renderKey === lastPreviewRenderKey || interactiveThrottle) {
+    editorPerformanceStats.previewSkippedFrames++;
+    if (scheduleNext) requestAnimationFrame(() => renderPreview());
+    return;
+  }
+  lastPreviewRenderKey = renderKey;
+  lastPreviewHeavyRenderAt = now;
+  editorPerformanceStats.previewHeavyRenders++;
+
+  maybeRebakeEditedEquipment();
   const composite = renderComposite(t, previewPlaying ? undefined : pausedFrame);
   const displayedFrame = previewPlaying
     ? (compositePreviewFrame ?? previewFrameAt(t, timing))
@@ -5683,13 +5888,16 @@ function renderPreview(scheduleNext = true): void {
     return;
   }
 
-  if (!a || !a.frames.length) {
+  if (!timing.frameCount) {
     if (scheduleNext) requestAnimationFrame(() => renderPreview());
     return;
   }
 
   const idx = displayedFrame;
-  const rows = a.frames[idx] ?? [];
+  // Only the displayed frame is needed. The old visibleAnim() call composited
+  // every frame of the animation on every requestAnimationFrame, even when a
+  // paused composite preview immediately discarded that work.
+  const rows = compositeCur(idx) ?? [];
 
   const { w, h, hitbox } = geometryOf(file, rows);
 
@@ -5709,7 +5917,7 @@ function renderPreview(scheduleNext = true): void {
   pctx.fillRect(0, 0, preview.width, 20);
   pctx.fillStyle = '#ffcd75';
   pctx.font = '11px monospace';
-  pctx.fillText(`${animName}  ${a.fps}fps`, 8, 16);
+  pctx.fillText(`${animName}  ${timing.fps}fps`, 8, 16);
 
   const isHighRes = file.hd === false;
   const img = rasterizedCur(idx, !(isHighRes || !hd));
@@ -6552,35 +6760,28 @@ function rotateSelectionRows(source: PixelClipboard, degrees: number): PixelClip
   const height = Math.max(1, Math.ceil(
     Math.abs(source.w * sine) + Math.abs(source.h * cosine) - 1e-9,
   ));
+  const rows: string[] = [];
+  const mask: string[] | undefined = source.mask ? [] : undefined;
+  for (let y = 0; y < height; y++) {
+    const destinationY = y + 0.5 - height / 2;
+    const row: string[] = [];
+    const maskRow: string[] | undefined = mask ? [] : undefined;
+    for (let x = 0; x < width; x++) {
+      const destinationX = x + 0.5 - width / 2;
+      const sampleX = Math.floor(cosine * destinationX + sine * destinationY + source.w / 2);
+      const sampleY = Math.floor(-sine * destinationX + cosine * destinationY + source.h / 2);
+      const inside = sampleX >= 0 && sampleX < source.w && sampleY >= 0 && sampleY < source.h;
+      row.push(inside ? source.rows[sampleY][sampleX] : '.');
+      if (maskRow) maskRow.push(inside ? source.mask![sampleY][sampleX] : '.');
+    }
+    rows.push(row.join(''));
+    if (maskRow) mask!.push(maskRow.join(''));
+  }
   return {
     w: width,
     h: height,
-    rows: Array.from({ length: height }, (_, y) =>
-      Array.from({ length: width }, (_, x) => {
-        const destinationX = x + 0.5 - width / 2;
-        const destinationY = y + 0.5 - height / 2;
-        const sourceX = cosine * destinationX + sine * destinationY + source.w / 2;
-        const sourceY = -sine * destinationX + cosine * destinationY + source.h / 2;
-        const sampleX = Math.floor(sourceX);
-        const sampleY = Math.floor(sourceY);
-        return sampleX >= 0 && sampleX < source.w && sampleY >= 0 && sampleY < source.h
-          ? source.rows[sampleY][sampleX]
-          : '.';
-      }).join(''),
-    ),
-    mask: source.mask && Array.from({ length: height }, (_, y) =>
-      Array.from({ length: width }, (_, x) => {
-        const destinationX = x + 0.5 - width / 2;
-        const destinationY = y + 0.5 - height / 2;
-        const sourceX = cosine * destinationX + sine * destinationY + source.w / 2;
-        const sourceY = -sine * destinationX + cosine * destinationY + source.h / 2;
-        const sampleX = Math.floor(sourceX);
-        const sampleY = Math.floor(sourceY);
-        return sampleX >= 0 && sampleX < source.w && sampleY >= 0 && sampleY < source.h
-          ? source.mask![sampleY][sampleX]
-          : '.';
-      }).join(''),
-    ),
+    rows,
+    mask,
   };
 }
 
@@ -7295,6 +7496,14 @@ Object.defineProperty(window, '__editor', {
     get editVersion() { return editVersion; },
     get rebuiltVersion() { return rebuiltVersion; },
     get selection() { return selectionSnapshot(); },
+    performance: {
+      get snapshot() { return { ...editorPerformanceStats }; },
+      reset() {
+        editorPerformanceStats.redraws = 0;
+        editorPerformanceStats.previewHeavyRenders = 0;
+        editorPerformanceStats.previewSkippedFrames = 0;
+      },
+    },
     get bridge() {
       return {
         connected: bridgeConnected,
