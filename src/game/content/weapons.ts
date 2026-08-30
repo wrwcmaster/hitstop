@@ -520,7 +520,7 @@ defineWeaponType('unarmed', {
 defineWeaponType('sword', {
   comboWindow: 0.24,
   bodyAnimations: {
-    idle: 'sword-idle',
+    idle: { animation: 'sword-idle', embeddedHeldObject: true },
     run: { animation: 'sword-run', embeddedHeldObject: true },
   },
   ...contextuals({ reach: 20, arc: 16, heft: 1 }),

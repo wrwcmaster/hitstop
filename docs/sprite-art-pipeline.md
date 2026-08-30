@@ -58,6 +58,39 @@ design to surrender a semantic color.
 
 Keep the generated source. It is the comparison target, not yet a game asset.
 
+### Prove a generated video is decoding before extracting frames
+
+Do not infer that a video is static from repeated extracted frames until the
+random-access decode path has been verified. An HTTP test route that always
+returns the complete MP4 with status `200` can play from the beginning while
+silently breaking seeks: every requested timestamp may then yield the first
+decoded frame. In particular, do not serve an MP4 with Playwright
+`route.fulfill({ path })` unless that route correctly implements byte ranges.
+
+Use this gate before cropping, normalization, or sprite import:
+
+1. Serve the unchanged source through a normal range-capable server or use a
+   decoder with proven random-access support. For an HTTP MP4, a byte-range
+   request must return `206 Partial Content` with a valid `Content-Range`.
+2. After `loadedmetadata`, seek to at least the beginning, midpoint, and a late
+   timestamp. Wait for `seeked` and, when available, the next
+   `requestVideoFrameCallback` before reading pixels.
+3. Compare decoded subject pixels or image hashes between those timestamps.
+   Encoded-file metadata, a successful `currentTime` assignment, or a `seeked`
+   event alone does not prove that a different frame was decoded.
+4. Produce a timestamp-labelled contact sheet spanning the complete duration
+   and inspect it visually. Identify the intended loop from that sheet; do not
+   automatically treat the first N samples as the animation.
+5. Record the source URL/path, duration, dimensions, extraction timestamps,
+   and crop in the review metadata so the candidate can be reproduced.
+
+If an expected animation produces identical samples, stop and classify the
+extraction as unverified. Check byte-range handling and decoded pixels before
+claiming the source is static or asking for a replacement. When the decode
+path changes, regenerate every downstream contact sheet, candidate strip,
+normalized image, and sprite transaction; artifacts from the faulty decoder
+are invalid even when their files are well-formed.
+
 For animation, the generated source must contain the complete candidate loop
 before any frame is converted to JSON. Open that PNG in the sprite animation
 workbench, remove its chroma key, detect/crop the frames, align them to one

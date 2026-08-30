@@ -451,6 +451,11 @@ When editing sprite art through the live sprite editor, follow
   shared document.
 - Reuse the approved source silhouette and the complete approved material
   palette/alpha ramp. Do not invent a reduced color map from dominant colors.
+- Before extracting animation from video, prove random-access decoding with a
+  range-capable source, decoded-pixel differences at separated timestamps, and
+  a timestamp-labelled full-duration contact sheet. Repeated frames are a
+  decoder failure until this gate rules that out; never diagnose a video as
+  static from an unverified seek path. See `docs/sprite-art-pipeline.md`.
 - Dry-run the complete transaction, apply it once, then fetch and inspect the
   post-edit composite preview from that accepted revision.
 - Validate geometry, palette coverage, alpha structure, layer order, and
