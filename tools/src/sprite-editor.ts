@@ -1,31 +1,11 @@
 /// <reference types="vite/client" />
 
-import { resolveSpriteGeometry, resolveAnim, sprite, epx, type Palette, type SpriteFile, type SpriteAnimData } from '@engine/index';
+import { resolveAnim, sprite, epx, type Palette, type SpriteFile, type SpriteAnimData } from '@engine/index';
+import { parseSpriteDocument, emptyFrame, geometryOf, type SpriteDocument } from './sprite-editor/document';
+import { SpriteHistory } from './sprite-editor/history';
 import { PAL } from '@game/content/palette';
-// Composite preview: the editor borrows the GAME's renderers rather than
-// imitating them, so what you see here — held weapon anchored to the
-// body, slash trail sweeping on the attack clock — is exactly what the
-// game draws. The weapon anchors and the trail are code, not sprites;
-// no sprite-only overlay could show this truthfully.
-import {
-  drawHeldWeapon,
-  drawWeaponTrail,
-  weaponVisuals,
-  rebuildSpriteWeapon,
-} from '@game/content/weapon-visuals';
-import { weapons, weaponTypeOf, allAttacks } from '@game/content/weapons';
-import { KNIGHT_ANIMS, baseKnight } from '@game/content/sprites';
-// The "player (full)" body drives a REAL Player — body-english, gear
-// layers, held weapon and trail all come from Player.render, posed via
-// its poseAttack seam. Content self-registers on import (the game's
-// register*() functions are empty bodies that exist to force imports),
-// so pulling in items and classes here fills every registry the
-// constructor touches.
-import { Player } from '@game/actors/player';
-import '@game/content/items';
-import '@game/content/classes';
-import '@game/content/skills';
-import '@game/content/skilltree';
+import { weapons } from '@game/content/weapons';
+import { CompositePreview, movesOf } from './sprite-editor/composite-preview';
 
 /**
  * Sprite editor for the engine's per-sprite JSON format
@@ -39,7 +19,7 @@ const CELL = 24;
 
 /* ---------------- state ---------------- */
 
-let file: SpriteFile = {
+let file: SpriteDocument = {
   hd: true,
   palette: { ...PAL },
   anims: { idle: { fps: 8, frames: [emptyFrame(12, 14)] } },
@@ -52,19 +32,14 @@ let erasing = false;
 let currentTool: 'draw' | 'fill' = 'draw';
 let refFile: SpriteFile | null = null;
 let currentFileName = 'new sprite.json';
-const undoStack: string[] = [];
-const redoStack: string[] = [];
-const MAX_HISTORY = 100;
+const history = new SpriteHistory();
 
-function emptyFrame(w: number, h: number): string[] {
-  return Array.from({ length: h }, () => '.'.repeat(w));
-}
 function firstPaintChar(): string {
-  const entry = Object.entries(file.palette ?? {}).find(([, c]) => c);
-  return entry ? entry[0] : 'S';
+  const entry = Object.entries(file.palette).find(([, c]) => c);
+  return entry ? entry[0] : '.';
 }
 
-const pal = (): Palette => file.palette ?? {};
+const pal = (): Palette => file.palette;
 /**
  * The animation being edited, RESOLVED: an alias entry ("plunge":
  * "attack") has no frames of its own, so selecting one jumps to its
@@ -81,18 +56,7 @@ const cur = () => anim().frames[frameIdx];
 const W = () => cur()[0].length;
 const H = () => cur().length;
 
-function gridSize(rows: string[]): { w: number; h: number } {
-  return {
-    w: Math.max(1, ...rows.map((row) => row.length)),
-    h: Math.max(1, rows.length),
-  };
-}
-
-function geometryOf(spriteFile: SpriteFile, rows: string[]) {
-  const grid = gridSize(rows);
-  const density = spriteFile.hd === false ? 4 : 1;
-  return resolveSpriteGeometry(spriteFile, grid.w / density, grid.h / density);
-}
+const normalize = (raw: unknown): SpriteDocument => parseSpriteDocument(raw, PAL);
 
 /* ---------------- dom ---------------- */
 
@@ -126,7 +90,7 @@ function populateSpriteSelect(id: string): void {
   }
 }
 
-function existingSprite(path: string): SpriteFile {
+function existingSprite(path: string): SpriteDocument {
   const spriteFile = existingSprites.get(path);
   if (!spriteFile) throw new Error(`unknown sprite "${path}"`);
   // Editor mutations must not alter the cached module or reference layer.
@@ -171,10 +135,11 @@ function buildPalette(): void {
 }
 
 $('btnAddColor').onclick = () => {
+  const ch = ($('newChar') as HTMLInputElement).value;
+  if (ch.length !== 1) { flash('palette key must be one character'); return; }
   saveHistory();
-  const ch = ($('newChar') as HTMLInputElement).value || '?';
   const color = ($('newColor') as HTMLInputElement).value;
-  (file.palette ??= {})[ch] = color;
+  file.palette[ch] = color;
   currentChar = ch;
   buildPalette();
   redraw();
@@ -399,7 +364,7 @@ function redraw(): void {
   }
 
   // 3. Draw reference sprite if enabled
-  const showRef = ($('showRef') as HTMLInputElement)?.checked ?? true;
+  const showRef = ($('showRef') as HTMLInputElement).checked;
   if (refFile && showRef) {
     const refAnim = resolveAnim(refFile, animName in refFile.anims ? animName : Object.keys(refFile.anims)[0]);
     if (refAnim) {
@@ -425,7 +390,7 @@ function redraw(): void {
   }
 
   // 4. Draw onion skin if enabled
-  const onion = ($('onionSkin') as HTMLInputElement)?.checked ?? false;
+  const onion = ($('onionSkin') as HTMLInputElement).checked;
   if (onion && frameIdx > 0) {
     const prevFrame = anim().frames[frameIdx - 1];
     if (prevFrame) {
@@ -479,80 +444,8 @@ function redraw(): void {
  * only when this moves — so painting stays cheap.
  */
 let editVersion = 0;
-let rebuiltVersion = -1;
+const compositePreview = new CompositePreview();
 
-function maybeRebakeEditedWeapon(): void {
-  if (rebuiltVersion === editVersion) return;
-  rebuiltVersion = editVersion;
-  // "rusty-sword.json" -> visual id "rusty-sword"; a no-op for sheets
-  // that aren't a registered sprite weapon.
-  rebuildSpriteWeapon(currentFileName.replace(/\.json$/, ''), file);
-}
-
-/**
- * A knight to pose. She is constructed against no-op stand-ins for the
- * game and the tilemap: render() and poseAttack() draw and place — they
- * never simulate — so the only surfaces touched are the ones stubbed.
- * Built lazily and kept, so equipping gear or swapping weapons persists
- * between frames like it would in play.
- */
-let posePlayer: Player | null = null;
-let posePlayerError = '';
-
-function getPosePlayer(): Player | null {
-  if (posePlayer || posePlayerError) return posePlayer;
-  try {
-    const noop = () => {};
-    const stubSfx = { play: noop };
-    const stubGame = {
-      input: { held: () => false, pressed: () => false, consumePress: () => false, axis: () => 0 },
-      sfx: stubSfx,
-      feel: { text: noop, impact: noop, shake: noop, sfx: stubSfx, particles: { burst: noop, clear: noop } },
-      events: { emit: noop, on: () => noop },
-      world: { actors: () => [], all: () => [], spawn: (e: unknown) => e },
-      // beginAttack opens a strike on state entry; a hit-nothing stub.
-      combat: { strike: () => ({ apply: () => [] }), hit: noop },
-      camera: { x: 0, y: 0 },
-    } as unknown as ConstructorParameters<typeof Player>[0];
-    const stubCollision = {
-      tileSize: 8,
-      worldW: 10000,
-      worldH: 10000,
-      bounds: { x: 0, y: 0, w: 10000, h: 10000 },
-      *solidsNear() { /* nothing to collide with */ },
-      waterAt: () => false,
-      submersion: () => 0,
-      hazardAt: () => 0,
-      groundY: () => 10000,
-      tileAt: () => '',
-    } as unknown as ConstructorParameters<typeof Player>[1];
-    posePlayer = new Player(stubGame, stubCollision, 0, 0);
-  } catch (e) {
-    posePlayerError = String(e);
-  }
-  return posePlayer;
-}
-
-/**
- * A weapon's moveset, labeled the way a player thinks of it. The combo
- * swings and every contextual move usually share ONE sheet animation
- * ('attack'), differing in trail, timing, aim and body motion — which is
- * exactly why the composite needs a selector: the sheet alone cannot say
- * which move you are looking at.
- */
-function movesOf(weaponId: string): { key: string; label: string; def: ReturnType<typeof allAttacks>[number] }[] {
-  const type = weaponTypeOf(weapons.get(weaponId));
-  const out: { key: string; label: string; def: ReturnType<typeof allAttacks>[number] }[] = [];
-  type.attacks.forEach((def, i) => out.push({ key: `combo${i}`, label: `combo ${i + 1}`, def }));
-  for (const key of ['aerial', 'plunge', 'upper', 'dashAttack'] as const) {
-    const def = type[key];
-    if (def) out.push({ key, label: key === 'dashAttack' ? 'dash' : key, def });
-  }
-  return out;
-}
-
-/** Refill the move selector for the chosen weapon, keeping a still-valid
- * selection where possible. */
 function rebuildMoveSelect(weaponId: string): void {
   const sel = $('compMove') as HTMLSelectElement;
   const prev = sel.value;
@@ -571,236 +464,17 @@ function rebuildMoveSelect(weaponId: string): void {
   if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
 }
 
-/**
- * The attack hitbox overlay: dim while the box is merely placed, red
- * while the `active` window makes it real. Placement mirrors
- * Player.attackBox exactly — forward aims off the body's front edge
- * (facing right here), down off the feet, up off the head — so what the
- * panel shows is where the game would actually hit.
- */
-function drawAttackBox(
-  g: CanvasRenderingContext2D,
-  def: ReturnType<typeof allAttacks>[number],
-  body: { x: number; y: number; w: number; h: number },
-  progress: number,
-): void {
-  const hb = def.hitbox;
-  const aim = def.aim ?? 'forward';
-  const cx = body.x + body.w / 2;
-  const rect = aim === 'down'
-    ? { x: cx - hb.w / 2, y: body.y + body.h + hb.forward, w: hb.w, h: hb.h }
-    : aim === 'up'
-      ? { x: cx - hb.w / 2, y: body.y - hb.forward - hb.h, w: hb.w, h: hb.h }
-      : { x: body.x + body.w + hb.forward, y: body.y + body.h / 2 - hb.h / 2 + hb.y, w: hb.w, h: hb.h };
-  const live = progress > def.active[0] && progress < def.active[1];
-  g.save();
-  g.strokeStyle = live ? '#ff4444' : '#566c86';
-  g.globalAlpha = live ? 0.9 : 0.45;
-  g.lineWidth = 0.5;
-  g.strokeRect(rect.x + 0.25, rect.y + 0.25, rect.w - 0.5, rect.h - 0.5);
-  if (live) {
-    g.fillStyle = '#ff4444';
-    g.globalAlpha = 0.15;
-    g.fillRect(rect.x, rect.y, rect.w, rect.h);
-  }
-  g.restore();
-}
-
-/** Equip exactly `id` in `slot`, adding to the bag on first use. */
-function ensureEquipped(p: Player, slot: string, id: string | null): void {
-  if (p.equipment.get(slot) === id) return;
-  if (id === null) {
-    p.equipment.unequip(slot);
-  } else {
-    if (!p.inventory.has(id)) p.inventory.add(id);
-    p.equipment.equip(id);
-  }
-  p.syncStats();
-}
-
-/**
- * The joint view: body + held weapon + attack trail on one clock,
- * drawn by the same code the game uses (see Player.render — body at a
- * feet origin, weapon inside that transform, trail in world space).
- *
- * One cycle = the attack's real duration plus a beat of hold, or the
- * animation's own length if that is longer, so the trail sweeps at its
- * true speed and you still get a readable pause between swings.
- */
 function renderComposite(t: number): boolean {
-  const weaponId = ($('compWeapon') as HTMLSelectElement).value;
-  if (!weaponId || !weapons.has(weaponId)) return false;
-  const a = anim();
-  if (!a || !a.frames.length) return false;
-  maybeRebakeEditedWeapon();
-
-  const wdef = weapons.get(weaponId);
-  const moves = movesOf(weaponId);
-  // A move is a candidate when its animation is the one on screen — or
-  // when its animation is MISSING from the sheet and the screen shows
-  // 'attack', the pattern it falls back to in game. So the base swing
-  // still previews every un-arted move via the selector, and a move
-  // gains its own art the moment its animation exists.
-  const sheetHas = (name: string) => !!weaponVisuals.get(wdef.visual).animations?.includes(name);
-  const candidates = moves.filter((m) =>
-    m.def.animation === animName || (animName === 'attack' && !sheetHas(m.def.animation)));
-  const wantKey = ($('compMove') as HTMLSelectElement).value;
-  const move = candidates.find((m) => m.key === wantKey) ?? candidates[0];
-  const atkDef = move?.def;
-  // Long moves are time-compressed. The plunge's 0.9s duration is a
-  // MAXIMUM — in play the landing cuts it short — so previewed raw it
-  // is three-quarters of a second of nothing moving. Compression sweeps
-  // the full progress on a shorter wall clock; every trail and pose
-  // clock is a fraction of progress, so the whole move scales together.
-  // The label owns up to it with an xN tag.
-  const ATTACK_PREVIEW_CAP = 0.5;
-  const realDur = atkDef?.duration ?? 0;
-  const speedup = realDur > ATTACK_PREVIEW_CAP ? realDur / ATTACK_PREVIEW_CAP : 1;
-  const moveTag = move ? ` [${move.label}${speedup > 1 ? ` x${speedup.toFixed(1)}` : ''}]` : '';
-  // When the previewed anim isn't one this weapon attacks WITH, say
-  // where the attack lives instead of only that it's absent.
-  const noAttackHint = atkDef
-    ? ''
-    : `  (attacks play on: ${[...new Set(moves.map((m) => m.def.animation))].join(', ') || 'none'})`;
-
-  const fps = a.fps || 1;
-  const animCycle = a.frames.length / fps;
-  const dur = Math.min(realDur, ATTACK_PREVIEW_CAP);
-  const cycle = Math.max(animCycle, dur + 0.35);
-  const tIn = t % cycle;
-  const pose = atkDef && tIn <= dur
-    ? { progress: Math.min(1, tIn / dur), def: atkDef }
-    : undefined;
-
-  const bodySel = ($('compBody') as HTMLSelectElement).value;
-
-  // Game parity: the game draws a world pixel at 8 screen px (ZOOM 4 x
-  // WORLD_ZOOM 2), and judging attack art at any other size is judging
-  // different art. The viewport is trimmed to what the widest swing (the
-  // dash trail, ~24px around the origin) actually needs, and the side
-  // panel widens while the composite is active to hold it.
-  const SCALE = 8;
-  const VW = 52, VH = 42;
-  const fx = VW / 2, fy = 34;
-  preview.width = VW * SCALE;
-  preview.height = VH * SCALE;
-  pctx.imageSmoothingEnabled = false;
-  pctx.fillStyle = '#0a0c1c';
-  pctx.fillRect(0, 0, preview.width, preview.height);
-  pctx.save();
-  pctx.scale(SCALE, SCALE);
-  // Ground line, so the feet anchor reads.
-  pctx.fillStyle = '#1f2a57';
-  pctx.fillRect(0, fy, VW, 1);
-
-  // The full player: everything Player.render owns — body-english,
-  // gear layers, held weapon, trail — posed at this progress.
-  if (bodySel === 'player') {
-    const p = getPosePlayer();
-    if (p) {
-      ensureEquipped(p, 'weapon', weaponId);
-      const gearOn = ($('compGear') as HTMLInputElement).checked;
-      ensureEquipped(p, 'helmet', gearOn ? 'iron-helmet' : null);
-      ensureEquipped(p, 'armor', gearOn ? 'steel-armor' : null);
-      p.facing = 1;
-      p.animT = tIn;
-      p.renderTrail = ($('compTrail') as HTMLInputElement).checked;
-      p.poseAttack(pose ? pose.def : null, pose ? pose.progress : 0);
-      p.x = fx - p.w / 2;
-      p.y = fy - p.h;
-      try {
-        p.render(pctx);
-      } catch (e) {
-        posePlayerError = String(e);
-      }
-      // The player's own box math is the truth; draw straight from it.
-      if (pose && ($('compHitbox') as HTMLInputElement).checked) {
-        drawAttackBox(pctx, pose.def, { x: p.x, y: p.y, w: p.w, h: p.h }, pose.progress);
-      }
-      pctx.restore();
-      pctx.fillStyle = '#ffcd75';
-      pctx.font = '11px monospace';
-      pctx.fillText(
-        posePlayerError
-          ? 'player render failed: ' + posePlayerError.slice(0, 40)
-          : `${animName}${moveTag} + ${weaponId} (full player)${noAttackHint}`,
-        6, preview.height - 6,
-      );
-      return true;
-    }
-    // Construction failed: fall back to the sheet body, but say why.
-    pctx.restore();
-    pctx.fillStyle = '#b13e53';
-    pctx.font = '11px monospace';
-    pctx.fillText('player unavailable: ' + posePlayerError.slice(0, 44), 6, preview.height - 6);
-    return true;
-  }
-
-  // Body: the sheet being edited, or the registered knight when the
-  // edited sheet is the weapon itself. Draw size comes from the sprite's
-  // DECLARED geometry (knight art is 35x63 cells drawn at 10x18), never
-  // from the baked image — the game scales exactly the same way.
-  let bodyImg: HTMLCanvasElement;
-  let frame: number;
-  let dw: number;
-  let dh: number;
-  if (bodySel === 'knight') {
-    const set = KNIGHT_ANIMS.right;
-    const ka = set[animName] ?? set.idle ?? Object.values(set)[0];
-    frame = ka.loop === false
-      ? Math.min(Math.floor(tIn * ka.fps), ka.frames.length - 1)
-      : Math.floor(tIn * ka.fps) % ka.frames.length;
-    bodyImg = ka.frames[frame];
-    dw = baseKnight.w;
-    dh = baseKnight.h;
-  } else {
-    frame = a.loop === false
-      ? Math.min(Math.floor(tIn * fps), a.frames.length - 1)
-      : Math.floor(tIn * fps) % a.frames.length;
-    const rows = a.frames[frame] ?? [];
-    bodyImg = sprite(file.hd === false ? rows : epx(epx(rows)), pal());
-    const geo = geometryOf(file, rows);
-    dw = geo.w;
-    dh = geo.h;
-  }
-
-  pctx.save();
-  pctx.translate(fx, fy);
-  pctx.drawImage(bodyImg, -dw / 2, -dh, dw, dh);
-  // The weapon draw needs an animation its sheet actually has; outside
-  // an attack pose, fall back to idle rather than throwing mid-paint.
-  const known = weaponVisuals.get(wdef.visual).animations;
-  const weaponAnim = !known || known.includes(animName) ? animName : 'idle';
-  try {
-    drawHeldWeapon(pctx, wdef.visual, {
-      facing: 1, anim: weaponAnim, frame, animT: tIn,
-      bodyW: dw, bodyH: dh, attack: pose,
+  return compositePreview.render(pctx, preview, t,
+    { file, animName, fileName: currentFileName, version: editVersion },
+    {
+      weapon: ($('compWeapon') as HTMLSelectElement).value,
+      move: ($('compMove') as HTMLSelectElement).value,
+      body: ($('compBody') as HTMLSelectElement).value,
+      gear: ($('compGear') as HTMLInputElement).checked,
+      trail: ($('compTrail') as HTMLInputElement).checked,
+      hitbox: ($('compHitbox') as HTMLInputElement).checked,
     });
-  } catch { /* a half-painted sheet mid-edit; next frame will catch up */ }
-  pctx.restore();
-
-  if (pose && ($('compTrail') as HTMLInputElement).checked) {
-    try {
-      drawWeaponTrail(pctx, wdef.visual, {
-        x: fx, y: fy - dh * 0.45, facing: 1,
-        colors: [...wdef.colors], attack: pose,
-      });
-    } catch { /* ditto */ }
-  }
-  // dw/dh are the sprite's DECLARED physical dims (see above), which is
-  // the body the game's box math would use.
-  if (pose && ($('compHitbox') as HTMLInputElement).checked) {
-    drawAttackBox(pctx, pose.def, { x: fx - dw / 2, y: fy - dh, w: dw, h: dh }, pose.progress);
-  }
-  pctx.restore();
-
-  pctx.fillStyle = '#ffcd75';
-  pctx.font = '11px monospace';
-  pctx.fillText(
-    `${animName}${moveTag} + ${weaponId}${noAttackHint}`,
-    6, preview.height - 6,
-  );
-  return true;
 }
 
 function renderPreview(): void {
@@ -823,8 +497,8 @@ function renderPreview(): void {
     return;
   }
 
-  const idx = Math.floor(t * (a.fps || 1)) % a.frames.length;
-  const rows = a.frames[idx] ?? [];
+  const idx = Math.floor(t * a.fps) % a.frames.length;
+  const rows = a.frames[idx];
 
   const { w, h, hitbox } = geometryOf(file, rows);
 
@@ -851,12 +525,12 @@ function renderPreview(): void {
   const y = 20;
 
   // Draw reference sprite behind current frame if enabled
-  const showRef = ($('showRef') as HTMLInputElement)?.checked ?? true;
+  const showRef = ($('showRef') as HTMLInputElement).checked;
   if (refFile && showRef) {
     const refAnim = resolveAnim(refFile, animName in refFile.anims ? animName : Object.keys(refFile.anims)[0]);
     if (refAnim) {
-      const refIdx = refAnim.frames.length ? Math.floor(t * (refAnim.fps || 1)) % refAnim.frames.length : 0;
-      const refRows = refAnim.frames[refIdx] ?? [];
+      const refIdx = Math.floor(t * refAnim.fps) % refAnim.frames.length;
+      const refRows = refAnim.frames[refIdx];
 
       const refGeometry = geometryOf(refFile, refRows);
       const refIsHighRes = refFile.hd === false;
@@ -925,8 +599,7 @@ $('btnLoad').onclick = () => ($('fileInput') as HTMLInputElement).click();
       currentChar = firstPaintChar();
       currentFileName = f.name;
       editVersion++;
-      undoStack.length = 0;
-      redoStack.length = 0;
+      history.clear();
       updateUndoRedoButtons();
       refreshUI();
       flash(`loaded ${f.name}`);
@@ -964,8 +637,7 @@ $('selectSprite').onchange = (e) => {
       rebuildMoveSelect(stem);
     }
 
-    undoStack.length = 0;
-    redoStack.length = 0;
+    history.clear();
     updateUndoRedoButtons();
     refreshUI();
     flash(`loaded ${val}`);
@@ -989,8 +661,9 @@ $('btnSave').onclick = () => {
 $('btnImport').onclick = () => {
   try {
     const raw = JSON.parse(($('io') as HTMLTextAreaElement).value);
+    const document = normalize(raw);
     saveHistory();
-    file = normalize(raw);
+    file = document;
     animName = Object.keys(file.anims)[0];
     frameIdx = 0;
     currentChar = firstPaintChar();
@@ -1001,25 +674,6 @@ $('btnImport').onclick = () => {
   }
 };
 
-/** Accept the SpriteFile format, or the older { palette, frames, fps }. */
-function normalize(raw: unknown): SpriteFile {
-  const r = raw as Record<string, unknown>;
-  if (r && typeof r === 'object' && r.anims) {
-    const f = r as unknown as SpriteFile;
-    if (!f.anims || !Object.keys(f.anims).length) throw new Error('no animations');
-    const normalized = { ...f, hd: f.hd ?? true, palette: f.palette ?? { ...PAL } };
-    geometryOf(normalized, resolveAnim(normalized, Object.keys(normalized.anims)[0])?.frames[0] ?? []);
-    return normalized;
-  }
-  if (r && Array.isArray(r.frames)) {
-    return {
-      hd: true,
-      palette: (r.palette as Palette) ?? { ...PAL },
-      anims: { idle: { fps: Number(r.fps) || 8, frames: r.frames as string[][] } },
-    };
-  }
-  throw new Error('unrecognized sprite json');
-}
 
 /* ---------------- tools & reference & nudge ---------------- */
 
@@ -1103,64 +757,28 @@ function nudge(dx: number, dy: number): void {
 /* ---------------- history (undo / redo) ---------------- */
 
 function saveHistory(): void {
-  editVersion++; // every mutation funnels through here first
-  const stateStr = JSON.stringify(file);
-  if (undoStack.length > 0 && undoStack[undoStack.length - 1] === stateStr) {
-    return;
-  }
-  undoStack.push(stateStr);
-  if (undoStack.length > MAX_HISTORY) {
-    undoStack.shift();
-  }
-  redoStack.length = 0; // Clear redo stack on new action
+  editVersion++;
+  history.checkpoint(file);
   updateUndoRedoButtons();
 }
 
-function undo(): void {
-  if (undoStack.length === 0) return;
-  const currentStr = JSON.stringify(file);
-  redoStack.push(currentStr);
-  
-  const prevStateStr = undoStack.pop()!;
-  file = normalize(JSON.parse(prevStateStr));
+function restoreHistory(document: SpriteDocument | null, label: string): void {
+  if (!document) return;
+  file = document;
   editVersion++;
-  
-  if (!file.anims[animName]) {
-    animName = Object.keys(file.anims)[0];
-  }
-  const maxIdx = anim().frames.length - 1;
-  frameIdx = Math.min(frameIdx, maxIdx);
-  
+  if (!file.anims[animName]) animName = Object.keys(file.anims)[0];
+  frameIdx = Math.min(frameIdx, anim().frames.length - 1);
   refreshUI();
   updateUndoRedoButtons();
-  flash('undo');
+  flash(label);
 }
 
-function redo(): void {
-  if (redoStack.length === 0) return;
-  const currentStr = JSON.stringify(file);
-  undoStack.push(currentStr);
-  
-  const nextStateStr = redoStack.pop()!;
-  file = normalize(JSON.parse(nextStateStr));
-  editVersion++;
-  
-  if (!file.anims[animName]) {
-    animName = Object.keys(file.anims)[0];
-  }
-  const maxIdx = anim().frames.length - 1;
-  frameIdx = Math.min(frameIdx, maxIdx);
-  
-  refreshUI();
-  updateUndoRedoButtons();
-  flash('redo');
-}
+function undo(): void { restoreHistory(history.undo(file), 'undo'); }
+function redo(): void { restoreHistory(history.redo(file), 'redo'); }
 
 function updateUndoRedoButtons(): void {
-  const btnUndo = $('btnUndo') as HTMLButtonElement;
-  const btnRedo = $('btnRedo') as HTMLButtonElement;
-  if (btnUndo) btnUndo.disabled = undoStack.length === 0;
-  if (btnRedo) btnRedo.disabled = redoStack.length === 0;
+  ($('btnUndo') as HTMLButtonElement).disabled = !history.canUndo;
+  ($('btnRedo') as HTMLButtonElement).disabled = !history.canRedo;
 }
 
 $('btnUndo').onclick = () => undo();
@@ -1240,7 +858,7 @@ function refreshUI(): void {
   syncIO();
 
   const hdCheckbox = $('hd') as HTMLInputElement;
-  if (hdCheckbox) hdCheckbox.checked = file.hd ?? true;
+  hdCheckbox.checked = file.hd;
 }
 
 refreshUI();
@@ -1251,7 +869,7 @@ Object.defineProperty(window, '__editor', {
     get file() { return file; },
     get currentFileName() { return currentFileName; },
     get editVersion() { return editVersion; },
-    get rebuiltVersion() { return rebuiltVersion; },
+    get rebuiltVersion() { return compositePreview.bakedVersion; },
   },
 });
 

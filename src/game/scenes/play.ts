@@ -5,7 +5,6 @@ import {
   buildTilemap,
   Tilemap,
   drawText,
-  textWidth,
   DebugOverlay,
   Triggers,
   DialogueScene,
@@ -14,7 +13,6 @@ import {
   Director,
   entityKey,
   itemDef,
-  items,
   validateRoom,
   tiles,
   chance,
@@ -25,7 +23,7 @@ import {
   placeBody,
   type Solid,
 } from '@engine/index';
-import { menuLine, prettyCode, prettyButton, promptText, REPLAY_PENDING_KEY, type ActionGame, type Action, type RunStart, type TestScenario } from '../defs';
+import { menuLine, actionLabel, promptText, REPLAY_PENDING_KEY, type ActionGame, type Action, type RunStart, type TestScenario } from '../defs';
 import { Player } from '../actors/player';
 import { Monster, monsters } from '../actors/monster';
 import { Pickup } from '../actors/pickup';
@@ -40,7 +38,7 @@ import { SaveSlotsScene } from './saveslots';
 import { Background } from './background';
 import { COLORS } from '../content/palette';
 import { ROOMS, START_ROOM } from '../content/rooms';
-import { earnableDef, earnables } from '@engine/index';
+import { earnableDef } from '@engine/index';
 import { DEFAULT_SONG } from '../content/music';
 import { saveStore, slotStore, newestSave, snapshotPlayer, restorePlayer, type SaveData } from '../save';
 import type { PlayHost } from './play/host';
@@ -57,45 +55,11 @@ import { CoopScene } from './coop';
 import { displayName } from '../name';
 import type { PeerLink } from '@engine/index';
 import { edgeDoorSide, openEdgeDoorways } from './play/doorways';
+import { resolveDoorLanding, type DoorLanding } from './play/door-landing';
+import { renderDoorSigns, renderDoorOpening, renderDoorPrompt } from './play/door-view';
+import { advanceTransition, transitionOpacity, DOOR_OPEN_TIME, type Transition } from './play/door-transition';
+import { validateScenario } from '../test/scenario-validation';
 
-/** A door transition in progress: fade out, swap rooms, fade in. */
-interface Transition {
-  t: number;
-  fromRoomId: string;
-  roomId: string;
-  x: number;
-  y: number;
-  /**
-   * A doorway that has to open before the fade starts: seconds left, and
-   * the opening it fills. Absent for a plain gap in the wall, which has
-   * nothing to open.
-   */
-  open?: { left: number; x: number; y: number; w: number; h: number };
-  /** Horizontal edge gaps keep the knight moving naturally through the fade. */
-  walk?: { out: -1 | 1; into: -1 | 1 };
-  /** Pixels already walked on the far side, against WALK_IN_MAX. */
-  walked?: number;
-  /**
-   * The surface the knight was standing on when this crossing began, if
-   * she was standing at all. A threshold HAS a floor: the two rooms' floors
-   * meet at the doorway, and she is on both while she walks through. Only
-   * one room is loaded at a time, so past the edge the tiles simply stop —
-   * and she was falling off the end of the world for the last frames of
-   * every walked crossing. Absent when she crosses airborne, because then
-   * there is no floor under her and the arc is the truth.
-   */
-  thresholdY?: number;
-}
-
-const TRANSITION_TIME = 0.6;
-/**
- * How far she walks after arriving, before stopping.
- *
- * She arrives standing in the threshold, so this is the whole visible
- * step out of it — long enough to read as walking through a door,
- * short enough to leave her still standing in it.
- */
-const WALK_IN_MAX = 8;
 /**
  * A vertical seam does not use Transition at all: the room swaps at the
  * exact step of the crossing and the simulation never pauses, so every
@@ -112,8 +76,6 @@ const SEAM_FADE = 0.25;
 const EDGE_WALK_SPEED = 72;
 /** How far the threshold floor reaches past the boundary (see moveThroughEdge). */
 const THRESHOLD_RUN = 128;
-/** How long a door takes to haul itself up out of the way. */
-const DOOR_OPEN_TIME = 0.35;
 
 type Phase = 'title' | 'play' | 'over';
 
@@ -409,7 +371,9 @@ export class PlayScene implements Scene {
 
   private roomById(id: string): RoomDef {
     if (this.testRoom && id === 'test') return this.testRoom;
-    return ROOMS[id] ?? ROOMS[START_ROOM];
+    const room = ROOMS[id];
+    if (!room) throw new Error(`Unknown room: ${id}`);
+    return room;
   }
 
   /** The usage line under the banner (see `hint`). */
@@ -447,6 +411,7 @@ export class PlayScene implements Scene {
    * fresh per-run tape before the starter draws a single random number.
    */
   beginRun(start: RunStart): void {
+    if (start.kind === 'scenario') validateScenario(start.scenario);
     // A run begins from a clean stack. Overlays — dialogue, the map, a
     // shop — sit ABOVE this scene and stop it updating, and the start is
     // only QUEUED here (dispatched from update, so a run never begins
@@ -603,9 +568,8 @@ export class PlayScene implements Scene {
 
     const pl = s.player ?? {};
     this.player.gold = pl.gold ?? 999;
-    for (const id of pl.give ?? []) if (items.has(id)) this.player.inventory.add(id);
+    for (const id of pl.give ?? []) this.player.inventory.add(id);
     for (const id of pl.equip ?? []) {
-      if (!items.has(id)) continue;
       if (!this.player.inventory.has(id)) this.player.inventory.add(id);
       this.player.equipment.equip(id);
     }
@@ -613,7 +577,7 @@ export class PlayScene implements Scene {
     // Boss verbs, without the boss: a scenario that wants to exercise
     // Impact Drop or Air Step starts already owning them.
     for (const id of pl.earned ?? []) {
-      if (earnables.has(id)) this.player.earned.grant(id, { game: this.player.game, player: this.player });
+      this.player.earned.grant(id, { game: this.player.game, player: this.player });
     }
     if (pl.hp != null) this.player.hp = clamp(pl.hp, 1, this.player.maxHp);
 
@@ -632,14 +596,13 @@ export class PlayScene implements Scene {
 
     // Inline RoomDef rides the existing 'test' slot; else a registered id.
     this.testRoom = s.roomDef ? validateRoom(s.roomDef) : this.testRoom;
-    const roomId = s.roomDef ? 'test' : (s.room && ROOMS[s.room] ? s.room : 'test_room');
+    const roomId = s.roomDef ? 'test' : (s.room ?? 'test_room');
     this.setRoom(roomId, pl.x, pl.y);
 
     // Requested monsters, spawned through the same placeables catalog as
-    // a room's own entities — unknown types are skipped, not fatal.
+    // a room's own entities. References were validated before the run began.
     const ctx: PlaceableCtx = { game: g, tilemap: this.tilemap, flags: this.flags };
     for (const e of s.spawn ?? []) {
-      if (!placeables.has(e.type)) continue;
       placeables.get(e.type).spawn(ctx, { type: e.type, x: e.x, y: e.y ?? 0, props: e.props });
     }
     g.sfx.play('menuSelect');
@@ -899,154 +862,19 @@ export class PlayScene implements Scene {
     return map;
   }
 
-  /**
-   * Where you come out when you walk through a doorway into `toRoom`:
-   * at that room's own door back here. The two triggers stop being a
-   * warp to authored coordinates and become two sides of one doorway, so
-   * a door leads somewhere consistent, turning round and walking back
-   * returns you to the spot you left, and neither end can drift from the
-   * other. Same bargain portals already make by landing on the pad.
-   *
-   * Safe to land ON the trigger: doors are interact-only and never fire
-   * on contact, so you arrive standing in the doorway, not bounced
-   * straight back.
-   *
-   * Null when the far side has no door home (a one-way drop), leaving
-   * the caller to fall back to the room's own spawn.
-   */
-  private doorLanding(toRoom: string): { x: number; y: number; carry?: boolean } | null {
-    const dest = ROOMS[toRoom];
-    const back = dest?.triggers?.find(
-      (tr) => tr.event === 'door' && tr.props?.room === this.roomId,
-    );
-    if (!back) return null;
-    const leaving = this.room.triggers?.find(
-      (tr) => tr.event === 'door' && tr.props?.room === toRoom,
-    );
-    const trackedSeam = back.props?.trackX === true && leaving?.props?.trackX === true;
-    const edgePair = !!leaving
-      && edgeDoorSide(this.room, leaving) !== null
-      && edgeDoorSide(dest, back) !== null;
-    const pw = this.player?.w ?? 14;
-    const ph = this.player?.h ?? 18;
-
-    // NOTHING lands inside stone — that check belongs to every kind of
-    // doorway, not just the sideways one. A landing buried in rock either
-    // wedges you or squeezes you somewhere arbitrary, and the seam it
-    // arrives through makes no difference to how bad that is. The map is
-    // built WITH this run's patches, so a floor the player smashed reads
-    // as the hole it now is.
-    const map = this.collisionMapFor(toRoom);
-    const buried = (x: number, y: number): boolean => {
-      for (const s of map.solidsNear({ x, y, w: pw, h: ph })) {
-        if (!s.oneWay && x < s.x + s.w && s.x < x + pw && y < s.y + s.h && s.y < y + ph) return true;
-      }
-      return false;
-    };
-    /**
-     * Nudge a vertical-seam landing out of any lip it overlaps — always
-     * DOWNWARD, the near side for both arrival kinds (rising into a floor
-     * shaft, falling out of a ceiling gap). Stepping the other way once
-     * "found air" on the far side of an unsmashed cap, which teleported
-     * the knight through a tile of solid rock; sliding down only ever
-     * expels her from the face she is already touching. If the mouth is
-     * blocked, she arrives beneath the blockage, bonks, and the seam
-     * sends her honestly back the way she came.
-     */
-    const settle = (x: number, y: number): { x: number; y: number } | null => {
-      for (let d = 0; d <= 4 * dest.tileSize; d++) {
-        if (!buried(x, y + d)) return { x, y: y + d };
-      }
-      return null;
-    };
-
-    // A VERTICAL seam — a shaft marked fallIn/leapUp on the far side —
-    // is entered along its axis, not from beside. You arrive IN the
-    // opening, and `carry` keeps your velocity through the transition:
-    // fall down the well and you emerge under the far ceiling still
-    // falling; jump up it and the same jump lifts you out of the well's
-    // mouth on the other side. The room swap becomes a splice in one
-    // continuous arc, which is what makes it read as one place.
-    // Preserve where the knight crossed a vertical seam. Wide breakable
-    // floors may only be open beneath the exact tiles she smashed; always
-    // returning at the trigger's centre can put her under intact stone.
-    // Mapping the source fraction onto the far opening also makes unequal
-    // shaft widths join as one continuous passage.
-    const verticalX = (): number => {
-      if (!trackedSeam || !this.player || !leaving || leaving.w <= 0) {
-        return back.x + back.w / 2 - pw / 2;
-      }
-      const along = clamp((this.player.cx - leaving.x) / leaving.w, 0, 1);
-      return clamp(back.x + back.w * along - pw / 2, back.x, back.x + back.w - pw);
-    };
-    // Vertical seams fire at the source trigger's far edge (the plane
-    // where that room's drawn shaft ends) and arrive at the far edge of
-    // the destination's own trigger — its matching boundary. Between the
-    // two rooms every drawn pixel of both shafts gets flown through, in
-    // the room that draws it: leave through the ceiling and you enter
-    // the far shaft from its very bottom, still rising; drop out of a
-    // floor and you fall in from the far ceiling's top. What stops you
-    // is whatever solid geometry the shaft actually contains — a
-    // breakable lid stops a weak jump ON SCREEN, not in an invisible
-    // elsewhere.
-    if (back.props?.leapUp === true) {
-      const at = settle(verticalX(), back.y);
-      return at && { ...at, carry: true };
-    }
-    if (back.props?.fallIn === true) {
-      const at = settle(verticalX(), back.y + back.h - ph);
-      return at && { ...at, carry: true };
-    }
-    // Arrive IN the doorway, one pixel past the point where it would
-    // take you back.
-    //
-    // Landing wholly outside it (the old +2px) is what killed the
-    // walk-out: with the step capped short there was nothing left to
-    // watch, so she simply appeared beside the door instead of coming
-    // through it. Landing wholly INSIDE it is the other failure — an
-    // open doorway fires on contact, so it would throw her straight
-    // back, forever.
-    //
-    // The gate is the seam between those: it fires on her CENTRE
-    // reaching the opening, so a body placed with its centre a pixel
-    // clear of that line stands visibly in the threshold while the door
-    // stays quiet — and every step she takes from there is outward, so
-    // the centre only ever moves further from firing.
-    const roomW = Math.max(...dest.tiles.map((r) => r.length)) * dest.tileSize;
-    const outward = back.x + back.w / 2 < roomW / 2 ? 1 : -1;
-    const half = Math.ceil(pw / 2);
-    const x = outward === 1 ? back.x + back.w - half + 1 : back.x + half - pw - 1;
-    // A horizontal seam maps the exact height at which it was crossed,
-    // rather than pinning every arrival to the destination floor. Equal
-    // trigger heights preserve Y offset exactly; unequal ones scale it.
-    // Together with carried velocity below, a jump stays a jump across
-    // the room boundary and a fall keeps falling. The clamp is the same
-    // backstop every body obeys, applied to a placement: whatever height
-    // the mapping proposes, you arrive inside the room.
-    const destH = dest.tiles.length * dest.tileSize;
-    const y = clamp(
-      edgePair && this.player && leaving && leaving.h > 0
-        ? back.y + (this.player.y - leaving.y) * (back.h / leaving.h)
-        : back.y + back.h - ph,
-      0,
-      destH - ph,
-    );
-    // Stepping out sideways assumes a doorway you walk through. A shaft
-    // you FALL down has no beside — the town well is two tiles wide with
-    // rock either side — so let the caller fall back to the room's spawn
-    // rather than burying you in stone.
-    // A mapped height can land a pixel or two inside the floor — the two
-    // rooms' sills rarely agree exactly — and bailing out here sent her
-    // to the ROOM'S SPAWN instead, which is how one crossing dropped her
-    // 40px down the road from the door she walked through. Nudge her
-    // clear of whatever she overlaps, near side first, and only give up
-    // if the doorway is genuinely walled.
-    if (!buried(x, y)) return { x, y, carry: edgePair };
-    for (let d = 1; d <= 2 * dest.tileSize; d++) {
-      if (!buried(x, y - d)) return { x, y: y - d, carry: edgePair };
-      if (!buried(x, y + d)) return { x, y: y + d, carry: edgePair };
-    }
-    return null;
+  /** Resolve geometry only while a live player is crossing a door. */
+  private doorLanding(toRoom: string): DoorLanding | null {
+    const player = this.player;
+    const destination = ROOMS[toRoom];
+    if (!player || !destination) return null;
+    return resolveDoorLanding({
+      sourceId: this.roomId,
+      source: this.room,
+      destinationId: toRoom,
+      destination,
+      player,
+      collision: this.collisionMapFor(toRoom),
+    });
   }
 
   private goToRoom(roomId: string, x?: number, y?: number): void {
@@ -1080,7 +908,7 @@ export class PlayScene implements Scene {
     }
     this.transition = {
       t: 0,
-      fromRoomId: this.roomId,
+      walked: 0,
       roomId,
       x: x ?? land?.x ?? spawn.x,
       y: y ?? land?.y ?? spawn.y,
@@ -1097,6 +925,15 @@ export class PlayScene implements Scene {
    * toward the old room's outside, then away from the new room's edge,
    * instead of freezing as soon as the hitbox touches a trigger.
    */
+  /** Re-map live height and preserve vertical speed across the room swap. */
+  private swapAtThreshold(tr: Transition): void {
+    const landing = tr.walk ? this.doorLanding(tr.roomId) : null;
+    if (tr.walk && this.player) this.player.facing = tr.walk.into;
+    const vy = landing?.carry && this.player ? this.player.vy : null;
+    this.setRoom(tr.roomId, landing?.x ?? tr.x, landing?.y ?? tr.y);
+    if (vy !== null && this.player) this.player.vy = vy;
+  }
+
   private edgeWalk(toRoom: string): { out: -1 | 1; into: -1 | 1 } | null {
     const leaving = this.room.triggers?.find(
       (tr) => tr.event === 'door' && tr.props?.room === toRoom,
@@ -1350,28 +1187,6 @@ export class PlayScene implements Scene {
     else triggerActions.get('door').run(def, this.host); // traverse / lock feedback
   }
 
-  /** A door/portal's floating prompt: where a door leads, or "TRAVEL". */
-  /**
-   * A standing sign over every doorway naming where it goes.
-   *
-   * This replaced a floating "E CAVERN" that only appeared once you were
-   * already standing in the opening — useless twice over, since by then
-   * you are through, and since walking in no longer needs a key press.
-   * A sign you can read from across the room is what actually helps: you
-   * pick your exit before you commit to walking to it.
-   *
-   * Dimmed rather than hidden at distance, so a room full of doors
-   * doesn't turn into a wall of shouting gold text.
-   */
-  /**
-   * A door that stops being locked while you are standing in it.
-   *
-   * Triggers fire on entry, so a doorway that refused you has had its one
-   * go: kill the boss with your shoulder against his door and nothing
-   * happens until you walk away and back, which reads as the door being
-   * broken. Watch each doorway's locked state and re-arm the trigger the
-   * moment it relents.
-   */
   /**
    * Has she actually reached the doorway, or merely brushed its edge?
    *
@@ -1451,98 +1266,6 @@ export class PlayScene implements Scene {
     }
   }
 
-  private renderDoorSigns(ctx: CanvasRenderingContext2D): void {
-    const p = this.player;
-    const worldW = this.tilemap.worldW;
-    const viewLeft = this.game.camera.x;
-    const viewRight = viewLeft + this.game.camera.viewW;
-    for (const z of this.room.triggers ?? []) {
-      if (z.event !== 'door') continue;
-      const doorX = z.x + z.w / 2;
-      const label = this.doorLabel(z);
-      const words = label.split(/\s+/);
-      let lines = [label];
-      if (textWidth(label) > 48 && words.length > 1) {
-        let split = 1;
-        let best = Number.POSITIVE_INFINITY;
-        for (let i = 1; i < words.length; i++) {
-          const left = words.slice(0, i).join(' ');
-          const right = words.slice(i).join(' ');
-          const score = Math.max(textWidth(left), textWidth(right));
-          if (score < best) {
-            best = score;
-            split = i;
-          }
-        }
-        lines = [words.slice(0, split).join(' '), words.slice(split).join(' ')];
-      }
-      // Edge doors and scrolling rooms can put the authored door centre
-      // outside the readable viewport. Clamp by the actual widest line,
-      // not a fixed margin, so no destination name can be clipped.
-      const halfWidth = Math.max(...lines.map((line) => textWidth(line))) / 2;
-      const left = Math.max(0, viewLeft) + halfWidth + 2;
-      const right = Math.min(worldW, viewRight) - halfWidth - 2;
-      const textX = left <= right ? clamp(doorX, left, right) : (left + right) / 2;
-      const near = p ? Math.abs(p.cx - doorX) < 70 : false;
-      const besidePortal = (this.room.triggers ?? []).some((other) => (
-        other.event === 'portal'
-        && Math.abs((other.x + other.w / 2) - doorX) < 70
-        && Math.abs((other.y + other.h / 2) - (z.y + z.h / 2)) < 70
-      ));
-      ctx.globalAlpha = near ? 1 : 0.45;
-      const lineHeight = 8;
-      // Above the doorway by preference — but a ceiling door's "above" is
-      // outside the room, and the frame no longer extends past the roof to
-      // cover for it. Clamp into the room the same way the line above
-      // clamps horizontally, so the sign drops below the lintel instead
-      // of demanding a strip of void to live in.
-      const top = Math.max(0, this.game.camera.y) + 2;
-      const bottom = Math.min(this.tilemap.worldH, this.game.camera.y + this.game.camera.viewH)
-        - lines.length * lineHeight - 2;
-      const wanted = z.y - 9 - (lines.length - 1) * lineHeight - (besidePortal ? 14 : 0);
-      const textY = top <= bottom ? clamp(wanted, top, bottom) : wanted;
-      lines.forEach((line, index) => {
-        drawText(ctx, line, textX, textY + index * lineHeight, near ? COLORS.gold : COLORS.steel, 1, 'center');
-      });
-      ctx.globalAlpha = 1;
-    }
-  }
-
-  /**
-   * The door hauling itself up out of the opening, portcullis fashion —
-   * which is what the banded timber already looks like, and reads far
-   * better than sliding two 8px halves apart.
-   *
-   * Drawn over the tilemap's own copy of the door, but before actors, and
-   * clipped to the opening. The gate disappears into the lintel while the
-   * player crossing the threshold remains in the foreground.
-   */
-  private renderDoorOpening(ctx: CanvasRenderingContext2D): void {
-    const o = this.transition?.open;
-    if (!o) return;
-    const p = clamp(1 - o.left / DOOR_OPEN_TIME, 0, 1);
-    const ts = this.tilemap.tileSize;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(o.x, o.y, o.w, o.h);
-    ctx.clip();
-    ctx.fillStyle = '#07070d';
-    ctx.fillRect(o.x, o.y, o.w, o.h);
-    const lift = Math.round(p * (o.h + ts));
-    const gate = tiles.get('gate');
-    for (let i = 0; i * ts < o.h + ts; i++) {
-      gate.draw?.(ctx, o.x, o.y + i * ts - lift, ts, 0, i);
-    }
-    ctx.restore();
-  }
-
-  private renderInteractPrompt(ctx: CanvasRenderingContext2D, z: TriggerDef): void {
-    const key = this.interactKeyLabel();
-    const dest = z.event === 'portal' ? t('TRAVEL') : this.doorLabel(z);
-    const label = key ? `${key}  ${dest}` : dest;
-    const bob = Math.sin(this.uiT * 4) * 1.5;
-    drawText(ctx, label, z.x + z.w / 2, z.y - 6 + bob, COLORS.gold, 1, 'center');
-  }
 
   /** The place a door leads, for its prompt (localized room name). */
   private doorLabel(z: TriggerDef): string {
@@ -1556,18 +1279,13 @@ export class PlayScene implements Scene {
 
   /** Device-aware interact label (pad button / key), '' on touch. */
   private interactKeyLabel(): string {
-    const pad = this.game.pad;
-    if (pad?.connected) {
-      const b = pad.buttonsFor('interact')[0];
-      return b != null ? prettyButton(b) : 'Y';
-    }
-    if (typeof window !== 'undefined' && !window.matchMedia('(pointer: fine)').matches) return '';
-    const code = this.game.input.codesFor('interact')[0];
-    return code ? prettyCode(code) : 'E';
+    return actionLabel(this.game, 'interact', '');
   }
 
   /** Open the portal destination menu (interact on a portal pad). */
   private openPortal(): void {
+    const player = this.player;
+    if (!player) return;
     const g = this.game;
     g.sfx.play('menuSelect');
     g.scenes.push(
@@ -1579,20 +1297,19 @@ export class PlayScene implements Scene {
           // Step out of the destination's portal pad, not a fixed offset —
           // you should appear where the portal is. (Safe now that pads are
           // interact-only and won't re-open on contact.)
-          const land = this.portalLanding(dest.room);
-          this.goToRoom(dest.room, land?.x ?? dest.x, land?.y ?? dest.y);
+          const land = this.portalLanding(dest.room, player.w);
+          this.goToRoom(dest.room, land.x, land.y);
         },
       ),
     );
   }
 
   /** Where to arrive when warping into `roomId`: centered on its portal
-   * pad so the traveller emerges from the portal. Null if it has none. */
-  private portalLanding(roomId: string): { x: number; y: number } | null {
-    const pad = ROOMS[roomId]?.triggers?.find((tr) => tr.event === 'portal');
-    if (!pad) return null;
-    const pw = this.player?.w ?? 14;
-    return { x: pad.x + pad.w / 2 - pw / 2, y: pad.y };
+   * pad. Portal destinations must author their own arrival geometry. */
+  private portalLanding(roomId: string, width: number): { x: number; y: number } {
+    const pad = this.roomById(roomId).triggers?.find((tr) => tr.event === 'portal');
+    if (!pad) throw new Error(`Portal destination has no portal pad: ${roomId}`);
+    return { x: pad.x + pad.w / 2 - width / 2, y: pad.y };
   }
 
   private openConversation(id: string): void {
@@ -1630,62 +1347,20 @@ export class PlayScene implements Scene {
       return;
     }
 
-    // Door transition: the world holds its breath while the screen fades.
     if (this.transition) {
       const tr = this.transition;
-      // Haul the door up first; the fade waits until it is out of the way,
-      // so you watch it open rather than being yanked through a shut one.
-      if (tr.open && tr.open.left > 0) {
-        tr.open.left -= dt;
-        return;
-      }
-      const half = TRANSITION_TIME / 2;
-      const before = tr.t;
-      const after = Math.min(TRANSITION_TIME, before + dt);
-      const outDt = Math.max(0, Math.min(after, half) - Math.min(before, half));
-      if (tr.walk) this.moveThroughEdge(tr.walk.out, outDt);
-      tr.t = after;
-      if (before < half && after >= half) {
-        // The fade-out half may have advanced a jump or fall. Re-map that
-        // CURRENT height at the threshold instead of using the Y captured
-        // when the transition began, keeping both halves of the arc
-        // continuous.
-        const liveLanding = tr.walk ? this.doorLanding(tr.roomId) : null;
-        if (tr.walk && this.player) this.player.facing = tr.walk.into;
-        // The arc's SPEED has to survive the swap too. setRoom zeroes
-        // velocity — right for an ordinary door, where you arrive at a
-        // standstill — but an edge pair is one continuous threshold, and
-        // the instant-swap branch in goToRoom already hands velocity back
-        // across the same call. Without this the height was re-mapped
-        // (above) while the fall that produced it was thrown away, so a
-        // jump or a drop through the opening restarted from rest on the
-        // far side. Horizontal speed stays the transition's to own: the
-        // walk drives it, and tr.t >= TRANSITION_TIME zeroes it on purpose.
-        const carriedVy = liveLanding?.carry && this.player ? this.player.vy : null;
-        this.setRoom(tr.roomId, liveLanding?.x ?? tr.x, liveLanding?.y ?? tr.y);
-        if (carriedVy !== null && this.player) this.player.vy = carriedVy;
-      }
-      // Step OUT of the doorway — a step, not a stroll. Walking the whole
-      // fade-in carried her 22px clear of the door she had just come
-      // through, so she stopped in open room with the doorway behind her
-      // and no sense of having just used it. Capped, she clears the
-      // opening and stands in it.
-      const inDt = Math.max(0, after - half) - Math.max(0, before - half);
-      if (tr.walk && this.player) {
-        if ((tr.walked ?? 0) < WALK_IN_MAX) {
-          const from = this.player.x;
-          this.moveThroughEdge(tr.walk.into, inDt);
-          tr.walked = (tr.walked ?? 0) + Math.abs(this.player.x - from);
-        }
-        // Stop her HERE, not at the end of the fade. Edge pairs carry
-        // velocity across the swap, so a knight who walked in still has
-        // the walk in her legs: clearing tr.walk to end the step also
-        // skipped the stop, and she coasted 31px past the door on a walk
-        // and 42px on a dash - further than before the cap existed.
-        if ((tr.walked ?? 0) >= WALK_IN_MAX) this.player.vx = 0;
-      }
-      if (tr.t >= TRANSITION_TIME) {
-        if (tr.walk && this.player) this.player.vx = 0;
+      const finished = advanceTransition(tr, dt, {
+        walk: (direction, elapsed) => {
+          const player = this.player;
+          if (!player) return 0;
+          const before = player.x;
+          this.moveThroughEdge(direction, elapsed);
+          return Math.abs(player.x - before);
+        },
+        swap: () => this.swapAtThreshold(tr),
+        stop: () => { if (this.player) this.player.vx = 0; },
+      });
+      if (finished) {
         if (this.player) this.player.interactionsEnabled = true;
         this.transition = null;
       }
@@ -1852,13 +1527,19 @@ export class PlayScene implements Scene {
     );
     g.camera.begin(ctx);
     this.tilemap.render(ctx, g.camera.x, g.camera.y, g.camera.viewW, g.camera.viewH);
-    this.renderDoorOpening(ctx);
+    renderDoorOpening(ctx, this.transition?.open, this.tilemap.tileSize, DOOR_OPEN_TIME);
     this.waves.renderMarkers(ctx);
     g.world.render(ctx);
     if (this.phase === 'play') this.hud.renderGateMarker(ctx, this.gateMarker, this.uiT);
     this.director.renderLetterbox(ctx, g.width, g.height);
-    if (this.phase === 'play') this.renderDoorSigns(ctx);
-    if (this.phase === 'play' && this.nearInteract) this.renderInteractPrompt(ctx, this.nearInteract);
+    if (this.phase === 'play') renderDoorSigns(ctx, {
+      player: this.player, bounds: this.tilemap, camera: g.camera,
+      triggers: this.room.triggers ?? [], label: z => this.doorLabel(z),
+    });
+    if (this.phase === 'play' && this.nearInteract) {
+      const z = this.nearInteract;
+      renderDoorPrompt(ctx, z, this.interactKeyLabel(), z.event === 'portal' ? t('TRAVEL') : this.doorLabel(z), this.uiT);
+    }
     g.feel.renderWorld(ctx);
     this.debug.renderWorld(ctx);
     g.camera.end(ctx);
@@ -1889,9 +1570,7 @@ export class PlayScene implements Scene {
     }
     if (this.transition) {
       const tr = this.transition;
-      const half = TRANSITION_TIME / 2;
-      const a = tr.t < half ? tr.t / half : (TRANSITION_TIME - tr.t) / half;
-      ctx.globalAlpha = clamp(a, 0, 1);
+      ctx.globalAlpha = transitionOpacity(tr);
       ctx.fillStyle = '#07070d';
       ctx.fillRect(0, 0, g.width, g.height);
       ctx.globalAlpha = 1;

@@ -16,9 +16,6 @@ export interface PortalDest {
   room: string;
   /** Menu label ("Haven — town of the living"). */
   label: string;
-  /** Where you land (defaults to the room's playerSpawn if omitted). */
-  x?: number;
-  y?: number;
   /** Menu order (low first). */
   order: number;
 }
@@ -29,41 +26,34 @@ export function definePortal(id: string, def: PortalDest): void {
   portals.register(id, def);
 }
 
-// You now arrive standing on the destination room's portal pad (PlayScene
-// computes the spot), so you step out of the portal you travelled to. The
-// x/y below are only a fallback for a room with no portal trigger.
+// Arrival geometry belongs to the room's portal trigger, not this menu catalog.
 definePortal('arena', {
   room: 'arena',
   label: 'Greenwood - the arena gate',
-  x: 150, y: 200,
   order: 1,
 });
 
 definePortal('cavern', {
   room: 'cavern',
   label: 'Sunless Cavern',
-  x: 150, y: 216,
   order: 2,
 });
 
 definePortal('throne', {
   room: 'throne',
   label: "Slime King's throne",
-  x: 40, y: 216,
   order: 3,
 });
 
 definePortal('town', {
   room: 'town',
   label: 'Haven - the town square',
-  x: 120, y: 216,
   order: 4,
 });
 
 definePortal('grotto', {
   room: 'grotto',
   label: 'The Drowned Grotto',
-  x: 60, y: 78,
   order: 5,
 });
 

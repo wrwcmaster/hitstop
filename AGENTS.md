@@ -503,7 +503,7 @@ a port with `-- --port 5174`), then drive the real game:
   `localStorage['hitstop.scenario']` + `/?scenario=local` for hand-
   testing / the editor. It runs through `beginRun`, so a scenario is a
   `RunStart` kind and **replays exactly** (the whole scenario rides the
-  recording). Unknown item/monster ids are skipped, not fatal.
+  recording). Unknown room/item/monster/earnable references are rejected before the current world changes.
 - **Mobile**: emulate with `devices['Pixel 7'] + hasTouch`; touch
   controls appear only on coarse-pointer devices. Verify taps, the ☰
   menu button, and TALK.

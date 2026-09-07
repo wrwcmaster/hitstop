@@ -126,7 +126,11 @@ A single static sprite is just one animation with one frame. `loadSprite` (`src/
 - **frames** — numbered buttons switch frames within the selected animation. **+ frame** (blank), **dup**, **del**.
 - **size (w × h) → resize** — reshape every frame across all animations (content preserved top-left), keeping the sprite uniform.
 - **preview** — plays **every animation at once** at its own fps. The **hd** checkbox toggles between the raw art and the EPX-upscaled version the game actually renders, at the same on-screen size.
-- **existing sprite** is populated recursively from every `.json` file under `content/sprites/`, including nested equipment sheets; the reference selector uses the same catalog. **load file / save** can open any other `.json` sprite from disk and download the current one. **export / import** are the clipboard/textarea equivalents (the older single-animation `{ palette, frames, fps }` shape is accepted too).
+- **existing sprite** is populated recursively from every `.json` file under `content/sprites/`, including nested equipment sheets; the reference selector uses the same catalog. **load file / save** can open any other `.json` sprite from disk and download the current one. **export / import** are the clipboard/textarea equivalents. Imports require the current named-animation `SpriteFile` format; retired flat-frame files are not converted. Every animation, alias and frame is validated before replacing the document.
+
+Document parsing and geometry helpers live in `tools/src/sprite-editor/document.ts`, independent of DOM controls and preview rendering. Run `npm run test:sprite-document` to check the repository catalog and malformed-input cases.
+
+`history.ts` owns bounded, isolated undo/redo snapshots; the UI owns selection restoration. `composite-preview.ts` adapts the game's renderers using explicit document and preview options, without querying editor DOM controls. The entry point wires these components to browser events.
 
 ### Composite preview: sprites in company
 
