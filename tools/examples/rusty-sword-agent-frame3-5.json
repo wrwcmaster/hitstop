@@ -1,0 +1,88 @@
+{
+  "protocolVersion": 1,
+  "dryRun": true,
+  "commands": [
+    {
+      "op": "frame.clear",
+      "target": { "animation": "attack", "frame": 2, "layerId": "*" }
+    },
+    {
+      "op": "frame.copy",
+      "from": { "animation": "attack2", "frame": 0, "layerId": "base" },
+      "to": { "animation": "attack", "frame": 2, "layerId": "base", "x": 10, "y": 10 },
+      "region": { "componentAt": { "x": 74, "y": 56, "connectivity": 8 } }
+    },
+    {
+      "op": "anchor.set",
+      "anchor": "grip",
+      "animation": "attack",
+      "frame": 2,
+      "point": { "x": 24, "y": 16.5 }
+    },
+    {
+      "op": "frame.clear",
+      "target": { "animation": "attack", "frame": 3, "layerId": "*" }
+    },
+    {
+      "op": "frame.copy",
+      "from": { "animation": "attack2", "frame": 0, "layerId": "base" },
+      "to": { "animation": "attack", "frame": 3, "layerId": "base", "x": 10, "y": 10 },
+      "region": { "componentAt": { "x": 74, "y": 56, "connectivity": 8 } },
+      "transform": { "rotate": 30 }
+    },
+    {
+      "op": "anchor.set",
+      "anchor": "grip",
+      "animation": "attack",
+      "frame": 3,
+      "point": { "x": 28, "y": 13.75, "angle": 30 }
+    },
+    {
+      "op": "frame.clear",
+      "target": { "animation": "attack", "frame": 4, "layerId": "*" }
+    },
+    {
+      "op": "frame.copy",
+      "from": { "animation": "attack2", "frame": 0, "layerId": "base" },
+      "to": { "animation": "attack", "frame": 4, "layerId": "base", "x": 10, "y": 10 },
+      "region": { "componentAt": { "x": 74, "y": 56, "connectivity": 8 } },
+      "transform": { "scaleX": 0.8, "scaleY": 0.8, "rotate": -30 }
+    },
+    {
+      "op": "anchor.set",
+      "anchor": "grip",
+      "animation": "attack",
+      "frame": 4,
+      "point": { "x": 26.75, "y": 14.5, "angle": -30 }
+    },
+    {
+      "op": "assert.anchor",
+      "anchor": "grip",
+      "animation": "attack",
+      "frame": 2,
+      "expected": { "x": 24, "y": 16.5 }
+    },
+    {
+      "op": "assert.anchor",
+      "anchor": "grip",
+      "animation": "attack",
+      "frame": 3,
+      "expected": { "x": 28, "y": 13.75, "angle": 30 }
+    },
+    {
+      "op": "assert.anchor",
+      "anchor": "grip",
+      "animation": "attack",
+      "frame": 4,
+      "expected": { "x": 26.75, "y": 14.5, "angle": -30 }
+    }
+  ],
+  "inspect": [
+    { "animation": "attack", "frame": 2, "layerId": "base", "components": true, "colors": false },
+    { "animation": "attack", "frame": 3, "layerId": "base", "components": true, "colors": false },
+    { "animation": "attack", "frame": 4, "layerId": "base", "components": true, "colors": false },
+    { "animation": "attack", "frame": 2, "layerId": "layer-2", "components": true, "colors": false },
+    { "animation": "attack", "frame": 3, "layerId": "layer-2", "components": true, "colors": false },
+    { "animation": "attack", "frame": 4, "layerId": "layer-2", "components": true, "colors": false }
+  ]
+}

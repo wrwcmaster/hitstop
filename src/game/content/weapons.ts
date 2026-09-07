@@ -1,6 +1,7 @@
 import { Registry } from '@engine/index';
 import { COLORS } from './palette';
 import { weaponVisuals, slashVisuals } from './weapon-visuals';
+import repositoryWeaponCombat from './weapon-combat.json';
 
 export interface WeaponHitboxDef {
   /** Gap from the player's front edge; negative values overlap the body. */
@@ -16,6 +17,12 @@ export interface WeaponTrailDef {
   endAngle: number;
   radius: number;
   thickness: number;
+  /**
+   * Whether to draw a separate slash overlay. Set this to false when the
+   * weapon's authored attack frames already contain the slash arc; the
+   * remaining trail fields still drive pose/frame timing.
+   */
+  overlay?: boolean;
   /**
    * Where along the swept arc the blade is fattest, 0 (tail) to 1
    * (leading edge). This is what separates a crescent from a smear:
@@ -64,6 +71,8 @@ export interface WeaponAttackDef {
   lunge: number;
   hitbox: WeaponHitboxDef;
   trail: WeaponTrailDef;
+  /** The selected body animation already contains the held object. */
+  embeddedHeldObject?: boolean;
   /** Body-English multiplier and vertical lift during the swing. */
   bodyWeight: number;
   lift: number;
@@ -102,6 +111,8 @@ export interface RangedDef {
   cooldown: number;
   /** Backward kick on the shooter, px/s. */
   recoil: number;
+  /** Forward distance from the player's center to the visible muzzle. */
+  muzzleX?: number;
   /** Small vertical trim from the shared ranged hand line (see
    * RANGED_HAND_Y in weapon-visuals.ts) — shots spawn ON the drawn
    * weapon, this only nudges within it (a barrel above the grip, say). */
@@ -143,6 +154,74 @@ export interface WeaponDef {
   colors: readonly string[];
 }
 
+/**
+ * The small, art-facing part of an attack definition that the sprite editor
+ * is allowed to tune. Move semantics (damage, lunge, trail, pogo, and so on)
+ * stay in this registry module; timing and contact geometry live in data so
+ * an artist can adjust what the preview shows without rewriting TypeScript.
+ */
+export interface WeaponCombatTuningEntry {
+  /** Number of authored poses in this move's attack animation. */
+  frameCount: number;
+  /** One-based, inclusive frames during which the attack can deal damage. */
+  activeFrames: [number, number];
+  hitbox: WeaponHitboxDef;
+}
+
+export interface WeaponCombatTuningProfile {
+  /** One clock for every authored attack animation in this weapon type. */
+  fps: number;
+  moves: Record<string, WeaponCombatTuningEntry>;
+}
+
+export type WeaponCombatTuning = Record<string, WeaponCombatTuningProfile>;
+
+function tuneAttack(
+  attack: WeaponAttackDef | undefined,
+  tuning: WeaponCombatTuningEntry | undefined,
+  fps: number,
+): WeaponAttackDef | undefined {
+  if (!attack || !tuning) return attack;
+  const [activeStart, activeEnd] = tuning.activeFrames;
+  return {
+    ...attack,
+    duration: tuning.frameCount / fps,
+    // Runtime simulation still benefits from normalized progress, but the
+    // authored source stays frame-native. Frame N occupies
+    // [(N - 1) / count, N / count), so an inclusive frame window maps to
+    // these two boundaries without a second timing source.
+    active: [
+      (activeStart - 1) / tuning.frameCount,
+      activeEnd / tuning.frameCount,
+    ] as [number, number],
+    hitbox: { ...tuning.hitbox },
+  };
+}
+
+function tuneWeaponType(
+  type: WeaponTypeDef,
+  tuning: WeaponCombatTuningProfile | undefined,
+): WeaponTypeDef {
+  if (!tuning) return type;
+  const move = tuning.moves;
+  return {
+    ...type,
+    attacks: type.attacks.map((attack, index) => tuneAttack(attack, move[`combo${index}`], tuning.fps)!),
+    aerial: tuneAttack(type.aerial, move.aerial, tuning.fps),
+    plunge: tuneAttack(type.plunge, move.plunge, tuning.fps),
+    upper: tuneAttack(type.upper, move.upper, tuning.fps),
+    dashAttack: tuneAttack(type.dashAttack, move.dashAttack, tuning.fps),
+  };
+}
+
+/** Deliberate editor hot-reload seam; ordinary game code never calls this. */
+export function replaceWeaponCombatTuning(
+  typeId: string,
+  tuning: WeaponCombatTuningProfile,
+): void {
+  weaponTypes.replace(typeId, tuneWeaponType(weaponTypes.get(typeId), tuning));
+}
+
 export const weaponTypes = new Registry<WeaponTypeDef>('weaponType');
 export const weapons = new Registry<WeaponDef>('weapon');
 
@@ -159,6 +238,7 @@ export function allAttacks(type: WeaponTypeDef): WeaponAttackDef[] {
 }
 
 export function defineWeaponType(id: string, def: WeaponTypeDef): void {
+  def = tuneWeaponType(def, (repositoryWeaponCombat as unknown as WeaponCombatTuning)[id]);
   if (!Number.isFinite(def.comboWindow) || def.comboWindow < 0) {
     throw new Error(`weapon type "${id}".comboWindow: expected a non-negative finite number`);
   }
@@ -170,6 +250,8 @@ export function defineWeaponType(id: string, def: WeaponTypeDef): void {
     for (const [field, value] of Object.entries({
       speed: r.speed, gravity: r.gravity, cooldown: r.cooldown, recoil: r.recoil,
     })) finite(value, `weapon type "${id}".ranged.${field}`);
+    if (r.muzzleX !== undefined) finite(r.muzzleX, `weapon type "${id}".ranged.muzzleX`);
+    if (r.muzzleY !== undefined) finite(r.muzzleY, `weapon type "${id}".ranged.muzzleY`);
     if (r.speed <= 0 || r.cooldown <= 0 || r.gravity < 0 || r.recoil < 0) {
       throw new Error(`weapon type "${id}".ranged: speed/cooldown must be positive, gravity/recoil non-negative`);
     }
@@ -218,8 +300,14 @@ export function defineWeaponType(id: string, def: WeaponTypeDef): void {
       throw new Error(`${path}.hitbox: width and height must be positive`);
     }
     for (const [field, value] of Object.entries(attack.trail)) {
-      if (field === 'sprite') continue; // the one non-numeric trail field
+      if (field === 'sprite' || field === 'overlay') continue;
       finite(value, `${path}.trail.${field}`);
+    }
+    if (attack.trail.overlay !== undefined && typeof attack.trail.overlay !== 'boolean') {
+      throw new Error(`${path}.trail.overlay: expected a boolean`);
+    }
+    if (attack.embeddedHeldObject !== undefined && typeof attack.embeddedHeldObject !== 'boolean') {
+      throw new Error(`${path}.embeddedHeldObject: expected a boolean`);
     }
     if (attack.trail.sprite !== undefined && !slashVisuals.has(attack.trail.sprite)) {
       throw new Error(`${path}.trail.sprite: unknown slash visual "${attack.trail.sprite}"`);
@@ -352,7 +440,7 @@ const contextuals = (p: { reach: number; arc: number; heft: number }) => ({
     // as long as the attack can actually pogo something.
     trail: {
       startAngle: 0.45, endAngle: 2.69, radius: p.reach * 0.8, thickness: 5,
-      bias: 0.5, glow: 1.8, sweep: 0.16, sprite: 'crescent',
+      bias: 0.5, glow: 1.8, sweep: 0.16,
     },
     movementKeep: 0.35,
     bodyWeight: 1.1,
@@ -412,21 +500,29 @@ defineWeaponType('sword', {
     attack({
       duration: 0.16, active: [0.15, 0.56], damageScale: 1, strength: 0.42, lunge: 45,
       hitbox: { forward: -2, y: 0, w: 20, h: 16 },
-      trail: { startAngle: -1.3, endAngle: 1.3, radius: 13, thickness: 3.5 },
+      // This move's complete body, blade, hand, and arc are authored on one
+      // timeline in the knight's own layered sprite. Weapon-specific overlay
+      // layers can still tint or decorate the embedded blade.
+      trail: { startAngle: -1.3, endAngle: 1.3, radius: 13, thickness: 3.5, overlay: false },
+      embeddedHeldObject: true,
     }),
     attack({
       animation: 'attack2',
       duration: 0.17, active: [0.14, 0.56], damageScale: 1, strength: 0.46, lunge: 50,
       hitbox: { forward: -2, y: -1, w: 20, h: 17 },
-      trail: { startAngle: 1.3, endAngle: -1.3, radius: 14, thickness: 3.5 },
-      frameDirection: -1,
+      // This move's complete body, blade, hand, and arc are authored on one
+      // timeline in the knight's own layered sprite.
+      trail: { startAngle: 1.3, endAngle: -1.3, radius: 14, thickness: 3.5, overlay: false },
+      embeddedHeldObject: true,
+      frameDirection: 1,
       lift: 3,
     }),
     attack({
       animation: 'attack3',
       duration: 0.25, active: [0.22, 0.62], damageScale: 2, strength: 0.8, lunge: 110,
       hitbox: { forward: -2, y: -1, w: 26, h: 20 },
-      trail: { startAngle: -1.35, endAngle: 1.35, radius: 17, thickness: 5 },
+      trail: { startAngle: -1.35, endAngle: 1.35, radius: 17, thickness: 5, overlay: false },
+      embeddedHeldObject: true,
       bodyWeight: 1.35,
       lift: 3,
       movementKeep: 0.0005,
@@ -473,7 +569,7 @@ defineWeaponType('bow', {
   comboWindow: 0,
   attacks: [],
   ranged: {
-    projectile: 'arrow', speed: 330, gravity: 420, cooldown: 0.55, recoil: 30,
+    projectile: 'arrow', speed: 330, gravity: 420, cooldown: 0.55, recoil: 30, muzzleX: 9,
     charge: { time: 0.8, floor: 0.4, curve: 1.4 },
   },
 });
@@ -483,7 +579,7 @@ defineWeaponType('bow', {
 defineWeaponType('gun', {
   comboWindow: 0,
   attacks: [],
-  ranged: { projectile: 'bullet', speed: 640, gravity: 30, cooldown: 0.85, recoil: 90, muzzleY: -0.25 },
+  ranged: { projectile: 'bullet', speed: 640, gravity: 30, cooldown: 0.85, recoil: 90, muzzleX: 10, muzzleY: -0.25 },
 });
 
 defineWeapon('unarmed', {

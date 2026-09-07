@@ -1,0 +1,46 @@
+{
+  "sword": {
+    "fps": 24,
+    "moves": {
+      "combo0": {
+        "frameCount": 6,
+        "activeFrames": [
+          4,
+          6
+        ],
+        "hitbox": {
+          "forward": -10.75,
+          "y": 0,
+          "w": 20,
+          "h": 16
+        }
+      },
+      "combo1": {
+        "frameCount": 6,
+        "activeFrames": [
+          2,
+          3
+        ],
+        "hitbox": {
+          "forward": -2,
+          "y": -1,
+          "w": 20,
+          "h": 17
+        }
+      },
+      "combo2": {
+        "frameCount": 6,
+        "activeFrames": [
+          3,
+          6
+        ],
+        "hitbox": {
+          "forward": -6,
+          "y": 3,
+          "w": 15,
+          "h": 15
+        }
+      }
+    }
+  }
+}

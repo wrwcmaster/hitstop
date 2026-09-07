@@ -1,11 +1,17 @@
 import { drawText, frameAt, whiteOf, tintOf, clamp } from '@engine/index';
-import { baseKnight } from '../content/sprites';
+import { baseKnight, KNIGHT_TAG_ANIMS } from '../content/sprites';
 import { gearLayers, DEBUG_ANCHORS } from '../content/gear-visuals';
 import { COLORS } from '../content/palette';
 import { IMPACT_DROP_PLUNGE } from '../content/weapons';
-import { drawHeldWeapon, drawWeaponTrail, drawNeutralTrail } from '../content/weapon-visuals';
+import {
+  drawHeldWeaponTag, drawEmbeddedHeldWeaponTag, drawWeaponTrail, drawNeutralTrail, heldWeaponAttachmentSlot,
+  heldWeaponGripRenderTag, heldWeaponHands,
+  type HeldWeaponCtx,
+} from '../content/weapon-visuals';
+import { orderedPlayerRenderTags } from '../content/render-tags';
 import { PLAYER_TUNING } from './player-tuning';
 import type { Player } from './player';
+import { facingHitboxX, shouldSuppressHeldWeapon } from './player-render-policy';
 
 /**
  * How the knight is drawn — the whole picture, from body English to the
@@ -32,6 +38,11 @@ function bodyPose(p: Player): { shear: number; ox: number; oy: number; sx: numbe
     const prog = clamp(p.fsm.t / p.attackDur, 0, 1);
     const attack = p.attackDef;
     if (!attack) return { shear: 0, ox: 0, oy: 0, sx: 1, sy: 1 };
+    // Authored attack art already carries the coil, swing, and recovery.
+    // Procedurally shearing those frames would pose the same action twice.
+    if (p.animSet.right[attack.animation]) {
+      return { shear: 0, ox: 0, oy: 0, sx: 1, sy: 1 };
+    }
     const mag = attack.bodyWeight;
     let shear: number;
     let ox: number;
@@ -66,9 +77,13 @@ function bodyPose(p: Player): { shear: number; ox: number; oy: number; sx: numbe
 
   // move / air: lean into horizontal motion; stretch on a fast rise,
   // pinch slightly on the fall — a subtle jump arc.
+  // The authored run cycle owns grounded locomotion now. Do not shear its
+  // carefully aligned frames based on velocity; procedural posing remains
+  // useful in the air, where the sprite set has less motion information.
+  if (p.onGround) return { shear: 0, ox: 0, oy: 0, sx: 1, sy: 1 };
+
   const shear = -clamp(p.vx / 900, -0.18, 0.18);
-  let sy = 1;
-  if (!p.onGround) sy = 1 + clamp(-p.vy / 1600, -0.06, 0.1);
+  const sy = 1 + clamp(-p.vy / 1600, -0.06, 0.1);
   return { shear, ox: 0, oy: 0, sx: 2 - sy, sy };
 }
 
@@ -79,17 +94,33 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
   // I-frame blink (god mode holds i-frames but shouldn't strobe).
   if (p.invulnT > 0 && !p.godMode && !p.fsm.is('dead') && Math.floor(p.invulnT * 20) % 2) return;
 
+  const set = p.facing === 1 ? p.animSet.right : p.animSet.left;
   let anim = 'air';
   if (p.onGround) anim = Math.abs(p.vx) > 8 ? 'run' : 'idle';
-  const set = p.facing === 1 ? p.animSet.right : p.animSet.left;
-  let img = frameAt(set, anim, p.animT);
+  else if (p.vy < -35 && set.rise) anim = 'rise';
+  else if (p.vy > 45 && set.fall) anim = 'fall';
+  let animT = p.animT;
+  const authoredAttack = p.fsm.is('attack') && p.attackDef
+    ? set[p.attackDef.animation]
+    : undefined;
+  if (authoredAttack && p.attackDef) {
+    anim = p.attackDef.animation;
+    // Attack timing belongs to the move, not the world's locomotion clock.
+    // Spread every authored pose across the move and hold the final frame at 1.
+    const progress = clamp(p.fsm.t / p.attackDur, 0, 1);
+    const directedProgress = p.attackDef.frameDirection === -1 ? 1 - progress : progress;
+    animT = Math.min(directedProgress, 0.999999) * authoredAttack.frames.length / authoredAttack.fps;
+  }
+  let img = frameAt(set, anim, animT);
   if (p.flashT > 0) img = whiteOf(img);
 
   // Entity coordinates describe the collision box. Sprite geometry maps
   // its draw origin onto that box, allowing transparent overhangs without
   // changing physics.
-  const cx = p.x - baseKnight.hitbox.x + baseKnight.w / 2;
-  const by = p.y - baseKnight.hitbox.y + baseKnight.h;
+  const poseHitbox = baseKnight.hitboxFor(anim);
+  const poseHitboxX = facingHitboxX(baseKnight.w, poseHitbox.x, poseHitbox.w, p.facing);
+  const cx = p.x - poseHitboxX + baseKnight.w / 2;
+  const by = p.y - poseHitbox.y + baseKnight.h;
   const dh = baseKnight.h;
   const dw = baseKnight.w;
 
@@ -114,7 +145,6 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
   const sy = baseSy * pose.sy;
   g.save();
   
-  let finalImg = img;
   const isSwallowed = p.fsm.is('swallowed');
   if (isSwallowed) {
     g.globalAlpha = 0.9; // keep player highly visible
@@ -122,34 +152,45 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
     const shiverX = Math.sin(p.animT * 50) * 0.8;
     const shiverY = Math.cos(p.animT * 50) * 0.8;
     g.translate(q(cx + pose.ox + shiverX), q(by + pose.oy + shiverY));
-    // Tint the player red for acid pain/damage!
-    finalImg = tintOf(img, COLORS.red, 0.55);
   } else {
     g.translate(q(cx + pose.ox), q(by + pose.oy));
   }
   
   g.scale(sx, sy);
   if (pose.shear) g.transform(1, 0, pose.shear, 1, 0, 0);
-  g.drawImage(finalImg, -dw / 2, -dh, dw, dh);
-
   const animObj = p.animSet.right[anim];
   const frameIdx = animObj
     ? (animObj.loop === false
-      ? Math.min(Math.floor(p.animT * animObj.fps), animObj.frames.length - 1)
-      : Math.floor(p.animT * animObj.fps) % animObj.frames.length)
+      ? Math.min(Math.floor(animT * animObj.fps), animObj.frames.length - 1)
+      : Math.floor(animT * animObj.fps) % animObj.frames.length)
     : 0;
+  const bodyAnchor = (name: string): { x: number; y: number } | undefined => {
+    const anchor = baseKnight.anchor?.(name, anim, frameIdx);
+    if (!anchor) return undefined;
+    // Sprite points are authored in the right-facing sheet. Individual
+    // weapon visuals already mirror by `ctx.facing`, exactly like their art.
+    return { x: anchor.x - dw / 2, y: anchor.y - dh };
+  };
   
-  // Visible gear draws as registered layers over the body (armor under
-  // helmet, etc). Any equipped slot with a visual in the gear-visuals
-  // registry composites here — new gear slots need no player changes.
-  if (p.flashT <= 0 && !isSwallowed) {
-    const f = p.facing;
+  const equippedGear = gearLayers(p.equipment);
+  const drawBodyTag = (tag: string): void => {
+    const tagged = KNIGHT_TAG_ANIMS.get(tag);
+    if (!tagged) return;
+    let layerImg = frameAt(p.facing === 1 ? tagged.right : tagged.left, anim, animT);
+    if (p.flashT > 0) layerImg = whiteOf(layerImg);
+    else if (isSwallowed) layerImg = tintOf(layerImg, COLORS.red, 0.55);
+    g.drawImage(layerImg, -dw / 2, -dh, dw, dh);
+  };
 
-    for (const [slot, visual] of gearLayers()) {
-      if (p.equipment.get(slot) === null) continue;
+  const drawGear = (): void => {
+    if (p.flashT > 0 || isSwallowed) return;
+    const f = p.facing;
+    for (const [, visual] of equippedGear) {
       const layerSet = f === 1 ? visual.anims.right : visual.anims.left;
-      const layerImg = frameAt(layerSet, anim, p.animT);
-      const anchor = visual.anchors?.[anim]?.[frameIdx] ?? { x: 0, y: 0, angle: 0 };
+      const gearAnim = layerSet[anim] ? anim : layerSet.idle ? 'idle' : Object.keys(layerSet)[0];
+      if (!gearAnim) continue;
+      const layerImg = frameAt(layerSet, gearAnim, animT);
+      const anchor = visual.anchors?.[gearAnim]?.[frameIdx] ?? { x: 0, y: 0, angle: 0 };
 
       g.save();
       g.translate(anchor.x * f, anchor.y);
@@ -161,23 +202,19 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
       }
       g.restore();
     }
-  }
-  
-  if (isSwallowed && p.swallowedBy) {
-    p.swallowedBy.def.swallow?.drawPlayerOverlay?.(g, p.swallowedBy, p, dw, dh);
-  }
-  
-  // Equipment visuals ride the same body transform as the knight.
-  if (p.flashT <= 0) {
-    if (p.equipment.get('charm')) renderCharm(g, dh);
-    const weapon = p.weapon;
-    drawHeldWeapon(g, weapon.visual, {
+  };
+
+  const weapon = p.weapon;
+  const weaponSlot = baseKnight.slot?.(heldWeaponAttachmentSlot(weapon.visual));
+  const weaponCtx: HeldWeaponCtx = {
       facing: p.facing,
       anim,
       frame: frameIdx,
-      animT: p.animT,
+      animT,
       bodyW: dw,
       bodyH: dh,
+      frontHand: bodyAnchor(weaponSlot?.anchor ?? 'frontHand'),
+      rearHand: bodyAnchor('rearHand'),
       attack: p.fsm.is('attack')
         ? {
             progress: Math.min(1, p.fsm.t / p.attackDur),
@@ -193,7 +230,56 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
         : p.fsm.is('attack') && p.attackDef?.aim === 'down'
           ? 'plunge'
           : undefined,
-    });
+  };
+
+  const grip = equippedGear.flatMap(([, visual]) => visual.grip ? [visual.grip] : []).at(-1)
+    ?? { outline: '#171625', fill: '#684037', highlight: '#9a5b45' };
+  const drawGrip = (anchor: { x: number; y: number } | undefined): void => {
+    if (!anchor) return;
+    const x = anchor.x * p.facing;
+    const y = anchor.y;
+    g.fillStyle = grip.outline;
+    g.fillRect(x - 0.75, y - 0.65, 1.5, 1.3);
+    g.fillStyle = grip.fill;
+    g.fillRect(x - 0.5, y - 0.4, 1, 0.85);
+    g.fillStyle = grip.highlight;
+    g.fillRect(x + (p.facing > 0 ? 0.1 : -0.35), y - 0.35, 0.3, 0.3);
+  };
+
+  // Every body and attachment layer contributes to one shared render band.
+  // The registry is the only z-order; local layer order is merely the stable
+  // tie-breaker within a tag. That lets a real authored hand cover a weapon.
+  const renderTags = orderedPlayerRenderTags();
+  const bodyTags = new Set(baseKnight.tags());
+  const bodyOverlayTag = [...renderTags].reverse().find((tag) => bodyTags.has(tag));
+  const gripRenderTag = heldWeaponGripRenderTag(weapon.visual);
+  // A move may request authored weapon-in-body art while the installed body
+  // lacks that animation (custom sheets only promise idle/run/air). In that
+  // case the body stays on locomotion art, so the ordinary held weapon must
+  // remain visible. Suppress it only when this body actually supplied the
+  // authored attack frames selected above.
+  const embeddedHeldObject = shouldSuppressHeldWeapon(
+    p.attackDef?.embeddedHeldObject,
+    Boolean(authoredAttack),
+  );
+  for (const tag of renderTags) {
+    drawBodyTag(tag);
+    if (tag === bodyOverlayTag) {
+      drawGear();
+      if (isSwallowed && p.swallowedBy) {
+        p.swallowedBy.def.swallow?.drawPlayerOverlay?.(g, p.swallowedBy, p, dw, dh);
+      }
+      if (p.flashT <= 0 && p.equipment.get('charm')) renderCharm(g, dh);
+    }
+    if (p.flashT <= 0) {
+      if (embeddedHeldObject) drawEmbeddedHeldWeaponTag(g, weapon.visual, weaponCtx, tag);
+      else drawHeldWeaponTag(g, weapon.visual, weaponCtx, tag);
+    }
+    if (p.flashT <= 0 && !embeddedHeldObject && tag === gripRenderTag) {
+      for (const hand of heldWeaponHands(weapon.visual, p.fsm.is('draw'))) {
+        drawGrip(hand === 'front' ? weaponCtx.frontHand : weaponCtx.rearHand);
+      }
+    }
   }
   g.restore();
   g.globalAlpha = 1;
