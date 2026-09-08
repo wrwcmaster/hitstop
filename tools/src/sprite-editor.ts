@@ -3018,21 +3018,21 @@ function floodFill(startX: number, startY: number, fillChar: string): void {
   const f = cur();
   const targetChar = f[startY]?.[startX];
   if (targetChar === undefined || targetChar === fillChar) return;
-  
+
   const w = W();
   const h = H();
   const queue: [number, number][] = [[startX, startY]];
   const visited = new Set<string>();
-  
+
   while (queue.length > 0) {
     const [x, y] = queue.shift()!;
     const key = `${x},${y}`;
     if (visited.has(key)) continue;
     visited.add(key);
-    
+
     if (f[y]?.[x] === targetChar) {
       setPixel(x, y, fillChar);
-      
+
       if (x > 0) queue.push([x - 1, y]);
       if (x < w - 1) queue.push([x + 1, y]);
       if (y > 0) queue.push([x, y - 1]);
