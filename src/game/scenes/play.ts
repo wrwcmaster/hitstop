@@ -1298,17 +1298,17 @@ export class PlayScene implements Scene {
           // you should appear where the portal is. (Safe now that pads are
           // interact-only and won't re-open on contact.)
           const land = this.portalLanding(dest.room, player.w);
-          this.goToRoom(dest.room, land.x, land.y);
+          this.goToRoom(dest.room, land?.x ?? dest.x, land?.y ?? dest.y);
         },
       ),
     );
   }
 
   /** Where to arrive when warping into `roomId`: centered on its portal
-   * pad. Portal destinations must author their own arrival geometry. */
-  private portalLanding(roomId: string, width: number): { x: number; y: number } {
+   * pad. Without a pad, the destination's authored coordinates apply. */
+  private portalLanding(roomId: string, width: number): { x: number; y: number } | null {
     const pad = this.roomById(roomId).triggers?.find((tr) => tr.event === 'portal');
-    if (!pad) throw new Error(`Portal destination has no portal pad: ${roomId}`);
+    if (!pad) return null;
     return { x: pad.x + pad.w / 2 - width / 2, y: pad.y };
   }
 

@@ -18,15 +18,27 @@ try {
   }
   const scene = game.scenes.all().find(s => s.constructor.name === 'PlayScene');
   assert.throws(() => scene.roomById('misspelled-room'), /Unknown room/);
-  assert.throws(() => scene.portalLanding('gatehouse', 10), /no portal pad/);
-  const { portalDests } = await server.ssrLoadModule('/src/game/content/portals.ts');
+  assert.equal(scene.portalLanding('gatehouse', 10), null, 'padless rooms use authored arrivals');
+  const { portalDests, definePortal } = await server.ssrLoadModule('/src/game/content/portals.ts');
   const { ROOMS } = await server.ssrLoadModule('/src/game/content/rooms/index.ts');
   for (const dest of portalDests()) {
     const pad = ROOMS[dest.room].triggers.find(t => t.event === 'portal');
     assert.ok(pad, dest.room);
     assert.deepEqual(scene.portalLanding(dest.room, 10), { x: pad.x + pad.w / 2 - 5, y: pad.y });
-    assert.ok(!('x' in dest) && !('y' in dest), 'one source of portal arrival geometry');
+    assert.ok(Number.isFinite(dest.x) && Number.isFinite(dest.y), 'authored arrivals remain in the catalog');
   }
+  const authored = { room: 'gatehouse', label: 'Padless test destination', order: 100, x: 120, y: 460 };
+  definePortal('padless-test', authored);
+  harness.beginRun({ kind: 'scenario', scenario: { room: 'town', quiet: true } });
+  scene.flags.add('visited:gatehouse');
+  scene.openPortal();
+  const menu = game.scenes.all().at(-1);
+  const index = menu.dests.findIndex(d => d.room === authored.room);
+  assert.ok(index >= 0, 'registered padless destination appears in the menu');
+  menu.menu.entries[index].onSelect();
+  assert.equal(scene.transition.roomId, authored.room);
+  assert.equal(scene.transition.x, authored.x);
+  assert.equal(scene.transition.y, authored.y);
   const { actionLabel } = await server.ssrLoadModule('/src/game/defs.ts');
   const matchMedia = window.matchMedia;
   const input = { codesFor: () => ['KeyE'] };
