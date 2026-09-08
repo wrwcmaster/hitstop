@@ -126,6 +126,12 @@ let hoverCell: { x: number; y: number } | null = null;
 let strokePaletteChanged = false;
 let strokePaletteLookup: StrokePaletteLookup | null = null;
 const strokeBrushBlendCache = new Map<string, string>();
+let paletteUsageSnapshot: Map<string, number> | null = null;
+let scheduledPaletteBuildFrame = 0;
+let scheduledContinuousFinalizeFrame = 0;
+let pendingContinuousPublish = false;
+let continuousDraftTimer = 0;
+let continuousPublishTimer = 0;
 let scheduledRedrawFrame = 0;
 let scheduledSelectionUiFrame = 0;
 const editorPerformanceStats = {
@@ -142,6 +148,14 @@ const editorPerformanceStats = {
   paintEvents: 0,
   paintTotalMs: 0,
   paintMaxMs: 0,
+  gestureFinishes: 0,
+  gestureFinishTotalMs: 0,
+  gestureFinishMaxMs: 0,
+  gestureSideEffects: 0,
+  gestureSideEffectTotalMs: 0,
+  gestureSideEffectMaxMs: 0,
+  draftPersistMaxMs: 0,
+  bridgePublishDispatchMaxMs: 0,
   selectionTransforms: 0,
   selectionTransformTotalMs: 0,
   selectionTransformMaxMs: 0,
@@ -161,7 +175,6 @@ let canvasPan: {
 } | null = null;
 interface ContinuousDocumentEdit {
   startVersion: number;
-  startDocument: string;
   beforeFile: SpriteFile;
   beforeSelection: PixelSelection | null;
   historyPushed: boolean;
@@ -311,7 +324,9 @@ let previewRenderVersion = 0;
 const DRAFT_PREFIX = 'hitstop.sprite-editor.draft:';
 const RENDER_TAG_DRAFT_KEY = 'hitstop.sprite-editor.render-tags.draft';
 const WEAPON_COMBAT_DRAFT_KEY = 'hitstop.sprite-editor.weapon-combat.draft.v2';
-let lastDraftSignature = '';
+let lastDraftPath: string | null = null;
+let lastDraftEditVersion = -1;
+let lastDraftRepositoryFile = '';
 let editorViewReady = false;
 let savedRenderTagSignature = JSON.stringify(repositoryRenderTagDefs);
 let renderTagDefs: PlayerRenderTagDef[] = readRenderTagDraft();
@@ -473,7 +488,11 @@ function storedDrafts(): StoredSpriteDraft[] {
 
 function clearDraft(path: string): void {
   localStorage.removeItem(draftKey(path));
-  if (lastDraftSignature.startsWith(`${path}\0`)) lastDraftSignature = '';
+  if (lastDraftPath === path) {
+    lastDraftPath = null;
+    lastDraftEditVersion = -1;
+    lastDraftRepositoryFile = '';
+  }
 }
 
 function persistCurrentDraft(): void {
@@ -484,8 +503,9 @@ function persistCurrentDraft(): void {
     clearDraft(currentRepoPath);
     return;
   }
-  const signature = `${currentRepoPath}\0${lastRepositoryFile}\0${serialized}`;
-  if (signature === lastDraftSignature) return;
+  if (currentRepoPath === lastDraftPath
+    && editVersion === lastDraftEditVersion
+    && lastRepositoryFile === lastDraftRepositoryFile) return;
   try {
     const draft: StoredSpriteDraft = {
       v: 1,
@@ -495,7 +515,9 @@ function persistCurrentDraft(): void {
       updatedAt: Date.now(),
     };
     localStorage.setItem(draftKey(currentRepoPath), JSON.stringify(draft));
-    lastDraftSignature = signature;
+    lastDraftPath = currentRepoPath;
+    lastDraftEditVersion = editVersion;
+    lastDraftRepositoryFile = lastRepositoryFile;
   } catch (error) {
     flash(`local draft failed: ${(error as Error).message}`);
   }
@@ -1682,7 +1704,7 @@ async function openSharedSprite(path: string): Promise<boolean> {
 }
 
 async function publishSharedSprite(): Promise<void> {
-  if (bridgePublishing || bridgeConflict || continuousEdit) return;
+  if (!bridgeConnected || bridgePublishing || bridgeConflict || continuousEdit) return;
   const serialized = JSON.stringify(file);
   if (serialized === lastSharedFile) return;
   bridgePublishing = true;
@@ -2074,6 +2096,10 @@ function sortedPaletteEntries(): [string, string][] {
 }
 
 function buildPalette(): void {
+  if (scheduledPaletteBuildFrame) {
+    cancelAnimationFrame(scheduledPaletteBuildFrame);
+    scheduledPaletteBuildFrame = 0;
+  }
   const host = $('palette');
   host.innerHTML = '';
   // Sorting is display-only: palette characters and every authored frame stay
@@ -2098,10 +2124,19 @@ function buildPalette(): void {
     host.appendChild(b);
   }
   const usage = paletteUsage();
+  paletteUsageSnapshot = usage;
   const total = Object.keys(pal()).filter((ch) => ch !== '.').length;
   const used = [...usage.keys()].filter((ch) => ch !== '.' && ch in pal()).length;
   $('paletteStatus').textContent = `${used}/${total}`;
   syncPaletteColorControls();
+}
+
+function schedulePaletteBuild(): void {
+  if (scheduledPaletteBuildFrame) return;
+  scheduledPaletteBuildFrame = requestAnimationFrame(() => {
+    scheduledPaletteBuildFrame = 0;
+    buildPalette();
+  });
 }
 
 function paletteAlphaByte(): number {
@@ -3107,8 +3142,15 @@ $('btnDelAnim').onclick = () => {
 function setPixel(x: number, y: number, ch: string): void {
   if (x < 0 || y < 0 || x >= W() || y >= H()) return;
   const f = cur();
-  if (f[y][x] === ch) return;
+  const previous = f[y][x];
+  if (previous === ch) return;
   f[y] = f[y].slice(0, x) + ch + f[y].slice(x + 1);
+  if (paletteUsageSnapshot) {
+    const previousCount = (paletteUsageSnapshot.get(previous) ?? 1) - 1;
+    if (previousCount > 0) paletteUsageSnapshot.set(previous, previousCount);
+    else paletteUsageSnapshot.delete(previous);
+    paletteUsageSnapshot.set(ch, (paletteUsageSnapshot.get(ch) ?? 0) + 1);
+  }
   editVersion++;
 }
 
@@ -3117,13 +3159,32 @@ interface StrokePaletteLookup {
   exact: Map<string, string>;
   colors: Array<{ ch: string; rgba: Rgba }>;
   byChar: Map<string, Rgba>;
+  recyclable: string[] | null;
 }
 
 function createCurrentPixelBatch(): PixelBatch {
   return createPixelBatch(cur());
 }
 
+function updatePaletteUsageForBatch(batch: PixelBatch): void {
+  const usage = paletteUsageSnapshot;
+  if (!usage) return;
+  for (const [y, next] of batch.rows) {
+    const previous = batch.frame[y];
+    for (let x = 0; x < next.length; x++) {
+      const from = previous[x];
+      const to = next[x];
+      if (from === to) continue;
+      const previousCount = (usage.get(from) ?? 1) - 1;
+      if (previousCount > 0) usage.set(from, previousCount);
+      else usage.delete(from);
+      usage.set(to, (usage.get(to) ?? 0) + 1);
+    }
+  }
+}
+
 function commitPixelBatch(batch: PixelBatch, invalidate = true): boolean {
+  if (batch.changed) updatePaletteUsageForBatch(batch);
   if (!commitPixelBatchRows(batch)) return false;
   // One stamp/interpolated segment is one render invalidation, regardless of
   // how many pixels it touched. The old per-pixel increment forced caches to
@@ -3179,10 +3240,17 @@ function rgbaHex(color: Rgba): string {
 }
 
 function createStrokePaletteLookup(): StrokePaletteLookup {
+  // buildPalette keeps this snapshot current during ordinary editing. Using
+  // it here makes full-palette recycling O(palette size), not O(all frames),
+  // on the first brush sample.
+  const usage = paletteUsageSnapshot ?? paletteUsage();
   const lookup: StrokePaletteLookup = {
     exact: new Map(),
     colors: [],
     byChar: new Map(),
+    recyclable: Object.keys(pal()).filter((ch) =>
+      ch !== '.' && ch !== currentChar && !usage.has(ch),
+    ),
   };
   for (const [ch, value] of Object.entries(pal())) {
     const rgba = parseRgba(value);
@@ -3245,7 +3313,6 @@ function paletteUsage(): Map<string, number> {
 interface PaletteCompaction { changed: boolean; merged: number; removed: number }
 
 function compactPalette(removeUnused = true): PaletteCompaction {
-  const usage = paletteUsage();
   const groups = new Map<string, string[]>();
   for (const [ch, color] of Object.entries(pal())) {
     if (ch === '.' || typeof color !== 'string') continue;
@@ -3256,9 +3323,12 @@ function compactPalette(removeUnused = true): PaletteCompaction {
     groups.set(key, group);
   }
 
+  const duplicateGroups = [...groups.values()].filter((chars) => chars.length > 1);
+  // Counting every pixel in every animation is relatively expensive on large
+  // authored sheets. It is only needed to choose among actual duplicates.
+  const usage = duplicateGroups.length ? paletteUsage() : new Map<string, number>();
   const remap = new Map<string, string>();
-  for (const chars of groups.values()) {
-    if (chars.length < 2) continue;
+  for (const chars of duplicateGroups) {
     // Preserve the selected key when possible; otherwise keep the most-used
     // key so the compacted JSON remains stable and readable.
     const canonical = chars.includes(currentChar)
@@ -3279,9 +3349,9 @@ function compactPalette(removeUnused = true): PaletteCompaction {
     for (const ch of remap.keys()) delete (file.palette ?? {})[ch];
   }
 
-  const afterRemapUsage = paletteUsage();
   let removed = 0;
   if (removeUnused) {
+    const afterRemapUsage = paletteUsage();
     for (const ch of Object.keys(pal())) {
       if (ch === '.' || ch === currentChar || afterRemapUsage.has(ch)) continue;
       delete (file.palette ?? {})[ch];
@@ -3327,11 +3397,27 @@ function paletteCharFor(color: Rgba): string {
   if (nearest && nearestDistance <= 12 ** 2) return nearest;
   const free = [...AUTO_PALETTE_CHARS].find((ch) => !(ch in pal()));
   // A stroke can make a source color unused before the automatic compaction
-  // at mouse-up. Recycle that slot when the key space is full.
-  const usage = free ? null : paletteUsage();
-  const recyclable = free ?? Object.keys(pal()).find((ch) =>
-    ch !== '.' && ch !== currentChar && !usage?.has(ch),
-  );
+  // at mouse-up. Recycle that slot when the key space is full. Build the
+  // inventory once per stroke: the previous implementation scanned every
+  // pixel in every animation for each new feather color, which made a full
+  // 345-entry palette hundreds of times slower than a small fixture palette.
+  let recyclable = free;
+  if (!recyclable) {
+    const lookup = strokePaletteLookup;
+    if (lookup && lookup.recyclable === null) {
+      const usage = paletteUsage();
+      lookup.recyclable = Object.keys(pal()).filter((ch) =>
+        ch !== '.' && ch !== currentChar && !usage.has(ch),
+      );
+    }
+    recyclable = lookup?.recyclable?.shift();
+    if (!lookup) {
+      const usage = paletteUsage();
+      recyclable = Object.keys(pal()).find((ch) =>
+        ch !== '.' && ch !== currentChar && !usage.has(ch),
+      );
+    }
+  }
   if (!recyclable) return nearest || currentChar;
   (file.palette ??= {})[recyclable] = hex;
   updateStrokePaletteLookup(recyclable, quantized);
@@ -3622,6 +3708,7 @@ grid.addEventListener('mouseleave', () => {
   updateWorkspaceCursorStatus();
 });
 window.addEventListener('mouseup', () => {
+  const finishStartedAt = performance.now();
   let selectionGestureFinished = false;
   picking = false;
   if (magicSelectionDrag) {
@@ -3673,17 +3760,24 @@ window.addEventListener('mouseup', () => {
     painting = false;
     lastPaintCell = null;
     if (strokePaletteChanged) {
-      // Keep deliberately prepared but unused swatches during ordinary
-      // painting. The manual compact action is the explicit opt-in to remove
-      // those; automatic maintenance only coalesces exact duplicates.
-      compactPalette(false);
-      buildPalette();
+      // Generated blends already reuse exact/near palette entries. Rebuilding
+      // and compacting every animation synchronously here made releasing a
+      // long stroke block the page; explicit Compact remains available for
+      // deliberate document-wide cleanup.
+      schedulePaletteBuild();
     }
     strokePaletteChanged = false;
     strokePaletteLookup = null;
     flushScheduledRedraw();
   }
-  finishContinuousDocumentEdit();
+  finishContinuousDocumentEdit(true, true);
+  const finishElapsed = performance.now() - finishStartedAt;
+  editorPerformanceStats.gestureFinishes++;
+  editorPerformanceStats.gestureFinishTotalMs += finishElapsed;
+  editorPerformanceStats.gestureFinishMaxMs = Math.max(
+    editorPerformanceStats.gestureFinishMaxMs,
+    finishElapsed,
+  );
 });
 
 function gridCell(e: MouseEvent): { x: number; y: number } {
@@ -7229,7 +7323,6 @@ function saveHistory(): boolean {
 function beginContinuousDocumentEdit(): ContinuousDocumentEdit {
   return {
     startVersion: editVersion,
-    startDocument: JSON.stringify(file),
     beforeFile: structuredClone(file),
     beforeSelection: selection ? cloneSelection(selection) : null,
     historyPushed: saveHistory(),
@@ -7249,12 +7342,76 @@ function cancelContinuousDocumentEdit(): void {
   editVersion = edit.startVersion + 1;
 }
 
+function runContinuousDocumentSideEffects(publish: boolean): void {
+  const startedAt = performance.now();
+  // The JSON textarea and geometry fields are not part of live pixel
+  // feedback. Export/import and structural edits synchronize them explicitly;
+  // pretty-printing the complete sprite after every stroke dominated the
+  // post-release frame on large layered documents.
+  schedulePreviewUpload();
+  void publishSelection();
+  // Draft persistence and bridge serialization both walk the full document.
+  // Debounce them independently so releasing a stroke only commits UI state;
+  // rapid consecutive strokes coalesce into one autosave and one publication.
+  window.clearTimeout(continuousDraftTimer);
+  continuousDraftTimer = window.setTimeout(() => {
+    const draftStartedAt = performance.now();
+    persistCurrentDraft();
+    editorPerformanceStats.draftPersistMaxMs = Math.max(
+      editorPerformanceStats.draftPersistMaxMs,
+      performance.now() - draftStartedAt,
+    );
+  }, 160);
+  if (publish) {
+    window.clearTimeout(continuousPublishTimer);
+    continuousPublishTimer = window.setTimeout(() => {
+      const publishStartedAt = performance.now();
+      void publishSharedSprite();
+      editorPerformanceStats.bridgePublishDispatchMaxMs = Math.max(
+        editorPerformanceStats.bridgePublishDispatchMaxMs,
+        performance.now() - publishStartedAt,
+      );
+    }, 220);
+  }
+  const elapsed = performance.now() - startedAt;
+  editorPerformanceStats.gestureSideEffects++;
+  editorPerformanceStats.gestureSideEffectTotalMs += elapsed;
+  editorPerformanceStats.gestureSideEffectMaxMs = Math.max(
+    editorPerformanceStats.gestureSideEffectMaxMs,
+    elapsed,
+  );
+}
+
+function scheduleContinuousDocumentSideEffects(publish: boolean): void {
+  pendingContinuousPublish ||= publish;
+  if (scheduledContinuousFinalizeFrame) return;
+  scheduledContinuousFinalizeFrame = requestAnimationFrame(() => {
+    scheduledContinuousFinalizeFrame = 0;
+    const shouldPublish = pendingContinuousPublish;
+    pendingContinuousPublish = false;
+    runContinuousDocumentSideEffects(shouldPublish);
+  });
+}
+
+function flushContinuousDocumentSideEffects(publish = false): void {
+  if (!scheduledContinuousFinalizeFrame && !pendingContinuousPublish) return;
+  if (scheduledContinuousFinalizeFrame) cancelAnimationFrame(scheduledContinuousFinalizeFrame);
+  scheduledContinuousFinalizeFrame = 0;
+  pendingContinuousPublish = false;
+  // The explicit operation that interrupts the deferred frame owns whether
+  // the current document should be published (undo/save/switch pass false).
+  runContinuousDocumentSideEffects(publish);
+}
+
 /** Finalize a drag/paint gesture that intentionally mutates on every move. */
-function finishContinuousDocumentEdit(publish = true): void {
-  if (!continuousEdit) return;
+function finishContinuousDocumentEdit(publish = true, deferSideEffects = false): void {
+  if (!continuousEdit) {
+    if (!deferSideEffects) flushContinuousDocumentSideEffects(publish);
+    return;
+  }
   const edit = continuousEdit;
   continuousEdit = null;
-  if (JSON.stringify(file) === edit.startDocument) {
+  if (editVersion === edit.startVersion) {
     if (edit.historyPushed) undoStack.pop();
     selection = edit.beforeSelection ? cloneSelection(edit.beforeSelection) : null;
     editVersion = edit.startVersion;
@@ -7266,23 +7423,16 @@ function finishContinuousDocumentEdit(publish = true): void {
   // preview can rebake live. Palette-only changes are still real edits and
   // need to invalidate the preview once at gesture end.
   editVersion = edit.startVersion + 1;
-  try {
-    validateSpriteEditorDocument(file);
-  } catch (error) {
-    if (edit.historyPushed) undoStack.pop();
-    file = edit.beforeFile;
-    selection = edit.beforeSelection ? cloneSelection(edit.beforeSelection) : null;
-    editVersion = edit.startVersion + 1;
-    refreshUI();
-    updateUndoRedoButtons();
-    flash(`edit reverted: ${(error as Error).message}`);
-    return;
+  // Continuous editor kernels preserve row dimensions, palette keys, and
+  // document structure by construction. A full validation walks every frame
+  // and belongs at semantic transaction/import/save boundaries, not in the
+  // pointer-release handler.
+  if (deferSideEffects) scheduleContinuousDocumentSideEffects(publish);
+  else {
+    const hadPendingSideEffects = Boolean(scheduledContinuousFinalizeFrame || pendingContinuousPublish);
+    flushContinuousDocumentSideEffects(publish);
+    if (!hadPendingSideEffects) runContinuousDocumentSideEffects(publish);
   }
-  syncIO();
-  persistCurrentDraft();
-  schedulePreviewUpload();
-  void publishSelection();
-  if (publish) void publishSharedSprite();
 }
 
 function applyHistoryState(snapshot: string): void {
@@ -7729,6 +7879,14 @@ Object.defineProperty(window, '__editor', {
         editorPerformanceStats.paintEvents = 0;
         editorPerformanceStats.paintTotalMs = 0;
         editorPerformanceStats.paintMaxMs = 0;
+        editorPerformanceStats.gestureFinishes = 0;
+        editorPerformanceStats.gestureFinishTotalMs = 0;
+        editorPerformanceStats.gestureFinishMaxMs = 0;
+        editorPerformanceStats.gestureSideEffects = 0;
+        editorPerformanceStats.gestureSideEffectTotalMs = 0;
+        editorPerformanceStats.gestureSideEffectMaxMs = 0;
+        editorPerformanceStats.draftPersistMaxMs = 0;
+        editorPerformanceStats.bridgePublishDispatchMaxMs = 0;
         editorPerformanceStats.selectionTransforms = 0;
         editorPerformanceStats.selectionTransformTotalMs = 0;
         editorPerformanceStats.selectionTransformMaxMs = 0;
