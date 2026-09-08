@@ -58,6 +58,39 @@ design to surrender a semantic color.
 
 Keep the generated source. It is the comparison target, not yet a game asset.
 
+### Prove a generated video is decoding before extracting frames
+
+Do not infer that a video is static from repeated extracted frames until the
+random-access decode path has been verified. An HTTP test route that always
+returns the complete MP4 with status `200` can play from the beginning while
+silently breaking seeks: every requested timestamp may then yield the first
+decoded frame. In particular, do not serve an MP4 with Playwright
+`route.fulfill({ path })` unless that route correctly implements byte ranges.
+
+Use this gate before cropping, normalization, or sprite import:
+
+1. Serve the unchanged source through a normal range-capable server or use a
+   decoder with proven random-access support. For an HTTP MP4, a byte-range
+   request must return `206 Partial Content` with a valid `Content-Range`.
+2. After `loadedmetadata`, seek to at least the beginning, midpoint, and a late
+   timestamp. Wait for `seeked` and, when available, the next
+   `requestVideoFrameCallback` before reading pixels.
+3. Compare decoded subject pixels or image hashes between those timestamps.
+   Encoded-file metadata, a successful `currentTime` assignment, or a `seeked`
+   event alone does not prove that a different frame was decoded.
+4. Produce a timestamp-labelled contact sheet spanning the complete duration
+   and inspect it visually. Identify the intended loop from that sheet; do not
+   automatically treat the first N samples as the animation.
+5. Record the source URL/path, duration, dimensions, extraction timestamps,
+   and crop in the review metadata so the candidate can be reproduced.
+
+If an expected animation produces identical samples, stop and classify the
+extraction as unverified. Check byte-range handling and decoded pixels before
+claiming the source is static or asking for a replacement. When the decode
+path changes, regenerate every downstream contact sheet, candidate strip,
+normalized image, and sprite transaction; artifacts from the faulty decoder
+are invalid even when their files are well-formed.
+
 For animation, the generated source must contain the complete candidate loop
 before any frame is converted to JSON. Open that PNG in the sprite animation
 workbench, remove its chroma key, detect/crop the frames, align them to one
@@ -291,6 +324,12 @@ Use this order for each frame:
 3. Copy the pristine normalized weapon from its approved source frame. Always
    restart from this untouched source; rotating an already transformed copy a
    second time compounds rasterization damage and softens the pixel clusters.
+   Do not attempt to recover the source by applying the inverse transform:
+   rotating by `25` degrees and then by `-25` degrees does not restore the
+   original pixels because each rasterization discards information. Undo back
+   to the pre-transform revision (including every transform-related step), or
+   clear the attempt and copy the pristine source again. Then apply the newly
+   calculated rotation, scale, and translation once.
 4. Measure the source and target weapon axes from two visible points, normally
    grip center to blade tip. Use the sprite-agent bridge's
    `frame.copyAligned` operation so uniform scale (including pose-dependent
@@ -299,6 +338,10 @@ Use this order for each frame:
    Inspect its mapped endpoints and endpoint error; do not infer the transformed
    grip from the output bounding-box origin. Prefer uniform scaling unless the
    approved reference clearly requires a width change.
+   When the existing target patch already matches the approved silhouette but
+   its material detail is inferior, use `frame.projectAligned` instead. It
+   projects the pristine source texture into the target's current opaque mask,
+   so pose geometry and anchors remain authoritative while texture changes.
 5. Align the rendered weapon to the embedded reference in the live composite.
    The opaque-pixel bounding box is not the transform box: transparent pixels,
    the selection rectangle, and its pivot all affect placement. Use the live
@@ -307,24 +350,53 @@ Use this order for each frame:
    editor's alignment comparison to isolate the pristine source and target
    layers, ghost them with the measured grip-to-tip axes, and export the
    non-mutating comparison PNG. The reported scale/rotation/translation and
-   the visible overlay must agree.
+   the visible overlay must agree. Explicitly select the corresponding body
+   animation and displayed frame; do not reuse the comparison panel's stale
+   animation/frame. Align the body attachment anchor and equipment grip anchor
+   in the comparison view before judging the silhouette, and record the
+   resolved frame pair with the artifact.
 6. After the art is visually correct, update both attachment endpoints for the
    frame: the body's hand anchor and the weapon's grip anchor. Anchors describe
    the accepted placement; they must not be used to justify a visibly wrong
    placement when the existing anchor metadata is itself inaccurate.
 7. Add small detached weapon details, such as a pommel cap, as part of the
-   weapon overlay and verify them against the live frame. Preserve the full
-   selection rectangle and pivot when moving these details, even if only a few
-   pixels inside that rectangle are opaque.
+   weapon overlay and verify them against the live frame. Component inspection
+   may prove which source pixels belong to the detail, but it does **not** prove
+   where the detail belongs in the target. Do not reuse its old offset from the
+   `grip` anchor: rotation, scaling, perspective, and an obscured handle can all
+   change that apparent relationship. On the rendered target, trace the
+   weapon's longitudinal axis backward through the cross-guard and handle, then
+   place the pommel on the visible handle endpoint. Use a screenshot feedback
+   loop for this placement, not a calculated offset: fetch the target
+   `canvas.png` and composite `preview.png` at the current revision, propose one
+   small visual move, apply only that move, then fetch both artifacts again and
+   compare the result. Repeat only from the newly rendered evidence. Do not
+   calculate the destination from anchor coordinates, component bounds,
+   centroids, or a previous frame's displacement. Confirm both the pommel's
+   along-axis position and its centering across the handle in the fresh canvas
+   and composite preview. Preserve the full selection rectangle and pivot when
+   moving the detail, even if only a few pixels inside that rectangle are
+   opaque, and do not modify accepted blade pixels as part of the
+   detached-detail operation. Treat a pommel-only pass as structurally scoped:
+   the main weapon component, body attachment anchor, and equipment grip anchor
+   must have identical before/after values. If the pommel looks wrong, move only
+   the pommel; do not compensate by moving an already aligned weapon or anchor.
 8. Put the slash effect on its own `Slash` overlay. Extract the exact connected
    effect shape from the approved body frame, excluding the embedded blade,
    then transfer the material colors from an already approved slash frame.
    Preserve the source shape and alpha structure; color matching must not
    redraw its silhouette.
 9. Inspect the editor grid and the body-plus-equipment preview on the same
-   frame. Save only after the overlay covers the embedded reference, the grip
-   is stable, the detached details are aligned, and no original effect color
-   leaks around the patch.
+   frame. For a weapon patch, also inspect the accepted revision through the
+   anchor-centered `preview-focus.png` endpoint at 250% or greater. The close-up
+   must include the guard, both blade edges, tip, handle, and pommel; use it to
+   detect uncovered reference pixels, rotation drift, half-pixel-looking
+   offsets, and misplaced detached details. The ordinary preview and alignment
+   comparison do not replace this gate. If the focused endpoint fails or
+   cannot center the requested attachment anchor, stop and treat the frame as
+   unverified until the API is fixed. Save only after the overlay covers the
+   embedded reference, the grip is stable, the detached details are aligned,
+   and no original effect color leaks around the patch.
 
 The editor's live document is authoritative during this workflow. Before an
 agent edit, require a synced bridge revision. If the editor reports a conflict,
@@ -334,11 +406,171 @@ transform. Make one deterministic change, render it, and visually verify it
 before reporting success. A JSON-valid result or a mathematically aligned
 anchor is not evidence that the pixels are aligned.
 
+A human correction replaces the rejected placement model immediately. Fetch
+the corrected live revision and use the corrected rendered result as the new
+reference; do not retain the earlier anchor-relative offset, transform, or
+visual estimate for later frames. Keep deterministic component transfer
+separate from hand-painted seam cleanup. If the human reserves gap filling or
+anomaly-pixel repair for manual work, leave those pixels untouched and limit
+the agent transaction to the explicitly requested component.
+
+When checking an anchor, fetch the frame-addressed editable canvas through
+`GET /__sprite-editor/canvas.png`; do not crop the browser viewport. Read the
+anchor from the overlay's white center dot inside the compact cyan crosshair ring. The label and
+crosshair arms are orientation aids only, and nearby weapon colors are not part of
+the marker. If that center dot cannot be identified confidently, stop and ask
+for clarification rather than guessing a direction.
+
+Match a reference anchor by its **local art landmark**, not by copying the
+reference frame's coordinates or comparing absolute screenshot positions. A
+weapon attachment can require two independent constraints: one feature chooses
+the position along the weapon and another chooses the position across it. For
+the approved `knight-v2` sword-run `frontHand`, the hand-side edge of the
+cross-guard chooses the along-sword position, while the midpoint between the
+two blade edges chooses the across-sword position. Inspect both horizontal and
+vertical displacement from the white dot. Do not collapse "blade centerline",
+"guard center", "hand-side edge", and "blade-side edge" into one approximate
+point; that mistake can yield the right general area but the wrong anchor by
+multiple sprite pixels.
+
+The screenshot feedback loop is: inspect reference canvas, name landmark,
+inspect target canvas, propose one `(dx, dy)` and endpoint, apply once, then
+fetch **new reference and target canvases from the accepted revision** and
+visually judge them together. Target-only inspection and a remembered
+reference are insufficient. Recompute the visible relationship after the move;
+do not merely confirm that the dot reached the agent's predicted coordinate.
+For a blade centerline, trace both silhouette edges at the attachment point and
+judge their midpoint. For a reliable longitudinal axis, take midpoints at two
+well-separated, unobscured blade sections, connect them, and extend that line
+back to the guard. Never derive the axis from the guard area alone: guard width,
+the hand, pose perspective, and overlays distort that local silhouette. A
+displayed-pixel distance may be converted to sprite coordinates only with a
+verified render scale; checker tiles, PNG width, browser zoom, and device-pixel
+ratio are not a scale contract. During
+human-guided work, present the exact API canvas being used and wait for approval
+before each mutation. A human-provided corrected coordinate invalidates the
+rejected estimate and its assumptions.
+
+An anchor passes only when the paired canvases directly show that the white dot
+matches both the approved along-axis landmark and across-axis landmark. A
+successful command, exact endpoint, or agreement with the agent's earlier
+estimate is not visual evidence. If either relationship is obscured or
+ambiguous, report the result as unverified instead of accepting it.
+
 For repeatable frames, encode the clear/copy/one-pass transform/color
 remap/anchor/assert sequence as one semantic transaction and dry-run it before
 publication. The command and coordinate contract is documented in
 [Sprite editor agent protocol](sprite-editor-agent.md); it includes a frames
 3–5 example and deliberately keeps repository saving outside the transaction.
+
+### Measure an embedded-weapon mismatch
+
+Measure the target silhouette and the equipment overlay in the coordinate
+space where they are finally composited. The body frame and equipment frame
+have independent local coordinates, so comparing their stored pixel positions
+directly gives a false displacement.
+
+1. Convert the body's attachment anchor and the equipment frame's grip anchor
+   to the same pixel-grid units. The equipment-to-body composite offset is:
+
+   ```text
+   offset = bodyAttachmentAnchor - equipmentGripAnchor
+   compositePixel = equipmentPixel + offset
+   ```
+
+   Apply this offset to every opaque equipment pixel before comparing it with
+   the embedded weapon in the body frame. Keep the original local coordinates
+   for editing; the offset is for measurement and rendered verification.
+2. Use the approved named selection or another verified mask for the embedded
+   weapon. Never substitute the rectangular selection bounds: transparent
+   cells in that rectangle are not part of the silhouette. Likewise, do not
+   infer the target from palette colors when those colors also occur on skin,
+   clothing, or another effect.
+3. Split the comparison into semantic regions: cross-guard/grip, blade body,
+   and tip. A whole-weapon principal axis is unreliable when a tall cross-guard
+   biases the result. Measure the blade axis from blade-only opaque pixels or
+   from verified grip-center and tip landmarks.
+4. For a blade-only pixel set, the principal-axis angle can be measured from
+   its centroid and covariance:
+
+   ```text
+   angle = 0.5 * atan2(2 * covarianceXY,
+                       covarianceXX - covarianceYY)
+   ```
+
+   Normalize the angle delta to the smallest equivalent rotation. On this
+   canvas, positive Y points downward, so a positive visual rotation is
+   clockwise. PCA is a diagnostic, not ground truth: confirm which end is the
+   tip and inspect the rendered edges.
+5. Compare the target set `T` with the composite-adjusted overlay set `O`:
+
+   ```text
+   covered = T intersect O
+   missing = T minus O
+   extra   = O minus T
+   IoU     = size(covered) / size(T union O)
+   ```
+
+   Report the counts and bounds of `missing` and `extra` for each semantic
+   region. A single global overlap score can hide a missing tip or cross-guard.
+6. Diagnose the transform from the spatial error pattern:
+
+   - roughly constant displacement along the blade means translation;
+   - perpendicular displacement that grows toward the tip means rotation;
+   - parallel axes with a growing gap toward the tip means length/scale;
+   - one edge matching while the opposite edge diverges means width or
+     silhouette mismatch, not merely rotation;
+   - a correct silhouette with different internal pixels is a material or
+     palette problem and should use projection/color transfer, not geometry.
+   Start with the least powerful matching correction. When the whole approved
+   weapon is uniformly off by one logical pixel, apply one rigid one-pixel
+   translation with its rotation and scale unchanged, then inspect a fresh
+   focused preview. Do not hold the tip fixed while moving the guard: that
+   changes axis length and turns the translation into an unwanted scale pass.
+   Record whether the delta is measured in logical sprite pixels or 4x HD
+   texels before applying it.
+7. Estimate uniform scale from the ratio of verified grip-to-tip distances.
+   Pixel-area ratio is only a secondary check because cross-guard area and
+   rasterization can distort it. If length and width require different ratios,
+   record that as evidence for non-uniform scaling or a frame-specific patch;
+   do not silently choose one.
+8. After one transform, fetch the accepted revision's composite preview and
+   repeat the set comparison. Integer rounding and resampling can change edge
+   pixels even when the continuous transform is mathematically exact, so the
+   rendered preview remains the final authority.
+9. When the measured geometry is within approximately one pixel, stop
+   transforming. Repeated scaling or rotation will lose more source
+   information than it fixes. Finish with constrained pixel repair instead:
+
+   - fill target pixels still missing from the overlay using nearby colors
+     from the same material region and shading ramp;
+   - remove pixels outside the approved target silhouette;
+   - repair isolated colors, one-pixel spikes, holes, doubled edges, and
+     broken highlight or outline runs introduced by resampling;
+   - preserve intentional cross-guard, blade-edge, rust, highlight, and alpha
+     distinctions rather than choosing the nearest color from the whole
+     sprite;
+   - inspect at both grid scale and final composite scale after the repair.
+
+   Treat this as pixel cleanup, not another geometry pass. Keep the accepted
+   transform fixed, limit edits to the measured `missing` and `extra` regions
+   plus directly connected anomaly pixels, and verify that the cleanup
+   improves coverage without flattening the weapon's material detail.
+
+   Pixel cleanup must not disguise unresolved placement. Never paint an
+   invented cross-guard extension or arbitrary cover pattern merely because
+   reference pixels remain visible. First translate or refit the approved
+   cross-guard artwork itself. Cleanup is appropriate only after that geometry
+   is visually accepted, and every added pixel must follow the approved
+   silhouette and local material ramp.
+
+Example from the sword-run investigation: after applying the measured
+attachment offset, the overlay covered 248 of 315 target pixels, with 67 target
+pixels missing and 25 extra overlay pixels. Blade-only principal axes differed
+by about 0.9 degrees, while 29 missing pixels were concentrated near the tip.
+That evidence identifies insufficient length/scale as the primary mismatch;
+rotating again would not solve it. These values describe that inspected frame,
+not reusable constants.
 
 ### Reuse the approved rusty-sword arc palette
 

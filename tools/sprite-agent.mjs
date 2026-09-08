@@ -138,11 +138,24 @@ switch (command) {
 
   case 'preview': {
     const destination = path.resolve(args[0] ?? 'sprite-preview.png');
+    const animationIndex = args.indexOf('--animation');
+    const frameIndex = args.indexOf('--frame');
+    const animation = animationIndex >= 0 ? args[animationIndex + 1] : undefined;
+    const displayFrame = frameIndex >= 0 ? Number(args[frameIndex + 1]) : undefined;
+    if ((animation === undefined) !== (displayFrame === undefined)) {
+      throw new Error('preview frame requests require both --animation and --frame');
+    }
+    if (displayFrame !== undefined && (!Number.isInteger(displayFrame) || displayFrame < 1)) {
+      throw new Error('--frame uses one-based display frame numbers');
+    }
+    const route = animation === undefined
+      ? '/preview.png'
+      : `/preview.png?animation=${encodeURIComponent(animation)}&frame=${displayFrame - 1}`;
     const deadline = Date.now() + 3000;
     let bytes;
     while (!bytes) {
       try {
-        bytes = await request('/preview.png');
+        bytes = await request(route);
       } catch (error) {
         if (Date.now() >= deadline || !/^Error: 404 /.test(String(error))) throw error;
         await new Promise((resolve) => setTimeout(resolve, 75));
@@ -153,13 +166,98 @@ switch (command) {
     break;
   }
 
+  case 'preview-focus': {
+    const destination = path.resolve(args[0] ?? 'sprite-preview-focus.png');
+    const valueAfter = (flag, fallback) => {
+      const index = args.indexOf(flag);
+      return index >= 0 ? args[index + 1] : fallback;
+    };
+    const animation = valueAfter('--animation');
+    const displayFrame = Number(valueAfter('--frame'));
+    const anchor = valueAfter('--anchor');
+    const zoom = Number(valueAfter('--zoom', '300'));
+    const size = Number(valueAfter('--size', '384'));
+    if (!animation || !Number.isInteger(displayFrame) || displayFrame < 1 || !anchor) {
+      throw new Error('preview-focus requires --animation, a one-based --frame, and --anchor');
+    }
+    if (!Number.isInteger(zoom) || zoom < 100 || zoom > 800) {
+      throw new Error('--zoom must be an integer from 100 to 800 percent');
+    }
+    if (!Number.isInteger(size) || size < 128 || size > 1024) {
+      throw new Error('--size must be an integer from 128 to 1024 pixels');
+    }
+    const route = '/preview-focus.png'
+      + `?animation=${encodeURIComponent(animation)}`
+      + `&frame=${displayFrame - 1}`
+      + `&anchor=${encodeURIComponent(anchor)}`
+      + `&zoom=${zoom}&size=${size}`;
+    await fs.writeFile(destination, Buffer.from(await request(route)));
+    console.log(destination);
+    break;
+  }
+
+  case 'canvas': {
+    const destination = path.resolve(args[0] ?? 'sprite-canvas.png');
+    const animationIndex = args.indexOf('--animation');
+    const frameIndex = args.indexOf('--frame');
+    const animation = animationIndex >= 0 ? args[animationIndex + 1] : undefined;
+    const displayFrame = frameIndex >= 0 ? Number(args[frameIndex + 1]) : undefined;
+    if (!animation || displayFrame === undefined) {
+      throw new Error('canvas requests require both --animation and --frame');
+    }
+    if (!Number.isInteger(displayFrame) || displayFrame < 1) {
+      throw new Error('--frame uses one-based display frame numbers');
+    }
+    const route = `/canvas.png?animation=${encodeURIComponent(animation)}&frame=${displayFrame - 1}`;
+    await fs.writeFile(destination, Buffer.from(await request(route)));
+    console.log(destination);
+    break;
+  }
+
   case 'comparison': {
     const destination = path.resolve(args[0] ?? 'sprite-comparison.png');
+    const valueAfter = (flag, fallback) => {
+      const index = args.indexOf(flag);
+      return index >= 0 ? args[index + 1] : fallback;
+    };
+    const animation = valueAfter('--animation');
+    const displayFrame = Number(valueAfter('--frame'));
+    const reference = valueAfter('--reference');
+    let route = '/comparison.png';
+    if (animation !== undefined || args.includes('--frame') || reference !== undefined) {
+      if (!animation || !Number.isInteger(displayFrame) || displayFrame < 1 || !reference) {
+        throw new Error('frame comparison requires --animation, a one-based --frame, and --reference');
+      }
+      const sourceFrame = Number(valueAfter('--source-frame', '0'));
+      const opacity = Number(valueAfter('--opacity', '50'));
+      const view = valueAfter('--view', 'overlay');
+      if (!Number.isInteger(sourceFrame) || sourceFrame < 0) {
+        throw new Error('--source-frame must be 0 (auto) or a positive displayed frame');
+      }
+      if (!Number.isInteger(opacity) || opacity < 0 || opacity > 100) {
+        throw new Error('--opacity must be an integer from 0 to 100');
+      }
+      if (!['overlay', 'source', 'target'].includes(view)) {
+        throw new Error('--view must be overlay, source, or target');
+      }
+      const params = new URLSearchParams({
+        animation,
+        frame: String(displayFrame - 1),
+        reference,
+        sourceAnimation: valueAfter('--source-animation', ''),
+        sourceFrame: String(sourceFrame),
+        sourceLayer: valueAfter('--source-layer', 'base'),
+        targetLayer: valueAfter('--target-layer', 'base'),
+        view,
+        opacity: String(opacity),
+      });
+      route = `/comparison.png?${params}`;
+    }
     const deadline = Date.now() + 3000;
     let bytes;
     while (!bytes) {
       try {
-        bytes = await request('/comparison.png');
+        bytes = await request(route);
       } catch (error) {
         if (Date.now() >= deadline || !/^Error: 404 /.test(String(error))) throw error;
         await new Promise((resolve) => setTimeout(resolve, 75));
@@ -206,8 +304,10 @@ usage:
   npm run agent-sprite -- selection
   npm run agent-sprite -- inspect [animation] [display-frame|range] [layer-id] [--no-colors] [--no-components]
   npm run agent-sprite -- run transaction.json [--dry-run] [--full]
-  npm run agent-sprite -- preview sprite-preview.png
-  npm run agent-sprite -- comparison sprite-comparison.png
+  npm run agent-sprite -- preview sprite-preview.png [--animation idle --frame 2]
+  npm run agent-sprite -- preview-focus close-up.png --animation run --frame 4 --anchor frontHand [--zoom 300 --size 384]
+  npm run agent-sprite -- canvas sprite-canvas.png --animation idle --frame 2
+  npm run agent-sprite -- comparison sprite-comparison.png [--animation run --frame 4 --reference knight-v2.json]
   npm run agent-sprite -- apply edited.json [repo-path]
   npm run agent-sprite -- save [repo-path]
 

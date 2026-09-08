@@ -22,11 +22,13 @@ import {
   drawEmbeddedHeldWeaponTag,
   drawHeldWeaponTag,
   drawWeaponTrail,
+  heldWeaponAttachment,
   weaponVisuals,
   rebuildSpriteWeapon,
 } from '@game/content/weapon-visuals';
 import {
   weapons,
+  weaponTypes,
   weaponTypeOf,
   allAttacks,
   replaceWeaponCombatTuning,
@@ -40,6 +42,18 @@ import {
   rebuildKnightSprite,
 } from '@game/content/sprites';
 import { rebuildGearVisual } from '@game/content/gear-visuals';
+import {
+  batchPixel,
+  brushStrength,
+  commitPixelBatchRows,
+  createPixelBatch,
+  pastePixels,
+  rotateSelectionRows,
+  scaleSelectionRows,
+  setBatchPixel,
+  type PixelBatch,
+  type PixelClipboard,
+} from './sprite-editor-pixel-kernels';
 // The "player (full)" body drives a REAL Player — body-english, gear
 // layers, held weapon and trail all come from Player.render, posed via
 // its poseAttack seam. Content self-registers on import (the game's
@@ -47,7 +61,13 @@ import { rebuildGearVisual } from '@game/content/gear-visuals';
 // so pulling in items and classes here fills every registry the
 // constructor touches.
 import { Player } from '@game/actors/player';
-import { shouldSuppressHeldWeapon } from '@game/actors/player-render-policy';
+import {
+  bodyAnimationEmbedsHeldObject,
+  logicalAnimationForResolvedBodyAnimation,
+  resolveWeaponBodyAnimation,
+  snappedBodyOffsetForAttachment,
+  shouldSuppressHeldWeapon,
+} from '@game/actors/player-render-policy';
 import '@game/content/items';
 import '@game/content/classes';
 import '@game/content/skills';
@@ -104,6 +124,46 @@ let lastPaintCell: { x: number; y: number } | null = null;
 let hoverPointer: { x: number; y: number } | null = null;
 let hoverCell: { x: number; y: number } | null = null;
 let strokePaletteChanged = false;
+let strokePaletteLookup: StrokePaletteLookup | null = null;
+const strokeBrushBlendCache = new Map<string, string>();
+let paletteUsageSnapshot: Map<string, number> | null = null;
+let scheduledPaletteBuildFrame = 0;
+let scheduledContinuousFinalizeFrame = 0;
+let pendingContinuousPublish = false;
+let continuousDraftTimer = 0;
+let continuousPublishTimer = 0;
+let scheduledRedrawFrame = 0;
+let scheduledSelectionUiFrame = 0;
+const editorPerformanceStats = {
+  redraws: 0,
+  redrawTotalMs: 0,
+  redrawMaxMs: 0,
+  redrawSetupMaxMs: 0,
+  redrawCheckerMaxMs: 0,
+  redrawReferenceMaxMs: 0,
+  redrawRasterMaxMs: 0,
+  redrawImageMaxMs: 0,
+  redrawGridMaxMs: 0,
+  redrawOverlayMaxMs: 0,
+  paintEvents: 0,
+  paintTotalMs: 0,
+  paintMaxMs: 0,
+  gestureFinishes: 0,
+  gestureFinishTotalMs: 0,
+  gestureFinishMaxMs: 0,
+  gestureSideEffects: 0,
+  gestureSideEffectTotalMs: 0,
+  gestureSideEffectMaxMs: 0,
+  draftPersistMaxMs: 0,
+  bridgePublishDispatchMaxMs: 0,
+  selectionTransforms: 0,
+  selectionTransformTotalMs: 0,
+  selectionTransformMaxMs: 0,
+  previewHeavyRenders: 0,
+  previewHeavyTotalMs: 0,
+  previewHeavyMaxMs: 0,
+  previewSkippedFrames: 0,
+};
 let panelsBeforeTabToggle: { left: boolean; right: boolean } | null = null;
 let spacePanActive = false;
 let canvasPan: {
@@ -115,7 +175,6 @@ let canvasPan: {
 } | null = null;
 interface ContinuousDocumentEdit {
   startVersion: number;
-  startDocument: string;
   beforeFile: SpriteFile;
   beforeSelection: PixelSelection | null;
   historyPushed: boolean;
@@ -123,7 +182,6 @@ interface ContinuousDocumentEdit {
 let continuousEdit: ContinuousDocumentEdit | null = null;
 interface PixelRect { x: number; y: number; w: number; h: number }
 interface PixelSelection extends PixelRect { mask?: string[] }
-interface PixelClipboard { w: number; h: number; rows: string[]; mask?: string[]; palette?: Palette }
 interface SelectionMove {
   start: { x: number; y: number };
   original: PixelSelection;
@@ -145,6 +203,11 @@ interface SelectionHandleTransform {
   moved: boolean;
   flipX: boolean;
   flipY: boolean;
+}
+interface SelectionTransformPointer {
+  clientX: number;
+  clientY: number;
+  shiftKey: boolean;
 }
 interface SharedSelection extends PixelRect {
   path: string | null;
@@ -174,11 +237,25 @@ let selectionStart: SelectionDrag | null = null;
 let magicSelectionDrag: MagicSelectionDrag | null = null;
 let selectionMove: SelectionMove | null = null;
 let selectionHandleTransform: SelectionHandleTransform | null = null;
+let pendingSelectionTransformPointer: SelectionTransformPointer | null = null;
+let scheduledSelectionTransformFrame = 0;
 let pixelClipboard: PixelClipboard | null = null;
 let refFile: SpriteFile | null = null;
 let comparisonUploadTimer = 0;
 let comparisonUploadStatus = 'idle';
 interface ComparisonAxis { start: { x: number; y: number }; end: { x: number; y: number } }
+interface ComparisonConfigureChanges {
+  enabled?: boolean;
+  referencePath?: string;
+  animation?: string;
+  sourceLayer?: string;
+  targetLayer?: string;
+  sourceFrame?: number;
+  view?: 'overlay' | 'source' | 'target';
+  opacity?: number;
+  sourceAxis?: ComparisonAxis;
+  targetAxis?: ComparisonAxis;
+}
 interface ComparisonAlignment {
   sourceAxis: ComparisonAxis;
   targetAxis: ComparisonAxis;
@@ -193,6 +270,7 @@ interface ComparisonAlignment {
 let currentFileName = 'new sprite.json';
 let currentRepoPath: string | null = null;
 let selectedAnchorName = '';
+let suppressAnchorLabel = false;
 let anchorPlacementMode = false;
 let selectedAttachmentSlotName = '';
 const FLAT_LAYER_ID = 'base';
@@ -242,10 +320,13 @@ let bridgePublishing = false;
 let lastSharedFile = '';
 let lastRepositoryFile = '';
 let previewTimer = 0;
+let previewRenderVersion = 0;
 const DRAFT_PREFIX = 'hitstop.sprite-editor.draft:';
 const RENDER_TAG_DRAFT_KEY = 'hitstop.sprite-editor.render-tags.draft';
 const WEAPON_COMBAT_DRAFT_KEY = 'hitstop.sprite-editor.weapon-combat.draft.v2';
-let lastDraftSignature = '';
+let lastDraftPath: string | null = null;
+let lastDraftEditVersion = -1;
+let lastDraftRepositoryFile = '';
 let editorViewReady = false;
 let savedRenderTagSignature = JSON.stringify(repositoryRenderTagDefs);
 let renderTagDefs: PlayerRenderTagDef[] = readRenderTagDraft();
@@ -407,7 +488,11 @@ function storedDrafts(): StoredSpriteDraft[] {
 
 function clearDraft(path: string): void {
   localStorage.removeItem(draftKey(path));
-  if (lastDraftSignature.startsWith(`${path}\0`)) lastDraftSignature = '';
+  if (lastDraftPath === path) {
+    lastDraftPath = null;
+    lastDraftEditVersion = -1;
+    lastDraftRepositoryFile = '';
+  }
 }
 
 function persistCurrentDraft(): void {
@@ -418,8 +503,9 @@ function persistCurrentDraft(): void {
     clearDraft(currentRepoPath);
     return;
   }
-  const signature = `${currentRepoPath}\0${lastRepositoryFile}\0${serialized}`;
-  if (signature === lastDraftSignature) return;
+  if (currentRepoPath === lastDraftPath
+    && editVersion === lastDraftEditVersion
+    && lastRepositoryFile === lastDraftRepositoryFile) return;
   try {
     const draft: StoredSpriteDraft = {
       v: 1,
@@ -429,7 +515,9 @@ function persistCurrentDraft(): void {
       updatedAt: Date.now(),
     };
     localStorage.setItem(draftKey(currentRepoPath), JSON.stringify(draft));
-    lastDraftSignature = signature;
+    lastDraftPath = currentRepoPath;
+    lastDraftEditVersion = editVersion;
+    lastDraftRepositoryFile = lastRepositoryFile;
   } catch (error) {
     flash(`local draft failed: ${(error as Error).message}`);
   }
@@ -538,20 +626,101 @@ const compositeCur = (index = frameIdx): string[] => {
     ? compositeSpriteFrameByTags(file, animName, index, renderTagIds(), PAL, visibleLayer)
     : compositeSpriteFrame(file, animName, index, PAL, visibleLayer)) ?? cur();
 };
-const rasterizedCur = (index = frameIdx, upscale = false): HTMLCanvasElement | undefined => (
-  rasterizeSpriteFrame(file, animName, index, PAL, {
-    tagOrder: isLayeredSpriteFile(file) ? renderTagIds() : undefined,
-    include: visibleLayer,
-    upscale,
-  })
-);
-const visibleAnim = (): SpriteAnimData => {
-  const timing = resolveAnimTiming(file, animName)!;
-  return {
-    fps: timing.fps,
-    loop: timing.loop,
-    frames: Array.from({ length: timing.frameCount }, (_, index) => compositeCur(index)),
-  };
+
+/**
+ * Rasterize the editor's native-resolution canvas with one ImageData upload.
+ * The engine's general sprite baker issues one fillStyle/fillRect pair per
+ * opaque pixel; that is fine for one-time game assets but caused 50–80 ms
+ * stalls when an edited 160×110 frame invalidated on every brush sample.
+ */
+function rasterizeEditorFrame(index: number): HTMLCanvasElement | undefined {
+  if (!(animName in file.anims)) return undefined;
+  const target = resolveAnimName(file, animName);
+  const palette = { ...PAL, ...(file.palette ?? {}) };
+  const colors = new Map<string, Rgba | null>();
+  for (const [ch, value] of Object.entries(palette)) colors.set(ch, parseRgba(value));
+
+  let layerRows: string[][];
+  if (isLayeredSpriteFile(file)) {
+    const layered = file;
+    const timeline = layered.anims[target];
+    if (!timeline || typeof timeline === 'string' || index < 0 || index >= timeline.frameCount) return undefined;
+    const orderedLayers = renderTagIds().flatMap((tag) => layered.layers.filter((layer) => layer.tag === tag));
+    layerRows = orderedLayers
+      .filter(visibleLayer)
+      .map((layer) => layer.tracks[target]?.[index])
+      .filter((rows): rows is string[] => Boolean(rows));
+  } else {
+    const entry = file.anims[target];
+    const rows = typeof entry === 'string' ? undefined : entry?.frames[index];
+    if (!rows) return undefined;
+    layerRows = [rows];
+  }
+  const first = layerRows[0] ?? cur();
+  const width = first[0]?.length ?? 0;
+  const height = first.length;
+  if (!width || !height) return undefined;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d')!;
+  const image = context.createImageData(width, height);
+  const pixels = image.data;
+
+  for (const rows of layerRows) {
+    for (let y = 0; y < height; y++) {
+      const row = rows[y];
+      for (let x = 0; x < width; x++) {
+        const color = colors.get(row[x]);
+        if (!color || color.a <= 0) continue;
+        const offset = (y * width + x) * 4;
+        const destinationAlpha = pixels[offset + 3];
+        if (color.a >= 255 || destinationAlpha === 0) {
+          pixels[offset] = color.r;
+          pixels[offset + 1] = color.g;
+          pixels[offset + 2] = color.b;
+          pixels[offset + 3] = color.a;
+          continue;
+        }
+        const inverseAlpha = 255 - color.a;
+        const outputAlpha = color.a + destinationAlpha * inverseAlpha / 255;
+        const destinationWeight = destinationAlpha * inverseAlpha / 255;
+        pixels[offset] = Math.round((color.r * color.a + pixels[offset] * destinationWeight) / outputAlpha);
+        pixels[offset + 1] = Math.round((color.g * color.a + pixels[offset + 1] * destinationWeight) / outputAlpha);
+        pixels[offset + 2] = Math.round((color.b * color.a + pixels[offset + 2] * destinationWeight) / outputAlpha);
+        pixels[offset + 3] = Math.round(outputAlpha);
+      }
+    }
+  }
+  context.putImageData(image, 0, 0);
+  return canvas;
+}
+
+let rasterCacheVersion = -1;
+const rasterCache = new Map<string, HTMLCanvasElement | undefined>();
+const rasterizedCur = (index = frameIdx, upscale = false): HTMLCanvasElement | undefined => {
+  if (rasterCacheVersion !== editVersion) {
+    rasterCacheVersion = editVersion;
+    rasterCache.clear();
+  }
+  const key = [
+    animName,
+    index,
+    Number(upscale),
+    soloLayerId ?? '',
+    [...hiddenLayerIds].sort().join(','),
+    isLayeredSpriteFile(file) ? renderTagIds().join(',') : '',
+  ].join('|');
+  if (rasterCache.has(key)) return rasterCache.get(key);
+  const image = upscale
+    ? rasterizeSpriteFrame(file, animName, index, PAL, {
+      tagOrder: isLayeredSpriteFile(file) ? renderTagIds() : undefined,
+      include: visibleLayer,
+      upscale: true,
+    })
+    : rasterizeEditorFrame(index);
+  rasterCache.set(key, image);
+  return image;
 };
 const W = () => cur()[0].length;
 const H = () => cur().length;
@@ -674,6 +843,7 @@ const brushCursor = $('brushCursor');
 const preview = $('preview') as HTMLCanvasElement;
 const pctx = preview.getContext('2d')!;
 const TRANSPARENCY_CHECKER_SIZE = 12;
+const transparencyPatterns = new WeakMap<CanvasRenderingContext2D, CanvasPattern>();
 
 /** Photoshop-style transparency is a view-space aid, not sprite pixels. */
 function drawTransparencyChecker(
@@ -682,15 +852,22 @@ function drawTransparencyChecker(
   height: number,
   size = TRANSPARENCY_CHECKER_SIZE,
 ): void {
-  context.fillStyle = '#f0f0f0';
-  context.fillRect(0, 0, width, height);
-  context.fillStyle = '#b8b8b8';
-  for (let y = 0; y < height; y += size) {
-    for (let x = 0; x < width; x += size) {
-      if (((x / size) + (y / size)) % 2 === 0) continue;
-      context.fillRect(x, y, Math.min(size, width - x), Math.min(size, height - y));
-    }
+  let pattern = transparencyPatterns.get(context);
+  if (!pattern) {
+    const tile = document.createElement('canvas');
+    tile.width = size * 2;
+    tile.height = size * 2;
+    const tileContext = tile.getContext('2d')!;
+    tileContext.fillStyle = '#f0f0f0';
+    tileContext.fillRect(0, 0, tile.width, tile.height);
+    tileContext.fillStyle = '#b8b8b8';
+    tileContext.fillRect(size, 0, size, size);
+    tileContext.fillRect(0, size, size, size);
+    pattern = context.createPattern(tile, 'repeat')!;
+    transparencyPatterns.set(context, pattern);
   }
+  context.fillStyle = pattern;
+  context.fillRect(0, 0, width, height);
 }
 
 const SPRITE_ROOT = '/src/game/content/sprites/';
@@ -909,6 +1086,12 @@ function updateWorkspaceChrome(): void {
       : `${currentRepoPath} · saved`
     : `${currentFileName} · local document`;
   $('btnDeselect').toggleAttribute('disabled', !selection);
+}
+
+function updateWorkspaceCursorStatus(): void {
+  const value = hoverCell ? `x ${hoverCell.x}  y ${hoverCell.y}` : 'x --  y --';
+  const status = $('workspaceCursorStatus');
+  if (status.textContent !== value) status.textContent = value;
 }
 
 const VIEW_STATE_KEY = 'hitstop.sprite-editor.view';
@@ -1251,6 +1434,7 @@ function clearHistory(): void {
 /** Drop pointer/tool state that cannot be valid in another document. */
 function resetDocumentInteractionState(resetRigSelection = true): void {
   cancelContinuousDocumentEdit();
+  cancelScheduledSelectionTransform();
   painting = false;
   erasing = false;
   picking = false;
@@ -1520,7 +1704,7 @@ async function openSharedSprite(path: string): Promise<boolean> {
 }
 
 async function publishSharedSprite(): Promise<void> {
-  if (bridgePublishing || bridgeConflict || continuousEdit) return;
+  if (!bridgeConnected || bridgePublishing || bridgeConflict || continuousEdit) return;
   const serialized = JSON.stringify(file);
   if (serialized === lastSharedFile) return;
   bridgePublishing = true;
@@ -1641,6 +1825,10 @@ async function saveWorkspaceSprites(): Promise<void> {
 }
 
 function schedulePreviewUpload(): void {
+  // The visible preview renderer also uses this nonce. It lets view-only
+  // controls invalidate a paused preview without forcing a continuous 60fps
+  // rebuild when nothing on screen changed.
+  previewRenderVersion++;
   window.clearTimeout(previewTimer);
   if (!bridgeConnected || !bridgeRevision) return;
   previewTimer = window.setTimeout(() => {
@@ -1653,6 +1841,52 @@ function schedulePreviewUpload(): void {
       }).catch(() => {});
     }, 'image/png');
   }, 180);
+}
+
+function configureComparison(changes: ComparisonConfigureChanges): void {
+  if (changes.referencePath !== undefined) {
+    const reference = $('selectRefSprite') as HTMLSelectElement;
+    if (changes.referencePath && !existingSprites.has(changes.referencePath)) {
+      throw new Error(`unknown comparison reference "${changes.referencePath}"`);
+    }
+    reference.value = changes.referencePath;
+    refFile = changes.referencePath ? existingSprite(changes.referencePath) : null;
+    rebuildComparisonSelectors();
+  }
+  const setSelect = (id: string, value: string | undefined): void => {
+    if (value === undefined) return;
+    const select = $(id) as HTMLSelectElement;
+    if (![...select.options].some((option) => option.value === value)) {
+      throw new Error(`invalid ${id} value "${value}"`);
+    }
+    select.value = value;
+  };
+  setSelect('compareRefAnim', changes.animation);
+  setSelect('compareRefLayer', changes.sourceLayer);
+  setSelect('compareTargetLayer', changes.targetLayer);
+  setSelect('compareView', changes.view);
+  if (changes.enabled !== undefined) ($('showRef') as HTMLInputElement).checked = changes.enabled;
+  if (changes.sourceFrame !== undefined) ($('compareRefFrame') as HTMLInputElement).value = String(changes.sourceFrame);
+  if (changes.opacity !== undefined) {
+    const opacity = Math.max(0, Math.min(100, changes.opacity));
+    ($('compareOpacity') as HTMLInputElement).value = String(opacity);
+    ($('compareOpacityValue') as HTMLOutputElement).value = `${opacity}%`;
+  }
+  const axisEntries: Array<[string, number | undefined]> = [
+    ['compareSourceX1', changes.sourceAxis?.start.x], ['compareSourceY1', changes.sourceAxis?.start.y],
+    ['compareSourceX2', changes.sourceAxis?.end.x], ['compareSourceY2', changes.sourceAxis?.end.y],
+    ['compareTargetX1', changes.targetAxis?.start.x], ['compareTargetY1', changes.targetAxis?.start.y],
+    ['compareTargetX2', changes.targetAxis?.end.x], ['compareTargetY2', changes.targetAxis?.end.y],
+  ];
+  for (const [id, value] of axisEntries) {
+    if (value !== undefined) ($(id) as HTMLInputElement).value = String(value);
+  }
+  if (changes.sourceAxis || changes.targetAxis) {
+    ($('compareAlignAxes') as HTMLInputElement).checked = true;
+    $('compareAxes').hidden = false;
+  }
+  redraw();
+  schedulePreviewUpload();
 }
 
 function connectBridgeEvents(): void {
@@ -1681,6 +1915,103 @@ function connectBridgeEvents(): void {
     if (shared.x < 0 || shared.y < 0 || shared.x + shared.w > W() || shared.y + shared.h > H()) return;
     setSelection({ x: shared.x, y: shared.y, w: shared.w, h: shared.h, mask: shared.mask?.slice() });
   });
+  events.addEventListener('preview-request', (event) => {
+    const request = JSON.parse((event as MessageEvent<string>).data) as {
+      id: string;
+      animation: string;
+      frame: number;
+      revision: number;
+      focus?: { anchor: string; zoomPercent: number; size: number };
+    };
+    if (request.revision !== bridgeRevision) return;
+    try {
+      const bytes = renderRequestedPreview(request.animation, request.frame, request.focus);
+      void fetch(`${BRIDGE}/preview-requests/${encodeURIComponent(request.id)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'image/png', 'X-Sprite-Revision': String(bridgeRevision) },
+        body: bytes.buffer as ArrayBuffer,
+      }).catch(() => {});
+    } catch {
+      // The requesting route times out. A stale or unrelated editor tab must
+      // not publish a misleading image for this semantic request.
+    }
+  });
+  events.addEventListener('canvas-request', (event) => {
+    const request = JSON.parse((event as MessageEvent<string>).data) as {
+      id: string;
+      animation: string;
+      frame: number;
+      revision: number;
+      showAnchorLabels?: boolean;
+    };
+    if (request.revision !== bridgeRevision) return;
+    try {
+      const bytes = renderRequestedCanvas(
+        request.animation,
+        request.frame,
+        request.showAnchorLabels !== false,
+      );
+      void fetch(`${BRIDGE}/canvas-requests/${encodeURIComponent(request.id)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'image/png', 'X-Sprite-Revision': String(bridgeRevision) },
+        body: bytes.buffer as ArrayBuffer,
+      }).catch(() => {});
+    } catch {
+      // The requesting route times out rather than accepting a canvas from a
+      // stale tab or from a cursor that cannot render the requested frame.
+    }
+  });
+  events.addEventListener('comparison-request', (event) => {
+    const request = JSON.parse((event as MessageEvent<string>).data) as {
+      id: string;
+      revision: number;
+      animation: string;
+      frame: number;
+      referencePath: string;
+      sourceAnimation: string;
+      sourceFrame: number;
+      sourceLayer: string;
+      targetLayer: string;
+      view: 'overlay' | 'source' | 'target';
+      opacity: number;
+    };
+    if (request.revision !== bridgeRevision) return;
+    try {
+      const bytes = renderRequestedComparison(request.animation, request.frame, {
+        enabled: true,
+        referencePath: request.referencePath,
+        animation: request.sourceAnimation,
+        sourceFrame: request.sourceFrame,
+        sourceLayer: request.sourceLayer,
+        targetLayer: request.targetLayer,
+        view: request.view,
+        opacity: request.opacity,
+      });
+      void fetch(`${BRIDGE}/comparison-requests/${encodeURIComponent(request.id)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'image/png', 'X-Sprite-Revision': String(bridgeRevision) },
+        body: bytes.buffer as ArrayBuffer,
+      }).catch(() => {});
+    } catch {
+      // The requesting route times out rather than accepting a comparison
+      // from a stale tab or an invalid frame/reference configuration.
+    }
+  });
+}
+
+interface ComparisonReference {
+  file: SpriteFile;
+  animation: string;
+  frame: number;
+  image: CanvasImageSource;
+}
+
+interface ComparisonAnchorAlignment {
+  sourceAnchor: string;
+  targetAnchor: string;
+  source: { x: number; y: number };
+  target: { x: number; y: number };
+  offset: { x: number; y: number };
 }
 
 async function initializeBridge(): Promise<void> {
@@ -1765,6 +2096,10 @@ function sortedPaletteEntries(): [string, string][] {
 }
 
 function buildPalette(): void {
+  if (scheduledPaletteBuildFrame) {
+    cancelAnimationFrame(scheduledPaletteBuildFrame);
+    scheduledPaletteBuildFrame = 0;
+  }
   const host = $('palette');
   host.innerHTML = '';
   // Sorting is display-only: palette characters and every authored frame stay
@@ -1789,10 +2124,19 @@ function buildPalette(): void {
     host.appendChild(b);
   }
   const usage = paletteUsage();
+  paletteUsageSnapshot = usage;
   const total = Object.keys(pal()).filter((ch) => ch !== '.').length;
   const used = [...usage.keys()].filter((ch) => ch !== '.' && ch in pal()).length;
   $('paletteStatus').textContent = `${used}/${total}`;
   syncPaletteColorControls();
+}
+
+function schedulePaletteBuild(): void {
+  if (scheduledPaletteBuildFrame) return;
+  scheduledPaletteBuildFrame = requestAnimationFrame(() => {
+    scheduledPaletteBuildFrame = 0;
+    buildPalette();
+  });
 }
 
 function paletteAlphaByte(): number {
@@ -2625,7 +2969,54 @@ $('btnFlattenLayers').onclick = () => {
 function buildAnims(): void {
   const host = $('anims');
   host.innerHTML = '';
-  for (const name of Object.keys(file.anims)) {
+  const names = Object.keys(file.anims);
+  const isEquipmentSprite = currentRepoPath?.replaceAll('\\', '/').startsWith('equipment/') ?? false;
+  const claimed = new Set<string>();
+  const groups: { label: string; names: string[]; profile?: string }[] = [];
+  for (const [typeId, type] of weaponTypes.entries()) {
+    if (!type.bodyAnimations) continue;
+    const bodyEntries = Object.entries(type.bodyAnimations);
+    const family = new Set([
+      ...bodyEntries.flatMap(([logical, entry]) => {
+        const authored = typeof entry === 'string' ? entry : entry.animation;
+        // Body files author the resolved names (for example `sword-run`).
+        // Equipment files stay on the logical clock (`run`) so one overlay
+        // can follow whichever body profile the weapon type selects.
+        return isEquipmentSprite ? [logical] : [authored];
+      }),
+      ...allAttacks(type).map((attack) => attack.animation),
+    ]);
+    const familyNames = names.filter((name) => family.has(name));
+    if (!familyNames.length) continue;
+    familyNames.forEach((name) => claimed.add(name));
+    groups.push({
+      label: `${typeId} profile`,
+      names: familyNames,
+      profile: bodyEntries.map(([logical, entry]) => {
+        const authored = typeof entry === 'string' ? entry : entry.animation;
+        return `${logical} → ${authored}`;
+      }).join(' · '),
+    });
+  }
+  const shared = names.filter((name) => !claimed.has(name));
+  if (shared.length) groups.unshift({ label: 'shared', names: shared });
+
+  for (const group of groups) {
+    const section = document.createElement('section');
+    section.className = 'animation-group';
+    const heading = document.createElement('div');
+    heading.className = 'animation-group-label';
+    heading.textContent = group.label;
+    section.appendChild(heading);
+    if (group.profile) {
+      const profile = document.createElement('div');
+      profile.className = 'animation-profile-map';
+      profile.textContent = group.profile;
+      section.appendChild(profile);
+    }
+    const buttons = document.createElement('div');
+    buttons.className = 'animation-group-buttons';
+    for (const name of group.names) {
     const entry = file.anims[name];
     const b = document.createElement('button');
     // An alias borrows another animation's frames; label the borrow so
@@ -2635,7 +3026,6 @@ function buildAnims(): void {
       ? `alias: edits under this name change "${entry}"`
       : name;
     b.className = name === animName ? 'active' : '';
-    b.style.marginRight = '4px';
     b.onclick = () => {
       clearSelection(false);
       animName = name;
@@ -2646,7 +3036,10 @@ function buildAnims(): void {
       schedulePreviewUpload();
       void publishSelection();
     };
-    host.appendChild(b);
+      buttons.appendChild(b);
+    }
+    section.appendChild(buttons);
+    host.appendChild(section);
   }
   ($('fps') as HTMLInputElement).value = String(anim().fps);
   const materialize = $('btnMaterializeAnim') as HTMLButtonElement;
@@ -2749,12 +3142,56 @@ $('btnDelAnim').onclick = () => {
 function setPixel(x: number, y: number, ch: string): void {
   if (x < 0 || y < 0 || x >= W() || y >= H()) return;
   const f = cur();
-  if (f[y][x] === ch) return;
+  const previous = f[y][x];
+  if (previous === ch) return;
   f[y] = f[y].slice(0, x) + ch + f[y].slice(x + 1);
+  if (paletteUsageSnapshot) {
+    const previousCount = (paletteUsageSnapshot.get(previous) ?? 1) - 1;
+    if (previousCount > 0) paletteUsageSnapshot.set(previous, previousCount);
+    else paletteUsageSnapshot.delete(previous);
+    paletteUsageSnapshot.set(ch, (paletteUsageSnapshot.get(ch) ?? 0) + 1);
+  }
   editVersion++;
 }
 
 interface Rgba { r: number; g: number; b: number; a: number }
+interface StrokePaletteLookup {
+  exact: Map<string, string>;
+  colors: Array<{ ch: string; rgba: Rgba }>;
+  byChar: Map<string, Rgba>;
+  recyclable: string[] | null;
+}
+
+function createCurrentPixelBatch(): PixelBatch {
+  return createPixelBatch(cur());
+}
+
+function updatePaletteUsageForBatch(batch: PixelBatch): void {
+  const usage = paletteUsageSnapshot;
+  if (!usage) return;
+  for (const [y, next] of batch.rows) {
+    const previous = batch.frame[y];
+    for (let x = 0; x < next.length; x++) {
+      const from = previous[x];
+      const to = next[x];
+      if (from === to) continue;
+      const previousCount = (usage.get(from) ?? 1) - 1;
+      if (previousCount > 0) usage.set(from, previousCount);
+      else usage.delete(from);
+      usage.set(to, (usage.get(to) ?? 0) + 1);
+    }
+  }
+}
+
+function commitPixelBatch(batch: PixelBatch, invalidate = true): boolean {
+  if (batch.changed) updatePaletteUsageForBatch(batch);
+  if (!commitPixelBatchRows(batch)) return false;
+  // One stamp/interpolated segment is one render invalidation, regardless of
+  // how many pixels it touched. The old per-pixel increment forced caches to
+  // churn hundreds of times for a single soft-brush event.
+  if (invalidate) editVersion++;
+  return true;
+}
 
 // Sprite files address colors with one-character palette keys. Soft tools
 // therefore bake their result into real palette entries rather than hiding
@@ -2802,6 +3239,49 @@ function rgbaHex(color: Rgba): string {
   return color.a >= 254.5 ? rgb : `${rgb}${byte(color.a)}`;
 }
 
+function createStrokePaletteLookup(): StrokePaletteLookup {
+  // buildPalette keeps this snapshot current during ordinary editing. Using
+  // it here makes full-palette recycling O(palette size), not O(all frames),
+  // on the first brush sample.
+  const usage = paletteUsageSnapshot ?? paletteUsage();
+  const lookup: StrokePaletteLookup = {
+    exact: new Map(),
+    colors: [],
+    byChar: new Map(),
+    recyclable: Object.keys(pal()).filter((ch) =>
+      ch !== '.' && ch !== currentChar && !usage.has(ch),
+    ),
+  };
+  for (const [ch, value] of Object.entries(pal())) {
+    const rgba = parseRgba(value);
+    if (!rgba) continue;
+    const hex = rgbaHex(rgba);
+    // Preserve the pre-cache behavior: duplicate colors resolve to the first
+    // palette key rather than whichever duplicate happened to be visited last.
+    if (!lookup.exact.has(hex)) lookup.exact.set(hex, ch);
+    lookup.colors.push({ ch, rgba });
+    lookup.byChar.set(ch, rgba);
+  }
+  return lookup;
+}
+
+function paletteRgba(ch: string): Rgba | null {
+  return strokePaletteLookup?.byChar.get(ch) ?? parseRgba(pal()[ch]);
+}
+
+function updateStrokePaletteLookup(ch: string, rgba: Rgba): void {
+  const lookup = strokePaletteLookup;
+  if (!lookup) return;
+  const index = lookup.colors.findIndex((entry) => entry.ch === ch);
+  if (index >= 0) {
+    lookup.exact.delete(rgbaHex(lookup.colors[index].rgba));
+    lookup.colors[index] = { ch, rgba };
+  }
+  else lookup.colors.push({ ch, rgba });
+  lookup.byChar.set(ch, rgba);
+  lookup.exact.set(rgbaHex(rgba), ch);
+}
+
 function mixRgba(from: Rgba, to: Rgba, amount: number): Rgba {
   return {
     r: from.r + (to.r - from.r) * amount,
@@ -2833,7 +3313,6 @@ function paletteUsage(): Map<string, number> {
 interface PaletteCompaction { changed: boolean; merged: number; removed: number }
 
 function compactPalette(removeUnused = true): PaletteCompaction {
-  const usage = paletteUsage();
   const groups = new Map<string, string[]>();
   for (const [ch, color] of Object.entries(pal())) {
     if (ch === '.' || typeof color !== 'string') continue;
@@ -2844,9 +3323,12 @@ function compactPalette(removeUnused = true): PaletteCompaction {
     groups.set(key, group);
   }
 
+  const duplicateGroups = [...groups.values()].filter((chars) => chars.length > 1);
+  // Counting every pixel in every animation is relatively expensive on large
+  // authored sheets. It is only needed to choose among actual duplicates.
+  const usage = duplicateGroups.length ? paletteUsage() : new Map<string, number>();
   const remap = new Map<string, string>();
-  for (const chars of groups.values()) {
-    if (chars.length < 2) continue;
+  for (const chars of duplicateGroups) {
     // Preserve the selected key when possible; otherwise keep the most-used
     // key so the compacted JSON remains stable and readable.
     const canonical = chars.includes(currentChar)
@@ -2867,9 +3349,9 @@ function compactPalette(removeUnused = true): PaletteCompaction {
     for (const ch of remap.keys()) delete (file.palette ?? {})[ch];
   }
 
-  const afterRemapUsage = paletteUsage();
   let removed = 0;
   if (removeUnused) {
+    const afterRemapUsage = paletteUsage();
     for (const ch of Object.keys(pal())) {
       if (ch === '.' || ch === currentChar || afterRemapUsage.has(ch)) continue;
       delete (file.palette ?? {})[ch];
@@ -2892,12 +3374,16 @@ function paletteCharFor(color: Rgba): string {
   };
   if (quantized.a <= 0) return '.';
   const hex = rgbaHex(quantized);
+  const exact = strokePaletteLookup?.exact.get(hex);
+  if (exact) return exact;
   let nearest = '';
   let nearestDistance = Number.POSITIVE_INFINITY;
-  for (const [ch, value] of Object.entries(pal())) {
-    const rgba = parseRgba(value);
-    if (!rgba) continue;
-    if (rgbaHex(rgba) === hex) return ch;
+  const entries = strokePaletteLookup?.colors
+    ?? Object.entries(pal()).flatMap(([ch, value]) => {
+      const rgba = parseRgba(value);
+      return rgba ? [{ ch, rgba }] : [];
+    });
+  for (const { ch, rgba } of entries) {
     const distance = colorDistance(quantized, rgba);
     if (distance < nearestDistance) {
       nearest = ch;
@@ -2911,13 +3397,30 @@ function paletteCharFor(color: Rgba): string {
   if (nearest && nearestDistance <= 12 ** 2) return nearest;
   const free = [...AUTO_PALETTE_CHARS].find((ch) => !(ch in pal()));
   // A stroke can make a source color unused before the automatic compaction
-  // at mouse-up. Recycle that slot when the key space is full.
-  const usage = free ? null : paletteUsage();
-  const recyclable = free ?? Object.keys(pal()).find((ch) =>
-    ch !== '.' && ch !== currentChar && !usage?.has(ch),
-  );
+  // at mouse-up. Recycle that slot when the key space is full. Build the
+  // inventory once per stroke: the previous implementation scanned every
+  // pixel in every animation for each new feather color, which made a full
+  // 345-entry palette hundreds of times slower than a small fixture palette.
+  let recyclable = free;
+  if (!recyclable) {
+    const lookup = strokePaletteLookup;
+    if (lookup && lookup.recyclable === null) {
+      const usage = paletteUsage();
+      lookup.recyclable = Object.keys(pal()).filter((ch) =>
+        ch !== '.' && ch !== currentChar && !usage.has(ch),
+      );
+    }
+    recyclable = lookup?.recyclable?.shift();
+    if (!lookup) {
+      const usage = paletteUsage();
+      recyclable = Object.keys(pal()).find((ch) =>
+        ch !== '.' && ch !== currentChar && !usage.has(ch),
+      );
+    }
+  }
   if (!recyclable) return nearest || currentChar;
   (file.palette ??= {})[recyclable] = hex;
+  updateStrokePaletteLookup(recyclable, quantized);
   strokePaletteChanged = true;
   return recyclable;
 }
@@ -2928,41 +3431,81 @@ function brushSize(): number {
   return Math.max(1, Math.min(32, value));
 }
 
-function brushStrength(dx: number, dy: number, size = brushSize()): number {
-  const distance = Math.hypot(dx, dy);
-  const outer = (size + 1) / 2;
-  if (distance >= outer) return 0;
-  const core = Math.max(0.55, outer * 0.55);
-  if (distance <= core) return 1;
-  return (outer - distance) / Math.max(0.001, outer - core);
+interface BrushStampContext {
+  erase: boolean;
+  selected: Rgba | null;
+  offsets: Array<{ dx: number; dy: number; strength: number }>;
 }
 
-function paintBrush(centerX: number, centerY: number, erase: boolean): void {
-  const selected = parseRgba(pal()[currentChar]);
-  if (!erase && (!selected || currentChar === '.' || selected.a <= 0)) erase = true;
-  const extent = Math.ceil((brushSize() + 1) / 2);
-  for (let dy = -extent; dy <= extent; dy++) {
-    for (let dx = -extent; dx <= extent; dx++) {
-      const strength = brushStrength(dx, dy);
-      if (strength <= 0) continue;
+function createBrushStampContext(requestedErase: boolean): BrushStampContext {
+  const selected = paletteRgba(currentChar);
+  const erase = requestedErase || !selected || currentChar === '.' || selected.a <= 0;
+  const size = brushSize();
+  const extent = Math.ceil((size + 1) / 2);
+  const offsets: BrushStampContext['offsets'] = [];
+  for (let dy = -extent; dy <= extent; dy++) for (let dx = -extent; dx <= extent; dx++) {
+    const strength = brushStrength(dx, dy, size);
+    if (strength > 0) offsets.push({ dx, dy, strength });
+  }
+  return { erase, selected, offsets };
+}
+
+function brushBlendChar(
+  oldChar: string,
+  old: Rgba,
+  stamp: BrushStampContext,
+  strength: number,
+): string {
+  const cacheKey = `${Number(stamp.erase)}\0${oldChar}\0${currentChar}\0${Math.round(strength * 1024)}`;
+  const cached = strokeBrushBlendCache.get(cacheKey);
+  if (cached) return cached;
+  const result = stamp.erase
+    ? (() => {
+      const alpha = old.a * (1 - strength);
+      return alpha <= 0.5 ? '.' : paletteCharFor({ ...old, a: alpha });
+    })()
+    : strength >= 0.995
+      ? currentChar
+      : paletteCharFor(mixRgba(old, stamp.selected!, strength));
+  strokeBrushBlendCache.set(cacheKey, result);
+  return result;
+}
+
+function paintBrush(
+  centerX: number,
+  centerY: number,
+  erase: boolean,
+  targetBatch?: PixelBatch,
+  preparedStamp?: BrushStampContext,
+): void {
+  const batch = targetBatch ?? createCurrentPixelBatch();
+  const stamp = preparedStamp ?? createBrushStampContext(erase);
+  for (const { dx, dy, strength } of stamp.offsets) {
       const x = centerX + dx;
       const y = centerY + dy;
-      if (x < 0 || y < 0 || x >= W() || y >= H()) continue;
-      const oldChar = cur()[y][x];
-      const old = parseRgba(pal()[oldChar]);
-      if (erase) {
+      if (x < 0 || y < 0 || x >= batch.width || y >= batch.height) continue;
+      const oldChar = batchPixel(batch, x, y);
+      const old = paletteRgba(oldChar);
+      if (stamp.erase) {
         if (!old) continue;
-        const alpha = old.a * (1 - strength);
-        setPixel(x, y, alpha <= 0.5 ? '.' : paletteCharFor({ ...old, a: alpha }));
-      } else if (strength >= 0.995) {
-        setPixel(x, y, currentChar);
+        setBatchPixel(batch, x, y, brushBlendChar(oldChar, old, stamp, strength));
       } else if (old) {
-        setPixel(x, y, paletteCharFor(mixRgba(old, selected!, strength)));
+        setBatchPixel(batch, x, y, brushBlendChar(oldChar, old, stamp, strength));
+      } else if (strength >= 0.995) {
+        // The solid core must preserve the explicitly selected palette key,
+        // even when another key happens to contain the same RGBA value.
+        setBatchPixel(batch, x, y, currentChar);
       } else {
-        setPixel(x, y, paletteCharFor({ ...selected!, a: selected!.a * strength }));
+        const emptyKey = `0\0.\0${currentChar}\0${Math.round(strength * 1024)}`;
+        let blended = strokeBrushBlendCache.get(emptyKey);
+        if (!blended) {
+          blended = paletteCharFor({ ...stamp.selected!, a: stamp.selected!.a * strength });
+          strokeBrushBlendCache.set(emptyKey, blended);
+        }
+        setBatchPixel(batch, x, y, blended);
       }
-    }
   }
+  if (!targetBatch) commitPixelBatch(batch);
 }
 
 function blurBrush(centerX: number, centerY: number, erase: boolean): void {
@@ -2971,6 +3514,7 @@ function blurBrush(centerX: number, centerY: number, erase: boolean): void {
     return;
   }
   const source = cur().slice();
+  const batch = createCurrentPixelBatch();
   const size = brushSize();
   const extent = Math.ceil((size + 1) / 2);
   const sampleRadius = Math.max(1, Math.floor(size / 2));
@@ -2981,7 +3525,7 @@ function blurBrush(centerX: number, centerY: number, erase: boolean): void {
       const x = centerX + dx;
       const y = centerY + dy;
       if (x < 0 || y < 0 || x >= W() || y >= H()) continue;
-      const original = parseRgba(pal()[source[y][x]]);
+      const original = paletteRgba(source[y][x]);
       if (!original) continue; // blur color, but never grow the silhouette
       let premultipliedR = 0;
       let premultipliedG = 0;
@@ -2991,7 +3535,7 @@ function blurBrush(centerX: number, centerY: number, erase: boolean): void {
       for (let sy = -sampleRadius; sy <= sampleRadius; sy++) {
         for (let sx = -sampleRadius; sx <= sampleRadius; sx++) {
           if (Math.hypot(sx, sy) > sampleRadius + 0.25) continue;
-          const sample = parseRgba(pal()[source[y + sy]?.[x + sx]]);
+          const sample = paletteRgba(source[y + sy]?.[x + sx]);
           const sampleAlpha = (sample?.a ?? 0) / 255;
           premultipliedR += (sample?.r ?? 0) * sampleAlpha;
           premultipliedG += (sample?.g ?? 0) * sampleAlpha;
@@ -3009,9 +3553,10 @@ function blurBrush(centerX: number, centerY: number, erase: boolean): void {
         b: alphaWeight ? premultipliedB / alphaWeight : original.b,
         a: averageAlpha,
       };
-      setPixel(x, y, paletteCharFor(mixRgba(original, average, strength)));
+      setBatchPixel(batch, x, y, paletteCharFor(mixRgba(original, average, strength)));
     }
   }
+  commitPixelBatch(batch);
 }
 
 function floodFill(startX: number, startY: number, fillChar: string): void {
@@ -3113,6 +3658,10 @@ grid.addEventListener('mousedown', (e) => {
   }
   if (!requireEditableLayer()) return;
   continuousEdit = beginContinuousDocumentEdit();
+  strokePaletteLookup = currentTool === 'brush' || currentTool === 'blur'
+    ? createStrokePaletteLookup()
+    : null;
+  strokeBrushBlendCache.clear();
   erasing = e.button === 2;
   painting = true;
   lastPaintCell = null;
@@ -3121,7 +3670,10 @@ grid.addEventListener('mousedown', (e) => {
 grid.addEventListener('mousemove', (e) => {
   hoverPointer = { x: e.clientX, y: e.clientY };
   hoverCell = gridCell(e);
-  updateWorkspaceChrome();
+  // Pointer motion changes only the coordinate readout. Rebuilding the full
+  // workspace chrome here used to scan and parse every local draft on every
+  // mouse event, which made drawing and transforms stall as projects grew.
+  updateWorkspaceCursorStatus();
   updateBrushCursor();
   updateSelectionModifierCursor(e);
   if (picking) {
@@ -3133,7 +3685,7 @@ grid.addEventListener('mousemove', (e) => {
     return;
   }
   if (selectionHandleTransform) {
-    updateSelectionHandleTransform(e);
+    scheduleSelectionHandleTransform(e);
     return;
   }
   if (selectionStart) {
@@ -3153,9 +3705,11 @@ grid.addEventListener('mouseleave', () => {
   grid.classList.remove('selection-movable');
   if (!selectionHandleTransform) grid.style.cursor = '';
   updateBrushCursor();
-  updateWorkspaceChrome();
+  updateWorkspaceCursorStatus();
 });
 window.addEventListener('mouseup', () => {
+  const finishStartedAt = performance.now();
+  let selectionGestureFinished = false;
   picking = false;
   if (magicSelectionDrag) {
     const mode = magicSelectionDrag.initialMode;
@@ -3176,13 +3730,19 @@ window.addEventListener('mouseup', () => {
     flash(count ? `selected ${count} pixels (${mode})` : 'selection cleared');
   }
   if (selectionMove) {
+    selectionGestureFinished = selectionMove.moved;
     selectionMove = null;
   }
   if (selectionHandleTransform) {
+    // Commit the newest pointer sample before closing the gesture. Raw mouse
+    // events are coalesced to one expensive raster transform per animation
+    // frame, but mouseup must never drop the final position.
+    flushSelectionHandleTransform();
     const completedTransform = selectionHandleTransform;
     const moved = completedTransform.moved;
     const handle = completedTransform.handle;
     selectionHandleTransform = null;
+    selectionGestureFinished ||= moved;
     if (moved) {
       const flipped = [
         completedTransform.flipX ? 'horizontal' : '',
@@ -3195,19 +3755,29 @@ window.addEventListener('mouseup', () => {
     ($('selectionAngle') as HTMLInputElement).value = '0';
     grid.style.cursor = transformMode ? 'default' : currentTool === 'select' ? 'cell' : '';
   }
+  if (selectionGestureFinished) flushGestureSelectionUi();
   if (painting) {
     painting = false;
     lastPaintCell = null;
     if (strokePaletteChanged) {
-      // Keep deliberately prepared but unused swatches during ordinary
-      // painting. The manual compact action is the explicit opt-in to remove
-      // those; automatic maintenance only coalesces exact duplicates.
-      compactPalette(false);
-      buildPalette();
+      // Generated blends already reuse exact/near palette entries. Rebuilding
+      // and compacting every animation synchronously here made releasing a
+      // long stroke block the page; explicit Compact remains available for
+      // deliberate document-wide cleanup.
+      schedulePaletteBuild();
     }
     strokePaletteChanged = false;
+    strokePaletteLookup = null;
+    flushScheduledRedraw();
   }
-  finishContinuousDocumentEdit();
+  finishContinuousDocumentEdit(true, true);
+  const finishElapsed = performance.now() - finishStartedAt;
+  editorPerformanceStats.gestureFinishes++;
+  editorPerformanceStats.gestureFinishTotalMs += finishElapsed;
+  editorPerformanceStats.gestureFinishMaxMs = Math.max(
+    editorPerformanceStats.gestureFinishMaxMs,
+    finishElapsed,
+  );
 });
 
 function gridCell(e: MouseEvent): { x: number; y: number } {
@@ -3507,32 +4077,6 @@ function clearSelectionPixels(rows: string[], value: PixelSelection): void {
   }
 }
 
-function pastePixels(
-  rows: string[],
-  clip: PixelClipboard,
-  x: number,
-  y: number,
-  ignoreTransparent = false,
-): void {
-  const pastedW = Math.min(clip.w, rows[0].length - x);
-  const pastedH = Math.min(clip.h, rows.length - y);
-  for (let dy = 0; dy < pastedH; dy++) {
-    if (!ignoreTransparent) {
-      rows[y + dy] = rows[y + dy].slice(0, x)
-        + clip.rows[dy].slice(0, pastedW)
-        + rows[y + dy].slice(x + pastedW);
-      continue;
-    }
-    const destination = [...rows[y + dy]];
-    for (let dx = 0; dx < pastedW; dx++) {
-      if (clip.mask && clip.mask[dy]?.[dx] !== '1') continue;
-      const pixel = clip.rows[dy][dx];
-      if (pixel !== '.') destination[x + dx] = pixel;
-    }
-    rows[y + dy] = destination.join('');
-  }
-}
-
 function beginSelectionMove(point: { x: number; y: number }): void {
   if (!requireEditableLayer()) return;
   if (!selection) return;
@@ -3564,10 +4108,16 @@ function moveSelectionDrag(point: { x: number; y: number }): void {
   pastePixels(rows, selectionMove.source, x, y, true);
   anim().frames[frameIdx] = rows;
   editVersion++;
-  setSelection({ x, y, w: selectionMove.original.w, h: selectionMove.original.h, mask: selectionMove.source.mask?.slice() });
+  setSelectionDuringGesture({
+    x,
+    y,
+    w: selectionMove.original.w,
+    h: selectionMove.original.h,
+    mask: selectionMove.source.mask?.slice(),
+  });
 }
 
-function gridPointer(e: MouseEvent): { x: number; y: number } {
+function gridPointer(e: Pick<MouseEvent, 'clientX' | 'clientY'>): { x: number; y: number } {
   const bounds = grid.getBoundingClientRect();
   return {
     x: (e.clientX - bounds.left) / cellSize,
@@ -3694,10 +4244,25 @@ function applyLiveSelectionTransform(
   pastePixels(rows, clip, x, y, true);
   anim().frames[frameIdx] = rows;
   editVersion++;
-  setSelection({ x, y, w: clip.w, h: clip.h, mask: clip.mask?.slice() });
+  setSelectionDuringGesture({ x, y, w: clip.w, h: clip.h, mask: clip.mask?.slice() });
 }
 
-function updateSelectionHandleTransform(e: MouseEvent): void {
+function updateSelectionHandleTransform(e: SelectionTransformPointer): void {
+  const startedAt = performance.now();
+  try {
+    updateSelectionHandleTransformNow(e);
+  } finally {
+    const elapsed = performance.now() - startedAt;
+    editorPerformanceStats.selectionTransforms++;
+    editorPerformanceStats.selectionTransformTotalMs += elapsed;
+    editorPerformanceStats.selectionTransformMaxMs = Math.max(
+      editorPerformanceStats.selectionTransformMaxMs,
+      elapsed,
+    );
+  }
+}
+
+function updateSelectionHandleTransformNow(e: SelectionTransformPointer): void {
   const transform = selectionHandleTransform;
   if (!transform) return;
   const pointer = gridPointer(e);
@@ -3772,13 +4337,38 @@ function updateSelectionHandleTransform(e: MouseEvent): void {
   );
 }
 
-function setSelection(next: PixelSelection | null): void {
-  if (next && !transformMode && (currentTool === 'select' || currentTool === 'magic')) {
-    selectionTool = currentTool;
+function scheduleSelectionHandleTransform(e: MouseEvent): void {
+  pendingSelectionTransformPointer = {
+    clientX: e.clientX,
+    clientY: e.clientY,
+    shiftKey: e.shiftKey,
+  };
+  if (scheduledSelectionTransformFrame) return;
+  scheduledSelectionTransformFrame = requestAnimationFrame(() => {
+    scheduledSelectionTransformFrame = 0;
+    const pointer = pendingSelectionTransformPointer;
+    pendingSelectionTransformPointer = null;
+    if (pointer && selectionHandleTransform) updateSelectionHandleTransform(pointer);
+  });
+}
+
+function flushSelectionHandleTransform(): void {
+  if (scheduledSelectionTransformFrame) {
+    cancelAnimationFrame(scheduledSelectionTransformFrame);
+    scheduledSelectionTransformFrame = 0;
   }
-  selection = next;
-  const transformEnded = !selection && transformMode;
-  if (transformEnded) transformMode = false;
+  const pointer = pendingSelectionTransformPointer;
+  pendingSelectionTransformPointer = null;
+  if (pointer && selectionHandleTransform) updateSelectionHandleTransform(pointer);
+}
+
+function cancelScheduledSelectionTransform(): void {
+  if (scheduledSelectionTransformFrame) cancelAnimationFrame(scheduledSelectionTransformFrame);
+  scheduledSelectionTransformFrame = 0;
+  pendingSelectionTransformPointer = null;
+}
+
+function updateSelectionReadout(): void {
   ($('btnCut') as HTMLButtonElement).disabled = !selection;
   ($('btnCopy') as HTMLButtonElement).disabled = !selection;
   updateSelectionTransformControls();
@@ -3791,6 +4381,34 @@ function setSelection(next: PixelSelection | null): void {
   $('selectionStatus').textContent = selection
     ? `selection: ${selectionPixelCount(selection)} px in ${selection.w}x${selection.h} at ${selection.x},${selection.y} · shared with agent`
     : 'selection: none';
+}
+
+function setSelectionDuringGesture(next: PixelSelection): void {
+  selection = next;
+  if (scheduledSelectionUiFrame) return;
+  scheduledSelectionUiFrame = requestAnimationFrame(() => {
+    scheduledSelectionUiFrame = 0;
+    updateSelectionReadout();
+    scheduleRedraw();
+  });
+}
+
+function flushGestureSelectionUi(): void {
+  if (scheduledSelectionUiFrame) {
+    cancelAnimationFrame(scheduledSelectionUiFrame);
+    scheduledSelectionUiFrame = 0;
+  }
+  if (selection) setSelection(selection);
+}
+
+function setSelection(next: PixelSelection | null): void {
+  if (next && !transformMode && (currentTool === 'select' || currentTool === 'magic')) {
+    selectionTool = currentTool;
+  }
+  selection = next;
+  const transformEnded = !selection && transformMode;
+  if (transformEnded) transformMode = false;
+  updateSelectionReadout();
   buildLayerExtractionControls();
   updateWorkspaceChrome();
   // Selection is an independent canvas state. Keep its originating selection
@@ -3803,6 +4421,7 @@ function clearSelection(publish = true): void {
   selectionStart = null;
   magicSelectionDrag = null;
   selectionMove = null;
+  cancelScheduledSelectionTransform();
   selectionHandleTransform = null;
   grid.classList.remove('selection-movable');
   grid.style.cursor = '';
@@ -3856,6 +4475,7 @@ $('center').addEventListener('pointerdown', (event) => {
 });
 
 function paint(e: MouseEvent): void {
+  const startedAt = performance.now();
   const r = grid.getBoundingClientRect();
   const x = Math.floor((e.clientX - r.left) / cellSize);
   const y = Math.floor((e.clientY - r.top) / cellSize);
@@ -3868,17 +4488,32 @@ function paint(e: MouseEvent): void {
   } else if (currentTool === 'brush' || currentTool === 'blur') {
     const previous = lastPaintCell;
     if (previous?.x === x && previous.y === y) return;
-    const steps = previous ? Math.max(Math.abs(x - previous.x), Math.abs(y - previous.y)) : 0;
+    const size = brushSize();
+    // A soft circular dab overlaps safely at 25% diameter. Pixel-by-pixel
+    // center spacing did 4–8× redundant blending work on fast pointer moves.
+    const spacing = Math.max(1, Math.floor(size / 4));
+    const distance = previous ? Math.hypot(x - previous.x, y - previous.y) : 0;
+    const steps = previous ? Math.max(1, Math.ceil(distance / spacing)) : 0;
+    const brushBatch = currentTool === 'brush' ? createCurrentPixelBatch() : null;
+    const brushStamp = currentTool === 'brush' ? createBrushStampContext(erasing) : null;
     for (let step = 0; step <= steps; step++) {
       const amount = steps ? step / steps : 1;
       const stampX = previous ? Math.round(previous.x + (x - previous.x) * amount) : x;
       const stampY = previous ? Math.round(previous.y + (y - previous.y) * amount) : y;
-      if (currentTool === 'brush') paintBrush(stampX, stampY, erasing);
+      if (currentTool === 'brush') paintBrush(stampX, stampY, erasing, brushBatch!, brushStamp!);
       else blurBrush(stampX, stampY, erasing);
     }
+    if (brushBatch) commitPixelBatch(brushBatch);
     lastPaintCell = { x, y };
   }
-  redraw();
+  // Pointer events can arrive much faster than the display refresh rate.
+  // Coalesce their canvas work into one paint per animation frame while the
+  // document still records every sampled pixel.
+  scheduleRedraw();
+  const elapsed = performance.now() - startedAt;
+  editorPerformanceStats.paintEvents++;
+  editorPerformanceStats.paintTotalMs += elapsed;
+  editorPerformanceStats.paintMaxMs = Math.max(editorPerformanceStats.paintMaxMs, elapsed);
 }
 
 /* ---------------- frames ---------------- */
@@ -3967,6 +4602,20 @@ function isolateComparisonLayer(sprite: SpriteFile, layerId: string): SpriteFile
   return layer ? { ...sprite, layers: [layer] } : sprite;
 }
 
+/** Resolve comparison "auto" through the same weapon body profile as preview. */
+function automaticComparisonAnimation(sprite: SpriteFile): string {
+  const weaponId = ($('compWeapon') as HTMLSelectElement).value;
+  if (weaponId && weapons.has(weaponId)) {
+    const mapped = resolveWeaponBodyAnimation(
+      weaponTypeOf(weapons.get(weaponId)),
+      animName,
+      (name) => Boolean(resolveAnim(sprite, name)),
+    );
+    if (resolveAnim(sprite, mapped)) return mapped;
+  }
+  return resolveAnim(sprite, animName) ? animName : Object.keys(sprite.anims)[0];
+}
+
 function rebuildComparisonSelectors(): void {
   const sourceAnim = $('compareRefAnim') as HTMLSelectElement;
   const sourceLayer = $('compareRefLayer') as HTMLSelectElement;
@@ -3975,7 +4624,11 @@ function rebuildComparisonSelectors(): void {
   const previousSourceLayer = sourceLayer.value;
   const previousTargetLayer = targetLayer.value;
 
-  sourceAnim.replaceChildren(new Option('animation: auto', ''));
+  const automaticAnimation = refFile ? automaticComparisonAnimation(refFile) : '';
+  sourceAnim.replaceChildren(new Option(
+    automaticAnimation ? `animation: auto → ${automaticAnimation}` : 'animation: auto',
+    '',
+  ));
   for (const name of Object.keys(refFile?.anims ?? {})) sourceAnim.append(new Option(`animation: ${name}`, name));
   sourceAnim.value = [...sourceAnim.options].some((option) => option.value === previousAnim) ? previousAnim : '';
 
@@ -3996,21 +4649,93 @@ function rebuildComparisonSelectors(): void {
     : '';
 }
 
-function comparisonReference(): { file: SpriteFile; animation: string; frame: number; image: CanvasImageSource } | null {
+function comparisonReference(): ComparisonReference | null {
   if (!refFile) return null;
   const requestedAnimation = ($('compareRefAnim') as HTMLSelectElement).value;
   const animation = requestedAnimation && requestedAnimation in refFile.anims
     ? requestedAnimation
-    : animName in refFile.anims ? animName : Object.keys(refFile.anims)[0];
+    : automaticComparisonAnimation(refFile);
   const resolved = resolveAnim(refFile, animation);
   if (!resolved?.frames.length) return null;
   const requestedFrame = ($('compareRefFrame') as HTMLInputElement).valueAsNumber;
   const frame = Number.isFinite(requestedFrame) && requestedFrame > 0
     ? Math.min(resolved.frames.length - 1, Math.floor(requestedFrame) - 1)
-    : frameIdx % resolved.frames.length;
+    : Math.min(frameIdx, resolved.frames.length - 1);
   const source = isolateComparisonLayer(refFile, ($('compareRefLayer') as HTMLSelectElement).value);
   const image = rasterizeSpriteFrame(source, animation, frame, PAL, { upscale: false });
   return image ? { file: source, animation, frame, image } : null;
+}
+
+function comparisonAnchorPoint(
+  sprite: SpriteFile,
+  anchor: string,
+  animation: string,
+  frame: number,
+): { x: number; y: number } | null {
+  const group = sprite.anchors?.[anchor];
+  const concrete = concreteAnimNameOf(sprite, animation);
+  const points = group?.[animation] ?? group?.[concrete];
+  if (!points?.length) return null;
+  const point = points[Math.min(frame, points.length - 1)];
+  if (!point) return null;
+  return { x: point.x, y: point.y };
+}
+
+function inferredComparisonAnchors(
+  source: SpriteFile,
+  target: SpriteFile,
+): { sourceAnchor: string; targetAnchor: string } | null {
+  const sourceAnchors = Object.keys(source.anchors ?? {});
+  const targetAnchors = Object.keys(target.anchors ?? {});
+  const shared = sourceAnchors.find((name) => targetAnchors.includes(name));
+  if (shared) return { sourceAnchor: shared, targetAnchor: shared };
+
+  const sourceSlotAnchor = Object.values(source.attachmentSlots ?? {})
+    .map((slot) => slot.anchor)
+    .find((name) => sourceAnchors.includes(name));
+  if (sourceSlotAnchor && targetAnchors.includes('grip')) {
+    return { sourceAnchor: sourceSlotAnchor, targetAnchor: 'grip' };
+  }
+
+  const targetSlotAnchor = Object.values(target.attachmentSlots ?? {})
+    .map((slot) => slot.anchor)
+    .find((name) => targetAnchors.includes(name));
+  if (sourceAnchors.includes('grip') && targetSlotAnchor) {
+    return { sourceAnchor: 'grip', targetAnchor: targetSlotAnchor };
+  }
+  return null;
+}
+
+function comparisonAnchorAlignment(reference = comparisonReference()): ComparisonAnchorAlignment | null {
+  if (!reference) return null;
+  const names = inferredComparisonAnchors(reference.file, file);
+  if (!names) return null;
+  const source = comparisonAnchorPoint(
+    reference.file,
+    names.sourceAnchor,
+    reference.animation,
+    reference.frame,
+  );
+  const target = comparisonAnchorPoint(file, names.targetAnchor, animName, frameIdx);
+  if (!source || !target) return null;
+  const targetDensity = density();
+  // Match spriteWeapon exactly. Aligning the mathematical anchor points with
+  // their raw fractional delta puts the reference bitmap between the target
+  // document's grid lines, even though runtime snaps the attached bitmap to
+  // the body lattice. Resolve the attachment origin first, then invert it to
+  // place the reference body over the equipment document.
+  return {
+    ...names,
+    // Comparison state and drawing use the active document's authored-cell
+    // coordinates. Resolve placement in logical pixels first (the runtime
+    // contract), then convert once to that target grid.
+    source: { x: source.x * targetDensity, y: source.y * targetDensity },
+    target: { x: target.x * targetDensity, y: target.y * targetDensity },
+    offset: (() => {
+      const logical = snappedBodyOffsetForAttachment(source, target, targetDensity);
+      return { x: logical.x * targetDensity, y: logical.y * targetDensity };
+    })(),
+  };
 }
 
 function numericComparisonPoint(prefix: string, point: '1' | '2'): { x: number; y: number } | null {
@@ -4059,7 +4784,15 @@ function updateComparisonReport(alignment = comparisonAlignment()): void {
     return;
   }
   if (!(($('compareAlignAxes') as HTMLInputElement).checked)) {
-    report.textContent = 'Unaligned ghost overlay. Enable axis alignment to measure scale, rotation, and translation.';
+    const reference = comparisonReference();
+    const anchorAlignment = comparisonAnchorAlignment(reference);
+    report.textContent = reference
+      ? `Comparing ${reference.animation} · frame ${reference.frame + 1}`
+        + (anchorAlignment
+          ? ` · anchors ${anchorAlignment.sourceAnchor} → ${anchorAlignment.targetAnchor}`
+          : ' · origins unaligned')
+        + '. Enable axis alignment to measure scale, rotation, and translation.'
+      : 'The selected comparison reference has no renderable frame.';
     return;
   }
   report.textContent = alignment
@@ -4069,13 +4802,14 @@ function updateComparisonReport(alignment = comparisonAlignment()): void {
 
 function drawComparisonSource(
   ctx: CanvasRenderingContext2D,
-  image: CanvasImageSource,
+  reference: ComparisonReference,
   pixelScale: number,
   originX = 0,
   originY = 0,
 ): void {
   const opacity = Number(($('compareOpacity') as HTMLInputElement).value) / 100;
   const alignment = comparisonAlignment();
+  const anchorAlignment = alignment ? null : comparisonAnchorAlignment(reference);
   ctx.save();
   ctx.globalAlpha = Math.max(0, Math.min(1, opacity));
   if (alignment) {
@@ -4085,11 +4819,19 @@ function drawComparisonSource(
       pixelScale * c, pixelScale * d,
       originX + pixelScale * e, originY + pixelScale * f,
     );
-    ctx.drawImage(image, 0, 0);
+    ctx.drawImage(reference.image, 0, 0);
   } else {
-    const width = Number((image as { width?: number }).width ?? W());
-    const height = Number((image as { height?: number }).height ?? H());
-    ctx.drawImage(image, originX, originY, width * pixelScale, height * pixelScale);
+    const width = Number((reference.image as { width?: number }).width ?? W());
+    const height = Number((reference.image as { height?: number }).height ?? H());
+    const sourceDensity = reference.file.hd === false ? 4 : 1;
+    const sourceToTargetGrid = density() / sourceDensity;
+    ctx.drawImage(
+      reference.image,
+      originX + (anchorAlignment?.offset.x ?? 0) * pixelScale,
+      originY + (anchorAlignment?.offset.y ?? 0) * pixelScale,
+      width * sourceToTargetGrid * pixelScale,
+      height * sourceToTargetGrid * pixelScale,
+    );
   }
   ctx.restore();
 }
@@ -4142,14 +4884,54 @@ function scheduleComparisonUpload(): void {
   }, 180);
 }
 
+function scheduleRedraw(): void {
+  if (scheduledRedrawFrame) return;
+  scheduledRedrawFrame = requestAnimationFrame(() => {
+    scheduledRedrawFrame = 0;
+    redraw();
+  });
+}
+
+function flushScheduledRedraw(): void {
+  if (!scheduledRedrawFrame) return;
+  cancelAnimationFrame(scheduledRedrawFrame);
+  scheduledRedrawFrame = 0;
+  redraw();
+}
+
 function redraw(): void {
-  grid.width = W() * cellSize;
-  grid.height = H() * cellSize;
+  const startedAt = performance.now();
+  redrawNow();
+  const elapsed = performance.now() - startedAt;
+  editorPerformanceStats.redrawTotalMs += elapsed;
+  editorPerformanceStats.redrawMaxMs = Math.max(editorPerformanceStats.redrawMaxMs, elapsed);
+}
+
+function redrawNow(): void {
+  let stageStartedAt = performance.now();
+  editorPerformanceStats.redraws++;
+  if (scheduledRedrawFrame) {
+    cancelAnimationFrame(scheduledRedrawFrame);
+    scheduledRedrawFrame = 0;
+  }
+  const width = W() * cellSize;
+  const height = H() * cellSize;
+  if (grid.width !== width) grid.width = width;
+  if (grid.height !== height) grid.height = height;
   gctx.imageSmoothingEnabled = false;
+  editorPerformanceStats.redrawSetupMaxMs = Math.max(
+    editorPerformanceStats.redrawSetupMaxMs,
+    performance.now() - stageStartedAt,
+  );
 
   // 1. Transparency is a fixed view-space checker. It deliberately ignores
   // cellSize, so zooming the sprite never turns checker tiles into pixels.
+  stageStartedAt = performance.now();
   drawTransparencyChecker(gctx, grid.width, grid.height);
+  editorPerformanceStats.redrawCheckerMaxMs = Math.max(
+    editorPerformanceStats.redrawCheckerMaxMs,
+    performance.now() - stageStartedAt,
+  );
 
   // 2. Draw a non-mutating comparison source. Its optional two-point matrix
   // maps source sprite coordinates directly into target coordinates, so the
@@ -4157,8 +4939,9 @@ function redraw(): void {
   const showRef = ($('showRef') as HTMLInputElement)?.checked ?? true;
   const comparing = Boolean(refFile && showRef);
   const comparisonView = ($('compareView') as HTMLSelectElement).value;
+  stageStartedAt = performance.now();
   const reference = comparing ? comparisonReference() : null;
-  if (reference && comparisonView !== 'target') drawComparisonSource(gctx, reference.image, cellSize);
+  if (reference && comparisonView !== 'target') drawComparisonSource(gctx, reference, cellSize);
 
   // 3. Draw onion skin if enabled
   const onion = ($('onionSkin') as HTMLInputElement)?.checked ?? false;
@@ -4171,32 +4954,50 @@ function redraw(): void {
       gctx.restore();
     }
   }
+  editorPerformanceStats.redrawReferenceMaxMs = Math.max(
+    editorPerformanceStats.redrawReferenceMaxMs,
+    performance.now() - stageStartedAt,
+  );
 
   // 4. Draw visible target layers bottom-to-top. Rasterizing each layer separately
   // preserves source-over alpha instead of replacing the lower palette cell.
+  stageStartedAt = performance.now();
   const visibleImage = comparing ? comparisonTargetImage() : rasterizedCur(frameIdx, false);
+  editorPerformanceStats.redrawRasterMaxMs = Math.max(
+    editorPerformanceStats.redrawRasterMaxMs,
+    performance.now() - stageStartedAt,
+  );
+  stageStartedAt = performance.now();
   if ((!comparing || comparisonView !== 'source') && visibleImage) {
     gctx.drawImage(visibleImage, 0, 0, grid.width, grid.height);
   }
+  editorPerformanceStats.redrawImageMaxMs = Math.max(
+    editorPerformanceStats.redrawImageMaxMs,
+    performance.now() - stageStartedAt,
+  );
 
   // 5. Grid lines
+  stageStartedAt = performance.now();
   gctx.strokeStyle = 'rgba(35, 40, 48, 0.18)';
+  gctx.beginPath();
   for (let x = 0; x <= W(); x++) {
-    gctx.beginPath();
     gctx.moveTo(x * cellSize + 0.5, 0);
     gctx.lineTo(x * cellSize + 0.5, H() * cellSize);
-    gctx.stroke();
   }
   for (let y = 0; y <= H(); y++) {
-    gctx.beginPath();
     gctx.moveTo(0, y * cellSize + 0.5);
     gctx.lineTo(W() * cellSize, y * cellSize);
-    gctx.stroke();
   }
+  gctx.stroke();
   const alignment = comparing ? comparisonAlignment() : null;
   if (alignment) drawComparisonAxis(gctx, alignment, cellSize);
   updateComparisonReport(alignment);
   scheduleComparisonUpload();
+  editorPerformanceStats.redrawGridMaxMs = Math.max(
+    editorPerformanceStats.redrawGridMaxMs,
+    performance.now() - stageStartedAt,
+  );
+  stageStartedAt = performance.now();
 
   if (selection) {
     const x = selection.x * cellSize;
@@ -4276,22 +5077,58 @@ function redraw(): void {
       const x = point.x * density() * cellSize;
       const y = point.y * density() * cellSize;
       const radius = Math.max(4, Math.min(10, cellSize * 0.7));
+      const ringRadius = Math.max(3, Math.min(5, cellSize * 0.45));
+      const fontSize = Math.max(10, Math.min(14, cellSize));
+      const labelX = x + radius + 5;
+      const labelY = y - 4;
+      const drawCross = (): void => {
+        gctx.beginPath();
+        gctx.moveTo(x - radius, y); gctx.lineTo(x + radius, y);
+        gctx.moveTo(x, y - radius); gctx.lineTo(x, y + radius);
+        gctx.stroke();
+      };
       gctx.save();
-      gctx.strokeStyle = '#ffcd75';
-      gctx.lineWidth = 2;
+      gctx.lineCap = 'square';
+
+      // A narrow dark outline keeps the target readable without hiding the
+      // nearby art being aligned.
+      gctx.strokeStyle = '#07070d';
+      gctx.lineWidth = 3;
+      drawCross();
       gctx.beginPath();
-      gctx.moveTo(x - radius, y); gctx.lineTo(x + radius, y);
-      gctx.moveTo(x, y - radius); gctx.lineTo(x, y + radius);
+      gctx.arc(x, y, ringRadius, 0, Math.PI * 2);
+      gctx.stroke();
+
+      // Cyan is deliberately distinct from the editor's gold selection UI.
+      // The center dot is the authoritative anchor coordinate.
+      gctx.strokeStyle = '#00e5ff';
+      gctx.lineWidth = 1;
+      drawCross();
+      gctx.beginPath();
+      gctx.arc(x, y, ringRadius, 0, Math.PI * 2);
       gctx.stroke();
       gctx.fillStyle = '#07070d';
       gctx.fillRect(x - 2, y - 2, 4, 4);
-      gctx.font = `${Math.max(10, Math.min(14, cellSize))}px monospace`;
-      gctx.textBaseline = 'bottom';
-      gctx.fillStyle = '#ffcd75';
-      gctx.fillText(selectedAnchorName, x + radius + 3, y - 3);
+      gctx.fillStyle = '#ffffff';
+      gctx.fillRect(x - 1, y - 1, 2, 2);
+
+      if (!suppressAnchorLabel) {
+        gctx.font = `${fontSize}px monospace`;
+        gctx.textBaseline = 'bottom';
+        gctx.lineJoin = 'round';
+        gctx.strokeStyle = '#07070d';
+        gctx.lineWidth = 3;
+        gctx.strokeText(selectedAnchorName, labelX, labelY);
+        gctx.fillStyle = '#00e5ff';
+        gctx.fillText(selectedAnchorName, labelX, labelY);
+      }
       gctx.restore();
     }
   }
+  editorPerformanceStats.redrawOverlayMaxMs = Math.max(
+    editorPerformanceStats.redrawOverlayMaxMs,
+    performance.now() - stageStartedAt,
+  );
 }
 
 /* ---------------- composite preview ---------------- */
@@ -4304,10 +5141,28 @@ function redraw(): void {
 let editVersion = 0;
 let rebuiltVersion = -1;
 let rebuiltKnightSignature = '';
+let rebuiltCompositeWeaponKey = '';
+
+/** Resolve a sprite-backed visual by its content id without assuming a folder. */
+function spritePathForAssetId(id: string): string | null {
+  const matches = [...existingSprites.keys()].filter((path) => (
+    path === `${id}.json` || path.endsWith(`/${id}.json`)
+  ));
+  return matches.length === 1 ? matches[0] : null;
+}
 
 function maybeRebakeEditedEquipment(): void {
-  if (rebuiltVersion === editVersion) return;
+  const documentChanged = rebuiltVersion !== editVersion;
+  const selectedWeaponId = ($('compWeapon') as HTMLSelectElement).value;
+  const selectedVisualId = selectedWeaponId && weapons.has(selectedWeaponId)
+    ? weapons.get(selectedWeaponId).visual
+    : '';
+  const selectedVisualPath = selectedVisualId ? spritePathForAssetId(selectedVisualId) : null;
+  const compositeWeaponKey = `${selectedVisualId}:${selectedVisualPath ?? ''}`;
+  const selectedWeaponChanged = compositeWeaponKey !== rebuiltCompositeWeaponKey;
+  if (!documentChanged && !selectedWeaponChanged) return;
   rebuiltVersion = editVersion;
+  rebuiltCompositeWeaponKey = compositeWeaponKey;
 
   // Player.render reads the registered knight sprite, while the raw-sheet
   // preview reads the editor document directly. Rebuild the registered body
@@ -4325,11 +5180,20 @@ function maybeRebakeEditedEquipment(): void {
       posePlayerError = '';
     }
   }
-  // "rusty-sword.json" -> visual id "rusty-sword"; a no-op for sheets
-  // that aren't a registered sprite weapon.
-  const id = currentFileName.replace(/\.json$/, '');
-  rebuildSpriteWeapon(id, file);
-  rebuildGearVisual(id, file);
+
+  // The canvas and the composite may be two different workspace documents.
+  // Re-bake the selected sprite weapon from that document too; otherwise a
+  // knight canvas can silently render the repository snapshot (or an older
+  // draft) while the equipment canvas renders the current overlay.
+  if (selectedVisualPath) {
+    const selectedWeaponFile = latestWorkingSprite(selectedVisualPath);
+    if (selectedWeaponFile) rebuildSpriteWeapon(selectedVisualId, selectedWeaponFile);
+  }
+
+  // "iron-helmet.json" -> visual id "iron-helmet"; a no-op for sheets
+  // that aren't registered gear.
+  const currentId = currentFileName.replace(/\.json$/, '');
+  rebuildGearVisual(currentId, file);
 }
 
 /**
@@ -4398,6 +5262,20 @@ function movesOf(weaponId: string): WeaponMoveView[] {
     if (def) out.push({ key, label: key === 'dashAttack' ? 'dash' : key, def });
   }
   return out;
+}
+
+/** A combat move only owns the preview clock when it actually uses this animation. */
+function compositeMoveForAnimation(weaponId: string, animation: string): WeaponMoveView | undefined {
+  if (!weaponId || !weapons.has(weaponId)) return undefined;
+  const wdef = weapons.get(weaponId);
+  const known = weaponVisuals.get(wdef.visual).animations;
+  const sheetHas = (name: string) => Boolean(known?.includes(name));
+  const candidates = movesOf(weaponId).filter((move) => (
+    move.def.animation === animation
+    || (animation === 'attack' && !sheetHas(move.def.animation))
+  ));
+  const wanted = ($('compMove') as HTMLSelectElement).value;
+  return candidates.find((move) => move.key === wanted) ?? candidates[0];
 }
 
 function selectedCombatMove(): { weaponId: string; typeId: string; move: WeaponMoveView } | null {
@@ -4610,6 +5488,7 @@ interface CombatPreviewGeometry {
 let combatPreviewGeometry: CombatPreviewGeometry | null = null;
 let combatPreviewActive = false;
 let compositePreviewFrame: number | null = null;
+const renderedPreviewAnchors = new Map<string, { x: number; y: number }>();
 const ATTACK_PREVIEW_CAP = 0.5;
 const ATTACK_PREVIEW_HOLD = 0.35;
 
@@ -4718,8 +5597,16 @@ function posePlayerLocomotion(p: Player, animation: string): void {
 function resolveCompositeBodyClock(bodySelection: string, requestedAnimation = animName) {
   const selectedBody = selectedWeaponBody(bodySelection);
   const bodyFile = selectedBody ?? file;
-  const requestedBodyAnim = resolveAnim(bodyFile, requestedAnimation)
-    ? requestedAnimation
+  const weaponId = ($('compWeapon') as HTMLSelectElement).value;
+  const mappedAnimation = weaponId && weapons.has(weaponId)
+    ? resolveWeaponBodyAnimation(
+      weaponTypeOf(weapons.get(weaponId)),
+      requestedAnimation,
+      (name) => Boolean(resolveAnim(bodyFile, name)),
+    )
+    : requestedAnimation;
+  const requestedBodyAnim = resolveAnim(bodyFile, mappedAnimation)
+    ? mappedAnimation
     : requestedAnimation !== 'attack' && resolveAnim(bodyFile, 'attack')
       ? 'attack'
     : resolveAnim(bodyFile, 'idle')
@@ -4727,7 +5614,7 @@ function resolveCompositeBodyClock(bodySelection: string, requestedAnimation = a
       : Object.keys(bodyFile.anims)[0];
   const bodyAnim = resolveAnim(bodyFile, requestedBodyAnim);
   const fullPlayerAnim = bodySelection === 'player'
-    ? KNIGHT_ANIMS.right[requestedAnimation]
+    ? KNIGHT_ANIMS.right[mappedAnimation]
       ?? KNIGHT_ANIMS.right.attack
       ?? KNIGHT_ANIMS.right.idle
       ?? Object.values(KNIGHT_ANIMS.right)[0]
@@ -4755,6 +5642,7 @@ function resolveCompositeBodyClock(bodySelection: string, requestedAnimation = a
  * hold. Asset-local FPS values never create a second attack clock.
  */
 function renderComposite(t: number, pausedFrame?: number): boolean {
+  renderedPreviewAnchors.clear();
   combatPreviewGeometry = null;
   combatPreviewActive = false;
   compositePreviewFrame = null;
@@ -4774,11 +5662,7 @@ function renderComposite(t: number, pausedFrame?: number): boolean {
   // 'attack', the pattern it falls back to in game. So the base swing
   // still previews every un-arted move via the selector, and a move
   // gains its own art the moment its animation exists.
-  const sheetHas = (name: string) => !!wdef && !!weaponVisuals.get(wdef.visual).animations?.includes(name);
-  const candidates = moves.filter((m) =>
-    m.def.animation === animName || (animName === 'attack' && !sheetHas(m.def.animation)));
-  const wantKey = ($('compMove') as HTMLSelectElement).value;
-  const move = candidates.find((m) => m.key === wantKey) ?? candidates[0];
+  const move = hasWeapon ? compositeMoveForAnimation(weaponId, animName) : undefined;
   const atkDef = move?.def;
   // Neutral equipment is frame-aligned to the selected body, so the body
   // owns the preview frame set. A move without dedicated body art falls back
@@ -4948,18 +5832,49 @@ function renderComposite(t: number, pausedFrame?: number): boolean {
   // Player.render uses; otherwise it silently falls back to a generic
   // hand position and cannot reveal handedness mistakes in draft art.
   const sheetAnchor = (name: string): { x: number; y: number } | undefined => {
-    const concreteBodyAnim = concreteAnimNameOf(bodyFile, requestedBodyAnim);
-    const point = bodyFile.anchors?.[name]?.[concreteBodyAnim]?.[frame];
+    // Match LoadedSprite.anchor(): an alias may deliberately override only
+    // its attachment track while borrowing the concrete animation's pixels.
+    const point = comparisonAnchorPoint(bodyFile, name, requestedBodyAnim, frame);
     return point ? { x: point.x - dw / 2, y: point.y - dh } : undefined;
   };
+  for (const name of Object.keys(bodyFile.anchors ?? {})) {
+    const point = sheetAnchor(name);
+    if (point) renderedPreviewAnchors.set(name, {
+      x: (fx + point.x) * SCALE,
+      y: (fy + point.y) * SCALE,
+    });
+  }
+  // A focused composite may be requested using an anchor owned by the active
+  // equipment sprite rather than one owned by the body. Resolve that point
+  // through the visual's declarative attachment contract: visual anchor →
+  // character slot → body anchor. This keeps the editor independent of any
+  // particular slot or anchor names.
+  const visualAttachment = heldWeaponAttachment(wdef!.visual);
+  if (visualAttachment) {
+    const bodyAnchorName = bodyFile.attachmentSlots?.[visualAttachment.slot]?.anchor;
+    const point = bodyAnchorName ? sheetAnchor(bodyAnchorName) : undefined;
+    if (point) renderedPreviewAnchors.set(visualAttachment.anchor, {
+      x: (fx + point.x) * SCALE,
+      y: (fy + point.y) * SCALE,
+    });
+  }
   // The weapon draw needs an animation its sheet actually has; outside
   // an attack pose, fall back to idle rather than throwing mid-paint.
+  const selectedWeaponType = weaponTypeOf(wdef!);
+  const logicalAnimation = logicalAnimationForResolvedBodyAnimation(
+    selectedWeaponType,
+    requestedBodyAnim,
+  );
   const known = weaponVisuals.get(wdef!.visual).animations;
-  const weaponAnim = !known || known.includes(animName) ? animName : 'idle';
+  const weaponAnim = !known || known.includes(logicalAnimation) ? logicalAnimation : 'idle';
   // Match Player.render: embeddedHeldObject suppresses the attachment only
   // when this raw body really owns the requested authored move. If it fell
   // back to attack/idle, the ordinary weapon is still the only visible blade.
-  const embeddedHeldObject = shouldSuppressHeldWeapon(
+  const embeddedHeldObject = bodyAnimationEmbedsHeldObject(
+    selectedWeaponType,
+    logicalAnimation,
+    requestedBodyAnim,
+  ) || shouldSuppressHeldWeapon(
     atkDef?.embeddedHeldObject,
     Boolean(atkDef && requestedBodyAnim === atkDef.animation),
   );
@@ -5035,7 +5950,8 @@ function currentPreviewTiming(): { fps: number; frameCount: number; loop: boolea
   const bodySelection = ($('compBody') as HTMLSelectElement).value;
   const weaponId = ($('compWeapon') as HTMLSelectElement).value;
   if ((weaponId && weapons.has(weaponId)) || bodySelection === 'player') {
-    const clock = resolveCompositeBodyClock(bodySelection, selectedCombatMove()?.move.def.animation ?? animName);
+    const move = compositeMoveForAnimation(weaponId, animName);
+    const clock = resolveCompositeBodyClock(bodySelection, move?.def.animation ?? animName);
     return {
       fps: clock.fps,
       frameCount: Math.max(clock.frameCount, editedSelectedWeaponFrameCount(weaponId) ?? 0),
@@ -5209,10 +6125,22 @@ function finishCombatHitboxDrag(event: Event): void {
 $('combatHitboxOverlay').addEventListener('pointerup', finishCombatHitboxDrag);
 $('combatHitboxOverlay').addEventListener('pointercancel', finishCombatHitboxDrag);
 
-function renderPreview(): void {
-  maybeRebakeEditedEquipment();
+let lastPreviewRenderKey = '';
+
+function renderPreview(scheduleNext = true): void {
+  const heavyRendersBefore = editorPerformanceStats.previewHeavyRenders;
+  const startedAt = performance.now();
+  renderPreviewNow(scheduleNext);
+  if (editorPerformanceStats.previewHeavyRenders > heavyRendersBefore) {
+    const elapsed = performance.now() - startedAt;
+    editorPerformanceStats.previewHeavyTotalMs += elapsed;
+    editorPerformanceStats.previewHeavyMaxMs = Math.max(editorPerformanceStats.previewHeavyMaxMs, elapsed);
+  }
+}
+
+function renderPreviewNow(scheduleNext = true): void {
+  const now = performance.now();
   const hd = ($('hd') as HTMLInputElement).checked;
-  const a = visibleAnim();
   // Editing is frame-oriented: the game-scale preview must show the frame
   // selected in the grid unless the author explicitly asks to play the
   // animation. Previously the preview always ran on wall-clock time, so its
@@ -5222,7 +6150,32 @@ function renderPreview(): void {
   const pausedFrame = previewStepping
     ? ((previewStepFrame % timing.frameCount) + timing.frameCount) % timing.frameCount
     : Math.min(frameIdx, timing.frameCount - 1);
-  const t = previewPlaying ? performance.now() / 1000 : pausedFrame / timing.fps;
+  const t = previewPlaying ? now / 1000 : pausedFrame / timing.fps;
+  const estimatedFrame = previewPlaying ? previewFrameAt(t, timing) : pausedFrame;
+  const renderKey = [
+    editVersion,
+    previewRenderVersion,
+    animName,
+    estimatedFrame,
+    previewPlaying ? Math.floor(now / 33) : 'paused',
+    Number(hd),
+  ].join('|');
+  // The main canvas is the authoritative live feedback during a gesture.
+  // Composite preview construction can involve the full Player renderer and
+  // was taking 60–110 ms per pass, so never run it inside a stroke/transform;
+  // the next animation frame after mouse-up renders the accepted result once.
+  const interactionActive = Boolean(
+    continuousEdit || painting || selectionMove || selectionHandleTransform,
+  );
+  if (renderKey === lastPreviewRenderKey || interactionActive) {
+    editorPerformanceStats.previewSkippedFrames++;
+    if (scheduleNext) requestAnimationFrame(() => renderPreview());
+    return;
+  }
+  lastPreviewRenderKey = renderKey;
+  editorPerformanceStats.previewHeavyRenders++;
+
+  maybeRebakeEditedEquipment();
   const composite = renderComposite(t, previewPlaying ? undefined : pausedFrame);
   const displayedFrame = previewPlaying
     ? (compositePreviewFrame ?? previewFrameAt(t, timing))
@@ -5248,17 +6201,20 @@ function renderPreview(): void {
   if (composite) {
     applyPreviewZoom();
     updateCombatHitboxOverlay();
-    requestAnimationFrame(renderPreview);
+    if (scheduleNext) requestAnimationFrame(() => renderPreview());
     return;
   }
 
-  if (!a || !a.frames.length) {
-    requestAnimationFrame(renderPreview);
+  if (!timing.frameCount) {
+    if (scheduleNext) requestAnimationFrame(() => renderPreview());
     return;
   }
 
   const idx = displayedFrame;
-  const rows = a.frames[idx] ?? [];
+  // Only the displayed frame is needed. The old visibleAnim() call composited
+  // every frame of the animation on every requestAnimationFrame, even when a
+  // paused composite preview immediately discarded that work.
+  const rows = compositeCur(idx) ?? [];
 
   const { w, h, hitbox } = geometryOf(file, rows);
 
@@ -5278,13 +6234,18 @@ function renderPreview(): void {
   pctx.fillRect(0, 0, preview.width, 20);
   pctx.fillStyle = '#ffcd75';
   pctx.font = '11px monospace';
-  pctx.fillText(`${animName}  ${a.fps}fps`, 8, 16);
+  pctx.fillText(`${animName}  ${timing.fps}fps`, 8, 16);
 
   const isHighRes = file.hd === false;
   const img = rasterizedCur(idx, !(isHighRes || !hd));
 
   const x = 8;
   const y = 20;
+  const concreteAnimation = concreteAnimNameOf(file, animName);
+  for (const [name, tracks] of Object.entries(file.anchors ?? {})) {
+    const point = tracks[concreteAnimation]?.[idx];
+    if (point) renderedPreviewAnchors.set(name, { x: x + point.x * 8, y: y + point.y * 8 });
+  }
 
   // Draw the same comparison ghost used by the editable canvas. Comparison
   // controls remain view-only; previewing them never changes frame data.
@@ -5292,7 +6253,7 @@ function renderPreview(): void {
   const comparing = Boolean(refFile && showRef);
   const comparisonView = ($('compareView') as HTMLSelectElement).value;
   const reference = comparing ? comparisonReference() : null;
-  if (reference && comparisonView !== 'target') drawComparisonSource(pctx, reference.image, 8, x, y);
+  if (reference && comparisonView !== 'target') drawComparisonSource(pctx, reference, 8 / density(), x, y);
 
   // Draw active sprite frame
   if ((!comparing || comparisonView !== 'source') && img) pctx.drawImage(img, x, y, w * 8, h * 8);
@@ -5309,7 +6270,157 @@ function renderPreview(): void {
     pctx.strokeRect(hx + 0.5, hy + 0.5, hw - 1, hh - 1);
     pctx.restore();
   }
-  requestAnimationFrame(renderPreview);
+  if (scheduleNext) requestAnimationFrame(() => renderPreview());
+}
+
+function dataUrlBytes(dataUrl: string): Uint8Array {
+  const encoded = dataUrl.slice(dataUrl.indexOf(',') + 1);
+  const binary = atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+/**
+ * Render one semantic frame without moving the human's cursor or publishing a
+ * document revision. The visible preview bitmap and view state are restored
+ * synchronously before the encoded PNG is returned.
+ */
+function renderRequestedPreview(
+  animation: string,
+  frame: number,
+  focus?: { anchor: string; zoomPercent: number; size: number },
+): Uint8Array {
+  if (!file.anims[animation]) throw new Error(`unknown animation "${animation}"`);
+  const frameCount = resolveAnim(file, animation)?.frames.length ?? 0;
+  if (!Number.isInteger(frame) || frame < 0 || frame >= frameCount) {
+    throw new Error(`unknown frame ${frame} in "${animation}"`);
+  }
+
+  const saved = {
+    animation: animName,
+    frame: frameIdx,
+    stepping: previewStepping,
+    stepFrame: previewStepFrame,
+    playing: ($('previewPlay') as HTMLInputElement).checked,
+    move: ($('compMove') as HTMLSelectElement).value,
+  };
+  try {
+    animName = animation;
+    frameIdx = frame;
+    previewStepping = true;
+    previewStepFrame = frame;
+    ($('previewPlay') as HTMLInputElement).checked = false;
+    rebuildMoveSelect(($('compWeapon') as HTMLSelectElement).value);
+    renderPreview(false);
+    if (focus) {
+      const center = renderedPreviewAnchors.get(focus.anchor);
+      if (!center) {
+        throw new Error(`anchor "${focus.anchor}" is not rendered in this preview`);
+      }
+      const zoom = focus.zoomPercent / 100;
+      const focused = document.createElement('canvas');
+      focused.width = focus.size;
+      focused.height = focus.size;
+      const focusedContext = focused.getContext('2d');
+      if (!focusedContext) throw new Error('focused preview canvas is unavailable');
+      focusedContext.imageSmoothingEnabled = false;
+      drawTransparencyChecker(focusedContext, focused.width, focused.height);
+      focusedContext.drawImage(
+        preview,
+        focused.width / 2 - center.x * zoom,
+        focused.height / 2 - center.y * zoom,
+        preview.width * zoom,
+        preview.height * zoom,
+      );
+      return dataUrlBytes(focused.toDataURL('image/png'));
+    }
+    return dataUrlBytes(preview.toDataURL('image/png'));
+  } finally {
+    animName = saved.animation;
+    frameIdx = saved.frame;
+    previewStepping = saved.stepping;
+    previewStepFrame = saved.stepFrame;
+    ($('previewPlay') as HTMLInputElement).checked = saved.playing;
+    rebuildMoveSelect(($('compWeapon') as HTMLSelectElement).value);
+    const move = $('compMove') as HTMLSelectElement;
+    if ([...move.options].some((option) => option.value === saved.move)) move.value = saved.move;
+    renderPreview(false);
+  }
+}
+
+/**
+ * Render the editable grid for one semantic frame, including the same grid,
+ * anchor, selection, onion-skin, and comparison overlays the human sees. The
+ * human cursor and visible canvas are restored before the PNG is returned.
+ */
+function renderRequestedCanvas(
+  animation: string,
+  frame: number,
+  showAnchorLabels = true,
+): Uint8Array {
+  if (!file.anims[animation]) throw new Error(`unknown animation "${animation}"`);
+  const frameCount = resolveAnim(file, animation)?.frames.length ?? 0;
+  if (!Number.isInteger(frame) || frame < 0 || frame >= frameCount) {
+    throw new Error(`unknown frame ${frame} in "${animation}"`);
+  }
+
+  const saved = {
+    animation: animName,
+    frame: frameIdx,
+    selection,
+    suppressAnchorLabel,
+  };
+  try {
+    animName = animation;
+    frameIdx = frame;
+    suppressAnchorLabel = !showAnchorLabels;
+    if (saved.animation !== animation || saved.frame !== frame) selection = null;
+    redraw();
+    return dataUrlBytes(grid.toDataURL('image/png'));
+  } finally {
+    animName = saved.animation;
+    frameIdx = saved.frame;
+    selection = saved.selection;
+    suppressAnchorLabel = saved.suppressAnchorLabel;
+    redraw();
+  }
+}
+
+/**
+ * Render a frame-addressed, anchor-aligned comparison without relying on the
+ * human's current comparison-panel state. The temporary view is restored
+ * before returning, and no document revision is published.
+ */
+function renderRequestedComparison(
+  animation: string,
+  frame: number,
+  changes: ComparisonConfigureChanges,
+): Uint8Array {
+  if (!file.anims[animation]) throw new Error(`unknown animation "${animation}"`);
+  const frameCount = resolveAnim(file, animation)?.frames.length ?? 0;
+  if (!Number.isInteger(frame) || frame < 0 || frame >= frameCount) {
+    throw new Error(`unknown frame ${frame} in "${animation}"`);
+  }
+
+  const saved = captureEditorViewState();
+  try {
+    animName = animation;
+    frameIdx = frame;
+    selection = null;
+    configureComparison(changes);
+    const reference = comparisonReference();
+    if (!reference) throw new Error('comparison reference has no renderable frame');
+    if (!comparisonAnchorAlignment(reference)) {
+      throw new Error('comparison reference and target do not expose compatible attachment anchors');
+    }
+    redraw();
+    return dataUrlBytes(grid.toDataURL('image/png'));
+  } finally {
+    window.clearTimeout(comparisonUploadTimer);
+    restoreEditorViewState(saved);
+    window.clearTimeout(comparisonUploadTimer);
+  }
 }
 
 /* ---------------- io ---------------- */
@@ -5867,37 +6978,6 @@ function moveSelectionBy(dx: number, dy: number): void {
   commitSelectionPixels(pixelsInSelection(selection), x, y, `moved selection to ${x},${y}`);
 }
 
-function scaleSelectionRows(
-  source: PixelClipboard,
-  w: number,
-  h: number,
-  flipX = false,
-  flipY = false,
-): PixelClipboard {
-  return {
-    w,
-    h,
-    rows: Array.from({ length: h }, (_, y) => {
-      const scaledY = Math.min(source.h - 1, Math.floor(y * source.h / h));
-      const sourceY = flipY ? source.h - 1 - scaledY : scaledY;
-      return Array.from({ length: w }, (_, x) => {
-        const scaledX = Math.min(source.w - 1, Math.floor(x * source.w / w));
-        const sourceX = flipX ? source.w - 1 - scaledX : scaledX;
-        return source.rows[sourceY][sourceX];
-      }).join('');
-    }),
-    mask: source.mask && Array.from({ length: h }, (_, y) => {
-      const scaledY = Math.min(source.h - 1, Math.floor(y * source.h / h));
-      const sourceY = flipY ? source.h - 1 - scaledY : scaledY;
-      return Array.from({ length: w }, (_, x) => {
-        const scaledX = Math.min(source.w - 1, Math.floor(x * source.w / w));
-        const sourceX = flipX ? source.w - 1 - scaledX : scaledX;
-        return source.mask![sourceY][sourceX];
-      }).join('');
-    }),
-  };
-}
-
 function resizeSelection(): void {
   if (!transformMode) return;
   if (!requireEditableLayer()) return;
@@ -5920,82 +7000,6 @@ function resizeSelection(): void {
   const y = Math.max(0, Math.min(H() - requestedH,
     Math.round(selection.y + (selection.h - requestedH) / 2)));
   commitSelectionPixels(scaled, x, y, `resized selection to ${requestedW}x${requestedH}`);
-}
-
-function rotateSelectionQuarter(source: PixelClipboard, clockwise: boolean): PixelClipboard {
-  return {
-    w: source.h,
-    h: source.w,
-    rows: Array.from({ length: source.w }, (_, y) =>
-      Array.from({ length: source.h }, (_, x) => clockwise
-        ? source.rows[source.h - 1 - x][y]
-        : source.rows[x][source.w - 1 - y],
-      ).join(''),
-    ),
-    mask: source.mask && Array.from({ length: source.w }, (_, y) =>
-      Array.from({ length: source.h }, (_, x) => clockwise
-        ? source.mask![source.h - 1 - x][y]
-        : source.mask![x][source.w - 1 - y],
-      ).join(''),
-    ),
-  };
-}
-
-/**
- * Rotates indexed sprite pixels without creating gaps. Each destination
- * pixel is mapped back into the original selection and samples its nearest
- * source pixel. Quarter turns stay lossless; arbitrary angles necessarily
- * rasterize onto a new axis-aligned pixel grid.
- */
-function rotateSelectionRows(source: PixelClipboard, degrees: number): PixelClipboard {
-  const normalized = ((degrees % 360) + 360) % 360;
-  const quarterTurns = Math.round(normalized / 90) % 4;
-  const quarterAngle = quarterTurns * 90;
-  if (Math.abs(normalized - quarterAngle) < 0.0001 || Math.abs(normalized - 360) < 0.0001) {
-    let result = source;
-    for (let turn = 0; turn < quarterTurns; turn++) result = rotateSelectionQuarter(result, true);
-    return result;
-  }
-
-  const radians = degrees * Math.PI / 180;
-  const cosine = Math.cos(radians);
-  const sine = Math.sin(radians);
-  const width = Math.max(1, Math.ceil(
-    Math.abs(source.w * cosine) + Math.abs(source.h * sine) - 1e-9,
-  ));
-  const height = Math.max(1, Math.ceil(
-    Math.abs(source.w * sine) + Math.abs(source.h * cosine) - 1e-9,
-  ));
-  return {
-    w: width,
-    h: height,
-    rows: Array.from({ length: height }, (_, y) =>
-      Array.from({ length: width }, (_, x) => {
-        const destinationX = x + 0.5 - width / 2;
-        const destinationY = y + 0.5 - height / 2;
-        const sourceX = cosine * destinationX + sine * destinationY + source.w / 2;
-        const sourceY = -sine * destinationX + cosine * destinationY + source.h / 2;
-        const sampleX = Math.floor(sourceX);
-        const sampleY = Math.floor(sourceY);
-        return sampleX >= 0 && sampleX < source.w && sampleY >= 0 && sampleY < source.h
-          ? source.rows[sampleY][sampleX]
-          : '.';
-      }).join(''),
-    ),
-    mask: source.mask && Array.from({ length: height }, (_, y) =>
-      Array.from({ length: width }, (_, x) => {
-        const destinationX = x + 0.5 - width / 2;
-        const destinationY = y + 0.5 - height / 2;
-        const sourceX = cosine * destinationX + sine * destinationY + source.w / 2;
-        const sourceY = -sine * destinationX + cosine * destinationY + source.h / 2;
-        const sampleX = Math.floor(sourceX);
-        const sampleY = Math.floor(sourceY);
-        return sampleX >= 0 && sampleX < source.w && sampleY >= 0 && sampleY < source.h
-          ? source.mask![sampleY][sampleX]
-          : '.';
-      }).join(''),
-    ),
-  };
 }
 
 function rotateSelectionBy(degrees: number, message?: string): void {
@@ -6319,7 +7323,6 @@ function saveHistory(): boolean {
 function beginContinuousDocumentEdit(): ContinuousDocumentEdit {
   return {
     startVersion: editVersion,
-    startDocument: JSON.stringify(file),
     beforeFile: structuredClone(file),
     beforeSelection: selection ? cloneSelection(selection) : null,
     historyPushed: saveHistory(),
@@ -6339,12 +7342,76 @@ function cancelContinuousDocumentEdit(): void {
   editVersion = edit.startVersion + 1;
 }
 
+function runContinuousDocumentSideEffects(publish: boolean): void {
+  const startedAt = performance.now();
+  // The JSON textarea and geometry fields are not part of live pixel
+  // feedback. Export/import and structural edits synchronize them explicitly;
+  // pretty-printing the complete sprite after every stroke dominated the
+  // post-release frame on large layered documents.
+  schedulePreviewUpload();
+  void publishSelection();
+  // Draft persistence and bridge serialization both walk the full document.
+  // Debounce them independently so releasing a stroke only commits UI state;
+  // rapid consecutive strokes coalesce into one autosave and one publication.
+  window.clearTimeout(continuousDraftTimer);
+  continuousDraftTimer = window.setTimeout(() => {
+    const draftStartedAt = performance.now();
+    persistCurrentDraft();
+    editorPerformanceStats.draftPersistMaxMs = Math.max(
+      editorPerformanceStats.draftPersistMaxMs,
+      performance.now() - draftStartedAt,
+    );
+  }, 160);
+  if (publish) {
+    window.clearTimeout(continuousPublishTimer);
+    continuousPublishTimer = window.setTimeout(() => {
+      const publishStartedAt = performance.now();
+      void publishSharedSprite();
+      editorPerformanceStats.bridgePublishDispatchMaxMs = Math.max(
+        editorPerformanceStats.bridgePublishDispatchMaxMs,
+        performance.now() - publishStartedAt,
+      );
+    }, 220);
+  }
+  const elapsed = performance.now() - startedAt;
+  editorPerformanceStats.gestureSideEffects++;
+  editorPerformanceStats.gestureSideEffectTotalMs += elapsed;
+  editorPerformanceStats.gestureSideEffectMaxMs = Math.max(
+    editorPerformanceStats.gestureSideEffectMaxMs,
+    elapsed,
+  );
+}
+
+function scheduleContinuousDocumentSideEffects(publish: boolean): void {
+  pendingContinuousPublish ||= publish;
+  if (scheduledContinuousFinalizeFrame) return;
+  scheduledContinuousFinalizeFrame = requestAnimationFrame(() => {
+    scheduledContinuousFinalizeFrame = 0;
+    const shouldPublish = pendingContinuousPublish;
+    pendingContinuousPublish = false;
+    runContinuousDocumentSideEffects(shouldPublish);
+  });
+}
+
+function flushContinuousDocumentSideEffects(publish = false): void {
+  if (!scheduledContinuousFinalizeFrame && !pendingContinuousPublish) return;
+  if (scheduledContinuousFinalizeFrame) cancelAnimationFrame(scheduledContinuousFinalizeFrame);
+  scheduledContinuousFinalizeFrame = 0;
+  pendingContinuousPublish = false;
+  // The explicit operation that interrupts the deferred frame owns whether
+  // the current document should be published (undo/save/switch pass false).
+  runContinuousDocumentSideEffects(publish);
+}
+
 /** Finalize a drag/paint gesture that intentionally mutates on every move. */
-function finishContinuousDocumentEdit(publish = true): void {
-  if (!continuousEdit) return;
+function finishContinuousDocumentEdit(publish = true, deferSideEffects = false): void {
+  if (!continuousEdit) {
+    if (!deferSideEffects) flushContinuousDocumentSideEffects(publish);
+    return;
+  }
   const edit = continuousEdit;
   continuousEdit = null;
-  if (JSON.stringify(file) === edit.startDocument) {
+  if (editVersion === edit.startVersion) {
     if (edit.historyPushed) undoStack.pop();
     selection = edit.beforeSelection ? cloneSelection(edit.beforeSelection) : null;
     editVersion = edit.startVersion;
@@ -6356,23 +7423,16 @@ function finishContinuousDocumentEdit(publish = true): void {
   // preview can rebake live. Palette-only changes are still real edits and
   // need to invalidate the preview once at gesture end.
   editVersion = edit.startVersion + 1;
-  try {
-    validateSpriteEditorDocument(file);
-  } catch (error) {
-    if (edit.historyPushed) undoStack.pop();
-    file = edit.beforeFile;
-    selection = edit.beforeSelection ? cloneSelection(edit.beforeSelection) : null;
-    editVersion = edit.startVersion + 1;
-    refreshUI();
-    updateUndoRedoButtons();
-    flash(`edit reverted: ${(error as Error).message}`);
-    return;
+  // Continuous editor kernels preserve row dimensions, palette keys, and
+  // document structure by construction. A full validation walks every frame
+  // and belongs at semantic transaction/import/save boundaries, not in the
+  // pointer-release handler.
+  if (deferSideEffects) scheduleContinuousDocumentSideEffects(publish);
+  else {
+    const hadPendingSideEffects = Boolean(scheduledContinuousFinalizeFrame || pendingContinuousPublish);
+    flushContinuousDocumentSideEffects(publish);
+    if (!hadPendingSideEffects) runContinuousDocumentSideEffects(publish);
   }
-  syncIO();
-  persistCurrentDraft();
-  schedulePreviewUpload();
-  void publishSelection();
-  if (publish) void publishSharedSprite();
 }
 
 function applyHistoryState(snapshot: string): void {
@@ -6599,6 +7659,7 @@ window.addEventListener('blur', () => {
   magicSelectionDrag = null;
   selectionStart = null;
   selectionMove = null;
+  cancelScheduledSelectionTransform();
   selectionHandleTransform = null;
   painting = false;
   lastPaintCell = null;
@@ -6676,6 +7737,98 @@ function onHitboxChange(): void {
 
 /* ---------------- boot ---------------- */
 
+interface KernelBenchmarkMeasurement {
+  operations: number;
+  totalMs: number;
+  msPerOperation: number;
+  checksum: number;
+}
+
+interface EditorKernelBenchmark {
+  iterations: number;
+  brush: KernelBenchmarkMeasurement;
+  rotation: KernelBenchmarkMeasurement;
+  transform: KernelBenchmarkMeasurement;
+  documentUnchanged: boolean;
+}
+
+function benchmarkKernel(
+  operations: number,
+  run: (index: number) => number,
+): KernelBenchmarkMeasurement {
+  let checksum = 0;
+  const startedAt = performance.now();
+  for (let index = 0; index < operations; index++) checksum += run(index);
+  const totalMs = performance.now() - startedAt;
+  return {
+    operations,
+    totalMs: Math.round(totalMs * 1000) / 1000,
+    msPerOperation: Math.round(totalMs / operations * 10000) / 10000,
+    checksum,
+  };
+}
+
+/**
+ * Runs the real pixel kernels against local synthetic rows. It deliberately
+ * avoids editor state, history, bridge publication, redraws, and previews so
+ * performance can be measured without touching a human's open sprite.
+ */
+function runEditorKernelBenchmark(requestedIterations = 120): EditorKernelBenchmark {
+  const iterations = Math.max(10, Math.min(1000, Math.round(requestedIterations)));
+  const versionBefore = editVersion;
+  const width = MAX_GRID_SIZE;
+  const height = MAX_GRID_SIZE;
+  const frame = Array.from({ length: height }, (_, y) =>
+    Array.from({ length: width }, (_, x) => ((x + y) & 1) ? 'A' : 'B').join(''));
+  const source: PixelClipboard = {
+    w: 64,
+    h: 80,
+    rows: Array.from({ length: 80 }, (_, y) =>
+      Array.from({ length: 64 }, (_, x) => ((x * 3 + y * 5) % 7) ? 'A' : '.').join('')),
+    mask: Array.from({ length: 80 }, (_, y) =>
+      Array.from({ length: 64 }, (_, x) => ((x + y) % 5) ? '1' : '.').join('')),
+  };
+
+  const brush = benchmarkKernel(iterations * 4, (index) => {
+    const size = 16;
+    const extent = Math.ceil((size + 1) / 2);
+    const centerX = 20 + (index * 7) % (width - 40);
+    const centerY = 20 + (index * 11) % (height - 40);
+    const batch = createPixelBatch(frame);
+    const ch = (index & 1) ? 'C' : 'D';
+    let touched = 0;
+    for (let dy = -extent; dy <= extent; dy++) for (let dx = -extent; dx <= extent; dx++) {
+      if (brushStrength(dx, dy, size) <= 0) continue;
+      setBatchPixel(batch, centerX + dx, centerY + dy, ch);
+      touched++;
+    }
+    commitPixelBatch(batch, false);
+    return touched + batch.rows.size;
+  });
+
+  const rotation = benchmarkKernel(iterations, (index) => {
+    const rotated = rotateSelectionRows(source, 3 + (index * 17) % 174);
+    return rotated.w * 31 + rotated.h * 17 + (rotated.mask?.length ?? 0);
+  });
+
+  const transform = benchmarkKernel(iterations * 2, (index) => {
+    const targetW = 40 + index % 72;
+    const targetH = 44 + (index * 3) % 84;
+    const scaled = scaleSelectionRows(source, targetW, targetH, Boolean(index & 1), Boolean(index & 2));
+    const rows = frame.slice();
+    pastePixels(rows, scaled, (index * 5) % (width - targetW + 1), (index * 7) % (height - targetH + 1), true);
+    return scaled.w * 13 + scaled.h * 7 + rows.length;
+  });
+
+  return {
+    iterations,
+    brush,
+    rotation,
+    transform,
+    documentUnchanged: editVersion === versionBefore,
+  };
+}
+
 function refreshUI(): void {
   reconcileLayerState();
   rebuildComparisonSelectors();
@@ -6709,6 +7862,40 @@ Object.defineProperty(window, '__editor', {
     get editVersion() { return editVersion; },
     get rebuiltVersion() { return rebuiltVersion; },
     get selection() { return selectionSnapshot(); },
+    performance: {
+      get snapshot() { return { ...editorPerformanceStats }; },
+      benchmark(iterations = 120) { return runEditorKernelBenchmark(iterations); },
+      reset() {
+        editorPerformanceStats.redraws = 0;
+        editorPerformanceStats.redrawTotalMs = 0;
+        editorPerformanceStats.redrawMaxMs = 0;
+        editorPerformanceStats.redrawSetupMaxMs = 0;
+        editorPerformanceStats.redrawCheckerMaxMs = 0;
+        editorPerformanceStats.redrawReferenceMaxMs = 0;
+        editorPerformanceStats.redrawRasterMaxMs = 0;
+        editorPerformanceStats.redrawImageMaxMs = 0;
+        editorPerformanceStats.redrawGridMaxMs = 0;
+        editorPerformanceStats.redrawOverlayMaxMs = 0;
+        editorPerformanceStats.paintEvents = 0;
+        editorPerformanceStats.paintTotalMs = 0;
+        editorPerformanceStats.paintMaxMs = 0;
+        editorPerformanceStats.gestureFinishes = 0;
+        editorPerformanceStats.gestureFinishTotalMs = 0;
+        editorPerformanceStats.gestureFinishMaxMs = 0;
+        editorPerformanceStats.gestureSideEffects = 0;
+        editorPerformanceStats.gestureSideEffectTotalMs = 0;
+        editorPerformanceStats.gestureSideEffectMaxMs = 0;
+        editorPerformanceStats.draftPersistMaxMs = 0;
+        editorPerformanceStats.bridgePublishDispatchMaxMs = 0;
+        editorPerformanceStats.selectionTransforms = 0;
+        editorPerformanceStats.selectionTransformTotalMs = 0;
+        editorPerformanceStats.selectionTransformMaxMs = 0;
+        editorPerformanceStats.previewHeavyRenders = 0;
+        editorPerformanceStats.previewHeavyTotalMs = 0;
+        editorPerformanceStats.previewHeavyMaxMs = 0;
+        editorPerformanceStats.previewSkippedFrames = 0;
+      },
+    },
     get bridge() {
       return {
         connected: bridgeConnected,
@@ -6720,13 +7907,18 @@ Object.defineProperty(window, '__editor', {
     },
     comparison: {
       get state() {
+        const resolvedReference = comparisonReference();
+        const anchorAlignment = comparisonAnchorAlignment(resolvedReference);
         return {
           enabled: ($('showRef') as HTMLInputElement).checked,
           referencePath: ($('selectRefSprite') as HTMLSelectElement).value,
           animation: ($('compareRefAnim') as HTMLSelectElement).value,
+          resolvedAnimation: resolvedReference?.animation ?? null,
           sourceLayer: ($('compareRefLayer') as HTMLSelectElement).value,
           targetLayer: ($('compareTargetLayer') as HTMLSelectElement).value,
           sourceFrame: ($('compareRefFrame') as HTMLInputElement).valueAsNumber || 0,
+          resolvedFrame: resolvedReference?.frame ?? null,
+          anchorAlignment,
           view: ($('compareView') as HTMLSelectElement).value,
           opacity: Number(($('compareOpacity') as HTMLInputElement).value),
           alignAxes: ($('compareAlignAxes') as HTMLInputElement).checked,
@@ -6734,57 +7926,8 @@ Object.defineProperty(window, '__editor', {
           uploadStatus: comparisonUploadStatus,
         };
       },
-      configure(changes: {
-        enabled?: boolean;
-        referencePath?: string;
-        animation?: string;
-        sourceLayer?: string;
-        targetLayer?: string;
-        sourceFrame?: number;
-        view?: 'overlay' | 'source' | 'target';
-        opacity?: number;
-        sourceAxis?: ComparisonAxis;
-        targetAxis?: ComparisonAxis;
-      }) {
-        if (changes.referencePath !== undefined) {
-          const reference = $('selectRefSprite') as HTMLSelectElement;
-          if (changes.referencePath && !existingSprites.has(changes.referencePath)) {
-            throw new Error(`unknown comparison reference "${changes.referencePath}"`);
-          }
-          reference.value = changes.referencePath;
-          refFile = changes.referencePath ? existingSprite(changes.referencePath) : null;
-          rebuildComparisonSelectors();
-        }
-        const setSelect = (id: string, value: string | undefined): void => {
-          if (value === undefined) return;
-          const select = $(id) as HTMLSelectElement;
-          if (![...select.options].some((option) => option.value === value)) throw new Error(`invalid ${id} value "${value}"`);
-          select.value = value;
-        };
-        setSelect('compareRefAnim', changes.animation);
-        setSelect('compareRefLayer', changes.sourceLayer);
-        setSelect('compareTargetLayer', changes.targetLayer);
-        setSelect('compareView', changes.view);
-        if (changes.enabled !== undefined) ($('showRef') as HTMLInputElement).checked = changes.enabled;
-        if (changes.sourceFrame !== undefined) ($('compareRefFrame') as HTMLInputElement).value = String(changes.sourceFrame);
-        if (changes.opacity !== undefined) {
-          const opacity = Math.max(0, Math.min(100, changes.opacity));
-          ($('compareOpacity') as HTMLInputElement).value = String(opacity);
-          ($('compareOpacityValue') as HTMLOutputElement).value = `${opacity}%`;
-        }
-        const axisEntries: Array<[string, number | undefined]> = [
-          ['compareSourceX1', changes.sourceAxis?.start.x], ['compareSourceY1', changes.sourceAxis?.start.y],
-          ['compareSourceX2', changes.sourceAxis?.end.x], ['compareSourceY2', changes.sourceAxis?.end.y],
-          ['compareTargetX1', changes.targetAxis?.start.x], ['compareTargetY1', changes.targetAxis?.start.y],
-          ['compareTargetX2', changes.targetAxis?.end.x], ['compareTargetY2', changes.targetAxis?.end.y],
-        ];
-        for (const [id, value] of axisEntries) if (value !== undefined) ($(id) as HTMLInputElement).value = String(value);
-        if (changes.sourceAxis || changes.targetAxis) {
-          ($('compareAlignAxes') as HTMLInputElement).checked = true;
-          $('compareAxes').hidden = false;
-        }
-        redraw();
-        schedulePreviewUpload();
+      configure(changes: ComparisonConfigureChanges) {
+        configureComparison(changes);
         return this.state;
       },
       png() { return grid.toDataURL('image/png'); },

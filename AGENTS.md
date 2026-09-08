@@ -451,10 +451,79 @@ When editing sprite art through the live sprite editor, follow
   shared document.
 - Reuse the approved source silhouette and the complete approved material
   palette/alpha ramp. Do not invent a reduced color map from dominant colors.
+- Before extracting animation from video, prove random-access decoding with a
+  range-capable source, decoded-pixel differences at separated timestamps, and
+  a timestamp-labelled full-duration contact sheet. Repeated frames are a
+  decoder failure until this gate rules that out; never diagnose a video as
+  static from an unverified seek path. See `docs/sprite-art-pipeline.md`.
 - Dry-run the complete transaction, apply it once, then fetch and inspect the
   post-edit composite preview from that accepted revision.
 - Validate geometry, palette coverage, alpha structure, layer order, and
   reference-color leakage. Alignment alone is not completion.
+- Inspect anchor placement through the frame-addressed `canvas.png` API, never
+  a cropped browser screenshot. The white center dot inside the compact cyan crosshair ring is
+  the anchor coordinate; labels, cross arms, and nearby artwork are not.
+- Every body/equipment alignment and detached-detail pass must inspect
+  `preview-focus.png` from the accepted revision, centered on the relevant
+  rendered attachment anchor at an explicit zoom of at least 250% (normally
+  300%). Check the guard, both blade edges, tip, handle, pommel, exposed
+  reference pixels, rotation, and silhouette coverage. The ordinary preview,
+  alignment comparison, numeric assertions, and successful transaction do not
+  replace this gate; use `canvas.png` additionally when authoring overlays are
+  evidence. If the focused endpoint errors, times out, returns the wrong
+  frame/revision, or cannot resolve the attachment anchor, stop and report the
+  artwork as unverified. Fix the endpoint or semantic anchor mapping before
+  adjusting pixels or reporting completion; never silently fall back to the
+  ordinary preview.
+- Prefer the smallest transform consistent with the focused preview. If the
+  whole approved silhouette is displaced by one logical pixel, try one rigid
+  one-pixel translation first: keep rotation and scale unchanged and do not
+  pin the opposite endpoint, because doing so silently turns translation into
+  resizing. State whether a delta is in logical sprite pixels or 4x HD texels
+  before applying it. Re-fetch the focused preview after that single move and
+  escalate to rotation, scale, or a full pristine-source refit only when the
+  new render proves translation insufficient.
+- Never hide a misplaced cross-guard, blade edge, or other authored structure
+  by painting guessed filler over the reference. Correct the placement of the
+  approved artwork itself. Pixel cleanup is allowed only after geometry is
+  accepted, must use the approved material ramp and silhouette, and must not
+  substitute for a transform.
+- Match anchors by the same named local-art landmark in reference and target
+  frames, not by equal frame coordinates or screen positions. For an adjustment,
+  visually inspect both axes, state one delta plus endpoint, apply once, and
+  verify a fresh canvas. Never derive sprite distance from checker size, PNG
+  dimensions, browser zoom, or an otherwise unverified display scale.
+- Anchor verification always uses freshly fetched reference **and** target
+  canvases from the accepted revision, inspected together. Re-establish the
+  landmark after the move; never approve because the dot reached the agent's
+  predicted coordinate. For a weapon centerline, trace both silhouette edges
+  at two separated unobscured blade sections, connect their midpoints into the
+  longitudinal axis, and extend it back to the guard. Never infer the axis from
+  the obscured guard area alone. A target-only canvas or remembered reference
+  cannot prove correctness.
+- In a human-guided screenshot loop, show the exact API canvas inspected and
+  propose the next move before mutating. Treat a human-provided coordinate as
+  authoritative and invalidate the rejected visual or scale assumption.
+- Isolating a detached detail such as a pommel does not establish its target
+  placement. Locate it from the rendered handle endpoint and weapon axis, not
+  from its previous offset to an anchor. Verify its along-axis and across-axis
+  placement without touching accepted blade pixels. A human-corrected position
+  replaces the rejected placement model for all later work.
+- Place detached details with the screenshot feedback loop instead of numeric
+  placement calculations. Fetch the current-revision canvas and composite,
+  propose and apply one small visual move, fetch both again, and judge only the
+  new render. Do not derive the destination from anchors, component bounds,
+  centroids, or an earlier frame's offset.
+- A detached-detail-only transaction must leave the accepted main weapon pixels
+  and both attachment anchors unchanged. Fix a misplaced pommel by moving only
+  that component; never compensate by disturbing an aligned blade or anchor.
+- An alignment comparison is valid only after explicitly selecting the mapped
+  body animation/frame and aligning the body attachment anchor with the
+  equipment grip anchor in the comparison view. Never trust stale panel state
+  or an active-frame fallback.
+- Keep semantic component transfer separate from hand-painted gap and anomaly
+  cleanup. When the human reserves that cleanup for manual work, do not redraw,
+  extend, or recolor those pixels during a neighboring patch operation.
 - Do not report success until the rendered preview passes every applicable
   check. If it does not, revert or correct the single edit before continuing.
 

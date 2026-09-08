@@ -22,6 +22,8 @@
     "learn": "node tools/agent-play/learn/train.mjs",
     "learn:collect": "node tools/agent-play/learn/collect.mjs",
     "test:sprite-editor": "node tools/sprite-editor-document.test.mjs",
+    "test:sprite-editor:interaction-performance": "node tools/sprite-editor-interaction-performance.test.mjs",
+    "test:sprite-editor:performance": "node tools/sprite-editor-performance.test.mjs",
     "test:sprite-editor:ui": "node tools/sprite-editor-smoke.mjs"
   },
   "devDependencies": {
