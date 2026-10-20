@@ -1,7 +1,6 @@
 import { rand, sign, tintOf, itemDef, ballisticVelocity, ballisticLob, frameAt } from '@engine/index';
 import { defineMonster, monsters, Monster, type MonsterDef } from './monster';
 import { shootArrow, shootBullet, muzzleFlash, ARROW_GRAVITY, BULLET_GRAVITY } from '../content/ballistics';
-import { drawBow } from '../content/weapon-visuals';
 import {
   DUMMY_IDLE,
   SLIME1,
@@ -577,23 +576,12 @@ defineMonster('archer', {
   },
   draw(g, m) {
     const f = m.facing;
-    const x = Math.round(m.x);
-    const y = Math.round(m.y);
-    const flash = m.flashT > 0;
     const aim = m.state.aim as number;
     const anim = aim > 0 ? 'aim' : Math.abs(m.vx) > 8 ? 'walk' : 'idle';
     const set = f === 1 ? ARCHER_ANIMS.right : ARCHER_ANIMS.left;
-    blit(g, m.img(frameAt(set, anim, m.animT)), m.x - archerSprite.hitbox.x, m.y - archerSprite.hitbox.y);
-    // The bow — the same shared renderer the knight's bow uses. Aiming
-    // pulls the string back over the telegraph window, arrow nocked, so
-    // "a bow being drawn" reads identically friend or foe.
-    const pull = aim > 0 ? 1 - aim / ARCHER_AIM : 0;
-    const bx = x + (f === 1 ? 11 : 1);
-    g.save();
-    g.translate(bx, y + 9);
-    if (f === -1) g.scale(-1, 1);
-    drawBow(g, { pull, arrow: aim > 0, ...(flash && { tint: '#ffffff' }) });
-    g.restore();
+    const pull = aim > 0 ? Math.max(0, Math.min(0.999999, 1 - aim / ARCHER_AIM)) : 0;
+    const animT = aim > 0 ? (pull * set.aim.frames.length) / set.aim.fps : m.animT;
+    blit(g, m.img(frameAt(set, anim, animT)), m.x - archerSprite.hitbox.x, m.y - archerSprite.hitbox.y);
   },
 });
 

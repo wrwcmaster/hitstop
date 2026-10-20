@@ -1069,7 +1069,7 @@ defineMonster('vise', {
     const set = side < 0 ? VISE_ANIMS.right : VISE_ANIMS.left;
     blit(
       g,
-      m.img(frameAt(set, anim, m.animT)),
+      m.img(frameAt(set, anim, anim === 'traverse' || !fsm ? m.animT : fsm.t)),
       m.x - viseSprite.hitbox.x,
       m.y - viseSprite.hitbox.y,
     );
@@ -1481,9 +1481,15 @@ defineMonster('mourn', {
     else if (fsm.is('pounce')) anim = 'pounce';
     else if (fsm.is('keen')) anim = 'keen';
     const set = m.facing === 1 ? MOURN_ANIMS.right : MOURN_ANIMS.left;
+    const animT = anim === 'listen' || !fsm ? m.animT : fsm.t;
+    const clip = set[anim] ?? set.listen;
+    const rawIdx = Math.floor(Math.max(0, animT) * clip.fps);
+    const frameIdx = clip.loop === false
+      ? Math.min(clip.frames.length - 1, rawIdx)
+      : rawIdx % clip.frames.length;
     blit(
       g,
-      m.img(frameAt(set, anim, m.animT)),
+      m.img(frameAt(set, anim, animT)),
       m.x - mournSprite.hitbox.x,
       m.y - mournSprite.hitbox.y,
     );
@@ -1496,7 +1502,7 @@ defineMonster('mourn', {
     // The ear faces what it is listening to and glows with how sure it
     // is. A DIM ear is a stale belief — the tell that you have gone quiet
     // enough to move, and the one thing the player must learn to read.
-    const earAnchor = mournSprite.anchor?.('earTip', anim, 0);
+    const earAnchor = mournSprite.anchor?.('earTip', anim, frameIdx);
     const ax = earAnchor ? earAnchor.x - mournSprite.hitbox.x : m.w - 6;
     const ay = earAnchor ? earAnchor.y - mournSprite.hitbox.y : 12;
     const ex = m.facing < 0 ? m.x + (m.w - ax) - 1 : m.x + ax - 1;

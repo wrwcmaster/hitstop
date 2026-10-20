@@ -913,22 +913,10 @@ export function compareSpriteToReference(
     h: reference.hitbox?.h ?? reference.h ?? 16,
   };
 
-  const sameCanvas =
-    Math.round((candidate.w ?? 16) * candDensity) === Math.round((reference.w ?? 16) * refDensity) &&
-    Math.round((candidate.h ?? 16) * candDensity) === Math.round((reference.h ?? 16) * refDensity);
-
-  const candOx = sameCanvas
-    ? Math.round(((candidate.w ?? 16) * candDensity) / 2)
-    : Math.round((candHb.x + candHb.w / 2) * candDensity);
-  const candOy = sameCanvas
-    ? Math.round((candidate.h ?? 16) * candDensity)
-    : Math.round((candHb.y + candHb.h) * candDensity);
-  const refOx = sameCanvas
-    ? Math.round(((reference.w ?? 16) * refDensity) / 2)
-    : Math.round((refHb.x + refHb.w / 2) * refDensity);
-  const refOy = sameCanvas
-    ? Math.round((reference.h ?? 16) * refDensity)
-    : Math.round((refHb.y + refHb.h) * refDensity);
+  const candOx = Math.round((candHb.x + candHb.w / 2) * candDensity);
+  const candOy = Math.round((candHb.y + candHb.h) * candDensity);
+  const refOx = Math.round((refHb.x + refHb.w / 2) * refDensity);
+  const refOy = Math.round((refHb.y + refHb.h) * refDensity);
 
   const candPal = candidate.palette ?? {};
   const refPal = reference.palette ?? {};
