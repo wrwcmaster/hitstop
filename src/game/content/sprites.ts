@@ -3,9 +3,16 @@ import { PAL } from './palette';
 import { validatePlayerRenderTags } from './render-tags';
 import knightJson from './sprites/knight-v2.json';
 import duelistJson from './sprites/duelist.json';
+import viseJson from './sprites/vise.json';
+import viseNestJson from './sprites/vise-nest.json';
+import mournJson from './sprites/mourn.json';
+import dummyJson from './sprites/dummy.json';
 import slimeJson from './sprites/slime.json';
 import batJson from './sprites/bat.json';
 import pikeJson from './sprites/pike.json';
+import archerJson from './sprites/archer.json';
+import gunnerJson from './sprites/gunner.json';
+import wallcrawlerJson from './sprites/wallcrawler.json';
 import chestJson from './sprites/chest.json';
 import merchantJson from './sprites/merchant.json';
 import iconsJson from './sprites/icons.json';
@@ -52,7 +59,7 @@ export async function loadKnightSheet(imageUrl: string, desc: SheetDescriptor): 
   applyKnight(loadSheet(img, { ...desc, renderTag: desc.renderTag ?? baseKnight.tags()[0] }));
 }
 
-/* ---------------- the Duelist (human boss) ---------------- */
+/* ---------------- bosses ---------------- */
 
 // Her own body art — a crimson-coated fencer with a swept ponytail — so
 // she reads as a distinct human, not a recolored knight. The saber and
@@ -60,7 +67,19 @@ export async function loadKnightSheet(imageUrl: string, desc: SheetDescriptor): 
 export const duelistSprite = load(duelistJson);
 export const DUELIST_ANIMS = withFacing(duelistSprite.animSet());
 
+export const viseSprite = load(viseJson);
+export const VISE_ANIMS = withFacing(viseSprite.animSet());
+
+export const viseNestSprite = load(viseNestJson);
+export const VISE_NEST_ANIMS = viseNestSprite.animSet();
+
+export const mournSprite = load(mournJson);
+export const MOURN_ANIMS = withFacing(mournSprite.animSet());
+
 /* ---------------- enemies ---------------- */
+
+export const dummySprite = load(dummyJson);
+export const DUMMY_IDLE = dummySprite.frame('idle', 0);
 
 export const slimeSprite = load(slimeJson);
 export const SLIME1 = slimeSprite.frame('idle', 0);
@@ -69,6 +88,15 @@ export const SLIME2 = slimeSprite.frame('idle', 1);
 export const pikeSprite = load(pikeJson);
 export const PIKE1 = pikeSprite.frame('swim', 0);
 export const PIKE2 = pikeSprite.frame('swim', 1);
+
+export const archerSprite = load(archerJson);
+export const ARCHER_ANIMS = withFacing(archerSprite.animSet());
+
+export const gunnerSprite = load(gunnerJson);
+export const GUNNER_ANIMS = withFacing(gunnerSprite.animSet());
+
+export const wallcrawlerSprite = load(wallcrawlerJson);
+export const WALLCRAWLER_ANIMS = withFacing(wallcrawlerSprite.animSet());
 
 export const chestSprite = load(chestJson);
 export const CHEST = chestSprite.frame('idle', 0);

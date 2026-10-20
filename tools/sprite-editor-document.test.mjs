@@ -504,6 +504,40 @@ try {
     }), /command 1 \(undefined\): command must be an object/);
   }
 
+  {
+    const baker = await server.ssrLoadModule('/tools/src/sprite-baker.ts');
+    const critic = await server.ssrLoadModule('/tools/src/sprite-critic.ts');
+    const rigs = await server.ssrLoadModule('/tools/src/sprite-rigs.ts');
+
+    for (const [id, rig] of Object.entries(rigs.BUILTIN_SPRITE_RIGS)) {
+      const bakedFile = baker.bakeSpriteRig(rig);
+      assert.doesNotThrow(() => model.validateSpriteEditorDocument(bakedFile), `rig "${id}" failed schema validation`);
+      const report = critic.critiqueSpriteFile(bakedFile, rig.critic ?? {});
+      assert.equal(report.passed, true, `rig "${id}" failed critic: ${JSON.stringify(report.issues)}`);
+      assert.equal(report.score, 100, `rig "${id}" score ${report.score} !== 100`);
+    }
+
+    const advFile = baker.bakeSpriteRig(rigs.ADVENTURER_HUMANOID_RIG);
+    assert.equal(advFile.anchors.frontHand.run.length, 8);
+    assert.equal(typeof advFile.anchors.frontHand.run[0].angle, 'number');
+
+    const layeredAdvFile = baker.bakeSpriteRig({
+      ...rigs.ADVENTURER_HUMANOID_RIG,
+      anims: { idle: rigs.ADVENTURER_HUMANOID_RIG.anims.idle },
+      layers: [
+        { id: 'back-arm', name: 'Back Arm', tag: 'back' },
+        { id: 'body', name: 'Body', tag: 'body' },
+        { id: 'front-arm', name: 'Front Arm', tag: 'front' },
+      ],
+    });
+    assert.doesNotThrow(() => model.validateSpriteEditorDocument(layeredAdvFile));
+    assert.equal(layeredAdvFile.layers.length, 3);
+
+    const sheet = baker.renderSpriteContactSheetRgba(advFile, { scale: 2 });
+    assert.ok(sheet.width > 0 && sheet.height > 0);
+    assert.equal(sheet.rgba.length, sheet.width * sheet.height * 4);
+  }
+
   console.log('sprite-editor document tests: ok');
 } finally {
   await server.close();

@@ -1,6 +1,19 @@
 import { FSM, rand, pick, frameAt, ballisticVelocity, carryBody, placeBody, t } from '@engine/index';
 import { defineMonster, Monster } from './monster';
-import { SLIME1, SLIME2, TEXEL, DUELIST_ANIMS, duelistSprite } from '../content/sprites';
+import {
+  SLIME1,
+  SLIME2,
+  TEXEL,
+  DUELIST_ANIMS,
+  VISE_ANIMS,
+  VISE_NEST_ANIMS,
+  MOURN_ANIMS,
+  blit,
+  duelistSprite,
+  viseSprite,
+  viseNestSprite,
+  mournSprite,
+} from '../content/sprites';
 import { tintOf, whiteOf, type Tilemap } from '@engine/index';
 import { COLORS } from '../content/palette';
 import { shootBullet, muzzleFlash, BULLET_GRAVITY } from '../content/ballistics';
@@ -971,8 +984,8 @@ function makeViseFsm(m: Monster): FSM<Monster> {
 defineMonster('vise', {
   hp: VISE_LIMB_HP * VISE_SEVERS,
   damage: 22,
-  w: 30,
-  h: 26,
+  w: viseSprite.hitbox.w,
+  h: viseSprite.hitbox.h,
   score: 9000,
   boss: true,
   flies: true, // it is always holding the wall; the floor is not its business
@@ -1048,16 +1061,18 @@ defineMonster('vise', {
         if (!back) g.fillRect(left + 2 - reach, ly + 1, reach, 3);
       }
     }
-    // Body: a flat carapace pressed to the stone.
-    g.fillStyle = m.flashT > 0 ? COLORS.white : VISE_BODY;
-    g.fillRect(left + 2, top, m.w - 4, m.h);
-    g.fillStyle = m.flashT > 0 ? COLORS.white : '#22304f';
-    g.fillRect(left + 4, top + 3, m.w - 8, m.h - 6);
-    // Eyes down the spine, gold and unbothered.
-    g.fillStyle = m.flashT > 0 ? COLORS.white : COLORS.gold;
-    for (let i = 0; i < 3; i++) {
-      g.fillRect(left + (side < 0 ? m.w - 9 : 5), top + 5 + i * 7, 3, 2);
-    }
+    // Armored carapace + spine-eyes from the 3D-baked sprite.
+    let anim = 'traverse';
+    if (fsm?.is('lunge')) anim = 'lunge';
+    else if (fsm?.is('rockfall')) anim = 'rockfall';
+    else if (fsm?.is('pinSlam')) anim = 'pinSlam';
+    const set = side < 0 ? VISE_ANIMS.right : VISE_ANIMS.left;
+    blit(
+      g,
+      m.img(frameAt(set, anim, m.animT)),
+      m.x - viseSprite.hitbox.x,
+      m.y - viseSprite.hitbox.y,
+    );
   },
 });
 
@@ -1070,7 +1085,8 @@ defineMonster('vise-nest', {
   hp: 90,
   damage: 0,
   noContactDamage: true,
-  w: 16, h: 20,
+  w: viseNestSprite.hitbox.w,
+  h: viseNestSprite.hitbox.h,
   score: 300,
   flies: true, // it is part of the wall
   colors: ['#3f5f85', '#8fb6d6'],
@@ -1091,23 +1107,14 @@ defineMonster('vise-nest', {
     m.game.feel.sfx.play('splat');
   },
   draw(g, m) {
-    const x = Math.round(m.x);
-    const y = Math.round(m.y);
-    g.fillStyle = m.flashT > 0 ? COLORS.white : '#2b4467';
-    g.fillRect(x, y, m.w, m.h);
-    g.fillStyle = m.flashT > 0 ? COLORS.white : '#3f5f85';
-    for (let i = 0; i < 5; i++) {
-      const cx = x + 2 + ((i * 5) % (m.w - 4));
-      const cy = y + 2 + ((i * 7) % (m.h - 5));
-      g.fillRect(cx, cy, 4, 4);
-    }
-    // Wet cells that pulse when something inside is nearly ready.
     const ready = (m.state.spawnT as number) < 1.2;
-    g.fillStyle = m.flashT > 0 ? COLORS.white : (ready ? COLORS.gold : '#8fb6d6');
-    for (let i = 0; i < 3; i++) {
-      const p = Math.sin(m.animT * (ready ? 9 : 3) + i) * 0.5 + 0.5;
-      g.fillRect(x + 3 + i * 5, y + 4 + Math.round(p * 9), 2, 2);
-    }
+    const anim = ready ? 'ready' : 'idle';
+    blit(
+      g,
+      m.img(frameAt(VISE_NEST_ANIMS, anim, m.animT)),
+      m.x - viseNestSprite.hitbox.x,
+      m.y - viseNestSprite.hitbox.y,
+    );
   },
 });
 
@@ -1362,8 +1369,8 @@ function makeMournFsm(m: Monster): FSM<Monster> {
 defineMonster('mourn', {
   hp: MOURN_KNOT_HP * MOURN_KNOTS,
   damage: 20,
-  w: 34,
-  h: 28,
+  w: mournSprite.hitbox.w,
+  h: mournSprite.hitbox.h,
   score: 11000,
   boss: true,
   displayName: 'MOURN, THE BELL BELOW',
@@ -1462,34 +1469,49 @@ defineMonster('mourn', {
   draw(g, m) {
     const fsm = m.state.fsm as FSM<Monster>;
     const gone = shattered(m);
-    // A hunched bell-shape.
-    g.fillStyle = m.flashT > 0 ? COLORS.white : MOURN_BODY;
-    g.fillRect(m.x + 2, m.y + 6, m.w - 4, m.h - 6);
-    g.fillRect(m.x + 6, m.y + 2, m.w - 12, 6);
-    // The four spine-knots: the health bar, worn on the body.
-    for (let i = 0; i < MOURN_KNOTS; i++) {
-      const kx = m.x + 6 + i * ((m.w - 12) / MOURN_KNOTS);
-      if (i < MOURN_KNOTS - gone) {
-        g.fillStyle = m.flashT > 0 ? COLORS.white : MOURN_KNOT;
-        g.fillRect(kx, m.y + 9, 4, 5);
-      } else {
-        g.fillStyle = COLORS.bgDark; // a shattered knot leaves a socket
-        g.fillRect(kx, m.y + 10, 4, 3);
-      }
-    }
-    // The ear faces what it is listening to and glows with how sure it
-    // is. A DIM ear is a stale belief — the tell that you have gone quiet
-    // enough to move, and the one thing the player must learn to read.
-    const ex = m.facing < 0 ? m.x + 1 : m.x + m.w - 4;
-    g.globalAlpha = 0.35 + 0.65 * attention(m).sure;
     // A guest's puppet DOES have an FSM — `init` ran there too — it is
     // simply never stepped, so asking it would report `listen` forever.
     // The wire value is therefore the authority whenever one has arrived.
     const fixated = m.state.remoteFixate !== undefined
       ? m.state.remoteFixate === true
       : fsm.is('fixate');
-    g.fillStyle = fixated ? COLORS.white : MOURN_EAR;
-    g.fillRect(ex, m.y + 8, 3, 7);
-    g.globalAlpha = 1;
+    let anim = 'listen';
+    if (fixated) anim = 'fixate';
+    else if (fsm.is('toll')) anim = 'toll';
+    else if (fsm.is('pounce')) anim = 'pounce';
+    else if (fsm.is('keen')) anim = 'keen';
+    const set = m.facing === 1 ? MOURN_ANIMS.right : MOURN_ANIMS.left;
+    blit(
+      g,
+      m.img(frameAt(set, anim, m.animT)),
+      m.x - mournSprite.hitbox.x,
+      m.y - mournSprite.hitbox.y,
+    );
+    // The four spine-knots: shattered knots leave dark sockets along the crown.
+    for (let i = MOURN_KNOTS - gone; i < MOURN_KNOTS; i++) {
+      const kx = m.x + 6 + i * ((m.w - 12) / MOURN_KNOTS);
+      g.fillStyle = COLORS.bgDark;
+      g.fillRect(kx, m.y + 8, 4, 4);
+    }
+    // The ear faces what it is listening to and glows with how sure it
+    // is. A DIM ear is a stale belief — the tell that you have gone quiet
+    // enough to move, and the one thing the player must learn to read.
+    const earAnchor = mournSprite.anchor?.('earTip', anim, 0);
+    const ax = earAnchor ? earAnchor.x - mournSprite.hitbox.x : m.w - 6;
+    const ay = earAnchor ? earAnchor.y - mournSprite.hitbox.y : 12;
+    const ex = m.facing < 0 ? m.x + (m.w - ax) - 1 : m.x + ax - 1;
+    const ey = m.y + ay - 1;
+    const sure = attention(m).sure;
+    if (fixated || sure >= 0.5) {
+      g.globalAlpha = fixated ? 1 : 0.4 + 0.6 * sure;
+      g.fillStyle = fixated ? COLORS.white : MOURN_EAR;
+      g.fillRect(ex, ey, 2, 2);
+      g.globalAlpha = 1;
+    } else {
+      g.globalAlpha = (1 - sure) * 0.7;
+      g.fillStyle = COLORS.bgDark;
+      g.fillRect(ex - 1, ey - 1, 3, 3);
+      g.globalAlpha = 1;
+    }
   },
 });
