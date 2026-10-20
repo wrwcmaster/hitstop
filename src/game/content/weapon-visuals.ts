@@ -18,6 +18,7 @@ import { normalizedItemIcon } from './item-icon';
 import greatSwordJson from './sprites/equipment/great-sword.json';
 import rustySwordJson from './sprites/equipment/rusty-sword.json';
 import type { WeaponAttackDef } from './weapons';
+import { snapAttachmentOriginToBodyGrid } from '../actors/player-render-policy';
 
 export interface WeaponAttackPose {
   progress: number;
@@ -69,6 +70,8 @@ export interface WeaponVisual {
   gripHands?: 'none' | 'front' | 'rear' | 'bothWhenCharging';
   /** Character attachment slot used to position this visual. */
   attachmentSlot?: string;
+  /** Anchor inside the visual that is pinned to `attachmentSlot`. */
+  attachmentAnchor?: string;
   /** Shared render bands contributed by this visual. */
   renderTags: readonly string[];
   /** Optional band for the procedural hand overlay; defaults to the visual's frontmost band. */
@@ -188,6 +191,19 @@ export function heldWeaponAttachmentSlot(id: string | null): string {
   return id ? (weaponVisuals.get(id).attachmentSlot ?? 'mainHand') : 'mainHand';
 }
 
+/** Declarative body-slot ↔ visual-anchor relationship used by renderers/tools. */
+export function heldWeaponAttachment(
+  id: string | null,
+): { slot: string; anchor: string } | undefined {
+  if (!id) return undefined;
+  const visual = weaponVisuals.get(id);
+  if (!visual.attachmentAnchor) return undefined;
+  return {
+    slot: visual.attachmentSlot ?? 'mainHand',
+    anchor: visual.attachmentAnchor,
+  };
+}
+
 export function drawWeaponTrail(g: CanvasRenderingContext2D, id: string | null, ctx: WeaponTrailCtx): void {
   if (id) weaponVisuals.get(id).drawTrail?.(g, ctx);
 }
@@ -260,6 +276,8 @@ export interface SpriteWeaponConfig {
   embeddedOverlaySprite?: LoadedSprite;
   /** Character attachment slot; defaults to the primary weapon hand. */
   attachmentSlot?: string;
+  /** Named anchor in the authored weapon sprite pinned to that slot. */
+  attachmentAnchor: string;
   /** Legacy feet origin, used by animations that do not yet author a grip. */
   origin?: { x: number; y: number };
   /** Resolve the weapon-side grip point from the right-facing source art. */
@@ -304,6 +322,7 @@ export function spriteWeapon(config: SpriteWeaponConfig): WeaponVisual {
     animations: Object.keys(config.anims.right),
     gripHands: 'front',
     attachmentSlot: config.attachmentSlot ?? 'mainHand',
+    attachmentAnchor: config.attachmentAnchor,
     renderTags,
     drawHeldTag(g, ctx, tag) {
       taggedVisuals.get(tag)?.drawHeld(g, ctx);
@@ -343,19 +362,47 @@ export function spriteWeapon(config: SpriteWeaponConfig): WeaponVisual {
       const origin = config.origin ?? { x: drawW / 2, y: drawH };
       const grip = config.grip?.(anim, frame);
       g.save();
-      g.translate(offset.x * ctx.facing, offset.y);
-      if (offset.angle) g.rotate(offset.angle * ctx.facing);
       if (grip && ctx.frontHand) {
         // Anchors are authored against the right-facing sheet. Left art is
         // pre-mirrored, so mirror both the body-local hand and the point
-        // inside the weapon frame before pinning them together.
+        // inside the weapon frame before pinning them together. The final
+        // bitmap origin is snapped relative to the body's own top-left pixel
+        // lattice. Fractional anchors remain valid landmarks, but they can no
+        // longer phase-shift the complete weapon bitmap by half a pixel.
         const gripX = ctx.facing === 1 ? grip.x : drawW - grip.x;
-        g.translate(ctx.frontHand.x * ctx.facing, ctx.frontHand.y);
-        g.drawImage(image, -gripX, -grip.y, drawW, drawH);
+        const desired = {
+          x: offset.x * ctx.facing + ctx.frontHand.x * ctx.facing - gripX,
+          y: offset.y + ctx.frontHand.y - grip.y,
+        };
+        const drawAt = snapAttachmentOriginToBodyGrid(desired, {
+          x: -ctx.bodyW / 2,
+          y: -ctx.bodyH,
+        }, TEXEL);
+        if (offset.angle) {
+          g.translate(drawAt.x + gripX, drawAt.y + grip.y);
+          g.rotate(offset.angle * ctx.facing);
+          g.drawImage(image, -gripX, -grip.y, drawW, drawH);
+        } else {
+          g.drawImage(image, drawAt.x, drawAt.y, drawW, drawH);
+        }
       } else {
         // Partial rigs remain playable while an artist adds grip points to
-        // the remaining rows; those rows retain their old feet alignment.
-        g.drawImage(image, -origin.x, -origin.y, drawW, drawH);
+        // the remaining rows; those rows retain their old feet alignment but
+        // still share the body's authored-pixel phase.
+        const drawAt = snapAttachmentOriginToBodyGrid({
+          x: offset.x * ctx.facing - origin.x,
+          y: offset.y - origin.y,
+        }, {
+          x: -ctx.bodyW / 2,
+          y: -ctx.bodyH,
+        }, TEXEL);
+        if (offset.angle) {
+          g.translate(drawAt.x + origin.x, drawAt.y + origin.y);
+          g.rotate(offset.angle * ctx.facing);
+          g.drawImage(image, -origin.x, -origin.y, drawW, drawH);
+        } else {
+          g.drawImage(image, drawAt.x, drawAt.y, drawW, drawH);
+        }
       }
       g.restore();
     },
@@ -653,7 +700,7 @@ function weaponFromSprite(file: SpriteFile, config: SpriteWeaponRegistrationConf
     sprite: loaded,
     embeddedOverlaySprite,
     anims: withFacing(loaded.animSet()),
-    grip: (anim, frame) => loaded.anchor?.('grip', anim, frame),
+    grip: (anim, frame) => loaded.anchor?.(config.attachmentAnchor, anim, frame),
   });
 }
 
@@ -676,11 +723,16 @@ export function rebuildSpriteWeapon(id: string, file: SpriteFile): boolean {
 }
 
 defineSpriteWeapon('rusty-sword', rustySwordJson, {
-  origin: { x: 16, y: 16 },
+  // Legacy no-grip rows (currently plunge) retain their accepted placement
+  // after attachment snapping moved from whole logical pixels to native
+  // sprite texels.
+  origin: { x: 16, y: 15.5 },
+  attachmentAnchor: 'grip',
 });
 
 defineSpriteWeapon('great-sword', greatSwordJson, {
   origin: { x: 16, y: 16 },
+  attachmentAnchor: 'grip',
 });
 
 /* ---- ranged visuals: procedural bow + flintlock ---- */

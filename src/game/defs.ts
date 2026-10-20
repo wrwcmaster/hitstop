@@ -120,7 +120,7 @@ export function actionLabel(
     const b = pad.buttonsFor(action)[0];
     if (b != null) return prettyButton(b);
   }
-  if (touch && typeof window !== 'undefined' && !window.matchMedia('(pointer: fine)').matches) {
+  if (touch !== undefined && typeof window !== 'undefined' && !window.matchMedia('(pointer: fine)').matches) {
     return touch;
   }
   const code = game.input.codesFor(action)[0];
@@ -172,8 +172,8 @@ export const REPLAY_PENDING_KEY = `${STORAGE_PREFIX}.replay.pending`;
  * which monsters to drop where. Everything is data, so an agent (or the
  * level editor, or a human via ?scenario=local) can set up an arbitrary
  * situation — "a bow-armed knight in the flooded grotto with two
- * archers" — as one JSON blob, with no code. Unknown ids are skipped
- * rather than crashing, so a typo in an agent's request is survivable.
+ * archers" — as one JSON blob, with no code. Unknown references are
+ * rejected before changing the current world, so tests cannot silently run a different setup.
  */
 export interface TestScenario {
   /** A registered room id (e.g. 'grotto', 'arena'). Ignored if `roomDef` is set. */
@@ -197,8 +197,7 @@ export interface TestScenario {
      *
      * Without this a scenario cannot reach a boss verb at all, since the
      * only other way to own one is to kill its boss: exactly the setup a
-     * deterministic recording of that verb needs to skip. Unknown ids are
-     * skipped rather than fatal, like every other id in a scenario.
+     * deterministic recording of that verb needs to skip.
      */
     earned?: string[];
   };

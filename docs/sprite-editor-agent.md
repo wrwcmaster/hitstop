@@ -35,8 +35,167 @@ npm run agent-sprite -- inspect attack 3-5 sword
 `GET /__sprite-editor/capabilities` is the machine-readable contract. It
 reports the protocol version, frame indexing, limits, region and transform
 forms, and the required/optional fields for every command. The API uses
-zero-based frame indexes. The CLI's `inspect` range uses the one-based frame
-numbers displayed by the editor.
+zero-based frame indexes. The CLI's `inspect` range and `preview --frame` use
+the one-based frame numbers displayed by the editor.
+
+### Frame-addressed previews
+
+The last automatically published preview remains available at
+`GET /__sprite-editor/preview.png`. To verify a specific frame without moving
+the human's cursor, request both its animation and zero-based frame:
+
+```text
+GET /__sprite-editor/preview.png?animation=run&frame=4
+npm run agent-sprite -- preview frame-5.png --animation run --frame 5
+```
+
+The bridge asks the connected editor to render that exact composite, returns
+the PNG with revision/animation/frame response headers, and restores the
+visible animation, frame, play state, and preview bitmap before replying. The
+request is read-only: it does not advance the document revision or change the
+editor cursor. Use this route for multi-frame verification; never assume the
+unqualified `preview.png` happens to contain the frame being measured.
+
+### Anchor-centered focused previews
+
+When a full composite is too small to judge weapon overlap, request a fixed
+square crop centered on a named anchor rendered by the selected body:
+
+```text
+GET /__sprite-editor/preview-focus.png?animation=sword-run&frame=3&anchor=frontHand&zoom=300&size=384
+npm run agent-sprite -- preview-focus frame-4-close-up.png --animation sword-run --frame 4 --anchor frontHand --zoom 300
+```
+
+`frame` is zero-based over HTTP and one-based in the CLI. `zoom` is an integer
+percentage from 100 through 800; `size` is the output width and height in
+pixels (384 by default, 128 through 1024). The renderer first produces the
+same addressed composite as `preview.png`, then scales it with nearest-neighbor
+sampling and places the named anchor at the exact center of the returned PNG.
+It does not change the editor's zoom, cursor, playback state, or document
+revision. Response headers include `X-Sprite-View: focused-composite-preview`,
+`X-Sprite-Center-Anchor`, and `X-Sprite-Zoom`.
+
+For every body/equipment alignment or detached-detail pass, the focused preview
+is a mandatory verification gate. Request it from the accepted revision at an
+explicit zoom of at least 250% (300% by default), centered on the relevant
+rendered attachment anchor. Inspect the returned PNG directly and check the
+entire weapon silhouette: guard, both blade edges, tip, handle, pommel, and any
+exposed pixels from the reference art. A full-size `preview.png`, the alignment
+comparison alone, or a numerically successful transaction cannot substitute
+for this close-up.
+
+Use `canvas.png` in addition when the anchor marker itself, a selection, or
+another authoring overlay must be visible. The focused preview centers on an
+anchor that is actually rendered for the requested frame; an unknown or
+unrendered anchor is an error rather than a fallback to a guessed position. If
+`preview-focus.png` errors, times out, returns the wrong frame/revision, or
+cannot resolve the requested attachment anchor, stop and mark the artwork
+unverified. Fix the endpoint or its semantic anchor mapping before adjusting
+pixels or reporting completion. Never silently fall back to the ordinary
+preview because the focused route failed.
+
+### Frame-addressed editable canvas
+
+Use the canvas endpoint when the evidence must include authoring overlays such
+as the selected anchor, selection boundary, grid, onion skin, or alignment
+comparison—not merely the game-scale composite preview:
+
+```text
+GET /__sprite-editor/canvas.png?animation=run&frame=4
+npm run agent-sprite -- canvas frame-5-canvas.png --animation run --frame 5
+```
+
+Append `anchorLabels=0` when the selected anchor's text obscures the artwork
+being judged. This hides only the label in the returned read-only artifact; the
+crosshair, ring, and authoritative white center dot remain visible, and the
+human's canvas is restored unchanged.
+
+The returned PNG is the sprite editor's actual `#grid` rendering at the current
+editor zoom. The request temporarily renders the addressed zero-based frame,
+then restores the human's animation, frame, selection, and visible canvas
+before replying. Response headers identify the sprite revision, animation,
+frame, and `X-Sprite-View: editable-canvas`. Use this endpoint instead of
+cropping a browser screenshot when inspecting anchors or selections.
+
+Anchor overlays use a thin black-outlined cyan crosshair and compact ring. The
+small **white center dot** is the authoritative anchor coordinate. Do not infer the point
+from the cyan label, the ends of the crosshair, a nearby gold crossguard, or
+the apparent center of overlapping artwork. When the center dot is obscured or
+ambiguous even in `canvas.png`, report that ambiguity and request a clearer
+zoom or human direction instead of proposing a movement.
+
+#### Adjust an anchor from a visual reference
+
+Anchor matching is a landmark task, not a coordinate-copy task. Two animation
+frames have different poses, so the correct anchor generally does not occupy
+the same local `x`/`y` coordinate or the same screen position in both frames.
+Match the anchor's relationship to the artwork instead.
+
+Use this feedback loop:
+
+1. Fetch `canvas.png` for the approved reference frame and the target frame at
+   the same editor zoom and revision. Inspect both images directly.
+2. On the reference, name the exact local landmark before proposing a move.
+   For `knight-v2` sword-run's `frontHand`, the approved frame-1 convention
+   combines two independent constraints: the hand-side edge of the cross-guard
+   determines the position **along** the sword, and the midpoint between the
+   blade's two visible edges determines the position **across** the sword.
+   "Near the sword", "guard center", and "blade center" are not
+   interchangeable landmarks. Do not generalize this content-specific
+   convention to another anchor without an approved reference.
+3. On the target, locate that same semantic landmark from the target pose. The
+   white center dot is the current anchor; it is not evidence of where the
+   target landmark ought to be.
+4. Visually infer the full two-dimensional correction from the white dot to
+   the chosen landmark. Check both axes. Projecting only a blade centerline can
+   miss the cross-guard constraint and incorrectly produce zero horizontal
+   movement.
+5. State the proposed change as both a delta and an endpoint, for example
+   `(-1, -2.125): (18.5, 17.875) -> (17.5, 15.75)`. In canvas coordinates,
+   left/up are negative and right/down are positive.
+6. If converting a displacement seen in the rendered PNG, use a verified
+   canvas-to-sprite scale. Do not infer it from the checkerboard size, PNG
+   dimensions, device-pixel ratio, or a remembered zoom. Those may not describe
+   the logical sprite-coordinate transform. A visually precise landmark with
+   an unverified scale is still an unverified coordinate.
+7. Apply one move, then fetch fresh `canvas.png` images for **both** the
+   reference frame and target frame at the accepted revision. Inspect them
+   together. A remembered reference or a target-only screenshot is not a
+   feedback loop.
+8. Re-establish the target landmark from the post-move art rather than checking
+   whether the dot reached the coordinate predicted before the move. For a
+   blade centerline, choose two well-separated positions on the unobscured
+   blade, find the visual midpoint between the two blade edges at each
+   position, connect those midpoints into the blade's **longitudinal axis**,
+   and extend that axis back to the cross-guard. Do not estimate the centerline
+   from the guard-area silhouette: the guard, hand, perspective, and label can
+   obscure or widen it. Do not use one edge, the guard center, a single local
+   midpoint, or the previously chosen screen X/Y as the sword axis.
+9. Do not declare success from the requested coordinate, bridge response,
+   arithmetic, or arrival at the agent's own estimate. Approval requires the
+   fresh paired canvases to show the same named dot-to-art relationship. If the
+   relationship remains ambiguous, report it as unverified.
+
+For a human-guided step-by-step adjustment, do not mutate while describing the
+next move. Show the exact canvas artifact the agent inspected, propose one
+specific delta, and wait for approval. If the human supplies the correct
+coordinate, treat it as authoritative: calculate and record the residual error,
+invalidate the rejected landmark/scale assumption, and do not reuse it on later
+frames. Automated pixel statistics may support diagnosis, but visual inference
+from the editable canvas is the approval criterion for anchor placement.
+
+Before reporting an anchor as correct, state all four checks explicitly:
+
+- the white center dot—not its label—is the point being judged;
+- the along-axis landmark matches the approved reference;
+- the across-axis/centerline landmark lies on the longitudinal axis derived
+  from two separated blade midpoints and matches the approved reference; and
+- the reference and target canvases are fresh artifacts from the same accepted
+  revision.
+
+If any check cannot be stated from direct visual evidence, the result is not
+verified. Never use the fact that a semantic command successfully wrote the
+requested coordinate as evidence for any of these visual checks.
 
 ### Persistent named selections
 
@@ -83,7 +242,11 @@ confined to `src/game/content/sprites/**/*.json`.
    `inspect` queries for the frames you need to judge. Dry runs never advance
    the shared revision.
 5. Fetch `preview.png` after the accepted revision and inspect the real editor
-   composite. Numeric assertions prove structure, not visual alignment.
+   composite. For body/equipment overlap, also fetch and directly inspect
+   `preview-focus.png` at 250% or greater, centered on the relevant attachment
+   anchor. Both artifacts must address the edited frame and accepted revision.
+   Numeric assertions prove structure, not visual alignment. A failed focused
+   preview leaves the edit unverified and blocks completion.
 6. Saving is a separate decision. Commands update the shared draft; they never
    write the repository. Use the editor's **save all** or the explicit save
    endpoint only after human or visual approval.
@@ -95,8 +258,8 @@ invalidate an existing preview.
 
 ### Mandatory visual-calculation guard
 
-Before calculating a visual transform, pause or step the editor to the target
-frame and download `GET /__sprite-editor/preview.png`. Verify its
+Before calculating a visual transform, download the frame-addressed preview
+for the target animation and frame. Verify its
 `X-Sprite-Revision` against the live state and inspect the PNG itself. Do not
 reconstruct the rendered composite from JSON, anchors, bounds, or component
 statistics while this endpoint is available. A human-supplied screenshot of
@@ -110,6 +273,24 @@ Write down the requested measurement before doing arithmetic:
 - in the editor's downward-positive canvas coordinates, a positive rotation
   is clockwise;
 - rotation-only work keeps scale exactly `1`.
+
+Choose the least powerful operation that explains the visible error. A
+constant one-pixel displacement of the complete silhouette is a rigid
+translation, not a new two-endpoint alignment problem. Apply the translation
+with rotation and scale unchanged. Do not move one axis endpoint while holding
+the other fixed: that changes axis length and therefore introduces scaling.
+Explicitly state whether “one pixel” means one logical sprite pixel or one HD
+texel (the authored sheets use 4x texel density), then fetch a new focused
+preview after that single move. Only escalate to rotation, scaling, or a full
+pristine-source refit when the new render demonstrates that translation alone
+cannot solve the mismatch.
+
+Do not conceal a geometry error with invented pixels. In particular, an
+exposed cross-guard must first be treated as evidence that the approved weapon
+art is misplaced. Move or refit that approved art; do not extend the guard with
+an improvised color pattern. Constrained pixel cleanup comes only after the
+transform is accepted and must preserve the approved silhouette and material
+ramp.
 
 Identify source and target landmarks on the same rendered image and label them
 before calculating. After one revision-safe mutation, retrieve and inspect the
@@ -131,6 +312,22 @@ measured dry-run view:
 - enter grip/tip (or other corresponding) source and target axes;
 - inspect the derived uniform scale, clockwise rotation, and translation.
 
+The comparison is valid only when its reference names the body animation and
+displayed frame that correspond to the equipment animation and frame being
+edited. Never accept the panel's previous selection, active-frame fallback, or
+an animation with a similar name without checking the resolved animation and
+frame reported by the comparison state. If the equipment animation is a
+weapon-profile animation, resolve its body-profile mapping first. When no
+mapping exists, stop and ask which body pose is authoritative.
+
+Before judging silhouette overlap, align the reference attachment anchor with
+the equipment grip anchor in the comparison view. This anchor alignment is a
+view transform only; it must not mutate either anchor. A ghosted overlay made
+from unmatched anchors, the wrong body frame, or the wrong animation can look
+plausible while recommending the wrong translation. Record the resolved source
+animation/frame, target animation/frame, and both anchor coordinates alongside
+the exported comparison artifact.
+
 The comparison matrix is applied only while drawing. It never pastes or
 resamples pixels into the active document, never changes the shared revision,
 and therefore cannot damage the pristine source. **Export comparison PNG**
@@ -138,6 +335,23 @@ downloads the grid view. The editor also publishes the same artifact at
 `GET /__sprite-editor/comparison.png`; the CLI command
 `agent-sprite comparison <output.png>` retrieves it for agent-side visual
 inspection. A comparison PNG is revision checked just like `preview.png`.
+
+For an agent request, do not depend on a comparison that the human happened to
+configure earlier. Request the target frame, body reference, and layers
+explicitly; the editor resolves the body-profile animation/frame, aligns the
+compatible attachment anchors, renders the comparison, and restores the
+human's view without changing the document revision:
+
+```text
+GET /__sprite-editor/comparison.png?animation=run&frame=3&reference=knight-v2.json&sourceAnimation=&sourceFrame=0&sourceLayer=base&targetLayer=base&view=overlay&opacity=50
+npm run agent-sprite -- comparison frame-4-comparison.png --animation run --frame 4 --reference knight-v2.json --source-layer base --target-layer base
+```
+
+The HTTP frame is zero-based; the CLI frame is one-based. `sourceFrame=0`
+uses the mapped target frame, and an empty `sourceAnimation` uses the equipped
+weapon's body-animation profile (for example `run` → `sword-run`). The
+frame-addressed endpoint fails instead of exporting an origin-aligned image
+when the reference and target do not expose compatible attachment anchors.
 
 Browser automation may configure the view through
 `window.__editor.comparison.configure(...)`. The source and target axes use
@@ -174,12 +388,13 @@ Commands currently cover the complete recurring workflow:
 | Family | Operations |
 | --- | --- |
 | Structure | `layer.ensure`, `animation.materialize`, `frame.insert`, `frame.remove`, `frame.move` |
-| Pixels | `frame.clear`, `frame.copy`, `frame.copyAligned`, `frame.remapColors`, `pixel.set` |
+| Pixels | `frame.clear`, `frame.copy`, `frame.copyAligned`, `frame.projectAligned`, `frame.translate`, `frame.remapColors`, `pixel.set` |
 | Rig | `anchor.set` |
 | Verification | `assert.frame`, `assert.anchor` |
 
 Frame references are `{ animation, frame, layerId?, path? }`. An edit target
-must be the active document; a `frame.copy` / `frame.copyAligned` source or
+must be the active document; a `frame.copy` / `frame.copyAligned` /
+`frame.projectAligned` source or
 inspection may name another repository sprite with `path`. Layered edit targets require
 `layerId`. Use `layerId: "*"` only with `frame.clear` to clear every layer in
 one frame.
@@ -189,6 +404,7 @@ Regions are one of:
 ```jsonc
 { "rect": { "x": 4, "y": 8, "w": 20, "h": 12 } }
 { "componentAt": { "x": 9, "y": 11, "connectivity": 8 } }
+{ "mask": { "x": 4, "y": 8, "rows": [".111.", "11111", ".111."] } }
 { "opaqueBounds": true }
 ```
 
@@ -196,6 +412,9 @@ Regions are one of:
 when inspection proves it is one component. A rectangle preserves transparent
 space inside its bounds. `opaqueBounds` crops the frame to its overall opaque
 bounds and therefore may include unrelated components.
+`mask` carries an exact arbitrary pixel selection, including a mask produced by
+SAM or loaded from the named-selection API. Its rows contain only `1` (selected)
+and `.` (unselected), and its `x`/`y` are source-frame pixel coordinates.
 
 Transforms accept clockwise `rotate` degrees and independent `scaleX` /
 `scaleY`; negative scale mirrors. Scale, mirror, and rotation are performed in
@@ -204,6 +423,11 @@ center is the pivot. `to.x` and `to.y` place the **top-left of the transformed
 output bounding box**, not its opaque bounds, grip, or pivot. Calculate scale
 from the target/source axis-length ratio, rotation from their axis-angle
 difference, then calculate translation separately.
+
+Use `frame.translate` when an approved frame is correct internally but its
+whole pose is offset on the shared canvas. It translates every layer by an
+integer pixel-grid `dx` / `dy`, moves all frame anchors by the corresponding
+logical distance, performs no resampling, and aborts instead of clipping.
 
 For that recurring calculation, prefer `frame.copyAligned`. Give it two
 control points in source-frame pixel coordinates and the two corresponding
@@ -236,14 +460,28 @@ points in destination-frame pixel coordinates:
 ```
 
 The operation derives one uniform scale (so pose-dependent sword length is
-handled), clockwise rotation, and integer-grid placement. Both source points
-must lie inside the extracted region. The result reports the derived transform,
-ideal and raster placements, mapped endpoints, and endpoint error. It aborts
-atomically when integer placement exceeds `maxEndpointError` (default 0.75px),
-so a bounding-box origin can no longer be mistaken for the grip without being
-visible in the command evidence. This proves the control-point alignment; the
-real composite preview remains the final check for silhouettes, occlusion, and
-incorrectly chosen points.
+handled), clockwise rotation, and grid placement. Both source points must lie
+inside the extracted region. A fractional ideal placement is preserved as an
+inverse-sampling phase instead of being rounded away, preserving the requested
+control-point geometry during rasterization. This does not authorize a
+fractional composite draw origin: sprite-backed attachments are separately
+snapped to the body sprite's authored-pixel lattice by the renderer. The result reports the derived transform,
+ideal and raster placements, `samplingPhase`, mapped endpoints, and endpoint
+error. It aborts atomically when endpoint error exceeds `maxEndpointError`
+(default 0.000001px), so a bounding-box origin can no longer be mistaken for
+the grip without being visible in the command evidence. This proves the
+control-point alignment; the real composite preview remains the final check
+for silhouettes, occlusion, and incorrectly chosen points.
+
+When the target frame already has an approved silhouette but needs material
+detail from a pristine source, use `frame.projectAligned` with the same two
+axes. It samples the once-transformed source texture only into pixels that are
+already opaque in the target layer. Pixels just outside the transformed source
+raster use the nearest transformed source sample, while target-transparent
+pixels remain transparent. The result reports direct and nearest-sample counts;
+the target pixel count, bounds, and anchors must remain unchanged. This is the
+preferred operation for recoloring a frame-aligned weapon patch without
+replacing its pose-specific geometry.
 
 Colors are `#RRGGBB` or `#RRGGBBAA`; `null` is transparent. Cross-document
 copy allocates exact destination palette entries by default. A full palette is
@@ -335,7 +573,8 @@ agent-sprite open <sprite.json> [--force]
 agent-sprite state [--full]
 agent-sprite inspect [animation] [display-frame|range] [layer-id]
 agent-sprite run <transaction.json> [--dry-run] [--full]
-agent-sprite preview <output.png>
+agent-sprite preview <output.png> [--animation <name> --frame <display-frame>]
+agent-sprite canvas <output.png> --animation <name> --frame <display-frame>
 agent-sprite comparison <output.png>
 agent-sprite save [sprite.json]
 ```

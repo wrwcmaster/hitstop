@@ -261,7 +261,7 @@ curl -X POST localhost:8791/scenario -d '{
 Or pass `scenario` on `POST /session` to do it in one call. Fields:
 `room` (a registered id) or `roomDef` (a full inline RoomDef);
 `player.{x,y,give,equip,gold,hp}`; `spawn: [{type,x,y,props}]`. Unknown
-item/monster ids are skipped, not fatal. A scenario is a normal run — it
+item/monster ids are rejected before the current world changes. A scenario is a normal run — it
 records and `npm run replay`s exactly like any other.
 
 State is JSON: scene stack, `dialogue` flag (keep tapping confirm while

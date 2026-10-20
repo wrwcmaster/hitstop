@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const PALETTE_CHARS =
-  '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#@$%&*+=!?~^;:,<>[]{}()_-|`';
+  '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#@$%&*+=!?~^;:,<>[]{}()_-|`'
+  + Array.from({ length: 1024 }, (_, index) => String.fromCharCode(0x0100 + index)).join('');
 
 function usageOf(anim) {
   const usage = new Map();
@@ -58,7 +59,31 @@ function dimensions(anim, label) {
   return { width, height };
 }
 
-const [targetArg, sourceArg, animName = 'run'] = process.argv.slice(2);
+function animationFrames(file, name) {
+  const entry = file.anims?.[name];
+  if (!entry || typeof entry === 'string') return null;
+  if (Array.isArray(entry.frames)) return entry.frames;
+  const layer = file.layers?.find((candidate) => candidate.tracks?.[name]);
+  return layer?.tracks?.[name] ?? null;
+}
+
+function sizeOfFrames(frames, label) {
+  return dimensions({ frames }, label);
+}
+
+function padFrames(frames, sourceSize, targetSize) {
+  if (sourceSize.width > targetSize.width || sourceSize.height > targetSize.height) {
+    throw new Error(`source ${sourceSize.width}x${sourceSize.height} exceeds target ${targetSize.width}x${targetSize.height}`);
+  }
+  const left = Math.floor((targetSize.width - sourceSize.width) / 2);
+  const top = targetSize.height - sourceSize.height;
+  return frames.map((frame) => Array.from({ length: targetSize.height }, (_, y) => {
+    if (y < top || y >= top + sourceSize.height) return '.'.repeat(targetSize.width);
+    return '.'.repeat(left) + frame[y - top] + '.'.repeat(targetSize.width - left - sourceSize.width);
+  }));
+}
+
+const [targetArg, sourceArg, animName = 'run', referenceAnim = 'run'] = process.argv.slice(2);
 if (!targetArg || !sourceArg) {
   throw new Error('usage: node tools/merge-sprite-animation.mjs <target.json> <source.json> [animation]');
 }
@@ -70,20 +95,10 @@ const source = JSON.parse(fs.readFileSync(sourcePath, 'utf8'));
 const sourceAnim = source.anims?.[animName];
 const sourceSize = dimensions(sourceAnim, `source ${animName}`);
 
-const preservedUsage = new Map();
-for (const [name, anim] of Object.entries(target.anims ?? {})) {
-  if (name === animName) continue;
-  for (const [ch, count] of usageOf(anim)) {
-    preservedUsage.set(ch, (preservedUsage.get(ch) ?? 0) + count);
-  }
-}
-
-const outputPalette = {};
-for (const ch of PALETTE_CHARS) {
-  if (!preservedUsage.has(ch)) continue;
-  if (!target.palette?.[ch]) throw new Error(`preserved palette key ${ch} is missing`);
-  outputPalette[ch] = target.palette[ch].toLowerCase();
-}
+const outputPalette = Object.fromEntries(Object.entries(target.palette ?? {}).map(([ch, color]) => [
+  ch,
+  typeof color === 'string' ? color.toLowerCase() : color,
+]));
 
 const preservedColors = Object.entries(outputPalette).map(([ch, color]) => ({ ch, color }));
 const sourceUsage = usageOf(sourceAnim);
@@ -94,35 +109,14 @@ const sourceEntries = [...sourceUsage].map(([sourceChar, count]) => ({
 }));
 for (const entry of sourceEntries) rgb(entry.color);
 
-// Exact matches cost no new key. For the rare case where the two animations
-// together exceed the one-character key space, discard the source swatches
-// whose weighted nearest-neighbour error is smallest. This keeps frequently
-// used silhouette and material colors stable while collapsing tiny highlights.
+// Exact matches cost no new key. New colors always receive a fresh key: an
+// authored animation import must never silently quantize its material ramp.
 const exactMap = new Map();
-let remaining = sourceEntries.filter((entry) => {
+const remaining = sourceEntries.filter((entry) => {
   const exact = preservedColors.find((candidate) => candidate.color === entry.color);
   if (exact) exactMap.set(entry.sourceChar, exact.ch);
   return !exact;
 });
-const availableSlots = PALETTE_CHARS.length - Object.keys(outputPalette).length;
-const removed = [];
-while (remaining.length > availableSlots) {
-  let bestIndex = -1;
-  let bestScore = Number.POSITIVE_INFINITY;
-  for (let i = 0; i < remaining.length; i++) {
-    const alternatives = [
-      ...preservedColors,
-      ...remaining.filter((_, index) => index !== i),
-    ];
-    const match = nearest(remaining[i].color, alternatives);
-    const score = remaining[i].count * match.distance;
-    if (score < bestScore) {
-      bestIndex = i;
-      bestScore = score;
-    }
-  }
-  removed.push(remaining.splice(bestIndex, 1)[0]);
-}
 
 const sourceMap = new Map(exactMap);
 for (const entry of remaining) {
@@ -135,20 +129,45 @@ for (const entry of remaining) {
   sourceMap.set(entry.sourceChar, ch);
 }
 
-const outputColors = Object.entries(outputPalette).map(([ch, color]) => ({ ch, color }));
-for (const entry of removed) {
-  sourceMap.set(entry.sourceChar, nearest(entry.color, outputColors).ch);
-}
-
-const remappedFrames = sourceAnim.frames.map((frame) => frame.map((row) =>
+let remappedFrames = sourceAnim.frames.map((frame) => frame.map((row) =>
   [...row].map((ch) => ch === '.' ? ch : sourceMap.get(ch) ?? (() => {
     throw new Error(`source frame references unmapped palette key ${ch}`);
   })()).join(''),
 ));
 
 target.palette = outputPalette;
-target.anims[animName] = { ...sourceAnim, frames: remappedFrames };
-dimensions(target.anims[animName], `merged ${animName}`);
+if (Array.isArray(target.layers)) {
+  const referenceFrames = animationFrames(target, referenceAnim)
+    ?? animationFrames(target, Object.keys(target.anims ?? {}).find((name) => animationFrames(target, name)));
+  if (!referenceFrames) throw new Error('layered target has no authored reference frames');
+  const targetSize = sizeOfFrames(referenceFrames, `target ${referenceAnim}`);
+  remappedFrames = padFrames(remappedFrames, sourceSize, targetSize);
+  target.anims[animName] = {
+    fps: sourceAnim.fps,
+    frameCount: remappedFrames.length,
+    ...(sourceAnim.loop === undefined ? {} : { loop: sourceAnim.loop }),
+  };
+  const blank = Array.from({ length: targetSize.height }, () => '.'.repeat(targetSize.width));
+  target.layers.forEach((layer, index) => {
+    (layer.tracks ??= {})[animName] = index === 0
+      ? remappedFrames
+      : remappedFrames.map(() => [...blank]);
+  });
+  for (const tracks of Object.values(target.anchors ?? {})) {
+    if (Array.isArray(tracks?.[animName])) continue;
+    const points = tracks?.[referenceAnim];
+    if (!Array.isArray(points) || !points.length) continue;
+    tracks[animName] = Array.from({ length: remappedFrames.length }, (_, index) => ({
+      ...points[index % points.length],
+    }));
+  }
+  if (target.animationHitboxOffsets?.[referenceAnim] && !target.animationHitboxOffsets?.[animName]) {
+    (target.animationHitboxOffsets ??= {})[animName] = { ...target.animationHitboxOffsets[referenceAnim] };
+  }
+} else {
+  target.anims[animName] = { ...sourceAnim, frames: remappedFrames };
+}
+sizeOfFrames(remappedFrames, `merged ${animName}`);
 
 // Keep attachment tracks structurally valid when an approved replacement has
 // a different frame count. Existing points retain their authored order; a
@@ -171,11 +190,7 @@ console.log(JSON.stringify({
   preservedColors: preservedColors.length,
   sourceColors: sourceEntries.length,
   exactMatches: exactMap.size,
-  mergedColors: removed.map((entry) => ({
-    source: entry.color,
-    pixels: entry.count,
-    mappedTo: outputPalette[sourceMap.get(entry.sourceChar)],
-  })),
+  mergedColors: [],
   outputColors: Object.keys(outputPalette).length,
   adjustedAnchorTracks,
 }, null, 2));

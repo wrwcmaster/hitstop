@@ -49,6 +49,7 @@ export interface SpriteAgentRect {
 export type SpriteAgentRegion =
   | { rect: SpriteAgentRect }
   | { componentAt: { x: number; y: number; connectivity?: 4 | 8 } }
+  | { mask: { x: number; y: number; rows: string[] } }
   | { opaqueBounds: true };
 
 export interface SpriteAgentTransform {
@@ -105,6 +106,14 @@ export type SpriteAgentCommand =
     to: number;
   }
   | {
+    op: 'frame.translate';
+    animation: string;
+    frame: number;
+    /** Pixel-grid displacement; all layers and attachment anchors move together. */
+    dx: number;
+    dy: number;
+  }
+  | {
     op: 'frame.clear';
     target: SpriteAgentFrameRef & { layerId?: string | '*' };
     region?: SpriteAgentRegion;
@@ -131,9 +140,23 @@ export type SpriteAgentCommand =
     sourceAxis: SpriteAgentAxis;
     /** Destination-frame pixel coordinates. Both endpoints are aligned by one uniform transform. */
     targetAxis: SpriteAgentAxis;
-    /** Defaults to 0.75px, the maximum error introduced by integer-grid placement. */
+    /** Defaults to 0.000001px; fractional placement is preserved during rasterization. */
     maxEndpointError?: number;
     mode?: 'over' | 'replace';
+    paletteOverflow?: 'error' | 'nearest';
+    colorMap?: Record<string, string | null>;
+  }
+  | {
+    op: 'frame.projectAligned';
+    from: SpriteAgentFrameRef;
+    to: SpriteAgentFrameRef;
+    /** Source pixels used as the texture. */
+    region?: SpriteAgentRegion;
+    /** Restrict projection to existing opaque target pixels in this region. */
+    targetRegion?: SpriteAgentRegion;
+    sourceAxis: SpriteAgentAxis;
+    targetAxis: SpriteAgentAxis;
+    maxEndpointError?: number;
     paletteOverflow?: 'error' | 'nearest';
     colorMap?: Record<string, string | null>;
   }
@@ -250,9 +273,11 @@ export const SPRITE_AGENT_OPERATIONS = [
   'frame.insert',
   'frame.remove',
   'frame.move',
+  'frame.translate',
   'frame.clear',
   'frame.copy',
   'frame.copyAligned',
+  'frame.projectAligned',
   'frame.remapColors',
   'pixel.set',
   'anchor.set',
@@ -285,6 +310,10 @@ const SPRITE_AGENT_COMMAND_REFERENCE = {
     required: ['animation', 'from', 'to'],
     effect: 'Reorder a frame together with all layer and anchor data.',
   },
+  'frame.translate': {
+    required: ['animation', 'frame', 'dx', 'dy'],
+    effect: 'Translate every layer and attachment anchor in one frame without clipping or resampling.',
+  },
   'frame.clear': {
     required: ['target.animation', 'target.frame'],
     optional: ['target.layerId (* means every layer)', 'region'],
@@ -302,6 +331,14 @@ const SPRITE_AGENT_COMMAND_REFERENCE = {
     ],
     optional: ['from.path', 'from.layerId', 'to.layerId', 'region', 'maxEndpointError', 'mode', 'paletteOverflow', 'colorMap'],
     effect: 'Copy pixels with uniform scale, rotation, and placement derived from two source and target control points.',
+  },
+  'frame.projectAligned': {
+    required: [
+      'from.animation', 'from.frame', 'to.animation', 'to.frame',
+      'sourceAxis.start', 'sourceAxis.end', 'targetAxis.start', 'targetAxis.end',
+    ],
+    optional: ['from.path', 'from.layerId', 'to.layerId', 'region', 'targetRegion', 'maxEndpointError', 'paletteOverflow', 'colorMap'],
+    effect: 'Project an aligned source texture into the target frame existing opaque silhouette without changing its geometry.',
   },
   'frame.remapColors': {
     required: ['target.animation', 'target.frame', 'colors'],
@@ -565,6 +602,21 @@ function regionMask(rows: string[], palette: Palette, region?: SpriteAgentRegion
     if (connectivity !== 4 && connectivity !== 8) throw new Error('component connectivity must be 4 or 8');
     return componentMask(rows, palette, region.componentAt.x, region.componentAt.y, connectivity);
   }
+  if ('mask' in region) {
+    const maskRows = region.mask.rows;
+    if (!Array.isArray(maskRows) || !maskRows.length) throw new Error('region.mask.rows must be a non-empty array');
+    const maskWidth = [...maskRows[0]].length;
+    if (!maskWidth || maskRows.some((row) => typeof row !== 'string' || [...row].length !== maskWidth || /[^.1]/u.test(row))) {
+      throw new Error('region.mask.rows must be equal-width strings containing only "." and "1"');
+    }
+    const bounds = validateRect({
+      x: region.mask.x,
+      y: region.mask.y,
+      w: maskWidth,
+      h: maskRows.length,
+    }, size, 'region.mask');
+    return { bounds, mask: maskRows.slice() };
+  }
   const bounds = validateRect(region.rect, size, 'region.rect');
   return { bounds, mask: Array.from({ length: bounds.h }, () => '1'.repeat(bounds.w)) };
 }
@@ -588,6 +640,8 @@ interface ClipTransformGeometry {
   sin: number;
   minX: number;
   minY: number;
+  spanX: number;
+  spanY: number;
   outW: number;
   outH: number;
   sourceW: number;
@@ -616,10 +670,12 @@ function clipTransformGeometry(clip: PixelClip, transform: SpriteAgentTransform 
   const maxX = Math.max(...corners.map((point) => point.x));
   const minY = Math.min(...corners.map((point) => point.y));
   const maxY = Math.max(...corners.map((point) => point.y));
-  const outW = Math.max(1, Math.ceil(maxX - minX - 1e-9));
-  const outH = Math.max(1, Math.ceil(maxY - minY - 1e-9));
+  const spanX = maxX - minX;
+  const spanY = maxY - minY;
+  const outW = Math.max(1, Math.ceil(spanX - 1e-9));
+  const outH = Math.max(1, Math.ceil(spanY - 1e-9));
   if (outW * outH > 1_000_000) throw new Error(`transformed copy is too large (${outW}x${outH})`);
-  return { angle, scaleX, scaleY, cos, sin, minX, minY, outW, outH, sourceW, sourceH };
+  return { angle, scaleX, scaleY, cos, sin, minX, minY, spanX, spanY, outW, outH, sourceW, sourceH };
 }
 
 function transformClipPoint(
@@ -644,19 +700,32 @@ function transformClipPoint(
   };
 }
 
-function transformClip(clip: PixelClip, transform: SpriteAgentTransform = {}): PixelClip {
+function transformClip(
+  clip: PixelClip,
+  transform: SpriteAgentTransform = {},
+  samplingPhase: SpriteAgentPoint = { x: 0, y: 0 },
+): PixelClip {
   const geometry = clipTransformGeometry(clip, transform);
   const {
-    cos, sin, scaleX, scaleY, minX, minY, outW, outH, sourceW, sourceH,
+    cos, sin, scaleX, scaleY, minX, minY, spanX, spanY, sourceW, sourceH,
   } = geometry;
+  const phaseX = finite(samplingPhase.x, 'samplingPhase.x');
+  const phaseY = finite(samplingPhase.y, 'samplingPhase.y');
+  if (phaseX < 0 || phaseX >= 1 || phaseY < 0 || phaseY >= 1) {
+    throw new Error('sampling phase must be in the range [0, 1)');
+  }
+  // Preserve the fractional part of an aligned placement inside the raster.
+  // Rounding it away here causes recurring half-pixel drift after a rescale.
+  const outW = Math.max(1, Math.ceil(spanX + phaseX - 1e-9));
+  const outH = Math.max(1, Math.ceil(spanY + phaseY - 1e-9));
   const rows = Array.from({ length: outH }, () => Array(outW).fill('.'));
   const mask = Array.from({ length: outH }, () => Array(outW).fill('.'));
 
   // One inverse sample applies scale, mirror, and rotation together. Reusing
   // an already transformed raster would compound degradation frame by frame.
   for (let y = 0; y < outH; y++) for (let x = 0; x < outW; x++) {
-    const dx = x + 0.5 + minX;
-    const dy = y + 0.5 + minY;
+    const dx = x + 0.5 - phaseX + minX;
+    const dy = y + 0.5 - phaseY + minY;
     const unrotatedX = dx * cos + dy * sin;
     const unrotatedY = -dx * sin + dy * cos;
     const sx = Math.floor(unrotatedX / scaleX + sourceW / 2);
@@ -670,6 +739,94 @@ function transformClip(clip: PixelClip, transform: SpriteAgentTransform = {}): P
     mask: mask.map((row) => row.join('')),
     palette: clip.palette,
     bounds: { x: 0, y: 0, w: outW, h: outH },
+  };
+}
+
+interface AlignedClip {
+  clip: PixelClip;
+  transform: Required<Pick<SpriteAgentTransform, 'rotate' | 'scaleX' | 'scaleY'>>;
+  placement: { x: number; y: number; idealX: number; idealY: number };
+  samplingPhase: SpriteAgentPoint;
+  mappedAxis: SpriteAgentAxis;
+  endpointError: { start: number; end: number; max: number };
+}
+
+function alignClip(
+  sourceClip: PixelClip,
+  sourceAxis: SpriteAgentAxis,
+  targetAxis: SpriteAgentAxis,
+  requestedMaxEndpointError = 0.000001,
+): AlignedClip {
+  const sourceStart = {
+    x: finite(sourceAxis.start.x, 'sourceAxis.start.x'),
+    y: finite(sourceAxis.start.y, 'sourceAxis.start.y'),
+  };
+  const sourceEnd = {
+    x: finite(sourceAxis.end.x, 'sourceAxis.end.x'),
+    y: finite(sourceAxis.end.y, 'sourceAxis.end.y'),
+  };
+  const targetStart = {
+    x: finite(targetAxis.start.x, 'targetAxis.start.x'),
+    y: finite(targetAxis.start.y, 'targetAxis.start.y'),
+  };
+  const targetEnd = {
+    x: finite(targetAxis.end.x, 'targetAxis.end.x'),
+    y: finite(targetAxis.end.y, 'targetAxis.end.y'),
+  };
+  const sourceDx = sourceEnd.x - sourceStart.x;
+  const sourceDy = sourceEnd.y - sourceStart.y;
+  const targetDx = targetEnd.x - targetStart.x;
+  const targetDy = targetEnd.y - targetStart.y;
+  const sourceLength = Math.hypot(sourceDx, sourceDy);
+  const targetLength = Math.hypot(targetDx, targetDy);
+  if (sourceLength <= 1e-6) throw new Error('sourceAxis endpoints must be distinct');
+  if (targetLength <= 1e-6) throw new Error('targetAxis endpoints must be distinct');
+  const scale = targetLength / sourceLength;
+  const transform = {
+    rotate: (Math.atan2(targetDy, targetDx) - Math.atan2(sourceDy, sourceDx)) * 180 / Math.PI,
+    scaleX: scale,
+    scaleY: scale,
+  };
+  const geometry = clipTransformGeometry(sourceClip, transform);
+  const transformedStart = transformClipPoint(sourceClip, geometry, sourceStart, 'sourceAxis.start');
+  const transformedEnd = transformClipPoint(sourceClip, geometry, sourceEnd, 'sourceAxis.end');
+  const idealX = targetStart.x - transformedStart.x;
+  const idealY = targetStart.y - transformedStart.y;
+  const splitPlacement = (value: number): { integer: number; phase: number } => {
+    const nearest = Math.round(value);
+    if (Math.abs(value - nearest) <= 1e-9) return { integer: nearest, phase: 0 };
+    const integer = Math.floor(value);
+    return { integer, phase: value - integer };
+  };
+  const xPlacement = splitPlacement(idealX);
+  const yPlacement = splitPlacement(idealY);
+  const x = xPlacement.integer;
+  const y = yPlacement.integer;
+  const samplingPhase = { x: xPlacement.phase, y: yPlacement.phase };
+  const clip = transformClip(sourceClip, transform, samplingPhase);
+  const mappedStart = {
+    x: x + transformedStart.x + samplingPhase.x,
+    y: y + transformedStart.y + samplingPhase.y,
+  };
+  const mappedEnd = {
+    x: x + transformedEnd.x + samplingPhase.x,
+    y: y + transformedEnd.y + samplingPhase.y,
+  };
+  const startError = Math.hypot(mappedStart.x - targetStart.x, mappedStart.y - targetStart.y);
+  const endError = Math.hypot(mappedEnd.x - targetEnd.x, mappedEnd.y - targetEnd.y);
+  const endpointError = Math.max(startError, endError);
+  const maxEndpointError = finite(requestedMaxEndpointError, 'maxEndpointError');
+  if (maxEndpointError < 0) throw new Error('maxEndpointError cannot be negative');
+  if (endpointError > maxEndpointError + 1e-9) {
+    throw new Error(`aligned endpoint error ${endpointError.toFixed(4)}px exceeds ${maxEndpointError}px`);
+  }
+  return {
+    clip,
+    transform,
+    placement: { x, y, idealX, idealY },
+    samplingPhase,
+    mappedAxis: { start: mappedStart, end: mappedEnd },
+    endpointError: { start: startError, end: endError, max: endpointError },
   };
 }
 
@@ -825,6 +982,102 @@ function pasteClip(
   };
 }
 
+function projectClipIntoOpaqueTarget(
+  target: ResolvedFrame,
+  clip: PixelClip,
+  placement: { x: number; y: number },
+  targetRegion: SpriteAgentRegion | undefined,
+  overflow: 'error' | 'nearest',
+  colorMap?: Record<string, string | null>,
+): {
+  changedPixels: number;
+  targetPixels: number;
+  directSamples: number;
+  nearestSamples: number;
+  addedColors: number;
+  approximatedColors: number;
+  bounds: SpriteAgentRect | null;
+} {
+  const palette = resolvedPalette(target.file);
+  const region = targetRegion
+    ? regionMask(target.rows, palette, targetRegion)
+    : {
+      bounds: { x: 0, y: 0, w: target.rows[0].length, h: target.rows.length },
+      mask: target.rows.map((row) => '1'.repeat(row.length)),
+    };
+  const samples: Array<{ x: number; y: number; ch: string }> = [];
+  for (let y = 0; y < clip.bounds.h; y++) for (let x = 0; x < clip.bounds.w; x++) {
+    if (clip.mask[y]?.[x] !== '1') continue;
+    const ch = clip.rows[y][x];
+    if (ch !== '.' && clip.palette[ch]) samples.push({ x, y, ch });
+  }
+  if (samples.length === 0) throw new Error('aligned source texture has no opaque pixels');
+
+  const rows = target.rows.map((row) => [...row]);
+  const remap = new Map<string, string>();
+  const touched: SpriteAgentPoint[] = [];
+  let changedPixels = 0;
+  let targetPixels = 0;
+  let directSamples = 0;
+  let nearestSamples = 0;
+  let addedColors = 0;
+  let approximatedColors = 0;
+  for (let y = 0; y < region.bounds.h; y++) for (let x = 0; x < region.bounds.w; x++) {
+    if (region.mask[y]?.[x] !== '1') continue;
+    const tx = region.bounds.x + x;
+    const ty = region.bounds.y + y;
+    if (rows[ty][tx] === '.') continue;
+    targetPixels++;
+    touched.push({ x: tx, y: ty });
+    const sx = tx - placement.x;
+    const sy = ty - placement.y;
+    let source = sx >= 0 && sx < clip.bounds.w && sy >= 0 && sy < clip.bounds.h
+      && clip.mask[sy]?.[sx] === '1' && clip.rows[sy][sx] !== '.'
+      ? { x: sx, y: sy, ch: clip.rows[sy][sx] }
+      : undefined;
+    if (source) {
+      directSamples++;
+    } else {
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (const candidate of samples) {
+        const distance = (candidate.x - sx) ** 2 + (candidate.y - sy) ** 2;
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          source = candidate;
+        }
+      }
+      nearestSamples++;
+    }
+    if (!source) throw new Error(`missing projected source sample at ${tx},${ty}`);
+    const sourceColor = clip.palette[source.ch];
+    if (!sourceColor) throw new Error(`missing projected source color at ${tx},${ty}`);
+    let mapped = remap.get(source.ch);
+    if (!mapped) {
+      const allocated = paletteChar(target.file, mappedSourceColor(sourceColor, colorMap), overflow);
+      mapped = allocated.char;
+      remap.set(source.ch, mapped);
+      if (allocated.added) addedColors++;
+      if (allocated.approximated) approximatedColors++;
+    }
+    if (rows[ty][tx] !== mapped) {
+      rows[ty][tx] = mapped;
+      changedPixels++;
+    }
+  }
+  if (targetPixels === 0) throw new Error('target silhouette has no opaque pixels');
+  setFrameRows(target, rows.map((row) => row.join('')));
+  const bounds = touched.length === 0 ? null : {
+    x: Math.min(...touched.map((point) => point.x)),
+    y: Math.min(...touched.map((point) => point.y)),
+    w: Math.max(...touched.map((point) => point.x)) - Math.min(...touched.map((point) => point.x)) + 1,
+    h: Math.max(...touched.map((point) => point.y)) - Math.min(...touched.map((point) => point.y)) + 1,
+  };
+  return {
+    changedPixels, targetPixels, directSamples, nearestSamples,
+    addedColors, approximatedColors, bounds,
+  };
+}
+
 function clearRows(rows: string[], palette: Palette, region?: SpriteAgentRegion): { rows: string[]; count: number } {
   const { bounds, mask } = region
     ? regionMask(rows, palette, region)
@@ -841,6 +1094,23 @@ function clearRows(rows: string[], palette: Palette, region?: SpriteAgentRegion)
     }
   }
   return { rows: next.map((row) => row.join('')), count };
+}
+
+function translateRows(rows: string[], dx: number, dy: number): string[] {
+  const w = rows[0]?.length ?? 0;
+  const h = rows.length;
+  const next = Array.from({ length: h }, () => Array(w).fill('.'));
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const ch = rows[y][x];
+    if (ch === '.') continue;
+    const tx = x + dx;
+    const ty = y + dy;
+    if (tx < 0 || tx >= w || ty < 0 || ty >= h) {
+      throw new Error(`frame translation ${dx},${dy} would clip opaque pixel ${x},${y}`);
+    }
+    next[ty][tx] = ch;
+  }
+  return next.map((row) => row.join(''));
 }
 
 function ensureLayer(file: SpriteFile, command: Extract<SpriteAgentCommand, { op: 'layer.ensure' }>): SpriteAgentCommandResult {
@@ -995,6 +1265,47 @@ function executeCommand(workspace: SpriteAgentWorkspace, command: SpriteAgentCom
       };
     }
 
+    case 'frame.translate': {
+      const animation = nonEmpty(command.animation, 'animation');
+      if (!(animation in workspace.active.anims)) throw new Error(`unknown animation "${animation}"`);
+      const concreteAnimation = resolveAnimName(workspace.active, animation);
+      const timing = resolveAnimTiming(workspace.active, animation);
+      if (!timing) throw new Error(`animation "${animation}" cannot be resolved`);
+      const frame = integer(command.frame, 'frame');
+      if (frame >= timing.frameCount) throw new Error(`frame ${frame} is outside "${animation}" (0-${timing.frameCount - 1})`);
+      const dx = integer(command.dx, 'dx', -Number.MAX_SAFE_INTEGER);
+      const dy = integer(command.dy, 'dy', -Number.MAX_SAFE_INTEGER);
+      if (isLayeredSpriteFile(workspace.active)) {
+        const translated = workspace.active.layers.map((layer) => {
+          const rows = layer.tracks[concreteAnimation]?.[frame];
+          if (!rows) throw new Error(`missing pixels for ${animation} frame ${frame} layer "${layer.id}"`);
+          return { layer, rows: translateRows(rows, dx, dy) };
+        });
+        for (const entry of translated) entry.layer.tracks[concreteAnimation][frame] = entry.rows;
+      } else {
+        const entry = workspace.active.anims[concreteAnimation];
+        if (!entry || typeof entry === 'string') throw new Error(`animation "${animation}" has no pixels`);
+        entry.frames[frame] = translateRows(entry.frames[frame], dx, dy);
+      }
+      const density = workspace.active.hd === false ? 4 : 1;
+      let movedAnchors = 0;
+      for (const tracks of Object.values(workspace.active.anchors ?? {})) {
+        const point = tracks[concreteAnimation]?.[frame];
+        if (!point) continue;
+        point.x += dx / density;
+        point.y += dy / density;
+        movedAnchors++;
+      }
+      return {
+        result: {
+          op: command.op,
+          changed: dx !== 0 || dy !== 0,
+          detail: { animation, frame, dx, dy, anchorDx: dx / density, anchorDy: dy / density, movedAnchors },
+        },
+        cursor: { animation, frame },
+      };
+    }
+
     case 'frame.clear': {
       let count = 0;
       const target = command.target;
@@ -1036,53 +1347,9 @@ function executeCommand(workspace: SpriteAgentWorkspace, command: SpriteAgentCom
       const source = resolveFrame(workspace, command.from);
       const target = resolveFrame(workspace, command.to, true);
       const sourceClip = extractClip(source, command.region);
-      const sourceStart = {
-        x: finite(command.sourceAxis.start.x, 'sourceAxis.start.x'),
-        y: finite(command.sourceAxis.start.y, 'sourceAxis.start.y'),
-      };
-      const sourceEnd = {
-        x: finite(command.sourceAxis.end.x, 'sourceAxis.end.x'),
-        y: finite(command.sourceAxis.end.y, 'sourceAxis.end.y'),
-      };
-      const targetStart = {
-        x: finite(command.targetAxis.start.x, 'targetAxis.start.x'),
-        y: finite(command.targetAxis.start.y, 'targetAxis.start.y'),
-      };
-      const targetEnd = {
-        x: finite(command.targetAxis.end.x, 'targetAxis.end.x'),
-        y: finite(command.targetAxis.end.y, 'targetAxis.end.y'),
-      };
-      const sourceDx = sourceEnd.x - sourceStart.x;
-      const sourceDy = sourceEnd.y - sourceStart.y;
-      const targetDx = targetEnd.x - targetStart.x;
-      const targetDy = targetEnd.y - targetStart.y;
-      const sourceLength = Math.hypot(sourceDx, sourceDy);
-      const targetLength = Math.hypot(targetDx, targetDy);
-      if (sourceLength <= 1e-6) throw new Error('sourceAxis endpoints must be distinct');
-      if (targetLength <= 1e-6) throw new Error('targetAxis endpoints must be distinct');
-      const scale = targetLength / sourceLength;
-      const rotate = (Math.atan2(targetDy, targetDx) - Math.atan2(sourceDy, sourceDx)) * 180 / Math.PI;
-      const transform = { rotate, scaleX: scale, scaleY: scale };
-      const geometry = clipTransformGeometry(sourceClip, transform);
-      const transformedStart = transformClipPoint(sourceClip, geometry, sourceStart, 'sourceAxis.start');
-      const transformedEnd = transformClipPoint(sourceClip, geometry, sourceEnd, 'sourceAxis.end');
-      const clip = transformClip(sourceClip, transform);
-      const idealX = targetStart.x - transformedStart.x;
-      const idealY = targetStart.y - transformedStart.y;
-      const x = Math.round(idealX);
-      const y = Math.round(idealY);
-      const mappedStart = { x: x + transformedStart.x, y: y + transformedStart.y };
-      const mappedEnd = { x: x + transformedEnd.x, y: y + transformedEnd.y };
-      const startError = Math.hypot(mappedStart.x - targetStart.x, mappedStart.y - targetStart.y);
-      const endError = Math.hypot(mappedEnd.x - targetEnd.x, mappedEnd.y - targetEnd.y);
-      const endpointError = Math.max(startError, endError);
-      const maxEndpointError = finite(command.maxEndpointError ?? 0.75, 'maxEndpointError');
-      if (maxEndpointError < 0) throw new Error('maxEndpointError cannot be negative');
-      if (endpointError > maxEndpointError + 1e-9) {
-        throw new Error(`aligned endpoint error ${endpointError.toFixed(4)}px exceeds ${maxEndpointError}px`);
-      }
+      const aligned = alignClip(sourceClip, command.sourceAxis, command.targetAxis, command.maxEndpointError);
       const pasted = pasteClip(
-        target, clip, x, y,
+        target, aligned.clip, aligned.placement.x, aligned.placement.y,
         command.mode ?? 'over', command.paletteOverflow ?? 'error', command.colorMap,
       );
       return {
@@ -1091,13 +1358,43 @@ function executeCommand(workspace: SpriteAgentWorkspace, command: SpriteAgentCom
           changed: pasted.changedPixels > 0,
           detail: {
             sourceBounds: sourceClip.bounds,
-            transform,
-            placement: { x, y, idealX, idealY },
+            transform: aligned.transform,
+            placement: aligned.placement,
+            samplingPhase: aligned.samplingPhase,
             sourceAxis: command.sourceAxis,
             targetAxis: command.targetAxis,
-            mappedAxis: { start: mappedStart, end: mappedEnd },
-            endpointError: { start: startError, end: endError, max: endpointError },
+            mappedAxis: aligned.mappedAxis,
+            endpointError: aligned.endpointError,
             ...pasted,
+          },
+        },
+        cursor: { animation: command.to.animation, frame: command.to.frame, layerId: command.to.layerId },
+      };
+    }
+
+    case 'frame.projectAligned': {
+      const source = resolveFrame(workspace, command.from);
+      const target = resolveFrame(workspace, command.to, true);
+      const sourceClip = extractClip(source, command.region);
+      const aligned = alignClip(sourceClip, command.sourceAxis, command.targetAxis, command.maxEndpointError);
+      const projected = projectClipIntoOpaqueTarget(
+        target, aligned.clip, aligned.placement, command.targetRegion,
+        command.paletteOverflow ?? 'error', command.colorMap,
+      );
+      return {
+        result: {
+          op: command.op,
+          changed: projected.changedPixels > 0,
+          detail: {
+            sourceBounds: sourceClip.bounds,
+            transform: aligned.transform,
+            placement: aligned.placement,
+            samplingPhase: aligned.samplingPhase,
+            sourceAxis: command.sourceAxis,
+            targetAxis: command.targetAxis,
+            mappedAxis: aligned.mappedAxis,
+            endpointError: aligned.endpointError,
+            ...projected,
           },
         },
         cursor: { animation: command.to.animation, frame: command.to.frame, layerId: command.to.layerId },
@@ -1252,7 +1549,10 @@ export function spriteAgentSourcePaths(commands: readonly unknown[]): string[] {
   const paths = new Set<string>();
   for (const command of commands) {
     validateCommandEnvelope(command);
-    if ((command.op === 'frame.copy' || command.op === 'frame.copyAligned') && command.from?.path) {
+    if (
+      (command.op === 'frame.copy' || command.op === 'frame.copyAligned' || command.op === 'frame.projectAligned')
+      && command.from?.path
+    ) {
       paths.add(command.from.path);
     }
   }

@@ -118,7 +118,7 @@ const gh = {
   ],
   props: { music: 'overworld', map: { x: 1, y: 2 } },
   triggers: [
-    { x: 6, y: 472, w: 10, h: 32, event: 'door', once: false, props: { room: 'kingsroad' } },
+    { x: 8, y: 472, w: 8, h: 32, event: 'door', once: false, props: { room: 'kingsroad' } },
     { x: 712, y: 472, w: 8, h: 32, event: 'door', once: false, props: { room: 'cavern', key: 'gate-key', lockedText: 'THE WARDEN HOLDS THE KEY' } },
   ],
 };

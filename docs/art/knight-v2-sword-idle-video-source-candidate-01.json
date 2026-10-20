@@ -1,0 +1,27 @@
+{
+  "source": "Good_based_on_the_attached_im.mp4",
+  "sourceSize": [
+    1280,
+    720
+  ],
+  "times": [
+    2.5,
+    2.75,
+    3,
+    3.25,
+    3.5
+  ],
+  "frameSize": [
+    488,
+    671
+  ],
+  "crop": [
+    361,
+    25,
+    488,
+    671
+  ],
+  "keyColor": "#ff00ff",
+  "animation": "sword-idle",
+  "fps": 4
+}

@@ -2,7 +2,7 @@ import { drawText, frameAt, whiteOf, tintOf, clamp } from '@engine/index';
 import { baseKnight, KNIGHT_TAG_ANIMS } from '../content/sprites';
 import { gearLayers, DEBUG_ANCHORS } from '../content/gear-visuals';
 import { COLORS } from '../content/palette';
-import { IMPACT_DROP_PLUNGE } from '../content/weapons';
+import { IMPACT_DROP_PLUNGE, weaponTypeOf } from '../content/weapons';
 import {
   drawHeldWeaponTag, drawEmbeddedHeldWeaponTag, drawWeaponTrail, drawNeutralTrail, heldWeaponAttachmentSlot,
   heldWeaponGripRenderTag, heldWeaponHands,
@@ -11,7 +11,12 @@ import {
 import { orderedPlayerRenderTags } from '../content/render-tags';
 import { PLAYER_TUNING } from './player-tuning';
 import type { Player } from './player';
-import { facingHitboxX, shouldSuppressHeldWeapon } from './player-render-policy';
+import {
+  bodyAnimationEmbedsHeldObject,
+  facingHitboxX,
+  resolveWeaponBodyAnimation,
+  shouldSuppressHeldWeapon,
+} from './player-render-policy';
 
 /**
  * How the knight is drawn — the whole picture, from body English to the
@@ -95,16 +100,19 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
   if (p.invulnT > 0 && !p.godMode && !p.fsm.is('dead') && Math.floor(p.invulnT * 20) % 2) return;
 
   const set = p.facing === 1 ? p.animSet.right : p.animSet.left;
-  let anim = 'air';
-  if (p.onGround) anim = Math.abs(p.vx) > 8 ? 'run' : 'idle';
-  else if (p.vy < -35 && set.rise) anim = 'rise';
-  else if (p.vy > 45 && set.fall) anim = 'fall';
+  let logicalAnim = 'air';
+  if (p.onGround) logicalAnim = Math.abs(p.vx) > 8 ? 'run' : 'idle';
+  else if (p.vy < -35 && set.rise) logicalAnim = 'rise';
+  else if (p.vy > 45 && set.fall) logicalAnim = 'fall';
+  const weaponType = weaponTypeOf(p.weapon);
+  let anim = resolveWeaponBodyAnimation(weaponType, logicalAnim, (name) => Boolean(set[name]));
   let animT = p.animT;
   const authoredAttack = p.fsm.is('attack') && p.attackDef
     ? set[p.attackDef.animation]
     : undefined;
   if (authoredAttack && p.attackDef) {
     anim = p.attackDef.animation;
+    logicalAnim = anim;
     // Attack timing belongs to the move, not the world's locomotion clock.
     // Spread every authored pose across the move and hold the final frame at 1.
     const progress = clamp(p.fsm.t / p.attackDur, 0, 1);
@@ -208,7 +216,9 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
   const weaponSlot = baseKnight.slot?.(heldWeaponAttachmentSlot(weapon.visual));
   const weaponCtx: HeldWeaponCtx = {
       facing: p.facing,
-      anim,
+      // Body art may replace logical `run` with `sword-run`; the equipment
+      // patch remains named `run` and follows the resolved body's anchors.
+      anim: logicalAnim,
       frame: frameIdx,
       animT,
       bodyW: dw,
@@ -258,7 +268,7 @@ export function renderPlayer(p: Player, g: CanvasRenderingContext2D): void {
   // case the body stays on locomotion art, so the ordinary held weapon must
   // remain visible. Suppress it only when this body actually supplied the
   // authored attack frames selected above.
-  const embeddedHeldObject = shouldSuppressHeldWeapon(
+  const embeddedHeldObject = bodyAnimationEmbedsHeldObject(weaponType, logicalAnim, anim) || shouldSuppressHeldWeapon(
     p.attackDef?.embeddedHeldObject,
     Boolean(authoredAttack),
   );
