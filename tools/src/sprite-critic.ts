@@ -97,6 +97,8 @@ export interface SpriteCriticOptions {
   expectedAnims?: string[];
   /** Expected physics hitbox dimensions `{ w, h }` from the game actor definition. */
   expectedHitboxSize?: { w: number; h: number };
+  /** Whether intentional multi-part silhouettes (e.g. a weapon pommel separated from the blade by the wielder's hand holdout) should suppress `fill-pinch` warnings while still flagging <=2px orphan speckles. */
+  allowMultiPartFill?: boolean;
 }
 
 export interface SpriteCriticReport {
@@ -133,6 +135,17 @@ function parseHexRgb(hex: string): [number, number, number] | null {
   const b = Number.parseInt(clean.slice(4, 6), 16);
   if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return null;
   return [r, g, b];
+}
+
+function parseHexRgba(hex: string): [number, number, number, number] | null {
+  const clean = hex.replace(/^#/, '');
+  if (clean.length < 6) return null;
+  const r = Number.parseInt(clean.slice(0, 2), 16);
+  const g = Number.parseInt(clean.slice(2, 4), 16);
+  const b = Number.parseInt(clean.slice(4, 6), 16);
+  const a = clean.length >= 8 ? Number.parseInt(clean.slice(6, 8), 16) : 255;
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b) || Number.isNaN(a)) return null;
+  return [r, g, b, a];
 }
 
 function compositeAnimFrames(file: SpriteFile, animName: string): string[][] {
@@ -397,7 +410,9 @@ function analyzeInteriorPinholes(rows: string[], gridW: number, gridH: number): 
           queue.push(nIdx);
         }
       }
-      holes.push({ size, minX, minY, maxX, maxY });
+      if (size <= 24) {
+        holes.push({ size, minX, minY, maxX, maxY });
+      }
     }
   }
   return holes;
@@ -503,13 +518,18 @@ export function critiqueSpriteFile(
   const nearDuplicateColors: SpriteCriticReport['nearDuplicateColors'] = [];
   for (let i = 0; i < paletteEntries.length; i++) {
     const [charA, hexA] = paletteEntries[i];
-    const rgbA = parseHexRgb(hexA);
-    if (!rgbA) continue;
+    const rgbaA = parseHexRgba(hexA);
+    if (!rgbaA) continue;
     for (let j = i + 1; j < paletteEntries.length; j++) {
       const [charB, hexB] = paletteEntries[j];
-      const rgbB = parseHexRgb(hexB);
-      if (!rgbB) continue;
-      const dist = Math.hypot(rgbA[0] - rgbB[0], rgbA[1] - rgbB[1], rgbA[2] - rgbB[2]);
+      const rgbaB = parseHexRgba(hexB);
+      if (!rgbaB) continue;
+      const dist = Math.hypot(
+        rgbaA[0] - rgbaB[0],
+        rgbaA[1] - rgbaB[1],
+        rgbaA[2] - rgbaB[2],
+        rgbaA[3] - rgbaB[3],
+      );
       if (dist < minColorDistance) {
         nearDuplicateColors.push({ charA, hexA, charB, hexB, distance: round2(dist) });
       }
@@ -649,8 +669,11 @@ export function critiqueSpriteFile(
       const maxComponents = opts.maxComponents ?? 1;
       const components = analyzeComponents(rows, gridW, gridH);
       const outlineChar = paletteEntries[0]?.[0] ?? '0';
-      const pinched = analyzeFillPinchOffs(rows, gridW, gridH, outlineChar);
-      let orphanSpeckleCount = pinched.filter((c) => c.size <= 2).length;
+      const rawPinched = analyzeFillPinchOffs(rows, gridW, gridH, outlineChar);
+      const pinched = opts.allowMultiPartFill
+        ? rawPinched.filter((c) => c.size <= 2)
+        : rawPinched;
+      let orphanSpeckleCount = rawPinched.filter((c) => c.size <= 2).length;
       if (components.length > 1) {
         const mainComp = components[0];
         for (let c = 1; c < components.length; c++) {
@@ -660,7 +683,7 @@ export function critiqueSpriteFile(
           }
         }
       }
-      if (components.length > maxComponents || pinched.length > 0) {
+      if (components.length > maxComponents || pinched.length > 0 || orphanSpeckleCount > 0) {
         const detachedList = [
           ...components.slice(maxComponents).map((c) => `silhouette:${c.size}px@(${c.minX},${c.minY})`),
           ...pinched.map((c) => `fill-pinch:${c.size}px@(${c.minX},${c.minY})`),
@@ -896,21 +919,35 @@ function classifyHexFamily(hex: string | undefined | null): MaterialFamily {
 export function compareSpriteToReference(
   candidate: SpriteFile,
   reference: SpriteFile,
-  animsToCompare: string[] = ['idle', 'run'],
+  animsToCompare?: string[],
 ): ReferenceParityReport {
   const candDensity = candidate.hd !== false ? 1 : 4;
   const refDensity = reference.hd !== false ? 1 : 4;
+
+  const inferLogicalSize = (file: SpriteFile, density: number): { w: number; h: number } => {
+    for (const animName of Object.keys(file.anims)) {
+      const frames = compositeAnimFrames(file, animName);
+      if (frames.length > 0 && frames[0].length > 0) {
+        return { w: frames[0][0].length / density, h: frames[0].length / density };
+      }
+    }
+    return { w: file.w ?? 16, h: file.h ?? 16 };
+  };
+
+  const candSize = inferLogicalSize(candidate, candDensity);
+  const refSize = inferLogicalSize(reference, refDensity);
+
   const candHb = {
     x: candidate.hitbox?.x ?? 0,
     y: candidate.hitbox?.y ?? 0,
-    w: candidate.hitbox?.w ?? candidate.w ?? 16,
-    h: candidate.hitbox?.h ?? candidate.h ?? 16,
+    w: candidate.hitbox?.w ?? candidate.w ?? candSize.w,
+    h: candidate.hitbox?.h ?? candidate.h ?? candSize.h,
   };
   const refHb = {
     x: reference.hitbox?.x ?? 0,
     y: reference.hitbox?.y ?? 0,
-    w: reference.hitbox?.w ?? reference.w ?? 16,
-    h: reference.hitbox?.h ?? reference.h ?? 16,
+    w: reference.hitbox?.w ?? reference.w ?? refSize.w,
+    h: reference.hitbox?.h ?? reference.h ?? refSize.h,
   };
 
   const candOx = Math.round((candHb.x + candHb.w / 2) * candDensity);
@@ -921,17 +958,21 @@ export function compareSpriteToReference(
   const candPal = candidate.palette ?? {};
   const refPal = reference.palette ?? {};
 
-  // Evaluate over a unified ground-relative sub-pixel window:
-  // dxSub in [-60..+60], hSub in [-16..+112]
-  const minDx = -60, maxDx = 60;
-  const minH = -16, maxH = 112;
+  // Evaluate over a unified ground-relative sub-pixel window covering both character (96x112) and weapon (160x128) sheets:
+  // dxSub in [-85..+85], hSub in [-24..+132]
+  const minDx = -85, maxDx = 85;
+  const minH = -24, maxH = 132;
   const winW = maxDx - minDx + 1;
   const winH = maxH - minH + 1;
+
+  const resolvedAnims = animsToCompare ?? Object.keys(reference.anims).filter(
+    (k) => typeof reference.anims[k] !== 'string' && k in candidate.anims && typeof candidate.anims[k] !== 'string',
+  );
 
   const animReports: Record<string, AnimParityMetrics> = {};
   let totalIoU = 0, totalTolIoU = 0, totalMat = 0, totalDetail = 0, totalFrames = 0;
 
-  for (const animName of animsToCompare) {
+  for (const animName of resolvedAnims) {
     const candFrames = compositeAnimFrames(candidate, animName);
     const refFrames = compositeAnimFrames(reference, animName);
     const count = Math.min(candFrames.length, refFrames.length);
@@ -1079,7 +1120,7 @@ export function compareSpriteToReference(
           }
         }
         const silIoU = regUnion > 0 ? round2(regInter / regUnion) : 1;
-        const matRatio = regInter > 0 ? round2(regMat / regInter) : 0;
+        const matRatio = regUnion === 0 ? 1 : regInter > 0 ? round2(regMat / regInter) : 0;
         const transRatio = rTrans > 0 ? round2(Math.min(cTrans, rTrans) / Math.max(cTrans, rTrans)) : 1;
         const detailParity = round2(silIoU * 0.45 + matRatio * 0.3 + transRatio * 0.25);
         return {
@@ -1162,3 +1203,275 @@ export function compareSpriteToReference(
     animations: animReports,
   };
 }
+
+/* ---------------- Equipment Composite Critic ---------------- */
+
+export interface EquipmentCompositeFrameMetrics {
+  frame: number;
+  bodyPixels: number;
+  weaponPixels: number;
+  compositePixels: number;
+  componentCount: number;
+  handAnchor: SpriteAnchor | null;
+  gripAnchor: SpriteAnchor | null;
+  silhouetteIoUWithRef: number | null;
+}
+
+export interface EquipmentCompositeAnimMetrics {
+  label: string;
+  bodyAnim: string;
+  weaponAnim: string;
+  embeddedHeldObject: boolean;
+  frameCount: number;
+  meanSilhouetteIoUWithRef: number | null;
+  frames: EquipmentCompositeFrameMetrics[];
+}
+
+export interface EquipmentCompositeCriticReport {
+  passed: boolean;
+  score: number;
+  errorCount: number;
+  warnCount: number;
+  overallSilhouetteIoUWithRef: number | null;
+  animations: Record<string, EquipmentCompositeAnimMetrics>;
+  issues: SpriteCriticIssue[];
+}
+
+/**
+ * Evaluates a character `bodyFile` + equipment `weaponFile` composite using the exact
+ * runtime `frontHand` ↔ `grip` socket snapping and optional reference parity against
+ * `(refBodyFile, refWeaponFile)`.
+ */
+export function critiqueEquipmentComposite(
+  bodyFile: SpriteFile,
+  weaponFile: SpriteFile,
+  refBodyFile?: SpriteFile,
+  refWeaponFile?: SpriteFile,
+): EquipmentCompositeCriticReport {
+  const specs: Array<{ label: string; bodyAnim: string; weaponAnim: string; embeddedHeldObject: boolean }> = [
+    { label: 'sword-idle', bodyAnim: 'sword-idle', weaponAnim: 'idle', embeddedHeldObject: true },
+    { label: 'sword-run', bodyAnim: 'sword-run', weaponAnim: 'run', embeddedHeldObject: true },
+    { label: 'attack', bodyAnim: 'attack', weaponAnim: 'attack', embeddedHeldObject: true },
+    { label: 'attack2', bodyAnim: 'attack2', weaponAnim: 'attack2', embeddedHeldObject: true },
+    { label: 'attack3', bodyAnim: 'attack3', weaponAnim: 'attack3', embeddedHeldObject: true },
+    { label: 'rise', bodyAnim: 'rise', weaponAnim: 'idle', embeddedHeldObject: false },
+    { label: 'fall', bodyAnim: 'fall', weaponAnim: 'idle', embeddedHeldObject: false },
+  ];
+
+  const density = bodyFile.hd !== false ? 1 : 4;
+  const cellW = 160;
+  const cellH = 168;
+
+  const issues: SpriteCriticIssue[] = [];
+  const animations: Record<string, EquipmentCompositeAnimMetrics> = {};
+  let totalIoU = 0;
+  let totalIoUFrames = 0;
+
+  const resolveRuntimeWeaponAnim = (wFile: SpriteFile, weaponAnim: string): string => {
+    if (weaponAnim in wFile.anims) return weaponAnim;
+    const isAttack = weaponAnim === 'attack' || weaponAnim.startsWith('attack');
+    if (isAttack && 'attack' in wFile.anims) return 'attack';
+    if ('idle' in wFile.anims) return 'idle';
+    return Object.keys(wFile.anims)[0] ?? weaponAnim;
+  };
+
+  const stampComposite = (
+    bFile: SpriteFile,
+    wFile: SpriteFile,
+    bodyAnim: string,
+    weaponAnim: string,
+    embeddedHeldObject: boolean,
+    frameIdx: number,
+  ): {
+    rows: string[];
+    bodyPixels: number;
+    weaponPixels: number;
+    compositePixels: number;
+    hand: SpriteAnchor | null;
+    grip: SpriteAnchor | null;
+  } => {
+    const resolvedBodyAnim = bodyAnim in bFile.anims ? bodyAnim : 'idle';
+    const resolvedWeaponAnim = resolveRuntimeWeaponAnim(wFile, weaponAnim);
+    const bFrames = compositeAnimFrames(bFile, resolvedBodyAnim);
+    const wFrames = compositeAnimFrames(wFile, resolvedWeaponAnim);
+    const bRows = bFrames[frameIdx % Math.max(1, bFrames.length)] ?? [];
+    const wRows = wFrames[frameIdx % Math.max(1, wFrames.length)] ?? [];
+    const bodyTexelW = bRows[0]?.length ?? 160;
+    const bodyTexelH = bRows.length || 110;
+    const hand = bFile.anchors?.frontHand?.[resolvedBodyAnim]?.[frameIdx % Math.max(1, bFrames.length)] ?? null;
+    const authoredGrip = wFile.anchors?.grip?.[resolvedWeaponAnim]?.[frameIdx % Math.max(1, wFrames.length)] ?? null;
+    const legacyOrigin = (wFile as { origin?: { x: number; y: number } }).origin ?? { x: 16, y: 15.5 };
+
+    const grid: string[][] = Array.from({ length: cellH }, () => Array.from({ length: cellW }, () => '.'));
+    let bodyPixels = 0;
+    for (let y = 0; y < bRows.length; y++) {
+      const row = bRows[y];
+      for (let x = 0; x < row.length; x++) {
+        const ch = row[x];
+        if (ch !== '.' && ch !== ' ') {
+          bodyPixels++;
+          if (x >= 0 && x < cellW && y >= 0 && y < cellH) {
+            grid[y][x] = 'B';
+          }
+        }
+      }
+    }
+
+    let weaponPixels = 0;
+    const dx = hand && authoredGrip
+      ? Math.round((hand.x - authoredGrip.x) * density)
+      : Math.round((bodyTexelW / (2 * density) - legacyOrigin.x) * density);
+    const dy = hand && authoredGrip
+      ? Math.round((hand.y - authoredGrip.y) * density)
+      : Math.round((bodyTexelH / density - legacyOrigin.y) * density);
+    for (let y = 0; y < wRows.length; y++) {
+      const row = wRows[y];
+      for (let x = 0; x < row.length; x++) {
+        const ch = row[x];
+        if (ch !== '.' && ch !== ' ') {
+          weaponPixels++;
+          const gx = dx + x;
+          const gy = dy + y;
+          if (gx >= 0 && gx < cellW && gy >= 0 && gy < cellH) {
+            grid[gy][gx] = 'W';
+          }
+        }
+      }
+    }
+
+    // Procedural leather grip (`drawGrip` in player-render.ts) when !embeddedHeldObject
+    if (!embeddedHeldObject && hand && authoredGrip) {
+      const hx = Math.round(hand.x * density);
+      const hy = Math.round(hand.y * density);
+      for (let gy = hy - 3; gy <= hy + 2; gy++) {
+        for (let gx = hx - 3; gx <= hx + 2; gx++) {
+          if (gx >= 0 && gx < cellW && gy >= 0 && gy < cellH) {
+            grid[gy][gx] = 'G';
+          }
+        }
+      }
+    }
+
+    let compositePixels = 0;
+    const rows = grid.map((r) => {
+      for (let x = 0; x < r.length; x++) {
+        if (r[x] !== '.') compositePixels++;
+      }
+      return r.join('');
+    });
+
+    return { rows, bodyPixels, weaponPixels, compositePixels, hand, grip: authoredGrip ?? legacyOrigin };
+  };
+
+  for (const spec of specs) {
+    const resolvedWeaponAnim = resolveRuntimeWeaponAnim(weaponFile, spec.weaponAnim);
+    const bFrames = compositeAnimFrames(bodyFile, spec.bodyAnim);
+    const wFrames = compositeAnimFrames(weaponFile, resolvedWeaponAnim);
+    const count = spec.weaponAnim === 'plunge' ? wFrames.length : bFrames.length;
+    if (count === 0) continue;
+    if (wFrames.length === 0) {
+      issues.push({
+        code: 'missing-expected-anim',
+        severity: 'error',
+        animation: spec.label,
+        message: `Weapon sprite has no frames for "${spec.weaponAnim}" (resolved to "${resolvedWeaponAnim}") in composite "${spec.label}".`,
+        suggestion: `Define "${spec.weaponAnim}" or a fallback "idle" track on the weapon sprite.`,
+      });
+    }
+
+    const frameReports: EquipmentCompositeFrameMetrics[] = [];
+    let animIoUSum = 0;
+    let animIoUCount = 0;
+
+    for (let f = 0; f < count; f++) {
+      const cand = stampComposite(bodyFile, weaponFile, spec.bodyAnim, resolvedWeaponAnim, spec.embeddedHeldObject, f);
+      if (!cand.hand) {
+        issues.push({
+          code: 'anchor-out-of-reach',
+          severity: 'error',
+          animation: spec.label,
+          frame: f,
+          message: `Missing body frontHand anchor for ${spec.bodyAnim}#${f} in composite "${spec.label}".`,
+          suggestion: `Define sockets.frontHand on "${spec.bodyAnim}" so weapon overlays can snap to the wielder's hand.`,
+        });
+      }
+
+      const comps = analyzeComponents(cand.rows, cellW, cellH);
+      if (comps.length > 1) {
+        const extra = comps.slice(1).map((c) => `${c.size}px@(${c.minX},${c.minY})`).join(', ');
+        issues.push({
+          code: 'disconnected-part',
+          severity: 'warn',
+          animation: spec.label,
+          frame: f,
+          message: `Composite ${spec.label}#${f} has ${comps.length} disconnected components (${extra}) after snapping weapon grip to frontHand.`,
+          suggestion: 'Verify frontHand and weapon grip anchors align so the wielder hand bridges the hilt holdout gap.',
+        });
+      }
+
+      let silIoU: number | null = null;
+      if (refBodyFile && refWeaponFile && (spec.bodyAnim in refBodyFile.anims || spec.weaponAnim === 'plunge')) {
+        const cmpBodyAnim = spec.bodyAnim in refBodyFile.anims ? spec.bodyAnim : 'idle';
+        const candCmp = cmpBodyAnim === spec.bodyAnim
+          ? cand
+          : stampComposite(bodyFile, weaponFile, cmpBodyAnim, resolvedWeaponAnim, spec.embeddedHeldObject, f);
+        const ref = stampComposite(refBodyFile, refWeaponFile, cmpBodyAnim, spec.weaponAnim, spec.embeddedHeldObject, f);
+        let inter = 0;
+        let union = 0;
+        for (let y = 0; y < cellH; y++) {
+          const cRow = candCmp.rows[y];
+          const rRow = ref.rows[y];
+          for (let x = 0; x < cellW; x++) {
+            const cOn = cRow[x] !== '.';
+            const rOn = rRow[x] !== '.';
+            if (cOn || rOn) {
+              union++;
+              if (cOn && rOn) inter++;
+            }
+          }
+        }
+        silIoU = union > 0 ? round2(inter / union) : 1;
+        animIoUSum += silIoU;
+        animIoUCount++;
+        totalIoU += silIoU;
+        totalIoUFrames++;
+      }
+
+      frameReports.push({
+        frame: f,
+        bodyPixels: cand.bodyPixels,
+        weaponPixels: cand.weaponPixels,
+        compositePixels: cand.compositePixels,
+        componentCount: comps.length,
+        handAnchor: cand.hand,
+        gripAnchor: cand.grip,
+        silhouetteIoUWithRef: silIoU,
+      });
+    }
+
+    animations[spec.label] = {
+      label: spec.label,
+      bodyAnim: spec.bodyAnim,
+      weaponAnim: resolvedWeaponAnim,
+      embeddedHeldObject: spec.embeddedHeldObject,
+      frameCount: count,
+      meanSilhouetteIoUWithRef: animIoUCount > 0 ? round2(animIoUSum / animIoUCount) : null,
+      frames: frameReports,
+    };
+  }
+
+  const errorCount = issues.filter((i) => i.severity === 'error').length;
+  const warnCount = issues.filter((i) => i.severity === 'warn').length;
+  const score = Math.max(0, 100 - errorCount * 25 - warnCount * 8);
+
+  return {
+    passed: errorCount === 0 && warnCount === 0,
+    score,
+    errorCount,
+    warnCount,
+    overallSilhouetteIoUWithRef: totalIoUFrames > 0 ? round2(totalIoU / totalIoUFrames) : null,
+    animations,
+    issues,
+  };
+}
+

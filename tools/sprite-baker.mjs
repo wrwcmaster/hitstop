@@ -9,6 +9,7 @@
  *   node tools/sprite-baker.mjs critique <sprite.json>
  *   node tools/sprite-baker.mjs audit [--preview-dir <dir>]
  *   node tools/sprite-baker.mjs sheet <sprite.json> [--preview <file.png>] [--scale <n>] [--no-overlays]
+ *   node tools/sprite-baker.mjs composite <body-rig-or-json> <weapon-rig-or-json> [--preview <file.png>] [--scale <n>] [--no-overlays] [--ref-body <json>] [--ref-weapon <json>]
  */
 import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
@@ -272,6 +273,72 @@ try {
       break;
     }
 
+    case 'composite': {
+      const positionals = [];
+      for (let i = 0; i < args.length; i++) {
+        const a = args[i];
+        if (a.startsWith('--')) {
+          if (['--preview', '--scale', '--ref-body', '--ref-weapon'].includes(a)) i++;
+          continue;
+        }
+        positionals.push(a);
+      }
+      const [bodyArg, weaponArg] = positionals;
+      if (!bodyArg || !weaponArg) {
+        throw new Error('usage: node tools/sprite-baker.mjs composite <body-rig-or-json> <weapon-rig-or-json> [--preview <out.png>] [--scale <n>] [--no-overlays] [--ref-body <json>] [--ref-weapon <json>]');
+      }
+      const loadOrBake = (arg) => {
+        if (rigs[arg]) return baker.bakeSpriteRig(rigs[arg]);
+        return JSON.parse(readFileSync(path.resolve(arg), 'utf8'));
+      };
+      const t0 = performance.now();
+      const bodyFile = loadOrBake(bodyArg);
+      const weaponFile = loadOrBake(weaponArg);
+      const refBodyPath = flagValue('--ref-body', null);
+      const refWeaponPath = flagValue('--ref-weapon', null);
+      const refBodyFile = refBodyPath ? loadOrBake(refBodyPath) : undefined;
+      const refWeaponFile = refWeaponPath ? loadOrBake(refWeaponPath) : undefined;
+
+      const report = critic.critiqueEquipmentComposite(bodyFile, weaponFile, refBodyFile, refWeaponFile);
+      const compositeMs = Math.round((performance.now() - t0) * 10) / 10;
+
+      const previewPng = flagValue('--preview', null);
+      if (previewPng) {
+        const scale = Number(flagValue('--scale', '3')) || 3;
+        const showOverlays = !args.includes('--no-overlays');
+        const sheet = baker.renderEquipmentCompositeSheetRgba(bodyFile, weaponFile, { scale, showOverlays });
+        writeFileSync(path.resolve(previewPng), encodeRgbaPng(sheet.width, sheet.height, sheet.rgba));
+      }
+
+      console.log(JSON.stringify({
+        body: bodyArg,
+        weapon: weaponArg,
+        compositeMs,
+        passed: report.passed,
+        score: report.score,
+        errorCount: report.errorCount,
+        warnCount: report.warnCount,
+        overallSilhouetteIoUWithRef: report.overallSilhouetteIoUWithRef,
+        animations: Object.fromEntries(
+          Object.entries(report.animations).map(([k, v]) => [
+            k,
+            {
+              frameCount: v.frameCount,
+              embeddedHeldObject: v.embeddedHeldObject,
+              meanSilhouetteIoUWithRef: v.meanSilhouetteIoUWithRef,
+            },
+          ]),
+        ),
+        issues: report.issues,
+        ...(previewPng ? { previewPng: path.resolve(previewPng) } : {}),
+      }, null, 2));
+
+      if (args.includes('--strict') && !report.passed) {
+        process.exitCode = 1;
+      }
+      break;
+    }
+
     default:
       console.log(`hitstop 3D-to-2D sprite baker & self-check loop
 
@@ -280,7 +347,8 @@ usage:
   node tools/sprite-baker.mjs bake <rig-id> [--out <sprite.json>] [--preview <sheet.png>] [--scale <n>] [--no-overlays] [--strict]
   node tools/sprite-baker.mjs critique <existing-sprite.json> [--strict]
   node tools/sprite-baker.mjs audit [--preview-dir <dir>]
-  node tools/sprite-baker.mjs sheet <existing-sprite.json> [--preview <sheet.png>] [--scale <n>] [--no-overlays]`);
+  node tools/sprite-baker.mjs sheet <existing-sprite.json> [--preview <sheet.png>] [--scale <n>] [--no-overlays]
+  node tools/sprite-baker.mjs composite <body-rig-or-json> <weapon-rig-or-json> [--preview <sheet.png>] [--scale <n>] [--no-overlays] [--ref-body <json>] [--ref-weapon <json>]`);
   }
 } finally {
   await server.close();
