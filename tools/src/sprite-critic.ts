@@ -1267,6 +1267,14 @@ export function critiqueEquipmentComposite(
   let totalIoU = 0;
   let totalIoUFrames = 0;
 
+  const resolveRuntimeWeaponAnim = (wFile: SpriteFile, weaponAnim: string): string => {
+    if (weaponAnim in wFile.anims) return weaponAnim;
+    const isAttack = weaponAnim === 'attack' || weaponAnim.startsWith('attack');
+    if (isAttack && 'attack' in wFile.anims) return 'attack';
+    if ('idle' in wFile.anims) return 'idle';
+    return Object.keys(wFile.anims)[0] ?? weaponAnim;
+  };
+
   const stampComposite = (
     bFile: SpriteFile,
     wFile: SpriteFile,
@@ -1282,15 +1290,16 @@ export function critiqueEquipmentComposite(
     hand: SpriteAnchor | null;
     grip: SpriteAnchor | null;
   } => {
-    const bFrames = compositeAnimFrames(bFile, bodyAnim in bFile.anims ? bodyAnim : 'idle');
-    const wFrames = compositeAnimFrames(wFile, weaponAnim);
+    const resolvedBodyAnim = bodyAnim in bFile.anims ? bodyAnim : 'idle';
+    const resolvedWeaponAnim = resolveRuntimeWeaponAnim(wFile, weaponAnim);
+    const bFrames = compositeAnimFrames(bFile, resolvedBodyAnim);
+    const wFrames = compositeAnimFrames(wFile, resolvedWeaponAnim);
     const bRows = bFrames[frameIdx % Math.max(1, bFrames.length)] ?? [];
     const wRows = wFrames[frameIdx % Math.max(1, wFrames.length)] ?? [];
     const bodyTexelW = bRows[0]?.length ?? 160;
     const bodyTexelH = bRows.length || 110;
-    const resolvedBodyAnim = bodyAnim in bFile.anims ? bodyAnim : 'idle';
     const hand = bFile.anchors?.frontHand?.[resolvedBodyAnim]?.[frameIdx % Math.max(1, bFrames.length)] ?? null;
-    const authoredGrip = wFile.anchors?.grip?.[weaponAnim]?.[frameIdx % Math.max(1, wFrames.length)] ?? null;
+    const authoredGrip = wFile.anchors?.grip?.[resolvedWeaponAnim]?.[frameIdx % Math.max(1, wFrames.length)] ?? null;
     const legacyOrigin = (wFile as { origin?: { x: number; y: number } }).origin ?? { x: 16, y: 15.5 };
 
     const grid: string[][] = Array.from({ length: cellH }, () => Array.from({ length: cellW }, () => '.'));
@@ -1355,17 +1364,27 @@ export function critiqueEquipmentComposite(
   };
 
   for (const spec of specs) {
+    const resolvedWeaponAnim = resolveRuntimeWeaponAnim(weaponFile, spec.weaponAnim);
     const bFrames = compositeAnimFrames(bodyFile, spec.bodyAnim);
-    const wFrames = compositeAnimFrames(weaponFile, spec.weaponAnim);
+    const wFrames = compositeAnimFrames(weaponFile, resolvedWeaponAnim);
     const count = spec.weaponAnim === 'plunge' ? wFrames.length : bFrames.length;
     if (count === 0) continue;
+    if (wFrames.length === 0) {
+      issues.push({
+        code: 'missing-expected-anim',
+        severity: 'error',
+        animation: spec.label,
+        message: `Weapon sprite has no frames for "${spec.weaponAnim}" (resolved to "${resolvedWeaponAnim}") in composite "${spec.label}".`,
+        suggestion: `Define "${spec.weaponAnim}" or a fallback "idle" track on the weapon sprite.`,
+      });
+    }
 
     const frameReports: EquipmentCompositeFrameMetrics[] = [];
     let animIoUSum = 0;
     let animIoUCount = 0;
 
     for (let f = 0; f < count; f++) {
-      const cand = stampComposite(bodyFile, weaponFile, spec.bodyAnim, spec.weaponAnim, spec.embeddedHeldObject, f);
+      const cand = stampComposite(bodyFile, weaponFile, spec.bodyAnim, resolvedWeaponAnim, spec.embeddedHeldObject, f);
       if (!cand.hand) {
         issues.push({
           code: 'anchor-out-of-reach',
@@ -1395,7 +1414,7 @@ export function critiqueEquipmentComposite(
         const cmpBodyAnim = spec.bodyAnim in refBodyFile.anims ? spec.bodyAnim : 'idle';
         const candCmp = cmpBodyAnim === spec.bodyAnim
           ? cand
-          : stampComposite(bodyFile, weaponFile, cmpBodyAnim, spec.weaponAnim, spec.embeddedHeldObject, f);
+          : stampComposite(bodyFile, weaponFile, cmpBodyAnim, resolvedWeaponAnim, spec.embeddedHeldObject, f);
         const ref = stampComposite(refBodyFile, refWeaponFile, cmpBodyAnim, spec.weaponAnim, spec.embeddedHeldObject, f);
         let inter = 0;
         let union = 0;
@@ -1433,7 +1452,7 @@ export function critiqueEquipmentComposite(
     animations[spec.label] = {
       label: spec.label,
       bodyAnim: spec.bodyAnim,
-      weaponAnim: spec.weaponAnim,
+      weaponAnim: resolvedWeaponAnim,
       embeddedHeldObject: spec.embeddedHeldObject,
       frameCount: count,
       meanSilhouetteIoUWithRef: animIoUCount > 0 ? round2(animIoUSum / animIoUCount) : null,

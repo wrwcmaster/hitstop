@@ -2123,9 +2123,16 @@ export function renderEquipmentCompositeSheetRgba(
     weaponOrigin?: { x: number; y: number };
   } = {},
 ): { width: number; height: number; rgba: Uint8Array } {
-  const specs = (options.anims ?? DEFAULT_SWORD_COMPOSITE_ANIMS).filter(
-    (s) => s.bodyAnim in bodyFile.anims && s.weaponAnim in weaponFile.anims,
-  );
+  const resolveRuntimeWeaponAnim = (wFile: SpriteFile, weaponAnim: string): string => {
+    if (weaponAnim in wFile.anims) return weaponAnim;
+    const isAttack = weaponAnim === 'attack' || weaponAnim.startsWith('attack');
+    if (isAttack && 'attack' in wFile.anims) return 'attack';
+    if ('idle' in wFile.anims) return 'idle';
+    return Object.keys(wFile.anims)[0] ?? weaponAnim;
+  };
+  const specs = (options.anims ?? DEFAULT_SWORD_COMPOSITE_ANIMS)
+    .map((s) => ({ ...s, weaponAnim: resolveRuntimeWeaponAnim(weaponFile, s.weaponAnim) }))
+    .filter((s) => s.bodyAnim in bodyFile.anims && s.weaponAnim in weaponFile.anims);
   if (!specs.length) {
     throw new Error('renderEquipmentCompositeSheetRgba: no matching body/weapon animation pairs');
   }
