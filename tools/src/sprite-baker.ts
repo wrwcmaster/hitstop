@@ -209,6 +209,10 @@ export interface BakerSocketDef {
   pos?: Vec3;
   /** Local direction vector to compute `SpriteAnchor.angle` (defaults to [+1, 0, 0]). */
   dir?: Vec3;
+  /** Optional per-animation/frame exact anchor overrides when matching authored landmarks. */
+  frames?: Record<string, SpriteAnchor[]>;
+  /** Optional animation names for which this socket should be omitted from `anchors`. */
+  omitAnims?: string[];
 }
 
 export interface BakerAnimationDef {
@@ -245,6 +249,8 @@ export interface BakerRigDef {
   /** Feet / root origin in logical pixels from top-left (defaults to `{ x: w / 2, y: h - 1 }`). */
   origin?: { x: number; y: number };
   hitbox?: SpriteGeometry['hitbox'];
+  /** Optional per-animation hitbox offsets matching `SpriteFile.animationHitboxOffsets`. */
+  animationHitboxOffsets?: SpriteFile['animationHitboxOffsets'];
   /** Optional editor metadata such as `{ canEquipWeapon: true }`. */
   editor?: { canEquipWeapon?: boolean };
   /** Camera pitch in degrees (positive tilts camera down to show top surfaces; default 8). */
@@ -833,7 +839,9 @@ function calcAmbientOcclusion(groups: CompiledGroup[], p: Vec3, n: Vec3, filterL
 
 /* ---------------- Palette allocation & Toon shading ---------------- */
 
-const PALETTE_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#@$%&*+=!?~^;:<>[]{}_-|';
+const PALETTE_CHARS =
+  '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#@$%&*+=!?~^;:,<>[]{}()_-|`' +
+  Array.from({ length: 256 }, (_, index) => String.fromCharCode(0x0100 + index)).join('');
 
 const BAYER2X2 = [
   [-0.06, 0.06],
@@ -848,15 +856,24 @@ interface ResolvedPalette {
 function buildRigPalette(rig: BakerRigDef): ResolvedPalette {
   const palette: Record<string, string> = {};
   const hexToChar = new Map<string, string>();
-  const charToRgb = new Map<string, [number, number, number]>();
+  const charToRgba = new Map<string, [number, number, number, number]>();
   let nextIdx = 0;
 
-  const parseRgb = (h: string): [number, number, number] => {
+  const normalizeHex = (h: string): string => {
+    const clean = h.trim().toLowerCase().replace(/^#/, '');
+    if (clean.length === 8 && clean.endsWith('ff')) {
+      return `#${clean.slice(0, 6)}`;
+    }
+    return `#${clean}`;
+  };
+
+  const parseRgba = (h: string): [number, number, number, number] => {
     const clean = h.replace(/^#/, '');
     return [
       Number.parseInt(clean.slice(0, 2), 16) || 0,
       Number.parseInt(clean.slice(2, 4), 16) || 0,
       Number.parseInt(clean.slice(4, 6), 16) || 0,
+      clean.length >= 8 ? Number.parseInt(clean.slice(6, 8), 16) : 255,
     ];
   };
 
@@ -864,16 +881,23 @@ function buildRigPalette(rig: BakerRigDef): ResolvedPalette {
 
   const registerHex = (rawHex: string | undefined | null, allowQuantize = false): string => {
     if (!rawHex) return '.';
-    const hex = rawHex.toLowerCase();
+    const hex = normalizeHex(rawHex);
     const existing = hexToChar.get(hex);
     if (existing) return existing;
-    const rgb = parseRgb(hex);
+    const rgba = parseRgba(hex);
     if (allowQuantize) {
       let bestCh = '';
       let bestDist = nextIdx >= maxColors ? 1e6 : 12.0;
-      for (const [ch, cRgb] of charToRgb.entries()) {
+      for (const [ch, cRgba] of charToRgba.entries()) {
         if (ch === '0') continue; // never alias into reserved outer outline slot '0'
-        const d = Math.hypot(rgb[0] - cRgb[0], rgb[1] - cRgb[1], rgb[2] - cRgb[2]);
+        // Never merge an opaque color with a translucent color
+        if ((rgba[3] === 255) !== (cRgba[3] === 255)) continue;
+        const d = Math.hypot(
+          rgba[0] - cRgba[0],
+          rgba[1] - cRgba[1],
+          rgba[2] - cRgba[2],
+          (rgba[3] - cRgba[3]) * 1.5,
+        );
         if (d < bestDist) {
           bestDist = d;
           bestCh = ch;
@@ -890,7 +914,7 @@ function buildRigPalette(rig: BakerRigDef): ResolvedPalette {
     const ch = PALETTE_CHARS[nextIdx++];
     palette[ch] = hex;
     hexToChar.set(hex, ch);
-    charToRgb.set(ch, rgb);
+    charToRgba.set(ch, rgba);
     return ch;
   };
 
@@ -1666,7 +1690,15 @@ function projectSocketAnchor(
   rig: BakerRigDef,
   socket: BakerSocketDef,
   boneWorldMats: Map<string, Mat4>,
+  animName?: string,
+  frameIdx?: number,
 ): SpriteAnchor {
+  if (animName !== undefined && frameIdx !== undefined) {
+    const explicit = socket.frames?.[animName]?.[frameIdx];
+    if (explicit) {
+      return { ...explicit };
+    }
+  }
   const mat = boneWorldMats.get(socket.bone);
   if (!mat) throw new Error(`socket references unknown bone "${socket.bone}" in rig "${rig.name}"`);
   const originX = rig.origin?.x ?? rig.w / 2;
@@ -1726,7 +1758,11 @@ export function bakeSpriteRig(rig: BakerRigDef): SpriteFile {
       };
       for (const l of rig.layers!) layerTracks.get(l.id)![animName] = [];
       if (rig.sockets) {
-        for (const sName of Object.keys(rig.sockets)) anchors[sName][animName] = [];
+        for (const sName of Object.keys(rig.sockets)) {
+          if (!sDefOmitsAnim(rig.sockets[sName], animName)) {
+            anchors[sName][animName] = [];
+          }
+        }
       }
 
       for (let f = 0; f < frameCount; f++) {
@@ -1739,7 +1775,10 @@ export function bakeSpriteRig(rig: BakerRigDef): SpriteFile {
         }
         if (rig.sockets) {
           for (const [sName, sDef] of Object.entries(rig.sockets)) {
-            anchors[sName][animName].push(projectSocketAnchor(rig, sDef, compiled.boneWorldMats));
+            if (sDefOmitsAnim(sDef, animName)) continue;
+            anchors[sName][animName].push(
+              projectSocketAnchor(rig, sDef, compiled.boneWorldMats, animName, f),
+            );
           }
         }
       }
@@ -1759,6 +1798,7 @@ export function bakeSpriteRig(rig: BakerRigDef): SpriteFile {
       w: rig.w,
       h: rig.h,
       ...(rig.hitbox ? { hitbox: rig.hitbox } : {}),
+      ...(rig.animationHitboxOffsets ? { animationHitboxOffsets: rig.animationHitboxOffsets } : {}),
       palette: pal.palette,
       anims,
       layers,
@@ -1778,7 +1818,11 @@ export function bakeSpriteRig(rig: BakerRigDef): SpriteFile {
     const frameCount = Math.max(1, Math.round(animDef.frames));
     const frames: string[][] = [];
     if (rig.sockets) {
-      for (const sName of Object.keys(rig.sockets)) anchors[sName][animName] = [];
+      for (const sName of Object.keys(rig.sockets)) {
+        if (!sDefOmitsAnim(rig.sockets[sName], animName)) {
+          anchors[sName][animName] = [];
+        }
+      }
     }
 
     for (let f = 0; f < frameCount; f++) {
@@ -1788,7 +1832,10 @@ export function bakeSpriteRig(rig: BakerRigDef): SpriteFile {
       frames.push(rasterizeLayerFrame(rig, compiled.groups, pal));
       if (rig.sockets) {
         for (const [sName, sDef] of Object.entries(rig.sockets)) {
-          anchors[sName][animName].push(projectSocketAnchor(rig, sDef, compiled.boneWorldMats));
+          if (sDefOmitsAnim(sDef, animName)) continue;
+          anchors[sName][animName].push(
+            projectSocketAnchor(rig, sDef, compiled.boneWorldMats, animName, f),
+          );
         }
       }
     }
@@ -1806,6 +1853,7 @@ export function bakeSpriteRig(rig: BakerRigDef): SpriteFile {
     w: rig.w,
     h: rig.h,
     ...(rig.hitbox ? { hitbox: rig.hitbox } : {}),
+    ...(rig.animationHitboxOffsets ? { animationHitboxOffsets: rig.animationHitboxOffsets } : {}),
     palette: pal.palette,
     anims,
     ...(rig.sockets && Object.keys(rig.sockets).length ? { anchors } : {}),
@@ -1813,6 +1861,13 @@ export function bakeSpriteRig(rig: BakerRigDef): SpriteFile {
   };
   validateSpriteEditorDocument(file);
   return file;
+}
+
+function sDefOmitsAnim(socket: BakerSocketDef, animName: string): boolean {
+  if (socket.omitAnims?.includes(animName)) return true;
+  // When `socket.frames` is provided and explicitly sets `animName` to an empty array,
+  // omit that animation from `anchors[socketName]` (e.g. legacy no-grip `plunge` rows).
+  return Boolean(socket.frames && animName in socket.frames && socket.frames[animName].length === 0);
 }
 
 /* ---------------- Contact sheet RGBA renderer ---------------- */
@@ -1911,12 +1966,21 @@ export function renderSpriteContactSheetRgba(
   const pal = file.palette ?? {};
 
   const setPixel = (x: number, y: number, r: number, g: number, b: number, a = 255) => {
-    if (x < 0 || y < 0 || x >= imgW || y >= imgH) return;
+    if (x < 0 || y < 0 || x >= imgW || y >= imgH || a <= 0) return;
     const i = (y * imgW + x) * 4;
-    rgba[i] = r;
-    rgba[i + 1] = g;
-    rgba[i + 2] = b;
-    rgba[i + 3] = a;
+    if (a >= 255) {
+      rgba[i] = r;
+      rgba[i + 1] = g;
+      rgba[i + 2] = b;
+      rgba[i + 3] = 255;
+    } else {
+      const alpha = a / 255;
+      const inv = 1 - alpha;
+      rgba[i] = Math.round(r * alpha + rgba[i] * inv);
+      rgba[i + 1] = Math.round(g * alpha + rgba[i + 1] * inv);
+      rgba[i + 2] = Math.round(b * alpha + rgba[i + 2] * inv);
+      rgba[i + 3] = 255;
+    }
   };
 
   for (let y = 0; y < imgH; y++) {
@@ -1970,7 +2034,8 @@ export function renderSpriteContactSheetRgba(
       for (let ty = 0; ty < texelH; ty++) {
         for (let tx = 0; tx < texelW; tx++) {
           const src = (ty * texelW + tx) * 4;
-          if (frameRgba[src + 3] === 0) continue;
+          const a = frameRgba[src + 3];
+          if (a === 0) continue;
           for (let sy = 0; sy < scale; sy++) {
             for (let sx = 0; sx < scale; sx++) {
               setPixel(
@@ -1979,7 +2044,7 @@ export function renderSpriteContactSheetRgba(
                 frameRgba[src],
                 frameRgba[src + 1],
                 frameRgba[src + 2],
-                255,
+                a,
               );
             }
           }
@@ -2028,10 +2093,271 @@ export function renderSpriteContactSheetRgba(
   return { width: imgW, height: imgH, rgba };
 }
 
+export interface CompositeAnimSpec {
+  label: string;
+  bodyAnim: string;
+  weaponAnim: string;
+  embeddedHeldObject: boolean;
+}
+
+export const DEFAULT_SWORD_COMPOSITE_ANIMS: CompositeAnimSpec[] = [
+  { label: 'sword-idle', bodyAnim: 'sword-idle', weaponAnim: 'idle', embeddedHeldObject: true },
+  { label: 'sword-run', bodyAnim: 'sword-run', weaponAnim: 'run', embeddedHeldObject: true },
+  { label: 'attack', bodyAnim: 'attack', weaponAnim: 'attack', embeddedHeldObject: true },
+  { label: 'attack2', bodyAnim: 'attack2', weaponAnim: 'attack2', embeddedHeldObject: true },
+  { label: 'attack3', bodyAnim: 'attack3', weaponAnim: 'attack3', embeddedHeldObject: true },
+  { label: 'rise', bodyAnim: 'rise', weaponAnim: 'idle', embeddedHeldObject: false },
+  { label: 'fall', bodyAnim: 'fall', weaponAnim: 'idle', embeddedHeldObject: false },
+];
+
+/**
+ * Render a contact sheet of `bodyFile` + `weaponFile` composited together
+ * using the exact runtime `snapAttachmentOriginToBodyGrid` and `drawGrip`
+ * rules from `player-render.ts` and `weapon-visuals.ts`.
+ */
+export function renderEquipmentCompositeSheetRgba(
+  bodyFile: SpriteFile,
+  weaponFile: SpriteFile,
+  options: ContactSheetOptions & {
+    anims?: CompositeAnimSpec[];
+    weaponOrigin?: { x: number; y: number };
+  } = {},
+): { width: number; height: number; rgba: Uint8Array } {
+  const specs = (options.anims ?? DEFAULT_SWORD_COMPOSITE_ANIMS).filter(
+    (s) => s.bodyAnim in bodyFile.anims && s.weaponAnim in weaponFile.anims,
+  );
+  if (!specs.length) {
+    throw new Error('renderEquipmentCompositeSheetRgba: no matching body/weapon animation pairs');
+  }
+
+  const firstBody = compositeSpriteFrame(bodyFile, resolveAnimName(bodyFile, specs[0].bodyAnim), 0) ?? [''];
+  const bodyTexelW = firstBody[0]?.length ?? 160;
+  const bodyTexelH = firstBody.length || 110;
+  const texelW = bodyTexelW;
+  const texelH = Math.max(bodyTexelH, 168);
+  const scale = Math.max(1, Math.round(options.scale ?? 3));
+  const cellPad = 6;
+  const cellW = texelW * scale + cellPad * 2;
+  const cellH = texelH * scale + cellPad * 2;
+
+  const getFrameCount = (file: SpriteFile, anim: string): number => {
+    const resolved = resolveAnimName(file, anim);
+    const entry = file.anims[resolved];
+    if (!entry || typeof entry === 'string') return 1;
+    return 'frameCount' in entry ? entry.frameCount : entry.frames.length;
+  };
+
+  const frameCounts = specs.map((s) =>
+    s.weaponAnim === 'plunge' ? getFrameCount(weaponFile, s.weaponAnim) : getFrameCount(bodyFile, s.bodyAnim),
+  );
+  const maxFrames = Math.max(1, ...frameCounts);
+
+  const imgW = maxFrames * cellW;
+  const imgH = specs.length * cellH;
+  const rgba = new Uint8Array(imgW * imgH * 4);
+  const bodyPal = bodyFile.palette ?? {};
+  const weaponPal = weaponFile.palette ?? {};
+
+  const setPixel = (x: number, y: number, r: number, g: number, b: number, a = 255) => {
+    if (x < 0 || y < 0 || x >= imgW || y >= imgH || a <= 0) return;
+    const i = (y * imgW + x) * 4;
+    if (a >= 255) {
+      rgba[i] = r;
+      rgba[i + 1] = g;
+      rgba[i + 2] = b;
+      rgba[i + 3] = 255;
+    } else {
+      const alpha = a / 255;
+      const inv = 1 - alpha;
+      rgba[i] = Math.round(r * alpha + rgba[i] * inv);
+      rgba[i + 1] = Math.round(g * alpha + rgba[i + 1] * inv);
+      rgba[i + 2] = Math.round(b * alpha + rgba[i + 2] * inv);
+      rgba[i + 3] = 255;
+    }
+  };
+
+  for (let y = 0; y < imgH; y++) {
+    for (let x = 0; x < imgW; x++) {
+      const checker = ((x >> 3) + (y >> 3)) & 1;
+      const v = checker ? 28 : 22;
+      setPixel(x, y, v, v, v + 6, 255);
+    }
+  }
+
+  const weaponLayers = isLayeredSpriteFile(weaponFile) ? weaponFile.layers : [];
+  const legacyOrigin = options.weaponOrigin ?? { x: 16, y: 15.5 };
+
+  for (let rowIdx = 0; rowIdx < specs.length; rowIdx++) {
+    const spec = specs[rowIdx];
+    const count = frameCounts[rowIdx];
+    const bCount = getFrameCount(bodyFile, spec.bodyAnim);
+    const wCount = getFrameCount(weaponFile, spec.weaponAnim);
+
+    for (let f = 0; f < count; f++) {
+      const bf = f % bCount;
+      const wf = f % wCount;
+      const bodyRows = compositeSpriteFrame(bodyFile, resolveAnimName(bodyFile, spec.bodyAnim), bf) ?? [];
+      const frameRgba = new Uint8Array(texelW * texelH * 4);
+
+      const blendFramePixel = (tx: number, ty: number, r: number, g: number, b: number, a: number) => {
+        if (tx < 0 || ty < 0 || tx >= texelW || ty >= texelH || a <= 0) return;
+        const o = (ty * texelW + tx) * 4;
+        if (a >= 255 || frameRgba[o + 3] === 0) {
+          frameRgba[o] = r;
+          frameRgba[o + 1] = g;
+          frameRgba[o + 2] = b;
+          frameRgba[o + 3] = a;
+        } else {
+          const alpha = a / 255;
+          const inv = 1 - alpha;
+          frameRgba[o] = Math.round(r * alpha + frameRgba[o] * inv);
+          frameRgba[o + 1] = Math.round(g * alpha + frameRgba[o + 1] * inv);
+          frameRgba[o + 2] = Math.round(b * alpha + frameRgba[o + 2] * inv);
+          frameRgba[o + 3] = Math.min(255, Math.round(a + frameRgba[o + 3] * inv));
+        }
+      };
+
+      // 1. Draw body ('body' render tag)
+      for (let y = 0; y < texelH; y++) {
+        const line = bodyRows[y] ?? '';
+        for (let x = 0; x < texelW; x++) {
+          const ch = line[x] ?? '.';
+          if (ch === '.' || ch === ' ') continue;
+          const hex = bodyPal[ch];
+          if (!hex) continue;
+          const [r, g, b, a] = parseHexRgba(hex);
+          blendFramePixel(x, y, r, g, b, a);
+        }
+      }
+
+      // 2. Compute snapped attachment offset in texels
+      const frontHand = bodyFile.anchors?.frontHand?.[spec.bodyAnim]?.[bf];
+      const grip = weaponFile.anchors?.grip?.[spec.weaponAnim]?.[wf];
+      let offsetX = 0;
+      let offsetY = 0;
+      if (frontHand && grip) {
+        offsetX = Math.round((frontHand.x - grip.x) * 4);
+        offsetY = Math.round((frontHand.y - grip.y) * 4);
+      } else {
+        // Legacy feet-relative placement (`spriteWeapon` fallback when a row omits `grip`)
+        offsetX = Math.round((bodyTexelW / 8 - legacyOrigin.x) * 4);
+        offsetY = Math.round((bodyTexelH / 4 - legacyOrigin.y) * 4);
+      }
+
+      // 3. Draw weapon layers in 'front-hand-held-object' band
+      if (weaponLayers.length > 0) {
+        for (const layer of weaponLayers) {
+          if (spec.embeddedHeldObject && layer.composition !== 'overlay') continue;
+          const wRows = layer.tracks[resolveAnimName(weaponFile, spec.weaponAnim)]?.[wf] ?? [];
+          for (let wy = 0; wy < wRows.length; wy++) {
+            const line = wRows[wy] ?? '';
+            for (let wx = 0; wx < line.length; wx++) {
+              const ch = line[wx] ?? '.';
+              if (ch === '.' || ch === ' ') continue;
+              const hex = weaponPal[ch];
+              if (!hex) continue;
+              const [r, g, b, a] = parseHexRgba(hex);
+              blendFramePixel(wx + offsetX, wy + offsetY, r, g, b, a);
+            }
+          }
+        }
+      } else {
+        const wRows = compositeSpriteFrame(weaponFile, resolveAnimName(weaponFile, spec.weaponAnim), wf) ?? [];
+        for (let wy = 0; wy < wRows.length; wy++) {
+          const line = wRows[wy] ?? '';
+          for (let wx = 0; wx < line.length; wx++) {
+            const ch = line[wx] ?? '.';
+            if (ch === '.' || ch === ' ') continue;
+            const hex = weaponPal[ch];
+            if (!hex) continue;
+            const [r, g, b, a] = parseHexRgba(hex);
+            blendFramePixel(wx + offsetX, wy + offsetY, r, g, b, a);
+          }
+        }
+      }
+
+      // 4. Draw procedural leather grip (`drawGrip` in player-render.ts) when !embeddedHeldObject
+      if (!spec.embeddedHeldObject && frontHand && grip) {
+        const hx = Math.round(frontHand.x * 4);
+        const hy = Math.round(frontHand.y * 4);
+        for (let dy = -3; dy <= 2; dy++) {
+          for (let dx = -3; dx <= 2; dx++) {
+            blendFramePixel(hx + dx, hy + dy, 0x17, 0x16, 0x25, 255);
+          }
+        }
+        for (let dy = -2; dy <= 1; dy++) {
+          for (let dx = -2; dx <= 1; dx++) {
+            blendFramePixel(hx + dx, hy + dy, 0x68, 0x40, 0x37, 255);
+          }
+        }
+        blendFramePixel(hx, hy - 1, 0x9a, 0x5b, 0x45, 255);
+        blendFramePixel(hx + 1, hy - 1, 0x9a, 0x5b, 0x45, 255);
+      }
+
+      const ox = f * cellW + cellPad;
+      const oy = rowIdx * cellH + cellPad;
+
+      for (let bx = 0; bx < texelW * scale; bx++) {
+        setPixel(ox + bx, oy - 1, 55, 62, 78);
+        setPixel(ox + bx, oy + texelH * scale, 55, 62, 78);
+      }
+      for (let by = 0; by < texelH * scale; by++) {
+        setPixel(ox - 1, oy + by, 55, 62, 78);
+        setPixel(ox + texelW * scale, oy + by, 55, 62, 78);
+      }
+
+      for (let ty = 0; ty < texelH; ty++) {
+        for (let tx = 0; tx < texelW; tx++) {
+          const src = (ty * texelW + tx) * 4;
+          const a = frameRgba[src + 3];
+          if (a === 0) continue;
+          for (let sy = 0; sy < scale; sy++) {
+            for (let sx = 0; sx < scale; sx++) {
+              setPixel(
+                ox + tx * scale + sx,
+                oy + ty * scale + sy,
+                frameRgba[src],
+                frameRgba[src + 1],
+                frameRgba[src + 2],
+                a,
+              );
+            }
+          }
+        }
+      }
+
+      if (options.showOverlays !== false && frontHand) {
+        const logicalToPx = 4 * scale;
+        const ax = ox + Math.round(frontHand.x * logicalToPx);
+        const ay = oy + Math.round(frontHand.y * logicalToPx);
+        for (let d = -3; d <= 3; d++) {
+          setPixel(ax + d, ay, 255, 205, 117);
+          setPixel(ax, ay + d, 255, 205, 117);
+        }
+      }
+    }
+  }
+
+  return { width: imgW, height: imgH, rgba };
+}
+
+export interface ReferenceReliefOptions {
+  /** Specific layer id to extract from a `LayeredSpriteFile` (instead of compositing all layers). */
+  layerId?: string;
+  /** Companion layer id whose union with `layerId` should also be checked for cross-layer pinholes. */
+  companionLayerId?: string;
+  /**
+   * Minimum 4-connected component size in pixels to preserve (default `0` keeps only the
+   * single largest component; set e.g. `6` for weapon overlays so the detached pommel cap
+   * and multi-part blade segments survive while 1-3px speckles are pruned).
+   */
+  minComponentPixels?: number;
+}
+
 /**
  * Extract an articulated 3D `ReliefShape` from a reference `SpriteFile` across
  * `animNames`, ensuring 4-connected silhouette continuity and zero interior pinholes
- * so the 3D baker raymarches the exact sub-pixel face, cloth, hand, and stride
+ * so the 3D baker raymarches the exact sub-pixel face, cloth, hand, weapon, and stride
  * detail while passing all `critiqueSpriteFile` invariants.
  */
 export function createReferenceReliefShape(
@@ -2040,6 +2366,7 @@ export function createReferenceReliefShape(
   animNames: string[],
   originSub: [number, number],
   pitchDeg = 7,
+  options: ReferenceReliefOptions = {},
 ): ReliefShape {
   const density = refFile.hd !== false ? 1 : 4;
   const rawPal = refFile.palette ?? {};
@@ -2047,8 +2374,17 @@ export function createReferenceReliefShape(
   for (const [k, v] of Object.entries(rawPal)) {
     if (typeof v === 'string') palette[k] = v;
   }
+  const minCompPx = options.minComponentPixels ?? 0;
 
-  const sanitizeFrameRows = (rawRows: string[]): ReliefFrameGrid => {
+  const extractLayerRows = (layerId: string | undefined, anim: string, frame: number): string[] => {
+    if (layerId && isLayeredSpriteFile(refFile)) {
+      const layer = refFile.layers.find((l) => l.id === layerId);
+      return layer?.tracks[anim]?.[frame] ?? [];
+    }
+    return compositeSpriteFrame(refFile, anim, frame) ?? [];
+  };
+
+  const sanitizeFrameRows = (rawRows: string[], companionRows?: string[]): ReliefFrameGrid => {
     const h = rawRows.length;
     const w = rawRows[0]?.length ?? 1;
     const grid = rawRows.map((r) => r.split(''));
@@ -2071,7 +2407,8 @@ export function createReferenceReliefShape(
       }
     }
 
-    // 2. Keep only the main 4-connected silhouette component (prune any stray detached mote)
+    // 2. Prune stray detached motes while keeping either the main silhouette component
+    //    (minCompPx === 0) or all multi-part weapon/pommel components >= minCompPx.
     {
       const vis = new Uint8Array(w * h);
       const comps: Array<number[]> = [];
@@ -2101,6 +2438,7 @@ export function createReferenceReliefShape(
       if (comps.length > 1) {
         comps.sort((a, b) => b.length - a.length);
         for (let c = 1; c < comps.length; c++) {
+          if (minCompPx > 0 && comps[c].length >= minCompPx) continue;
           for (const idx of comps[c]) {
             grid[Math.floor(idx / w)][idx % w] = '.';
           }
@@ -2109,20 +2447,27 @@ export function createReferenceReliefShape(
     }
 
     // 3. Fill any enclosed interior transparent pinhole not reachable from the 4 borders
-    {
+    const fillEnclosedHoles = (checkUnionWithCompanion: boolean) => {
       const ext = new Uint8Array(w * h);
       const q: number[] = [];
       const ortho = [[-1, 0], [1, 0], [0, -1], [0, 1]] as const;
+      const isUnionFilled = (x: number, y: number): boolean => {
+        if (isFilled(x, y)) return true;
+        if (!checkUnionWithCompanion || !companionRows) return false;
+        const cCh = companionRows[y]?.[x] ?? '.';
+        return cCh !== '.' && cCh !== ' ';
+      };
+
       for (let x = 0; x < w; x++) {
-        if (!isFilled(x, 0)) { ext[x] = 1; q.push(x); }
+        if (!isUnionFilled(x, 0)) { ext[x] = 1; q.push(x); }
         const bIdx = (h - 1) * w + x;
-        if (!isFilled(x, h - 1)) { ext[bIdx] = 1; q.push(bIdx); }
+        if (!isUnionFilled(x, h - 1)) { ext[bIdx] = 1; q.push(bIdx); }
       }
       for (let y = 0; y < h; y++) {
         const lIdx = y * w;
-        if (!isFilled(0, y)) { ext[lIdx] = 1; q.push(lIdx); }
+        if (!isUnionFilled(0, y)) { ext[lIdx] = 1; q.push(lIdx); }
         const rIdx = y * w + (w - 1);
-        if (!isFilled(w - 1, y)) { ext[rIdx] = 1; q.push(rIdx); }
+        if (!isUnionFilled(w - 1, y)) { ext[rIdx] = 1; q.push(rIdx); }
       }
       let head = 0;
       while (head < q.length) {
@@ -2132,26 +2477,72 @@ export function createReferenceReliefShape(
           const nx = cx + dx, ny = cy + dy;
           if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
           const nIdx = ny * w + nx;
-          if (!ext[nIdx] && !isFilled(nx, ny)) {
+          if (!ext[nIdx] && !isUnionFilled(nx, ny)) {
             ext[nIdx] = 1;
             q.push(nIdx);
           }
         }
       }
+      // Find enclosed transparent components and only fill genuine pinholes (<= 24px),
+      // preserving large negative-space windows (e.g. between a character's torso and a slash crescent).
+      const holeVisited = new Uint8Array(w * h);
+      const smallHoleMask = new Uint8Array(w * h);
       for (let y = 1; y < h - 1; y++) {
         for (let x = 1; x < w - 1; x++) {
-          const idx = y * w + x;
-          if (!isFilled(x, y) && !ext[idx]) {
-            // Fill enclosed interior pinhole with nearest neighbor's pixel key
+          const startIdx = y * w + x;
+          if (ext[startIdx] || holeVisited[startIdx] || isUnionFilled(x, y)) continue;
+          holeVisited[startIdx] = 1;
+          const comp = [startIdx];
+          let hHead = 0;
+          while (hHead < comp.length) {
+            const cur = comp[hHead++];
+            const cx = cur % w, cy = Math.floor(cur / w);
             for (const [dx, dy] of ortho) {
-              if (isFilled(x + dx, y + dy)) {
-                grid[y][x] = grid[y + dy][x + dx];
-                break;
+              const nx = cx + dx, ny = cy + dy;
+              if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+              const nIdx = ny * w + nx;
+              if (ext[nIdx] || holeVisited[nIdx] || isUnionFilled(nx, ny)) continue;
+              holeVisited[nIdx] = 1;
+              comp.push(nIdx);
+            }
+          }
+          if (comp.length <= 24) {
+            for (const cIdx of comp) smallHoleMask[cIdx] = 1;
+          }
+        }
+      }
+
+      // Iteratively fill small enclosed pinholes from adjacent filled pixels
+      for (let pass = 0; pass < 6; pass++) {
+        let changed = false;
+        for (let y = 1; y < h - 1; y++) {
+          for (let x = 1; x < w - 1; x++) {
+            const idx = y * w + x;
+            if (smallHoleMask[idx] && !isUnionFilled(x, y)) {
+              for (const [dx, dy] of ortho) {
+                if (isFilled(x + dx, y + dy)) {
+                  grid[y][x] = grid[y + dy][x + dx];
+                  changed = true;
+                  break;
+                } else if (checkUnionWithCompanion && companionRows) {
+                  const cCh = companionRows[y + dy]?.[x + dx] ?? '.';
+                  if (cCh !== '.' && cCh !== ' ') {
+                    grid[y][x] = cCh;
+                    changed = true;
+                    break;
+                  }
+                }
               }
             }
           }
         }
+        if (!changed) break;
       }
+    };
+
+    fillEnclosedHoles(false);
+    if (companionRows) {
+      fillEnclosedHoles(true);
     }
 
     return {
@@ -2272,9 +2663,12 @@ export function createReferenceReliefShape(
           : entry.frames.length;
     const grids: ReliefFrameGrid[] = [];
     for (let f = 0; f < count; f++) {
-      const rawRows = compositeSpriteFrame(refFile, resolved, f) ?? [];
+      const rawRows = extractLayerRows(options.layerId, resolved, f);
+      const compRows = options.companionLayerId
+        ? extractLayerRows(options.companionLayerId, resolved, f)
+        : undefined;
       if (rawRows.length > 0) {
-        const g = sanitizeFrameRows(rawRows);
+        const g = sanitizeFrameRows(rawRows, compRows);
         grids.push(g);
         if (!defaultGrid) defaultGrid = g;
       }

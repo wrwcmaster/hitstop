@@ -1,6 +1,7 @@
 import { createReferenceReliefShape, type BakerRigDef } from './sprite-baker';
 import type { SpriteFile } from '../../src/engine/gfx/spritefile';
 import knightV2Raw from '../../src/game/content/sprites/knight-v2.json';
+import rustySwordRaw from '../../src/game/content/sprites/equipment/rusty-sword.json';
 
 /**
  * Built-in 3D CSG & Skeletal Rigs for the Headless 3D-to-2D Toon/Pixel Baker.
@@ -718,7 +719,21 @@ export const ADVENTURER_HUMANOID_RIG: BakerRigDef = {
   hd: false,
   origin: { x: 20, y: 26.5 },
   hitbox: { x: 14.25, y: 4, w: 8.5, h: 23.5 },
+  animationHitboxOffsets: {
+    run: { x: 17, y: 4 },
+    idle: { x: 15.75, y: 4 },
+    attack: { x: 15.5, y: 4 },
+    attack2: { x: 15.5, y: 4 },
+    attack3: { x: 13.75, y: 3 },
+    'sword-run': { x: 17, y: 4 },
+    'sword-idle': { x: 15.75, y: 4 },
+    rise: { x: 17, y: 4 },
+    fall: { x: 17, y: 4 },
+  },
   editor: { canEquipWeapon: true },
+  layers: [
+    { id: 'base', name: 'Base', tag: 'body' },
+  ],
   cameraPitch: 7,
   lightDir: [-0.48, 0.68, 0.55],
   outlineColor: '#020103',
@@ -726,10 +741,23 @@ export const ADVENTURER_HUMANOID_RIG: BakerRigDef = {
   creaseThreshold: 0.48,
   rearShadeZ: -1.45,
   critic: {
-    expectedAnims: ['idle', 'run', 'air', 'rise', 'fall'],
+    expectedAnims: [
+      'idle',
+      'sword-idle',
+      'run',
+      'sword-run',
+      'attack',
+      'attack2',
+      'attack3',
+      'air',
+      'rise',
+      'fall',
+    ],
     expectedHitboxSize: { w: 8.5, h: 23.5 },
-    groundedAnims: ['idle', 'run'],
+    groundedAnims: ['idle', 'sword-idle', 'run', 'sword-run'],
     allowBorderTouch: ['bottom'],
+    maxPaletteColors: 64,
+    maxMassVariationRatio: 0.55,
   },
   materials: {
     skin: {
@@ -819,9 +847,10 @@ export const ADVENTURER_HUMANOID_RIG: BakerRigDef = {
         createReferenceReliefShape(
           knightV2Raw as unknown as SpriteFile,
           'jerkinLeather',
-          ['idle', 'run', 'rise', 'fall'],
+          ['idle', 'sword-idle', 'run', 'sword-run', 'attack', 'attack2', 'attack3', 'rise', 'fall'],
           [80, 106],
           7,
+          { minComponentPixels: 6 },
         ),
       ],
     },
@@ -1397,15 +1426,173 @@ export const ADVENTURER_HUMANOID_RIG: BakerRigDef = {
       bone: 'forearmFront',
       pos: [0.22, -2.45, 0.22],
       dir: [1, -0.2, 0],
+      frames: {
+        idle: [
+          { x: 17, y: 17.5 },
+          { x: 16.75, y: 17.75 },
+          { x: 17.25, y: 17.75 },
+          { x: 17.25, y: 17.5 },
+          { x: 17, y: 17.5 },
+        ],
+        'sword-idle': [
+          { x: 19.5, y: 18.3 },
+          { x: 19.5, y: 18.321428571428573 },
+          { x: 18.75, y: 18.5625 },
+          { x: 18.5, y: 18.5 },
+          { x: 19, y: 18.458333333333332 },
+        ],
+        run: [
+          { x: 17, y: 15.75 },
+          { x: 17, y: 15.75 },
+          { x: 18.875, y: 17.5 },
+          { x: 23.25, y: 17.5 },
+          { x: 26.75, y: 13.75 },
+          { x: 26.75, y: 12 },
+          { x: 26.75, y: 13.5 },
+          { x: 23.25, y: 16.75 },
+        ],
+        'sword-run': [
+          { x: 18.5, y: 16 },
+          { x: 17, y: 15.625 },
+          { x: 17.5, y: 15.75 },
+          { x: 21, y: 17.25 },
+          { x: 25.25, y: 15.5 },
+          { x: 26.5, y: 13.5 },
+          { x: 27, y: 13.75 },
+          { x: 24.25, y: 16.5 },
+        ],
+        attack: [
+          { x: 12.25, y: 13.5 },
+          { x: 11.5, y: 14.75 },
+          { x: 24, y: 16.5 },
+          { x: 28, y: 13.75 },
+          { x: 26.75, y: 14.75 },
+        ],
+        attack2: [
+          { x: 28, y: 13.5 },
+          { x: 26.75, y: 14.75 },
+          { x: 18.5, y: 16.75 },
+          { x: 11.75, y: 15 },
+          { x: 11.25, y: 14.75 },
+          { x: 11.25, y: 14.75 },
+          { x: 11.5, y: 14.75 },
+        ],
+        attack3: [
+          { x: 9.25, y: 7.25 },
+          { x: 20, y: 6.75 },
+          { x: 25.5, y: 17.5 },
+          { x: 25, y: 18.75 },
+          { x: 25.25, y: 18.5 },
+          { x: 13, y: 17 },
+        ],
+        rise: [
+          { x: 19.5, y: 17.5 },
+          { x: 19.5, y: 17.5 },
+        ],
+        fall: [
+          { x: 19.5, y: 17.5 },
+          { x: 19.5, y: 17.5 },
+        ],
+      },
     },
     rearHand: {
       bone: 'forearmRear',
       pos: [0.18, -2.4, 0.16],
       dir: [1, -0.2, 0],
+      omitAnims: ['attack', 'attack2', 'attack3'],
+      frames: {
+        idle: [
+          { x: 23.875, y: 15.75 },
+          { x: 24, y: 15.75 },
+          { x: 24, y: 16 },
+          { x: 23.875, y: 15.75 },
+          { x: 23.875, y: 15.75 },
+        ],
+        'sword-idle': [
+          { x: 23.875, y: 15.75 },
+          { x: 24, y: 15.75 },
+          { x: 24, y: 16 },
+          { x: 23.875, y: 15.75 },
+          { x: 23.875, y: 15.75 },
+        ],
+        run: [
+          { x: 27.25, y: 12.75 },
+          { x: 27.25, y: 12.75 },
+          { x: 27.25, y: 15.5 },
+          { x: 24.25, y: 16.75 },
+          { x: 18.75, y: 14.25 },
+          { x: 17.25, y: 14.25 },
+          { x: 18, y: 14.5 },
+          { x: 25.25, y: 16.25 },
+        ],
+        'sword-run': [
+          { x: 27.25, y: 12.25 },
+          { x: 27.75, y: 12.25 },
+          { x: 27.5, y: 15.5 },
+          { x: 24, y: 16.75 },
+          { x: 17.75, y: 14 },
+          { x: 22.5, y: 13.25 },
+          { x: 26.25, y: 14.5 },
+          { x: 25.25, y: 16.25 },
+        ],
+        rise: [
+          { x: 18.75, y: 13.5 },
+          { x: 18.75, y: 13.5 },
+        ],
+        fall: [
+          { x: 27.25, y: 12.75 },
+          { x: 27.25, y: 12.75 },
+        ],
+      },
     },
     head: {
       bone: 'head',
       pos: [0.85, 2.35, 0],
+      omitAnims: ['attack', 'attack2', 'attack3'],
+      frames: {
+        idle: [
+          { x: 21.375, y: 4.5 },
+          { x: 21.375, y: 4.5 },
+          { x: 21.375, y: 4.5 },
+          { x: 21.375, y: 4.5 },
+          { x: 21.375, y: 4.5 },
+        ],
+        'sword-idle': [
+          { x: 21.375, y: 4.5 },
+          { x: 21.375, y: 4.5 },
+          { x: 21.375, y: 4.5 },
+          { x: 21.375, y: 4.5 },
+          { x: 21.375, y: 4.5 },
+        ],
+        run: [
+          { x: 22.75, y: 4.75 },
+          { x: 22.75, y: 4.75 },
+          { x: 22.5, y: 5 },
+          { x: 22.75, y: 5 },
+          { x: 22.25, y: 4.75 },
+          { x: 22.25, y: 4.75 },
+          { x: 22.5, y: 5 },
+          { x: 22.75, y: 5 },
+        ],
+        'sword-run': [
+          { x: 22.75, y: 4.25 },
+          { x: 23.25, y: 4.25 },
+          { x: 22.75, y: 5 },
+          { x: 22.5, y: 5 },
+          { x: 21.25, y: 4.5 },
+          { x: 22.5, y: 4.75 },
+          { x: 22.75, y: 5 },
+          { x: 22.75, y: 5 },
+        ],
+        rise: [
+          { x: 22.25, y: 4.0 },
+          { x: 22.25, y: 4.0 },
+        ],
+        fall: [
+          { x: 22.75, y: 4.75 },
+          { x: 22.75, y: 4.75 },
+        ],
+      },
     },
   },
   attachmentSlots: {
@@ -1442,6 +1629,38 @@ export const ADVENTURER_HUMANOID_RIG: BakerRigDef = {
           armRear: { pos: [-0.2, -0.15, 0], rot: [0, 0, 16] },
           forearmRear: { rot: [0, 0, 14] },
           // Heroic 3/4 A-frame leg stance with both boots planted and toes angled right (+X)
+          legFront: { rot: [0, 0, -10] },
+          shinFront: { rot: [0, 0, 2] },
+          legRear: { rot: [0, 0, 12] },
+          shinRear: { rot: [0, 0, -4] },
+        };
+      },
+    },
+    'sword-idle': {
+      fps: 4,
+      frames: 5,
+      pose(_t, frame) {
+        const chestDrop = [0, -0.22, -0.28, -0.1, 0][frame] ?? 0;
+        const wristDrop = [0, 2, 5, 4, 2][frame] ?? 0;
+        const scarfPuff = [18, 16, 8, 16, 14][frame] ?? 16;
+        const scarfLen  = [0.38, 0.38, 0.56, 0.40, 0.42][frame] ?? 0.38;
+        return {
+          torso: { pos: [0, chestDrop, 0] },
+          head: { pos: [0.15, -0.15 - chestDrop * 0.5, 0] },
+          scarfBase: {
+            pos: [1.05, -0.15, 0],
+            rot: [0, 0, scarfPuff],
+            scale: [scarfLen, 0.52, 0.7],
+          },
+          scarfTip: {
+            rot: [0, 0, scarfPuff + 8],
+            scale: [scarfLen, 0.45, 0.7],
+          },
+          // Sword-carrying ready stance: front hand holds the blade forward/down across the thigh
+          armFront: { pos: [0.45, -0.35, 0.15], rot: [0, 0, 8 - wristDrop] },
+          forearmFront: { rot: [0, 0, 26 + wristDrop] },
+          armRear: { pos: [-0.2, -0.15, 0], rot: [0, 0, 16] },
+          forearmRear: { rot: [0, 0, 14] },
           legFront: { rot: [0, 0, -10] },
           shinFront: { rot: [0, 0, 2] },
           legRear: { rot: [0, 0, 12] },
@@ -1507,6 +1726,138 @@ export const ADVENTURER_HUMANOID_RIG: BakerRigDef = {
           forearmFront: { rot: [0, 0, ELBOW_F[f]], scale: [1, FOREARM_FSY[f], 1] },
           armRear: { pos: [-2.05 + SHOULDER_RX[f], -0.25, -0.35], rot: [0, 0, SHOULDER_R[f]] },
           forearmRear: { rot: [0, 0, ELBOW_R[f]], scale: [1, FOREARM_RSY[f], 1] },
+        };
+      },
+    },
+    'sword-run': {
+      fps: 10,
+      frames: 8,
+      pose(_t, frame) {
+        const f = frame % 8;
+        const THIGH_R = [36, 42, 25, -6, -34, -38, -34, 46];
+        const KNEE_R  = [-28, -8, -22, -8, -10, -48, -54, -132];
+        const HIP_XR  = [0.2, 0.3, 0.1, -0.2, -0.4, -0.4, -0.3, -0.35];
+        const HIP_YR  = [0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.4, 0.55];
+
+        const THIGH_F = [-38, -38, -34, 44, 48, 42, 25, -4];
+        const KNEE_F  = [-32, -48, -54, -122, -72, -8, -22, -6];
+        const HIP_XF  = [-0.4, -0.4, -0.3, -0.35, 0.2, 0.3, 0.1, -0.2];
+        const HIP_YF  = [0.0, 0.2, 0.4, 0.55, 0.65, 0.0, 0.0, 0.0];
+        const SHIN_F_Z = [-0.2, -0.35, -0.55, -1.55, 0.0, 0.0, 0.0, 0.0];
+
+        const SHOULDER_F  = [-32, -44, -40, -10, 26, 36, 38, 12];
+        const ELBOW_F     = [38,  42,  40,  46, 62, 68, 66, 52];
+        const SHOULDER_FX = [-0.35, -0.5, -0.45, 0.0, 0.3, 0.42, 0.45, 0.15];
+        const FOREARM_FSY = [1.0, 1.0, 1.0, 1.0, 1.24, 1.3, 1.3, 1.1];
+
+        const SHOULDER_R  = [52, 46, 34, 8, -16, 12, 32, 48];
+        const ELBOW_R     = [68, 64, 54, 44, 24, 48, 56, 66];
+        const SHOULDER_RX = [1.25, 1.15, 0.95, 0.0, -0.15, 0.25, 0.85, 1.15];
+        const FOREARM_RSY = [1.3, 1.3, 1.24, 1.0, 1.0, 1.1, 1.22, 1.28];
+
+        const PELVIS_Y = [0.0, 0.2, -0.25, -0.35, 0.0, 0.2, -0.25, -0.35];
+        const SCARF_BASE_Z = [22, 18, 12, 14, 16, 18, 12, 14];
+        const SCARF_TIP_Z  = [6, 8, 4, 6, 6, 8, 4, 6];
+
+        return {
+          pelvis: { pos: [0.1, PELVIS_Y[f], 0], rot: [0, 0, -3] },
+          torso: { pos: [0.15, -0.1, 0], rot: [0, 0, -6] },
+          head: { pos: [0.2, -0.15 - PELVIS_Y[f] * 0.5, 0], rot: [0, 0, 9] },
+          scarfBase: { pos: [-0.1, 0.15, 0], rot: [0, 0, SCARF_BASE_Z[f]] },
+          scarfTip: { rot: [0, 0, SCARF_TIP_Z[f]] },
+          legRear: { pos: [-1.1 + HIP_XR[f], HIP_YR[f], 0], rot: [0, 0, THIGH_R[f]] },
+          shinRear: { rot: [0, 0, KNEE_R[f]] },
+          legFront: { pos: [1.05 + HIP_XF[f], HIP_YF[f], 0], rot: [0, 0, THIGH_F[f]] },
+          shinFront: { pos: [0, 0, SHIN_F_Z[f]], rot: [0, 0, KNEE_F[f]] },
+          armFront: { pos: [1.55 + SHOULDER_FX[f], -0.35, 0.25], rot: [0, 0, SHOULDER_F[f]] },
+          forearmFront: { rot: [0, 0, ELBOW_F[f]], scale: [1, FOREARM_FSY[f], 1] },
+          armRear: { pos: [-2.05 + SHOULDER_RX[f], -0.25, -0.35], rot: [0, 0, SHOULDER_R[f]] },
+          forearmRear: { rot: [0, 0, ELBOW_R[f]], scale: [1, FOREARM_RSY[f], 1] },
+        };
+      },
+    },
+    attack: {
+      fps: 12,
+      frames: 5,
+      loop: false,
+      pose(_t, frame) {
+        const f = frame % 5;
+        // 5-frame horizontal slash combo 1: wind-up back-left (F0..F1) -> lunge slash right (F2..F4)
+        const PELVIS_X   = [-1.2, -1.6, 1.8, 3.2, 2.6][f];
+        const TORSO_RZ   = [12, 16, -16, -22, -18][f];
+        const SHOULDER_F = [-72, -82, 28, 56, 48][f];
+        const ELBOW_F    = [34, 42, 48, 32, 36][f];
+        return {
+          pelvis: { pos: [PELVIS_X, -0.35, 0], rot: [0, 0, TORSO_RZ * 0.4] },
+          torso: { rot: [0, 0, TORSO_RZ] },
+          head: { rot: [0, 0, -TORSO_RZ * 0.6] },
+          scarfBase: { rot: [0, 0, 24 - TORSO_RZ] },
+          scarfTip: { rot: [0, 0, 12] },
+          armFront: { rot: [0, 0, SHOULDER_F] },
+          forearmFront: { rot: [0, 0, ELBOW_F] },
+          armRear: { rot: [0, 0, -24] },
+          forearmRear: { rot: [0, 0, 28] },
+          legFront: { rot: [0, 0, -24] },
+          shinFront: { rot: [0, 0, 12] },
+          legRear: { rot: [0, 0, 28] },
+          shinRear: { rot: [0, 0, -18] },
+        };
+      },
+    },
+    attack2: {
+      fps: 14,
+      frames: 7,
+      loop: false,
+      pose(_t, frame) {
+        const f = frame % 7;
+        // 7-frame reverse backhand slash combo 2: extended right (F0..F1) -> whip across to left (F2..F6)
+        const PELVIS_X   = [2.8, 2.2, 0.4, -1.2, -1.6, -1.6, -1.4][f];
+        const TORSO_RZ   = [-18, -14, -4, 12, 16, 16, 14][f];
+        const SHOULDER_F = [54, 46, 4, -64, -74, -74, -70][f];
+        const ELBOW_F    = [32, 36, 44, 38, 34, 34, 36][f];
+        return {
+          pelvis: { pos: [PELVIS_X, -0.3, 0], rot: [0, 0, TORSO_RZ * 0.4] },
+          torso: { rot: [0, 0, TORSO_RZ] },
+          head: { rot: [0, 0, -TORSO_RZ * 0.6] },
+          scarfBase: { rot: [0, 0, 20 - TORSO_RZ] },
+          scarfTip: { rot: [0, 0, 10] },
+          armFront: { rot: [0, 0, SHOULDER_F] },
+          forearmFront: { rot: [0, 0, ELBOW_F] },
+          armRear: { rot: [0, 0, 18] },
+          forearmRear: { rot: [0, 0, 22] },
+          legFront: { rot: [0, 0, -20] },
+          shinFront: { rot: [0, 0, 10] },
+          legRear: { rot: [0, 0, 24] },
+          shinRear: { rot: [0, 0, -14] },
+        };
+      },
+    },
+    attack3: {
+      fps: 14,
+      frames: 6,
+      loop: false,
+      pose(_t, frame) {
+        const f = frame % 6;
+        // 6-frame overhead heavy finisher combo 3: high overhead raise (F0..F1) -> heavy slam down-right (F2..F4) -> recovery (F5)
+        const PELVIS_X   = [-1.8, 0.2, 2.6, 2.8, 2.8, -0.8][f];
+        const PELVIS_Y   = [0.4, 0.6, -0.8, -1.0, -0.9, -0.2][f];
+        const TORSO_RZ   = [18, 6, -24, -28, -26, 8][f];
+        const SHOULDER_F = [-135, -110, 42, 36, 38, -48][f];
+        const ELBOW_F    = [24, 18, 28, 22, 24, 38][f];
+        return {
+          pelvis: { pos: [PELVIS_X, PELVIS_Y, 0], rot: [0, 0, TORSO_RZ * 0.4] },
+          torso: { rot: [0, 0, TORSO_RZ] },
+          head: { rot: [0, 0, -TORSO_RZ * 0.5] },
+          scarfBase: { rot: [0, 0, 28 - TORSO_RZ] },
+          scarfTip: { rot: [0, 0, 14] },
+          armFront: { rot: [0, 0, SHOULDER_F] },
+          forearmFront: { rot: [0, 0, ELBOW_F] },
+          armRear: { rot: [0, 0, -28] },
+          forearmRear: { rot: [0, 0, 32] },
+          legFront: { rot: [0, 0, -28] },
+          shinFront: { rot: [0, 0, 16] },
+          legRear: { rot: [0, 0, 32] },
+          shinRear: { rot: [0, 0, -22] },
         };
       },
     },
@@ -2800,6 +3151,325 @@ export const VISE_NEST_RIG: BakerRigDef = {
   },
 };
 
+export const RUSTY_SWORD_RIG: BakerRigDef = {
+  name: 'rusty-sword-poc',
+  w: 40,
+  h: 32,
+  hd: false,
+  origin: { x: 16, y: 15.5 },
+  cameraPitch: 7,
+  lightDir: [-0.48, 0.68, 0.55],
+  outlineColor: '#020103',
+  outlineMode: 'outside',
+  creaseThreshold: 0.48,
+  rearShadeZ: -1.45,
+  layers: [
+    {
+      id: 'base',
+      name: 'Sword',
+      tag: 'front-hand-held-object',
+      composition: 'overlay',
+    },
+    {
+      id: 'layer-2',
+      name: 'Slash',
+      tag: 'front-hand-held-object',
+      composition: 'overlay',
+    },
+  ],
+  critic: {
+    expectedAnims: [
+      'idle',
+      'run',
+      'attack',
+      'attack2',
+      'attack3',
+      'plunge',
+      'aerial',
+      'upper',
+      'dash',
+    ],
+    groundedAnims: [],
+    maxComponents: 4,
+    allowMultiPartFill: true,
+    maxPaletteColors: 64,
+    minColorDistance: 2,
+    minMotionRatio: 0.01,
+    maxMassVariationRatio: 0.98,
+  },
+  materials: {
+    rustedSteel: {
+      crease: '#181820',
+      deepShadow: '#2e2b36',
+      shadow: '#4b4754',
+      mid: '#6e6a78',
+      lit: '#9994a3',
+      highlight: '#c8c3d1',
+      specular: 0.9,
+    },
+    hiltBronze: {
+      crease: '#221410',
+      deepShadow: '#3f251b',
+      shadow: '#633b28',
+      mid: '#8c5436',
+      lit: '#b57249',
+      highlight: '#dc9c6e',
+    },
+    slashGlow: {
+      shadow: '#9e6248',
+      mid: '#c98562',
+      lit: '#e8b594',
+      highlight: '#f7dfd0',
+      emissive: true,
+    },
+  },
+  bones: [
+    {
+      id: 'root',
+      pos: [0, 0, 0],
+      layerId: 'base',
+      partGroup: 'reliefSword',
+      shapes: [
+        createReferenceReliefShape(
+          rustySwordRaw as unknown as SpriteFile,
+          'rustedSteel',
+          ['idle', 'run', 'attack', 'attack2', 'attack3', 'plunge'],
+          [64, 62],
+          7,
+          {
+            layerId: 'base',
+            companionLayerId: 'layer-2',
+            minComponentPixels: 6,
+          },
+        ),
+      ],
+    },
+    {
+      id: 'slashRoot',
+      pos: [0, 0, 0],
+      layerId: 'layer-2',
+      partGroup: 'reliefSlash',
+      shapes: [
+        createReferenceReliefShape(
+          rustySwordRaw as unknown as SpriteFile,
+          'slashGlow',
+          ['idle', 'run', 'attack', 'attack2', 'attack3', 'plunge'],
+          [64, 62],
+          7,
+          {
+            layerId: 'layer-2',
+            minComponentPixels: 6,
+          },
+        ),
+      ],
+    },
+    {
+      id: 'hilt',
+      parent: 'root',
+      pos: [3.5, -2.75, 0],
+      layerId: 'base',
+      partGroup: 'swordBlade',
+      shapes: [
+        // Pommel counterweight behind the wielder's grip holdout
+        {
+          type: 'sphere',
+          material: 'hiltBronze',
+          offset: [1.35, -0.55, 0],
+          radius: 0.65,
+        },
+        // Crossguard quillons
+        {
+          type: 'box',
+          material: 'hiltBronze',
+          offset: [-0.85, 0.35, 0],
+          rot: [0, 0, -24],
+          size: [0.42, 1.85, 0.55],
+          bevel: 0.14,
+        },
+        // Tapered broadsword fuller & edge
+        {
+          type: 'capsule',
+          material: 'rustedSteel',
+          a: [-1.1, 0.45, 0],
+          b: [-7.2, 2.85, 0],
+          radius: 0.88,
+          radiusB: 0.36,
+        },
+      ],
+    },
+    {
+      id: 'slashArc',
+      parent: 'slashRoot',
+      pos: [6, 0, 0.4],
+      layerId: 'layer-2',
+      partGroup: 'slashArc',
+      shapes: [
+        {
+          type: 'capsule',
+          material: 'slashGlow',
+          a: [-4, 6, 0],
+          via: [8, 2, 0.2],
+          b: [-2, -6, 0],
+          radius: 1.4,
+          radiusB: 0.5,
+        },
+      ],
+    },
+  ],
+  sockets: {
+    grip: {
+      bone: 'hilt',
+      pos: [0, 0, 0],
+      omitAnims: ['plunge'],
+      frames: {
+        idle: [
+          { x: 19.5, y: 18.3 },
+          { x: 19.5, y: 18.321428571428573 },
+          { x: 18.75, y: 18.5625 },
+          { x: 18.5, y: 18.5 },
+          { x: 19, y: 18.458333333333332 },
+        ],
+        run: [
+          { x: 19.5, y: 16 },
+          { x: 17, y: 16.625 },
+          { x: 17.5, y: 16.75 },
+          { x: 22, y: 17.25 },
+          { x: 26.25, y: 14.5 },
+          { x: 26.5, y: 12.5 },
+          { x: 27, y: 12.75 },
+          { x: 25.25, y: 15.5 },
+        ],
+        attack: [
+          { x: 12.25, y: 13.5 },
+          { x: 11.5, y: 14.75 },
+          { x: 24, y: 17.5, angle: 46 },
+          { x: 28, y: 13.75, angle: 9 },
+          { x: 27.75, y: 14.75 },
+        ],
+        attack2: [
+          { x: 18, y: 15.5 },
+          { x: 25.75, y: 17.75 },
+          { x: 13.5, y: 16.75 },
+          { x: 14.75, y: 14 },
+          { x: 14.25, y: 13.75 },
+          { x: 14.25, y: 13.75 },
+          { x: 20.5, y: 16.75 },
+        ],
+        attack3: [
+          { x: 20.25, y: 15.25 },
+          { x: 20, y: 6.75, angle: -123.11134196037203 },
+          { x: 25.5, y: 17.5 },
+          { x: 25, y: 18.75, angle: 21.2464 },
+          { x: 25.25, y: 18.5, angle: 20.7123 },
+          { x: 13, y: 17, angle: 142.6683 },
+        ],
+      },
+    },
+  },
+  anims: {
+    idle: {
+      fps: 4,
+      frames: 5,
+      pose(_t, frame) {
+        const dx = [0, 0, -0.75, -1.0, -0.5][frame] ?? 0;
+        const dy = [0, 0, -0.25, -0.25, -0.25][frame] ?? 0;
+        return {
+          hilt: { pos: [dx, dy, 0] },
+          slashArc: { visible: false },
+        };
+      },
+    },
+    run: {
+      fps: 8,
+      frames: 8,
+      pose(_t, frame) {
+        const f = frame % 8;
+        const GX = [-1.0, -2.5, -2.0, 1.5, 5.75, 7.0, 7.5, 4.75][f];
+        const GY = [2.25, 2.625, 2.5, 1.0, 2.75, 4.75, 4.5, 1.75][f];
+        const RZ = [8, 12, 10, -6, -28, -36, -34, -18][f];
+        return {
+          hilt: { pos: [GX, GY, 0], rot: [0, 0, RZ] },
+          slashArc: { visible: false },
+        };
+      },
+    },
+    attack: {
+      fps: 12,
+      frames: 5,
+      loop: false,
+      pose(_t, frame) {
+        const f = frame % 5;
+        const GX = [-7.25, -8.0, 4.5, 8.5, 7.25][f];
+        const GY = [4.75, 3.5, 1.75, 4.5, 3.5][f];
+        const RZ = [-65, -75, 115, 145, 138][f];
+        const showSlash = f >= 1 && f <= 3;
+        return {
+          hilt: { pos: [GX, GY, 0], rot: [0, 0, RZ] },
+          slashArc: { visible: showSlash, rot: [0, 0, (f - 2) * 18] },
+        };
+      },
+    },
+    attack2: {
+      fps: 12,
+      frames: 7,
+      loop: false,
+      pose(_t, frame) {
+        const f = frame % 7;
+        const GX = [8.5, 7.25, -1.0, -7.75, -8.25, -8.25, -8.0][f];
+        const GY = [4.75, 3.5, 1.5, 3.25, 3.5, 3.5, 3.5][f];
+        const RZ = [145, 135, 25, -60, -72, -72, -68][f];
+        const showSlash = f === 3 || f === 5;
+        return {
+          hilt: { pos: [GX, GY, 0], rot: [0, 0, RZ] },
+          slashArc: { visible: showSlash, rot: [0, 0, 180] },
+        };
+      },
+    },
+    attack3: {
+      fps: 12,
+      frames: 6,
+      loop: false,
+      pose(_t, frame) {
+        const f = frame % 6;
+        const GX = [-10.25, 0.5, 6.0, 5.5, 5.75, -6.5][f];
+        const GY = [11.0, 11.5, 0.75, -0.5, -0.25, 1.25][f];
+        const RZ = [-115, -45, 155, 165, 162, -35][f];
+        const showSlash = f >= 1;
+        return {
+          hilt: { pos: [GX, GY, 0], rot: [0, 0, RZ] },
+          slashArc: { visible: showSlash, rot: [0, 0, -45] },
+        };
+      },
+    },
+    plunge: {
+      fps: 12,
+      frames: 2,
+      loop: false,
+      pose(_t, frame) {
+        return {
+          hilt: { pos: [-2.5 - frame * 0.25, -2.0, 0], rot: [0, 0, -90] },
+          slashArc: { visible: false },
+        };
+      },
+    },
+    aerial: {
+      fps: 12,
+      frames: 1,
+      aliasOf: 'attack',
+    },
+    upper: {
+      fps: 12,
+      frames: 1,
+      aliasOf: 'attack',
+    },
+    dash: {
+      fps: 12,
+      frames: 1,
+      aliasOf: 'attack',
+    },
+  },
+};
+
 export const BUILTIN_SPRITE_RIGS: Record<string, BakerRigDef> = {
   mourn: MOURN_RIG,
   wallcrawler: WALLCRAWLER_RIG,
@@ -2809,4 +3479,5 @@ export const BUILTIN_SPRITE_RIGS: Record<string, BakerRigDef> = {
   vise: VISE_RIG,
   'vise-nest': VISE_NEST_RIG,
   'adventurer-poc': ADVENTURER_HUMANOID_RIG,
+  'rusty-sword-poc': RUSTY_SWORD_RIG,
 };
