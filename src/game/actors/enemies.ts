@@ -1,8 +1,29 @@
-import { rand, sign, tintOf, itemDef, ballisticVelocity, ballisticLob } from '@engine/index';
+import { rand, sign, tintOf, itemDef, ballisticVelocity, ballisticLob, frameAt } from '@engine/index';
 import { defineMonster, monsters, Monster, type MonsterDef } from './monster';
 import { shootArrow, shootBullet, muzzleFlash, ARROW_GRAVITY, BULLET_GRAVITY } from '../content/ballistics';
-import { drawBow } from '../content/weapon-visuals';
-import { SLIME1, SLIME2, BAT1, BAT2, PIKE1, PIKE2, CHEST, TEXEL, blit, slimeSprite, batSprite, pikeSprite, chestSprite } from '../content/sprites';
+import {
+  DUMMY_IDLE,
+  SLIME1,
+  SLIME2,
+  BAT1,
+  BAT2,
+  PIKE1,
+  PIKE2,
+  CHEST,
+  TEXEL,
+  ARCHER_ANIMS,
+  GUNNER_ANIMS,
+  WALLCRAWLER_ANIMS,
+  blit,
+  dummySprite,
+  slimeSprite,
+  batSprite,
+  pikeSprite,
+  archerSprite,
+  gunnerSprite,
+  wallcrawlerSprite,
+  chestSprite,
+} from '../content/sprites';
 import { COLORS } from '../content/palette';
 import { Player } from './player';
 
@@ -32,7 +53,7 @@ function waterlineAbove(m: Monster, x: number): number {
 // something to land on and the hit feedback (flash, numbers, gibs) can
 // do the actual teaching.
 defineMonster('dummy', {
-  hp: 60, damage: 0, w: 12, h: 20, score: 0, xp: 0,
+  hp: 60, damage: 0, w: dummySprite.hitbox.w, h: dummySprite.hitbox.h, score: 0, xp: 0,
   colors: [COLORS.gold, COLORS.steelDark, COLORS.steel],
   noContactDamage: true,
   init(m) {
@@ -42,17 +63,7 @@ defineMonster('dummy', {
     m.vx = 0;
   },
   draw(g, m) {
-    const flash = m.flashT > 0;
-    const post = flash ? COLORS.white : COLORS.steelDark;
-    const head = flash ? COLORS.white : COLORS.gold;
-    g.fillStyle = post;
-    g.fillRect(m.x + 5, m.y + 6, 2, 14);          // stake
-    g.fillRect(m.x, m.y + 8, 12, 2);              // crossbar arms
-    g.fillStyle = head;
-    g.fillRect(m.x + 3, m.y, 6, 6);               // burlap head
-    g.fillStyle = post;
-    g.fillRect(m.x + 4, m.y + 2, 1, 1);           // stitched eyes
-    g.fillRect(m.x + 7, m.y + 2, 1, 1);
+    blit(g, m.img(DUMMY_IDLE), m.x - dummySprite.hitbox.x, m.y - dummySprite.hitbox.y);
   },
 });
 
@@ -565,31 +576,12 @@ defineMonster('archer', {
   },
   draw(g, m) {
     const f = m.facing;
-    const x = Math.round(m.x);
-    const y = Math.round(m.y);
-    const flash = m.flashT > 0;
-    const cloak = flash ? '#ffffff' : CLOAK;
-    const dark = flash ? '#ffffff' : CLOAK_DARK;
-    // Cloak: a tapering hooded figure, swaying slightly.
-    const sway = Math.sin(m.animT * 3) * 0.5;
-    g.fillStyle = dark;
-    g.fillRect(x + 1, y + 6, 10, 11); // robe
-    g.fillStyle = cloak;
-    g.fillRect(x + 2, y + 2, 8, 6); // hood
-    g.fillRect(x + 3 + sway, y + 8, 7, 8); // chest wrap
-    g.fillStyle = '#0e0e16';
-    g.fillRect(x + (f === 1 ? 6 : 2), y + 4, 4, 2); // hood shadow (eyes)
-    // The bow — the same shared renderer the knight's bow uses. Aiming
-    // pulls the string back over the telegraph window, arrow nocked, so
-    // "a bow being drawn" reads identically friend or foe.
     const aim = m.state.aim as number;
-    const pull = aim > 0 ? 1 - aim / ARCHER_AIM : 0;
-    const bx = x + (f === 1 ? 11 : 1);
-    g.save();
-    g.translate(bx, y + 9);
-    if (f === -1) g.scale(-1, 1);
-    drawBow(g, { pull, arrow: aim > 0, ...(flash && { tint: '#ffffff' }) });
-    g.restore();
+    const anim = aim > 0 ? 'aim' : Math.abs(m.vx) > 8 ? 'walk' : 'idle';
+    const set = f === 1 ? ARCHER_ANIMS.right : ARCHER_ANIMS.left;
+    const pull = aim > 0 ? Math.max(0, Math.min(0.999999, 1 - aim / ARCHER_AIM)) : 0;
+    const animT = aim > 0 ? (pull * set.aim.frames.length) / set.aim.fps : m.animT;
+    blit(g, m.img(frameAt(set, anim, animT)), m.x - archerSprite.hitbox.x, m.y - archerSprite.hitbox.y);
   },
 });
 
@@ -600,7 +592,7 @@ defineMonster('archer', {
  */
 defineMonster('gunner', {
   telegraphs: ['aim'], // the drawn bow / raised gun IS the warning
-  hp: 80, damage: 26, w: 13, h: 14, score: 450,
+  hp: 80, damage: 26, w: gunnerSprite.hitbox.w, h: gunnerSprite.hitbox.h, score: 450,
   rangedAt: 320, // levels the musket at anything near-flat inside this
   colors: [COLORS.redDark, COLORS.steel, COLORS.gold],
   drops: [
@@ -647,25 +639,12 @@ defineMonster('gunner', {
     const f = m.facing;
     const x = Math.round(m.x);
     const y = Math.round(m.y);
-    const flash = m.flashT > 0;
-    // A squat red imp in a powder-stained coat.
-    g.fillStyle = flash ? '#ffffff' : COLORS.redDark;
-    g.fillRect(x + 2, y + 4, 9, 10); // body
-    g.fillStyle = flash ? '#ffffff' : COLORS.red;
-    g.fillRect(x + 3, y + 1, 7, 5); // head
-    g.fillStyle = '#0e0e16';
-    g.fillRect(x + (f === 1 ? 7 : 3), y + 3, 3, 1); // scowl
-    g.fillStyle = flash ? '#ffffff' : COLORS.gold;
-    g.fillRect(x + 3, y + 9, 7, 1); // bandolier
-    // The musket, leveled while aiming (the barrel glints).
     const aiming = (m.state.aim as number) > 0;
-    const gy = y + (aiming ? 6 : 8);
-    g.fillStyle = flash ? '#ffffff' : COLORS.steel;
-    if (f === 1) g.fillRect(x + 8, gy, 11, 1.5);
-    else g.fillRect(x - 6, gy, 11, 1.5);
-    g.fillStyle = flash ? '#ffffff' : WOOD;
-    g.fillRect(x + (f === 1 ? 6 : 5), gy, 2, 2.5); // stock
+    const anim = aiming ? 'aim' : 'idle';
+    const set = f === 1 ? GUNNER_ANIMS.right : GUNNER_ANIMS.left;
+    blit(g, m.img(frameAt(set, anim, m.animT)), m.x - gunnerSprite.hitbox.x, m.y - gunnerSprite.hitbox.y);
     if (aiming && Math.floor(m.animT * 12) % 2 === 0) {
+      const gy = y + 6;
       g.fillStyle = COLORS.white;
       g.fillRect(x + (f === 1 ? 18 : -6), gy - 0.5, 1.5, 1.5); // sight glint
     }
@@ -708,7 +687,7 @@ function wallBeside(m: Monster, side: -1 | 1): boolean {
  * to reach, which is the bargain the region keeps making.
  */
 defineMonster('wallcrawler', {
-  hp: 70, damage: 14, w: 14, h: 12, score: 220, flies: true,
+  hp: 70, damage: 14, w: wallcrawlerSprite.hitbox.w, h: wallcrawlerSprite.hitbox.h, score: 220, flies: true,
   colors: ['#5b7fa8', '#8fb6d6', COLORS.white],
   drops: [
     { id: 'coin', chance: 0.5 },
@@ -793,26 +772,16 @@ defineMonster('wallcrawler', {
     if (player && Math.abs(player.cy - m.cy) > 40) m.state.climb = player.cy < m.cy ? -1 : 1;
   },
   draw(g, m) {
-    const side = (m.state.side as number) ?? 1;
-    const x = Math.round(m.x);
-    const y = Math.round(m.y);
+    const lunge = (m.state.lungeT as number) > 0;
     const balking = (m.state.balkT as number) > 0;
-    const body = m.flashT > 0 ? COLORS.white : '#3f5f85';
-    g.fillStyle = body;
-    g.fillRect(x + 2, y + 2, m.w - 4, m.h - 4);
-    // Gripping limbs: four hooks on the wall side, splayed on the other.
-    g.fillStyle = m.flashT > 0 ? COLORS.white : '#8fb6d6';
-    const wallX = side < 0 ? x : x + m.w - 2;
-    for (let i = 0; i < 4; i++) {
-      const ly = y + 1 + i * 3;
-      const reach = balking ? 3 + Math.sin(m.animT * 14 + i) * 2 : 2 + ((Math.floor(m.animT * 6) + i) % 2);
-      g.fillRect(side < 0 ? wallX - reach : wallX, ly, reach + 2, 2);
-    }
-    // Two cold eyes, watching the shaft it does not have to share.
-    g.fillStyle = m.flashT > 0 ? COLORS.white : COLORS.gold;
-    const ex = side < 0 ? x + m.w - 5 : x + 3;
-    g.fillRect(ex, y + 4, 2, 2);
-    g.fillRect(ex, y + 8, 2, 2);
+    const anim = lunge ? 'lunge' : balking ? 'balk' : 'climb';
+    const set = m.facing === 1 ? WALLCRAWLER_ANIMS.right : WALLCRAWLER_ANIMS.left;
+    blit(
+      g,
+      m.img(frameAt(set, anim, m.animT)),
+      m.x - wallcrawlerSprite.hitbox.x,
+      m.y - wallcrawlerSprite.hitbox.y,
+    );
   },
 });
 
