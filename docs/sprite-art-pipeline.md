@@ -136,6 +136,71 @@ pixel cluster into each region after reduction and before palette selection.
 Use this for an iris, insignia, or fixed buckle—not for hair, cloth, limbs, or
 anything whose shape is supposed to move.
 
+### Automated video-to-sprite import and gait matching
+
+Use `tools/import-video-animation.mjs` to run the entire video-to-sprite loop
+(`ffmpeg` decode + SHA-1 uniqueness check → 4-connected foreground isolation +
+source candidate strip → headless Sprite Animation Workbench normalization →
+`merge-sprite-animation.mjs` merge) in one ~9-second command:
+
+```powershell
+# 1. Initial pass (auto-selects a candidate loop and writes the contact sheet)
+node tools/import-video-animation.mjs `
+  --video "C:\path\to\generated.mp4" `
+  --anim greatsword-run --frames 8 --fps 10 --sample-fps 12 `
+  --ref-anim sword-run
+
+# 2. Refined pass with explicit phase-matched timestamps
+node tools/import-video-animation.mjs `
+  --video "C:\path\to\generated.mp4" `
+  --anim greatsword-run --frames 8 --fps 10 --sample-fps 12 `
+  --times 2.0833,2.1667,2.3333,2.4167,3.5,3.5833,3.6667,3.75 `
+  --ref-anim sword-run
+```
+
+Key lessons from building `greatsword-idle` and `greatsword-run`:
+
+1. **Carry pose for heavy two-handed weapons outside attacks:** Resting a heavy
+   weapon like the Great Sword on the shoulder during `idle` and `run` (one hand
+   on the hilt, the opposite arm free to swing as a counterbalance) reads much
+   more naturally at play scale than clamping both hands to the grip in front of
+   the chest. Wire weapon-specific locomotion through `bodyAnimations` with
+   `embeddedHeldObject: true` when the weapon is baked into the body sheet.
+2. **Match multi-stride gait biomechanics, not just pixel diffs:** Never trust
+   uniform timestamp spacing or raw frame-to-frame pixel difference to pick a
+   run cycle. Generated videos frequently stutter, linger on one pose, or repeat
+   the same half-stride without alternating arms. Compare candidate frames
+   side-by-side against the existing approved `run[0..7]` sprite across both
+   strides (`4` phases per stride):
+   - **Stride 1 (`frames 0..3`, free front arm swung back):**
+     `Drive` (front knee bent forward, trailing leg extended back) →
+     `Reach` (leading leg extended out with heel down and toe up, trailing leg
+     kicked up high behind) →
+     `Plant` (leading foot flat under the hip, trailing leg bent `90°` in the
+     air) →
+     `Passing` (leading foot slides under the hip as the trailing knee crosses
+     in front).
+   - **Stride 2 (`frames 4..7`, free front arm swung forward across torso):**
+     Repeat the same four `Drive → Reach → Plant → Passing` leg silhouettes on
+     the opposite stride so the cycle alternates arms and loops seamlessly from
+     frame `7` back to frame `0`.
+   - When the default `6 fps` sampling misses an airborne `Reach` or `Plant`
+     frame, sample at `12 fps` (`--sample-fps 12`), inspect the contact strip,
+     and pass the exact matched timestamps via `--times`.
+3. **Preserve source vertical position (`preserve-source-y`) on run cycles:**
+   Center each frame horizontally on its torso mass (`shiftX`), but keep
+   `shiftY = 0` relative to the video crop rather than pinning every frame's
+   lowest boot pixel to a fixed ground line. Pinning the lowest pixel pulls the
+   head and torso downward on airborne `Reach` frames where both feet are higher
+   off the ground.
+4. **Zero-pad decoded frame filenames (`frame_%04d.png`) and prune dead palette
+   keys on re-import:** Sampling a 10-second video at `12 fps` yields `120`
+   frames; two-digit padding (`%02d`) sorts `frame_100..119` ahead of
+   `frame_12..99` and shifts timestamps after `1.0s`. Likewise,
+   `tools/merge-sprite-animation.mjs` automatically prunes palette keys that were
+   only referenced by the overwritten animation so iterative re-imports do not
+   accumulate orphaned palette entries.
+
 ### Use an approved frame as a consistency control
 
 An identity reference plus a pose reference is not enough by itself. An image
@@ -618,3 +683,4 @@ Once every gate passes:
 - Resampling with smoothing or using inconsistent pixel-block sizes.
 - Letting gear sit on the body like stickers, effects lose their focal point, or tiles reveal their repetition and seams.
 - Replacing a dirty shared editor revision or saving browser work without explicit acceptance.
+- Selecting video run-cycle frames by uniform interval or pixel-diff heuristics without verifying the two-stride (`Drive → Reach → Plant → Passing`) leg and arm alternation against the approved `run` sprite.

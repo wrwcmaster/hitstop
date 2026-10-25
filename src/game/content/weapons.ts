@@ -561,6 +561,10 @@ defineWeaponType('sword', {
 
 defineWeaponType('great-sword', {
   comboWindow: 0.34,
+  bodyAnimations: {
+    idle: { animation: 'greatsword-idle', embeddedHeldObject: true },
+    run: { animation: 'greatsword-run', embeddedHeldObject: true },
+  },
   ...contextuals({ reach: 28, arc: 20, heft: 1.3 }),
   attacks: [
     attack({

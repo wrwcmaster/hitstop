@@ -83,6 +83,33 @@ function padFrames(frames, sourceSize, targetSize) {
   }));
 }
 
+function usedPaletteChars(file, excludedAnim = null) {
+  const used = new Set();
+  const scanFrames = (frames) => {
+    if (!Array.isArray(frames)) return;
+    for (const frame of frames) {
+      if (!Array.isArray(frame)) continue;
+      for (const row of frame) {
+        if (typeof row !== 'string') continue;
+        for (const ch of row) {
+          if (ch !== '.') used.add(ch);
+        }
+      }
+    }
+  };
+  for (const [name, anim] of Object.entries(file.anims ?? {})) {
+    if (name === excludedAnim || !anim || typeof anim === 'string') continue;
+    scanFrames(anim.frames);
+  }
+  for (const layer of file.layers ?? []) {
+    for (const [name, frames] of Object.entries(layer.tracks ?? {})) {
+      if (name === excludedAnim) continue;
+      scanFrames(frames);
+    }
+  }
+  return used;
+}
+
 const [targetArg, sourceArg, animName = 'run', referenceAnim = 'run'] = process.argv.slice(2);
 if (!targetArg || !sourceArg) {
   throw new Error('usage: node tools/merge-sprite-animation.mjs <target.json> <source.json> [animation]');
@@ -95,10 +122,15 @@ const source = JSON.parse(fs.readFileSync(sourcePath, 'utf8'));
 const sourceAnim = source.anims?.[animName];
 const sourceSize = dimensions(sourceAnim, `source ${animName}`);
 
-const outputPalette = Object.fromEntries(Object.entries(target.palette ?? {}).map(([ch, color]) => [
-  ch,
-  typeof color === 'string' ? color.toLowerCase() : color,
-]));
+const activelyUsed = usedPaletteChars(target, animName);
+const outputPalette = Object.fromEntries(
+  Object.entries(target.palette ?? {})
+    .filter(([ch]) => activelyUsed.has(ch))
+    .map(([ch, color]) => [
+      ch,
+      typeof color === 'string' ? color.toLowerCase() : color,
+    ]),
+);
 
 const preservedColors = Object.entries(outputPalette).map(([ch, color]) => ({ ch, color }));
 const sourceUsage = usageOf(sourceAnim);
