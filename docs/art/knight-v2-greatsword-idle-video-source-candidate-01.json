@@ -1,0 +1,27 @@
+{
+  "source": "C:\\Users\\scott\\Downloads\\gemini_generated_video_a6445efc.mp4",
+  "sourceSize": [
+    1280,
+    720
+  ],
+  "times": [
+    1,
+    1.25,
+    1.5,
+    1.75,
+    2
+  ],
+  "frameSize": [
+    562,
+    671
+  ],
+  "crop": [
+    312,
+    23,
+    562,
+    671
+  ],
+  "keyColor": "#ff00ff",
+  "animation": "greatsword-idle",
+  "fps": 4
+}

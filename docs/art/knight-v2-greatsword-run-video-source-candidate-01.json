@@ -1,0 +1,30 @@
+{
+  "source": "C:\\Users\\scott\\Downloads\\gemini_generated_video_3b75bda6.mp4",
+  "sourceSize": [
+    1280,
+    720
+  ],
+  "times": [
+    2.08,
+    2.17,
+    2.33,
+    2.42,
+    3.5,
+    3.58,
+    3.67,
+    3.75
+  ],
+  "frameSize": [
+    512,
+    671
+  ],
+  "crop": [
+    355,
+    17,
+    512,
+    671
+  ],
+  "keyColor": "#ff00ff",
+  "animation": "greatsword-run",
+  "fps": 10
+}
